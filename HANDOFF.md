@@ -1,5 +1,12 @@
 # HANDOFF.md · 当前状态
 
+## 2026-09-30 · provenance-round2（未提交、未部署）
+
+- 从 `origin/main@2ae065df3fc78f08022c4a04209b5f6a608d9bb3` 建立。数据仓第 1 轮已合并并发布；本分支 pin 为产物 `e5ef61c882e11319ebe1f06ca5534cb1b4723adb`，`npm run fetch:datapack` 校验通过。线上 pin 在第 2 轮部署前仍为 `574b17e`。
+- 追加幂等 v16 迁移：`works` 新增 Harness/服务商的 ID、「其他」和 Harness 版本共五列及两个部分索引；不回填。投稿、管理员审核/编辑/录入、馆藏映射、收录导出与公开视图接入新字段。`tool` 保留供旧客户端使用，不再以「管理员代传」填录入渠道。对局身份快照新增三个来源键，不改变计分 key、摘要和排行榜筛选。Show1 旧兼容端点及 Q13 两项修复未动。
+- `npm run check`：54 文件、0 错；`npm test`：116/116 通过，包括 Show1 golden。指定数据包下空库升 v16，bootstrap 200；注册表 ID 与「其他」两次投稿、审核、公开输出、提名、导出成功。旧 `origin/main` 代码在 v16 库 INSERT/SELECT 成功；3 张旧格式快照票的新旧 `config`、`model` 榜单排除 `updatedAt` 后逐字节相同。
+- 未提交、推送、开 PR、部署或切换线上数据包。部署顺序：已发布的第 1 轮数据包 → 本轮后端 → 第 3 轮前端。只回滚代码即可继续使用 v16 库；部署核对与线上库副本的榜单复核步骤见 `docs/archive/2026-09-30-provenance-round2-wsnxxxs.md`。提交前需用户决定是否提交及 GitHub 身份。
+
 ## 2026-09-29 · fix-round3（待 PR 审阅，未部署）
 
 - 从 `origin/main@0b512bd` 建立。S-03 在 `COOKIE_SECURE=1` 时使用 `__Host-sp_session`，拒绝重名会话 Cookie；未启用 Secure 的本地环境仍用 `sp_session`。上线将使全部现有用户登出一次。用户作品迁往独立可注册主域仍是运维待办。

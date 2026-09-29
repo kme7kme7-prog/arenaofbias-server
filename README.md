@@ -46,7 +46,9 @@ npm start
 
 开发包的 `bootstrap.datapack` 为 `null`，两端通过原始 `data.json` 的 `catalogDigest` 核对，不能冒认固定版本。数据格式和前端版本校验见 [API 契约](docs/api-contract.md)。
 
-新投票保存对局时的模型/档位与计分 key；标签更新不自动改变历史归属。管理员可运行 `npm run correct:vote -- <管理员> <投票ID> <a或b> <更正JSON文件> <原因>`；JSON 只允许 `modelId/modelName/vendor/effort`。更正单独保存，原始快照不变，并写审计。没有身份快照的 legacy 票（只可能来自迁移前的测试数据）不参与计分，也不能更正。
+新投票保存对局时的模型/档位、Harness/服务商与计分 key；来源维度不改变计分。管理员可运行 `npm run correct:vote -- <管理员> <投票ID> <a或b> <更正JSON文件> <原因>`；JSON 允许 `modelId/modelName/vendor/effort/harnessId/providerId`。更正单独保存，原始快照不变，并写审计。没有身份快照的 legacy 票不参与计分，也不能更正。
+
+作品来源使用两个数据包注册表：Harness 表示驱动模型产出作品的工具或环境，服务商表示实际提供推理服务的一方。投稿可选注册表 ID 或填写「其他」；普通用户过渡期仍可只提交原始 `tool` 声明。接口字段及互斥规则见 [API 契约](docs/api-contract.md)。
 
 ## 环境变量（server/config.mjs）
 

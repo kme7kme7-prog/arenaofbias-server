@@ -105,7 +105,7 @@ describe('admin inbox', () => {
     assert.equal(work.status, 'unverified');
     assert.equal(work.title, '江南水乡');
     assert.equal(work.modelName, 'Model A');
-    assert.equal(work.tool, '管理员代传');
+    assert.equal(work.tool, '');
     // Per-face review: registration decides nothing — both faces wait off.
     assert.deepEqual([work.show_gallery, work.show_arena], [false, false]);
     assert.equal((await call('root', 'GET', '/api/admin/inbox')).data.entries.length, 0);

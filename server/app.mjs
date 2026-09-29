@@ -310,7 +310,9 @@ export function createPlatform({ config, limits }) {
     try {
       submitted = library.submit(admin, {
         draftId: draft.id, confirmed: true, title: params.get('title'), summary: params.get('summary'),
-        modelId: params.get('modelId'), modelName: params.get('modelName'), tool: params.get('tool') || '管理员代传',
+        modelId: params.get('modelId'), modelName: params.get('modelName'), tool: params.get('tool') || '',
+        ...Object.fromEntries(['harnessId', 'harnessOther', 'harnessVersion', 'providerId', 'providerOther']
+          .filter((key) => params.has(key)).map((key) => [key, params.get(key)])),
       });
     } catch (error) {
       library.discardDraft(admin, draft.id);

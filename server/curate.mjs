@@ -77,6 +77,8 @@ export function createCurator({ db, catalog, library, onTakeover = () => {} }) {
       task: work.taskId, id: work.id, title: work.title, summary: work.summary,
       modelId: work.modelId, modelName: work.modelName, vendor: work.vendor,
       effort: work.effort, tool: work.tool, note: work.note,
+      harnessId: work.harnessId, harnessOther: work.harnessOther, harnessVersion: work.harnessVersion,
+      providerId: work.providerId, providerOther: work.providerOther,
       createdAt: new Date(work.createdAt).toISOString(), root: work.root,
       entry: work.entry, digest: work.digest, files: files(work),
     };

@@ -155,6 +155,7 @@ const MIGRATIONS = [
   // ('arena' = platform blind matches, 'legacy' = pre-v8 rows incl. migrated Show1 votes,
   // 'show1' = new compat-layer votes) so Bradley–Terry only scores arena votes; compat
   // votes remember their old mode. Comments gain the Show1 side the commenter backed.
+  // Migrated legacy a_identity/b_identity values are bare model ids, not JSON snapshots.
   // page_views and guess_results serve the compat track and guess endpoints.
   `ALTER TABLE votes ADD COLUMN source TEXT NOT NULL DEFAULT 'legacy';
    UPDATE votes SET source = 'arena' WHERE identity_source = 'snapshot';
@@ -272,6 +273,19 @@ const MIGRATIONS = [
       );
       CREATE UNIQUE INDEX IF NOT EXISTS guess_result_ip_day ON guess_results(day_key, ip_hash) WHERE superseded = 0;
       CREATE UNIQUE INDEX IF NOT EXISTS guess_result_user_day ON guess_results(day_key, user_id) WHERE superseded = 0 AND user_id IS NOT NULL;`);
+  },
+  (db) => {
+    const columns = new Set(db.prepare('PRAGMA table_info(works)').all().map((column) => column.name));
+    const idCheck = (column) => `CHECK (${column} IS NULL OR (length(${column}) BETWEEN 1 AND 40 AND ${column} NOT GLOB '*[^a-z0-9.-]*'))`;
+    for (const [name, type] of Object.entries({
+      harness_id: `TEXT ${idCheck('harness_id')}`,
+      harness_other: "TEXT NOT NULL DEFAULT '' CHECK (length(harness_other) <= 40)",
+      harness_version: "TEXT NOT NULL DEFAULT '' CHECK (length(harness_version) <= 40)",
+      provider_id: `TEXT ${idCheck('provider_id')}`,
+      provider_other: "TEXT NOT NULL DEFAULT '' CHECK (length(provider_other) <= 40)",
+    })) if (!columns.has(name)) db.exec(`ALTER TABLE works ADD COLUMN ${name} ${type}`);
+    db.exec(`CREATE INDEX IF NOT EXISTS works_harness ON works (harness_id) WHERE deleted_at IS NULL AND harness_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS works_provider ON works (provider_id) WHERE deleted_at IS NULL AND provider_id IS NOT NULL;`);
   },
 ];
 

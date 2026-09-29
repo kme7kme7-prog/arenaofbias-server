@@ -31,7 +31,7 @@ const GOLDEN = JSON.parse(
 test('guess result migration preserves rows and marks later IP/day or user/day records', () => {
   const db = new DatabaseSync(':memory:');
   try {
-    for (const step of MIGRATIONS.slice(0, -1)) {
+    for (const step of MIGRATIONS.slice(0, 14)) {
       if (typeof step === 'function') step(db);
       else db.exec(step);
     }
@@ -42,14 +42,14 @@ test('guess result migration preserves rows and marks later IP/day or user/day r
     add.run('later-user', 'ip-b', 'u-a', 3);
     add.run('other', 'ip-c', 'u-c', 4);
     const before = db.prepare('SELECT COUNT(*) AS n FROM guess_results').get().n;
-    MIGRATIONS.at(-1)(db);
+    MIGRATIONS[14](db);
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM guess_results').get().n, before);
     assert.deepEqual(db.prepare('SELECT id, superseded FROM guess_results ORDER BY created_at').all().map((row) => ({ ...row })), [
       { id: 'first', superseded: 0 }, { id: 'later-ip', superseded: 1 },
       { id: 'later-user', superseded: 1 }, { id: 'other', superseded: 0 },
     ]);
     assert.deepEqual(db.prepare('PRAGMA index_list(guess_results)').all().filter((row) => row.name.startsWith('guess_result_')).map((row) => row.partial), [1, 1]);
-    MIGRATIONS.at(-1)(db);
+    MIGRATIONS[14](db);
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM guess_results').get().n, before);
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM guess_results WHERE superseded = 1').get().n, 2);
     const addArchived = db.prepare(`INSERT INTO guess_results (id, day_key, ip_hash, user_id, created_at, superseded)

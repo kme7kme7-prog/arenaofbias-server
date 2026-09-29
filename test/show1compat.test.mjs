@@ -156,11 +156,11 @@ test('weight migration restores prior arena audit weights and falls back to orig
   const file = join(root, 'platform.db');
   const old = new DatabaseSync(file);
   try {
-    for (const step of MIGRATIONS.slice(0, -2)) {
+    for (const step of MIGRATIONS.slice(0, 13)) {
       if (typeof step === 'function') step(old);
       else old.exec(step);
     }
-    old.exec(`PRAGMA user_version = ${MIGRATIONS.length - 2}`);
+    old.exec('PRAGMA user_version = 13');
     const add = old.prepare(`INSERT INTO votes (id, match_id, task_id, a_work, b_work, pair_key, choice,
       created_at, a_identity, b_identity, identity_source, source) VALUES (?, ?, 'show1-001', 'a', 'b', ?, 'a', ?, '{}', '{}', 'snapshot', 'show1')`);
     add.run('before', 'm-before', 'p-before', 10);
@@ -176,7 +176,7 @@ test('weight migration restores prior arena audit weights and falls back to orig
     assert.deepEqual(rows.map((row) => JSON.parse(row.compat_weights_json)),
       [[0.3, 0, 0.6, 0, 0, 0.1], [1, 0, 0, 0, 0, 0], [0, 1, 0, 0, 0, 0]]);
     assert.deepEqual(rows.map((row) => row.compat_weight_source), ['original', 'audit', 'audit']);
-    MIGRATIONS.at(-2)(db);
+    MIGRATIONS[13](db);
     assert.deepEqual(db.prepare("SELECT compat_weight_source FROM votes ORDER BY created_at").all().map((row) => row.compat_weight_source),
       ['original', 'audit', 'audit']);
   } finally { db.close(); rmSync(root, { recursive: true, force: true }); }

@@ -7,6 +7,15 @@
 - R09 猜模型成绩按同日 IP 或用户去重，首条保留，另有每 IP 限流；追加幂等 v15 迁移，保留全部历史行并将较晚的重复记录标为 `superseded=1`，部分唯一索引仅约束有效记录。该接口仍是客户端自报数据。R08 每日答案可从前端推导，是娱乐玩法的已知设计边界。
 - DP-08 核实当前备份脚本先做数据库快照再备份文件，恢复多余作品目录会在启动时移入 `.data/orphans`，结论“已缓解”，无代码修改。R05 契约已补 Show1 兼容层与版本判读；README 明确 `CAPTURE=0` 截图队列不工作。新增 `docs/deploy.md` 和差异包脚本，部署、合并均未执行。
 
+## 2026-09-29 · Show1 模态判色修复（已部署）
+
+- 用户确认“模态完全相同就变绿”，替代多模态恒黄规则。`server/show1/guess-logic.mjs` 按完整集合比较，忽略顺序和重复；不同模型同为「图」也是绿。不同多模态集合仍黄，一纯文本一多模态仍灰，胜负仍按模型身份。
+- 本轮从 `main@0b512bd` 建立 `codex/guess-modality-match`，与 VPS 98 份已跟踪文件逐份核对一致（忽略部署换行差异）。前端仓库同步修复基于 `arenaofbias/main@d871c75`；旧站 PM2 已停用，当前服务为 systemd `arenaofbias-server`，不走旧 Show1 的 deploy:vps。
+- 复现：截图中的 GPT-4.1 / Claude Opus 5 / Claude Fable 5 对 Claude Opus 4.6 都被旧逻辑错误判 near。新增回归先红后绿；覆盖全部模型自己猜自己、同模态不同模型、顺序/重复、不同集合，以及每日/练习真实 HTTP 端点。
+- `npm run check`：49 文件 0 错；`npm test`：105/105 通过。无依赖、数据库迁移或数据包变更。用户本轮已要求修复本地、GitHub 与 VPS。
+- 已部署 systemd `arenaofbias-server`，公网 API 和桌面/390px 页面通过；同「图」的四个截图模型均绿、图+视仍黄、纯文本仍灰、猜中目标全绿。真实练习局不写每日战绩；前端无需重建。
+- 备份 `/www/wwwroot/arenaofbias-server-backups/modality-20260929T125932Z`；数据库 v14、quick_check=ok。26 用户/267 作品/599 票/16 评论/56 评价/4 猜题记录逐行无变化。完整记录见 `docs/archive/2026-09-29-modality-match-Atmeplz.md`。上文版本核对优先于下方各历史分支的部署状态。
+- GitHub 上游拒绝 Atmeplz 直接推送（403，仓库权限 push=false），因此本轮通过个人 fork 的 `codex/guess-modality-match` 提交 PR，待仓库管理员合并。VPS 已运行该修复；后续部署须保留此补丁，不能以尚未合并的上游 main 覆盖。
 
 ## 2026-09-29 · fix-round2（待 PR 审阅，未部署）
 

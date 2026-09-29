@@ -200,13 +200,18 @@ export function judge(guess, answer) {
     'ratio',
   );
 
-  // 模态（二元判定）：同纯文本=绿；同多模态=黄（恒黄）；一纯一多=灰
+  // 模态（2026-09-29）：完整集合相同=绿，与模型身份及排列顺序无关。
+  // 集合不同仍沿用同多模态=黄、一纯一多=灰的反馈。
+  const guessModalities = new Set(guess.modalities);
+  const answerModalities = new Set(answer.modalities);
+  const sameModalities = guessModalities.size === answerModalities.size
+    && [...guessModalities].every((m) => answerModalities.has(m));
   const guessMulti = guess.modalities.some((m) => m !== 'text');
   const answerMulti = answer.modalities.some((m) => m !== 'text');
   attributes.modalities =
-    guessMulti !== answerMulti
-      ? { state: 'miss', arrow: null }
-      : { state: answerMulti ? 'near' : 'hit', arrow: null };
+    sameModalities
+      ? { state: 'hit', arrow: null }
+      : { state: guessMulti === answerMulti ? 'near' : 'miss', arrow: null };
 
   // 推理模型：二值
   attributes.reasoning =

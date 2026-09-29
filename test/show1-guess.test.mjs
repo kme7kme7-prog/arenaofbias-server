@@ -118,14 +118,32 @@ test('judge: contextK 比值 ≤2 黄，null 为 unknown', () => {
   assert.deepEqual(attr(mk({ contextK: 128 }), mk({ contextK: null }), 'contextK'), { state: 'unknown', arrow: null });
 });
 
-test('judge: modalities 纯文本/多模态二元判定', () => {
-  // 同纯文本 = 绿
-  assert.deepEqual(attr(mk({ modalities: ['text'] }), mk({ modalities: ['text'] }), 'modalities'), { state: 'hit', arrow: null });
-  // 同多模态 = 恒黄，即使集合完全相同
-  assert.deepEqual(attr(mk({ modalities: ['text', 'image'] }), mk({ modalities: ['text', 'image'] }), 'modalities'), { state: 'near', arrow: null });
-  assert.deepEqual(attr(mk({ modalities: ['text', 'image', 'video'] }), mk({ modalities: ['text', 'audio'] }), 'modalities'), { state: 'near', arrow: null });
-  // 一纯一多 = 灰
-  assert.deepEqual(attr(mk({ modalities: ['text'] }), mk({ modalities: ['text', 'image'] }), 'modalities'), { state: 'miss', arrow: null });
+test('judge: modalities 相同绿 / 不同多模态黄 / 一纯一多灰', () => {
+  const answer = GUESS_MODELS.find((m) => m.name === 'Claude Opus 4.6');
+  assert.ok(answer);
+  for (const name of ['GPT-4.1', 'Claude Opus 5', 'Claude Fable 5', 'Claude Opus 4.6']) {
+    const guess = GUESS_MODELS.find((m) => m.name === name);
+    assert.ok(guess, name);
+    const feedback = judge(guess, answer);
+    assert.deepEqual(feedback.attributes.modalities, { state: 'hit', arrow: null }, name);
+    assert.equal(feedback.won, guess.id === answer.id, name);
+  }
+  const cases = [
+    [['text'], ['text'], 'hit'],
+    [['text', 'image', 'audio', 'video'], ['video', 'audio', 'image', 'text'], 'hit'],
+    [['text', 'image'], ['image', 'text', 'image'], 'hit'],
+    [['text', 'image'], ['text', 'image', 'video'], 'near'],
+    [['text', 'image'], ['text', 'audio'], 'near'],
+    [['text'], ['text', 'image'], 'miss'],
+  ];
+  for (const [left, right, state] of cases) {
+    const a = mk({ id: 'guess', modalities: left });
+    const b = mk({ id: 'answer', modalities: right });
+    assert.deepEqual(attr(a, b, 'modalities'), { state, arrow: null });
+    assert.deepEqual(attr(b, a, 'modalities'), { state, arrow: null });
+  }
+  for (const model of GUESS_MODELS)
+    assert.deepEqual(attr(model, model, 'modalities'), { state: 'hit', arrow: null }, model.name);
 });
 
 test('judge: reasoning 二值', () => {
@@ -348,6 +366,7 @@ describe('guess endpoints', () => {
     const r3 = await post('/api/guess/check', { guessId: answer.id });
     assert.equal(r3.body.feedback.won, true);
     assert.deepEqual(r3.body.feedback, judge(answer, answer));
+    assert.deepEqual(r3.body.feedback.attributes.modalities, { state: 'hit', arrow: null });
     assert.equal(r3.body.answer.id, answer.id);
     // name 兜底解析（不区分大小写）
     const r4 = await post('/api/guess/check', { guessId: answer.name.toUpperCase() });
@@ -371,6 +390,17 @@ describe('guess endpoints', () => {
     assert.equal(r2.status, 200);
     // 练习池 = difficulty ≤ 1
     assert.equal(r2.body.answer.difficulty, 1);
+    const answer = modelById.get(r2.body.answer.id);
+    const sameModalities = GUESS_MODELS.find((m) => m.id !== answer.id
+      && m.modalities.length === answer.modalities.length
+      && m.modalities.every((value) => answer.modalities.includes(value)));
+    assert.ok(sameModalities);
+    const same = await post('/api/guess/check', { guessId: sameModalities.id, gameId: r1.body.gameId });
+    assert.equal(same.body.feedback.won, false);
+    assert.deepEqual(same.body.feedback.attributes.modalities, { state: 'hit', arrow: null });
+    const correct = await post('/api/guess/check', { guessId: answer.id, gameId: r1.body.gameId });
+    assert.equal(correct.body.feedback.won, true);
+    assert.deepEqual(correct.body.feedback.attributes.modalities, { state: 'hit', arrow: null });
     // 非法 difficulty 回落简单档
     const r3 = await post('/api/guess/practice/start', { difficulty: 99 });
     assert.equal(r3.status, 200);

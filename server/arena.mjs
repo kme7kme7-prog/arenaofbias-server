@@ -59,7 +59,16 @@ export function createArena({ db, catalog, library, limits, random = Math.random
   // Eligibility follows current moderation/catalog membership; identity and score keys
   // come from the vote's saved snapshot and never drift with later label edits.
   // Votes without a snapshot (pre-snapshot test data) are not scored.
-  async function countedVotes(taskId, snapshot, keyOf) {
+  // Provenance filters: `null` (off), a registry id, or 'unset' (no registered id). A vote counts
+  // only when BOTH sides' snapshots match, so a filtered board never mixes provenances; free text
+  // is not kept in snapshots and counts as 'unset'. Scoring keys are unchanged.
+  const provenanceMatch = (filters, item) => ['harness', 'provider'].every((field) => {
+    const want = filters[field];
+    const id = item[`${field}Id`] ?? null;
+    return !want || (want === 'unset' ? !id : id === want);
+  });
+
+  async function countedVotes(taskId, snapshot, keyOf, filters = null) {
     const works = new Map();
     const lookup = (task, id) => {
       const key = `${task}/${id}`;
@@ -82,6 +91,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
           b: fromIdentity(row.b_correction) ?? fromIdentity(row.b_identity),
           choice: row.choice, userId: row.user_id ?? `vote:${row.id}`,
         };
+        if (filters && !(provenanceMatch(filters, vote.a) && provenanceMatch(filters, vote.b))) continue;
         votes.push(vote);
         const left = keyOf(vote.a), right = keyOf(vote.b);
         if (left !== right && rankedKeys.size <= RANK_WORKER_ENTRY_THRESHOLD) {
@@ -113,16 +123,18 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     });
   }
 
-  function leaderboard({ task = null, by = 'config', snapshot = null } = {}) {
+  function leaderboard({ task = null, by = 'config', snapshot = null, harness = null, provider = null } = {}) {
     const archive = snapshot ?? catalog.snapshot();
-    const cacheKey = `${archive.version}|${task ?? '*'}|${by}`;
+    const filters = harness || provider ? { harness, provider } : null;
+    const cacheKey = `${archive.version}|${task ?? '*'}|${by}${filters ? `|${harness ?? ''}|${provider ?? ''}` : ''}`;
     if (cache.has(cacheKey)) return cache.get(cacheKey);
     const activeCache = cache;
     const pending = Promise.resolve().then(async () => {
       const keyOf = (work) => by === 'model' ? (work.modelKey ?? modelKey(work)) : (work.configKey ?? entityKey(work));
-      const { votes, rankedEntryCount } = await countedVotes(task, archive, keyOf);
+      const { votes, rankedEntryCount } = await countedVotes(task, archive, keyOf, filters);
       const ranked = await rankOffThread(votes, by, rankedEntryCount);
-      const pool = task ? library.eligible(task, archive) : catalog.tasks().flatMap((t) => library.eligible(t.id, archive));
+      const pool = (task ? library.eligible(task, archive) : catalog.tasks().flatMap((t) => library.eligible(t.id, archive)))
+        .filter((work) => !filters || provenanceMatch(filters, work));
       const works = new Map();
       for (const work of pool) {
         const key = keyOf(work);
@@ -133,6 +145,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       const result = {
         task,
         by,
+        ...(filters ? { filters } : {}),
         totals: { votes: votes.length, voters: new Set(votes.map((vote) => vote.userId)).size, entries: ranked.length },
         rows: ranked.map((row, i) => ({
           rank: i + 1,

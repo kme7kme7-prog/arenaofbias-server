@@ -35,6 +35,13 @@ export function createAdmin({ db, catalog, library }) {
       if (show && !face) fail(400, '请指定筛选门面', 'invalid_query');
       const source = query.get('source') || null;
       if (source && !['curated', 'upload'].includes(source)) fail(400, '来源筛选无效', 'invalid_query');
+      // Provenance filters take a registry id, `other` (free text only) or `unset` (nothing stated).
+      const provenance = Object.fromEntries(['harness', 'provider'].map((field) => {
+        const value = query.get(field) || null;
+        if (value && !['other', 'unset'].includes(value) && !catalog[field](value)) fail(400, `${field === 'harness' ? 'Harness' : '服务商'}筛选无效`, 'invalid_query');
+        return [field, value];
+      }));
+      const provenanceOf = (work, field) => work[field] ?? (work[`${field}Name`] ? 'other' : 'unset');
       const page = intParam(query.get('page'), 1, 100000, '页码');
       const pageSize = intParam(query.get('pageSize'), 30, 100, '每页数量');
       const search = String(query.get('search') ?? '').trim().toLocaleLowerCase();
@@ -43,7 +50,8 @@ export function createAdmin({ db, catalog, library }) {
       const rows = [...curated, ...uploads].map((work) => library.adminWork(work)).filter((work) =>
         (!taskId || work.task === taskId) && (!status || work.status === status) &&
         (!source || work.source === source) && (!face || !show || Boolean(work[`show_${face}`]) === (show === 'on')) &&
-        (!search || `${work.title} ${work.modelName} ${work.task}`.toLocaleLowerCase().includes(search)));
+        Object.entries(provenance).every(([field, value]) => !value || provenanceOf(work, field) === value) &&
+        (!search || `${work.title} ${work.modelName} ${work.task} ${work.harnessName ?? ''} ${work.providerName ?? ''}`.toLocaleLowerCase().includes(search)));
       rows.sort((a, b) => a.task.localeCompare(b.task) || a.title.localeCompare(b.title, 'zh-CN') || a.id.localeCompare(b.id));
       return { works: rows.slice((page - 1) * pageSize, page * pageSize), total: rows.length, page, pageSize };
     },

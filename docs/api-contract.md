@@ -99,9 +99,9 @@
 | `modelId` / `modelName` / `vendor` | string / null | 模型归属；`modelId` 命中数据包模型表时名称与厂商取自模型表 |
 | `effort` | string | 强度档位，大小写不敏感地归入 `Low / Medium / High / XHigh / Max`；未知值原样保留 |
 | `tool` | string | 作者原始声明（兼容字段，≤40 字）；未提供时可由 Harness 名称或「其他」原文生成 |
-| `harnessId` / `harnessOther` | string / null、string | Harness 注册表 ID 或自填「其他」，两者互斥；旧作品分别为 null、空串 |
+| `harnessId` / `harnessOther` | string / null、string | Harness 注册表 ID 或自填「其他」，两者互斥；旧作品分别为 null、空串。写入时 ID 传空串与 null 相同，表示未注明 |
 | `harnessVersion` | string | Harness 版本（≤40 字）；仅有 Harness 时可填写 |
-| `providerId` / `providerOther` | string / null、string | 服务商注册表 ID 或自填「其他」，两者互斥；旧作品分别为 null、空串 |
+| `providerId` / `providerOther` | string / null、string | 服务商注册表 ID 或自填「其他」，两者互斥；旧作品分别为 null、空串。写入时 ID 传空串与 null 相同，表示未注明 |
 | `status` | `unverified` \| `verified` \| `questioned` | 审核状态，默认 `unverified` |
 | `audience` | `hidden` \| `show1` \| `show2` \| `both` | 展示站点，v7 新增；普通作品默认 `show2`，历史迁入作品为 `hidden` |
 | `reason` | string | 审核理由；`verified` 时恒为空串 |
@@ -611,7 +611,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 以下端点均须管理员会话；非管理员返回 `401`（未登录）或 `403`。写请求走同源检查、`write` 限流并记录 audit。错误仍按 1.4 节的 `{ "error": "中文提示", "code": "可选代码" }` 格式返回。
 
-**`GET /api/admin/works`** 合并馆藏精选和 SQLite 投稿。查询参数：`task`（题目 ID）、`status=verified|unverified|questioned`、`source=curated|upload`、`face=gallery|arena` 与 `show=on|off`（两者一起使用）、`search`（标题、模型、题目 ID）、`page`（默认 1）、`pageSize`（默认 30，最多 100）。成功形状：
+**`GET /api/admin/works`** 合并馆藏精选和 SQLite 投稿。查询参数：`task`（题目 ID）、`status=verified|unverified|questioned`、`source=curated|upload`、`face=gallery|arena` 与 `show=on|off`（两者一起使用）、`harness` 与 `provider`（取注册表 ID、`other` 表示只填了「其他」、`unset` 表示未注明；其他值 `400 invalid_query`）、`search`（标题、模型、题目 ID、Harness 与服务商名称）、`page`（默认 1）、`pageSize`（默认 30，最多 100）。成功形状：
 
 ```json
 { "works": [{ "task": "one", "id": "a", "source": "curated", "status": "verified", "show_gallery": true, "show_arena": true, "calibration_gallery": null, "calibration_arena": null, "has_calibration_gallery": false, "has_calibration_arena": false }], "total": 1, "page": 1, "pageSize": 30 }

@@ -174,7 +174,7 @@ const state = { user: undefined, data: null, works: null, audit: [], users: null
   system: ['arena', 'common'].includes(store.get('admin-system')) ? store.get('admin-system') : 'gallery', adminWorks: [], workTotal: 0,
   workCache: new Map(), workKey: '', workLoading: false, trafficLoading: false, requestId: 0,
   sidebarCollapsed: store.get('admin-sidebar-collapsed') === '1',
-  workPage: 1, workTask: '', workStatus: '', workShow: '', workSearch: '', traffic: null,
+  workPage: 1, workTask: '', workStatus: '', workShow: '', workHarness: '', workProvider: '', workSearch: '', traffic: null,
   inbox: null, inboxForms: {} };
 const taskTitle = (id) => [...(state.data?.tasks ?? []), ...(state.questions ?? [])].find((t) => t.id === id)?.title ?? id;
 
@@ -267,7 +267,8 @@ function workRow(w) {
   const quick = w.status === 'questioned' ? '' : faceOn(w, face)
     ? `<button class="btn sm" data-face-off="${esc(w.id)}" title="本面撤下，不影响另一面">${icon('close')}撤下</button>`
     : `<button class="btn sm primary" data-verify="${esc(w.id)}" title="${w.source === 'curated' ? '让这件馆藏作品' : '内容核验通过并'}${face === 'gallery' ? '上展览馆' : '进入正式盲测'}">${icon('check')}${face === 'gallery' ? '上展览馆' : '进盲测'}</button>`;
-  const meta = [taskTitle(w.task), w.source === 'curated' ? '精选馆藏' : esc(w.tool), formatDate(w.addedAt), w.owner ? `投稿者 ${esc(w.owner)}` : ''].filter(Boolean).join(' · ');
+  const source = w.source === 'curated' ? ['精选馆藏', esc(provenanceText(w))] : [esc(provenanceText(w) || w.tool)];
+  const meta = [taskTitle(w.task), ...source, formatDate(w.addedAt), w.owner ? `投稿者 ${esc(w.owner)}` : ''].filter(Boolean).join(' · ');
   return `<article class="work-row" data-status="${esc(w.status)}">
     ${thumb(w)}
     <div class="work-main">
@@ -300,6 +301,83 @@ function trialRows(trial) {
   return rows.map(([st, label, detail]) => `<li class="check is-${st}">${icon(st === 'ok' ? 'check' : st === 'fail' ? 'close' : 'alert')}<span><b>${esc(label)}</b>${esc(detail)}</span></li>`).join('');
 }
 
+// ---- provenance (Harness / provider) -------------------------------------------------------------
+// Registries come from the datapack (/data.json). A select holds a registry id, '' for "not stated"
+// or OTHER for free text; registry ids never contain '_', so OTHER cannot collide with one.
+const PROVENANCE = { harness: { label: 'Harness', list: 'harnesses' }, provider: { label: '服务商', list: 'providers' } };
+const OTHER = '__other';
+const registry = (type) => state.data?.[PROVENANCE[type].list] ?? [];
+const provenanceText = (w) => [w.harnessName && `${w.harnessName}${w.harnessVersion ? ` ${w.harnessVersion}` : ''}`, w.providerName].filter(Boolean).join(' · ');
+const nameKey = (value) => String(value ?? '').normalize('NFKC').toLowerCase().replace(/[\s-]/g, '');
+const suggestEntry = (type, text) => {
+  const key = nameKey(text);
+  return key ? registry(type).find((entry) => [entry.name, ...(entry.aliases ?? [])].some((name) => nameKey(name) === key)) ?? null : null;
+};
+// The stored choice of a work: registry id, OTHER (free text only) or ''.
+const currentProvenance = (w, type) => ({ choice: w?.[type] ?? (w?.[`${type}Name`] ? OTHER : ''), other: w?.[type] ? '' : w?.[`${type}Name`] ?? '' });
+
+function suggestionHtml(type, choice, other) {
+  const match = choice === OTHER ? suggestEntry(type, other) : null;
+  return match ? `可能是 ${esc(match.name)}<button type="button" class="btn sm" data-pick-provenance="${type}" data-id="${esc(match.id)}">改选 ${esc(match.name)}</button>` : '';
+}
+
+function provenanceFields({ harness = { choice: '', other: '' }, provider = { choice: '', other: '' }, version = '' } = {}) {
+  const field = (type, { choice, other }) => {
+    const entries = registry(type).filter((entry) => entry.listed || entry.id === choice);
+    const known = !choice || choice === OTHER || entries.some((entry) => entry.id === choice);
+    const suggestion = suggestionHtml(type, choice, other);
+    return `<label class="field"><span class="field-label">${PROVENANCE[type].label}</span><select class="input" name="${type}Choice" data-provenance-choice="${type}">
+        <option value="">未注明</option>
+        ${entries.map((entry) => `<option value="${esc(entry.id)}"${entry.id === choice ? ' selected' : ''}>${esc(entry.name)}${entry.listed ? '' : '（已停用）'}</option>`).join('')}
+        ${known ? '' : `<option value="${esc(choice)}" selected>${esc(choice)}（不在当前数据包）</option>`}
+        <option value="${OTHER}"${choice === OTHER ? ' selected' : ''}>其他（手动填写）</option>
+      </select></label>
+      <label class="field" data-provenance-other="${type}"${choice === OTHER ? '' : ' hidden'}><span class="field-label">其他${PROVENANCE[type].label}名称</span><input class="input" name="${type}Other" maxlength="40" value="${esc(other)}">
+        <span class="provenance-suggestion" data-provenance-suggestion="${type}"${suggestion ? '' : ' hidden'}>${suggestion}</span></label>`;
+  };
+  return `<div class="field-row">${field('harness', harness)}
+      <label class="field"><span class="field-label">Harness 版本<small>选填</small></span><input class="input" name="harnessVersion" maxlength="40" value="${esc(version)}" placeholder="例如 2.1.3"${harness.choice ? '' : ' disabled'}></label>
+    </div>
+    <div class="field-row">${field('provider', provider)}</div>`;
+}
+
+function refreshProvenance(form) {
+  for (const type of Object.keys(PROVENANCE)) {
+    const choice = form.elements.namedItem(`${type}Choice`);
+    if (!choice) continue;
+    const other = form.elements.namedItem(`${type}Other`).value;
+    $(`[data-provenance-other="${type}"]`, form).hidden = choice.value !== OTHER;
+    const suggestion = $(`[data-provenance-suggestion="${type}"]`, form);
+    suggestion.innerHTML = suggestionHtml(type, choice.value, other);
+    suggestion.hidden = !suggestion.innerHTML;
+  }
+  const version = form.elements.namedItem('harnessVersion');
+  if (version) version.disabled = !form.elements.namedItem('harnessChoice').value;
+}
+
+// Request fields for the chosen provenance. With `work`, only changed fields are sent; an id and
+// its free text are always sent together so the server clears the other half.
+function provenanceBody(get, work = null) {
+  const body = {};
+  for (const type of Object.keys(PROVENANCE)) {
+    const choice = get(`${type}Choice`) ?? '';
+    const other = String(get(`${type}Other`) ?? '').trim();
+    if (choice === OTHER && !other) throw new Error(`请填写${PROVENANCE[type].label}名称，或改选「未注明」`);
+    const next = choice === OTHER ? { id: null, other } : { id: choice || null, other: '' };
+    const before = currentProvenance(work, type);
+    const initial = { id: before.choice && before.choice !== OTHER ? before.choice : null, other: before.other };
+    if (work ? next.id === initial.id && next.other === initial.other : !next.id && !next.other) continue;
+    body[`${type}Id`] = next.id;
+    body[`${type}Other`] = next.other;
+  }
+  const version = get('harnessChoice') ? String(get('harnessVersion') ?? '').trim() : '';
+  if (work ? version !== (work.harnessVersion ?? '') : version) body.harnessVersion = version;
+  return body;
+}
+
+const provenanceFacts = (w) => `<div><dt>Harness</dt><dd>${esc(w.harnessName ? `${w.harnessName}${w.harnessVersion ? ` ${w.harnessVersion}` : ''}` : '未注明')}</dd></div>
+  <div><dt>服务商</dt><dd>${esc(w.providerName ?? '未注明')}</dd></div>`;
+
 // Curated works are repo-managed: reviewing one only decides the current face's flag.
 function openCuratedReview(w) {
   const face = state.system;
@@ -312,6 +390,7 @@ function openCuratedReview(w) {
         <dl class="facts">
           <div><dt>声明的模型</dt><dd>${esc(w.modelName)}${w.vendor ? ` · ${esc(w.vendor)}` : ''}</dd></div>
           <div><dt>推理档位</dt><dd>${esc(w.effort || '默认 / 未设置')}</dd></div>
+          ${provenanceFacts(w)}
         </dl>
         <p class="fine">馆藏作品的标题与信息由仓库收录流程管理，这里只决定它在${esc(FACE_LABEL[face])}的展示。</p>
         <div class="face-decision">
@@ -363,7 +442,8 @@ function openReview(w) {
           <div><dt>投稿者</dt><dd>${esc(w.owner ?? '已注销的用户')} · ${formatTime(w.addedAt)}</dd></div>
           <div><dt>声明的模型</dt><dd>${esc(w.modelName)}${w.vendor ? ` · ${esc(w.vendor)}` : ''}${w.model ? '' : '（未登记）'}</dd></div>
           <div><dt>推理档位</dt><dd>${esc(w.effort || '默认 / 未设置')}</dd></div>
-          <div><dt>生成工具</dt><dd>${esc(w.tool)}</dd></div>
+          ${provenanceFacts(w)}
+          <div><dt>作者原始声明</dt><dd>${esc(w.tool || '未注明')}</dd></div>
           <div><dt>文件</dt><dd>${esc(w.sourceName ?? '')} · ${w.files} 个 · ${formatBytes(w.bytes)} · 入口 ${esc(w.root ? `${w.root}/` : '')}${esc(w.entry ?? '')}</dd></div>
           ${w.reviewer ? `<div><dt>上次核验</dt><dd>${esc(w.reviewer)} · ${formatTime(w.reviewedAt)}</dd></div>` : ''}
         </dl>
@@ -389,6 +469,7 @@ function openReview(w) {
         <label class="field"><span class="field-label">作品标题</span><input class="input" name="title" maxlength="40" value="${esc(w.title)}" required></label>
         <label class="field"><span class="field-label">模型名称<small>展签显示的名字</small></span><input class="input" name="modelName" maxlength="60" value="${esc(w.modelName)}" required></label>
         <label class="field"><span class="field-label">作品摘要</span><textarea class="input" name="summary" maxlength="200" rows="2">${esc(w.summary)}</textarea></label>
+        ${provenanceFields({ harness: currentProvenance(w, 'harness'), provider: currentProvenance(w, 'provider'), version: w.harnessVersion ?? '' })}
         <div class="face-decision">
           <p class="face-state">${faceOn(w) ? `${FACE_LABEL[face]}：已${face === 'gallery' ? '展示' : '进正式盲测池'}` : `${FACE_LABEL[face]}：未${face === 'gallery' ? '展示' : '进盲测'}`}</p>
           <p class="fine">本面动作只改${FACE_LABEL[face]}，另一面（${face === 'gallery' ? `盲测：${faceOn(w, 'arena') ? '已进正式盲测池' : '未进'}` : `展览馆：${faceOn(w, 'gallery') ? '已展示' : '未展示'}`}）保持不变。</p>
@@ -423,10 +504,13 @@ function openReview(w) {
     }
     // Only the current face's flag moves; the server keeps the other face as-is.
     const mode = decide.dataset.decide;
+    let provenance;
+    try { provenance = provenanceBody((name) => field(name)?.value, w); }
+    catch (error) { $('.form-error', form).textContent = error.message; return; }
     const body = { status: mode === 'show' ? 'verified' : mode === 'hide' ? w.status : 'questioned',
       reason: field('reason').value, effort: field('effort').value,
       title: field('title').value, summary: field('summary').value,
-      [`show_${face}`]: mode === 'show' };
+      [`show_${face}`]: mode === 'show', ...provenance };
     if (field('modelId').value) body.modelId = field('modelId').value;
     else if (field('modelName').value !== w.modelName) body.modelName = field('modelName').value;
     $$('[data-decide]', form).forEach((b) => { b.disabled = true; });
@@ -523,7 +607,8 @@ function inboxPanel() {
   const cards = entries.map((entry) => {
     const form = state.inboxForms[entry.id] ??= {
       task: store.get('admin-inbox-task') ?? '', title: entry.suggest.title, summary: '',
-      modelId: '', modelName: entry.suggest.model, effort: '' };
+      modelId: '', modelName: entry.suggest.model, effort: '',
+      harnessChoice: '', harnessOther: '', harnessVersion: '', providerChoice: '', providerOther: '' };
     const value = (name) => esc(String(form[name] ?? ''));
     return `<article class="inbox-card" data-inbox-id="${esc(entry.id)}">
       <div class="inbox-preview"><iframe src="${esc(entry.preview)}" sandbox="allow-scripts allow-pointer-lock" loading="lazy" title="预览「${esc(entry.name)}」"></iframe><a class="btn sm inbox-open" href="${esc(entry.preview)}" target="_blank" rel="noopener">新窗口打开 ${icon('arrow')}</a></div>
@@ -539,6 +624,7 @@ function inboxPanel() {
           <label class="field"><span class="field-label">模型名称<small>展签显示的名字，选了档案会自动回填</small></span><input class="input" name="modelName" maxlength="60" value="${value('modelName')}" placeholder="如 Claude 4.5"></label>
         </div>
         <label class="field"><span class="field-label">摘要</span><input class="input" name="summary" maxlength="200" value="${value('summary')}"></label>
+        ${provenanceFields({ harness: { choice: form.harnessChoice, other: form.harnessOther }, provider: { choice: form.providerChoice, other: form.providerOther }, version: form.harnessVersion })}
         <p class="fine">登记只是入库，不决定展示：作品会同时出现在两边的审核队列——展览馆系统审「上不上展览馆」，竞技场系统审「进不进盲测」，两边各审一次。</p>
         <p class="form-error" role="alert"></p>
         <div class="actions"><button type="button" class="btn sm danger ghost" data-inbox-remove>${icon('trash')}移除</button><span class="spacer"></span><button class="btn sm primary" type="submit">${icon('check')}登记入库</button></div>
@@ -657,7 +743,7 @@ function adminWorkRow(w, face = state.system) {
   return `<tr data-work-key="${esc(`${w.task}/${w.id}`)}">
     <td><input type="checkbox" data-select-work="${esc(`${w.task}/${w.id}`)}" aria-label="选择${esc(w.title)}" ${promoted ? 'disabled' : ''}></td>
     <td><div class="admin-work-title">${thumb(w)}<div><b>${esc(w.title)}</b><small>${esc(taskTitle(w.task))}</small></div></div></td>
-    <td>${esc(w.modelName)}</td><td>${w.source === 'curated' ? '精选' : '投稿'}</td><td>${statusBadge(w.status)}</td>
+    <td>${esc(w.modelName)}${provenanceText(w) ? `<small class="work-provenance">${esc(provenanceText(w))}</small>` : ''}</td><td>${w.source === 'curated' ? '精选' : '投稿'}</td><td>${statusBadge(w.status)}</td>
     <td>${promoted ? '—' : `<label class="face-toggle"><input type="checkbox" data-face-toggle="${esc(w.id)}" ${w[`show_${face}`] ? 'checked' : ''} aria-label="${esc(w.title)}${face === 'gallery' ? '在展览馆显示' : '进正式盲测'}">${w[`show_${face}`] ? '已开启' : '已关闭'}</label>`}</td>
     ${face === 'arena' ? `<td>${promoted ? '已收录' : w.status === 'verified' && w.show_arena ? '在正式盲测池' : '不在正式盲测池'}</td>` : '<td>—</td>'}
     <td><div class="actions">${promoted ? '<span class="badge">已收录</span>' : w.nominatedAt ? '<span class="badge">已提名</span>' : ''}<button class="btn sm" data-calibrate="${esc(w.id)}">${label}取景</button><button class="btn sm" data-task-note="${esc(w.task)}">${face === 'gallery' ? '策展笔记' : '题目点评'}</button>${w.source === 'upload' ? `${curable ? `<button class="btn sm primary" data-nominate="${esc(w.id)}">${w.nominatedAt ? '换发命令' : '提名收录'}</button>` : ''}${w.nominatedAt && !promoted ? `<button class="btn sm" data-withdraw="${esc(w.id)}">撤回提名</button>` : ''}<button class="btn sm" data-edit="${esc(w.id)}">编辑</button><button class="btn sm" data-review="${esc(w.id)}">审核</button>` : ''}</div></td>
@@ -676,6 +762,11 @@ function systemWorksView() {
       <select class="input" name="task" aria-label="筛选题目"><option value="">全部题目</option>${options}</select>
       <select class="input" name="status" aria-label="筛选状态"><option value="">全部状态</option>${Object.entries(WORKS_FILTERS).filter(([id]) => id !== 'all').map(([id, label]) => `<option value="${id}" ${state.workStatus === id ? 'selected' : ''}>${label}</option>`).join('')}</select>
       <select class="input" name="show" aria-label="筛选开关"><option value="">全部开关</option><option value="on" ${state.workShow === 'on' ? 'selected' : ''}>已开启</option><option value="off" ${state.workShow === 'off' ? 'selected' : ''}>已关闭</option></select>
+      ${['harness', 'provider'].map((type) => {
+        const current = type === 'harness' ? state.workHarness : state.workProvider;
+        const choices = [['unset', '未注明'], ['other', '其他（手填）'], ...registry(type).map((entry) => [entry.id, entry.name])];
+        return `<select class="input" name="${type}" aria-label="筛选${PROVENANCE[type].label}"><option value="">全部${PROVENANCE[type].label}</option>${choices.map(([value, label]) => `<option value="${esc(value)}"${current === value ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select>`;
+      }).join('')}
       <button class="btn" type="submit">筛选</button></form>
       <div class="work-results" aria-busy="${state.workLoading}">${state.workLoading ? skeleton(7) : rows ? `<div class="admin-bulk"><span data-bulk-count>已选 0 件（本页）</span><button class="btn sm" data-bulk-face="on" disabled>批量开启${faceLabel()}</button><button class="btn sm" data-bulk-face="off" disabled>批量关闭${faceLabel()}</button></div><div class="table-wrap"><table class="board admin-work-table"><thead><tr><th><input type="checkbox" data-select-all aria-label="选择本页全部作品"></th><th>作品</th><th>模型</th><th>来源</th><th>状态</th><th>${face === 'arena' ? '正式盲测' : `${faceLabel()}开关`}</th><th>${face === 'arena' ? '正式盲测池' : '备注'}</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="board-empty">没有符合条件的作品。</p>'}</div>
       <div class="admin-pagination"><button class="btn sm" data-page="${state.workPage - 1}" ${state.workPage <= 1 ? 'disabled' : ''}>上一页</button><span>第 ${state.workPage} / ${pages} 页</span><button class="btn sm" data-page="${state.workPage + 1}" ${state.workPage >= pages ? 'disabled' : ''}>下一页</button></div>
@@ -713,14 +804,18 @@ function editDialog(w) {
     </div>
     <label class="field"><span class="field-label">登记为模型</span><select class="input" name="modelId"><option value="">不登记（保持自由文本）</option>${models.map((m) => `<option value="${esc(m.id)}"${m.id === w.model ? ' selected' : ''}>${esc(m.name)}</option>`).join('')}</select></label>
     <label class="field"><span class="field-label">作品摘要</span><textarea class="input" name="summary" maxlength="200" rows="2">${esc(w.summary)}</textarea></label>
+    ${provenanceFields({ harness: currentProvenance(w, 'harness'), provider: currentProvenance(w, 'provider'), version: w.harnessVersion ?? '' })}
     <p class="form-error" role="alert"></p><button class="btn primary" type="submit">保存</button></form>` });
   const form = $('form', sheet.el);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
+    let provenance;
+    try { provenance = provenanceBody((name) => form.elements.namedItem(name)?.value, w); }
+    catch (error) { $('.form-error', form).textContent = error.message; return; }
     const done = busy($('button[type="submit"]', form), '正在保存…');
     try {
       await api(`admin/works/${workKey(w)}/meta`, { method: 'POST', body: { title: form.title.value, summary: form.summary.value,
-        modelName: form.modelName.value, modelId: form.modelId.value || undefined, effort: form.effort.value } });
+        modelName: form.modelName.value, modelId: form.modelId.value || undefined, effort: form.effort.value, ...provenance } });
       sheet.close();
       toast('信息已更新');
       await reload();
@@ -868,12 +963,14 @@ function worksQuery() {
   if (state.workTask) query.set('task', state.workTask);
   if (state.workStatus) query.set('status', state.workStatus);
   if (state.workShow) query.set('show', state.workShow);
+  if (state.workHarness) query.set('harness', state.workHarness);
+  if (state.workProvider) query.set('provider', state.workProvider);
   if (state.workSearch) query.set('search', state.workSearch);
   return query;
 }
 // Works filters live in the hash (#/works?task=…&status=…) so views can be shared as links.
 function syncWorksHash() {
-  const hash = `#/works${state.workPage > 1 || state.workTask || state.workStatus || state.workShow || state.workSearch ? `?${worksQuery()}` : ''}`;
+  const hash = `#/works${state.workPage > 1 || state.workTask || state.workStatus || state.workShow || state.workHarness || state.workProvider || state.workSearch ? `?${worksQuery()}` : ''}`;
   history.replaceState(null, '', hash);
 }
 function applyWorksHash() {
@@ -883,6 +980,8 @@ function applyWorksHash() {
   state.workTask = pick('task', state.workTask);
   state.workStatus = pick('status', state.workStatus);
   state.workShow = pick('show', state.workShow);
+  state.workHarness = pick('harness', state.workHarness);
+  state.workProvider = pick('provider', state.workProvider);
   state.workSearch = pick('search', state.workSearch);
 }
 const rowSignatures = new Map();
@@ -1260,6 +1359,22 @@ document.addEventListener('change', async (e) => {
   } catch (error) { toggle.checked = !toggle.checked; toggle.disabled = false; toast(error.message); }
   finally { if (toggle.isConnected) { toggle.disabled = false; toggle.parentElement.classList.remove('is-saving'); toggle.parentElement.removeAttribute('aria-busy'); } }
 });
+// Provenance fields: show the free-text box, enable the version, offer a registry match.
+document.addEventListener('input', (e) => {
+  if (e.target.matches?.('[data-provenance-choice], [name="harnessOther"], [name="providerOther"]')) refreshProvenance(e.target.form);
+});
+document.addEventListener('click', (e) => {
+  const pick = e.target.closest?.('[data-pick-provenance]');
+  if (!pick) return;
+  const select = pick.form.elements.namedItem(`${pick.dataset.pickProvenance}Choice`);
+  if (![...select.options].some((option) => option.value === pick.dataset.id)) {
+    const entry = registry(pick.dataset.pickProvenance).find((item) => item.id === pick.dataset.id);
+    select.add(new Option(`${entry.name}（已停用）`, entry.id), select.options[select.options.length - 1]);
+  }
+  select.value = pick.dataset.id;
+  // Bubbles to the inbox listener below, which keeps the stored form in sync.
+  select.dispatchEvent(new Event('input', { bubbles: true }));
+});
 // Inbox form fields survive re-renders through state.inboxForms (keyed by entry id).
 document.addEventListener('input', (e) => {
   const card = e.target.closest('.inbox-card[data-inbox-id]');
@@ -1285,11 +1400,14 @@ document.addEventListener('submit', async (e) => {
     const error = $('.form-error', e.target);
     if (!stored.task) { error.textContent = '请选择题目'; return; }
     if (!stored.modelId && !stored.modelName.trim()) { error.textContent = '请填写模型名称，或从「登记为模型」里选择'; return; }
+    let provenance;
+    try { provenance = provenanceBody((name) => stored[name]); }
+    catch (err) { error.textContent = err.message; return; }
     const done = busy($('button[type="submit"]', e.target), '正在登记…');
     try {
       const data = await api('admin/inbox/register', { method: 'POST', body: {
         id, task: stored.task, title: stored.title, summary: stored.summary, modelId: stored.modelId || undefined,
-        modelName: stored.modelName, effort: stored.effort } });
+        modelName: stored.modelName, effort: stored.effort, ...provenance } });
       store.set('admin-inbox-task', stored.task);
       delete state.inboxForms[id];
       state.workCache.clear();
@@ -1306,6 +1424,8 @@ document.addEventListener('submit', async (e) => {
   state.workTask = form.elements.namedItem('task').value;
   state.workStatus = form.elements.namedItem('status').value;
   state.workShow = form.elements.namedItem('show').value;
+  state.workHarness = form.elements.namedItem('harness').value;
+  state.workProvider = form.elements.namedItem('provider').value;
   state.workPage = 1;
   syncWorksHash();
   await reload({ navigation: true });

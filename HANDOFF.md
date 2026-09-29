@@ -1,6 +1,14 @@
 # HANDOFF.md · 当前状态
 
-## 2026-09-30 · provenance-round2（未提交、未部署）
+## 2026-09-30 · provenance-round3-admin（待 PR 审阅，未部署）
+
+- 从 `origin/main@fec38c2`（含第 2 轮）建立，数据包 pin 不变（`e5ef61c`）。无数据库迁移。
+- 第 2 轮两处小修：写入时 Harness/服务商 ID 传空串按「未注明」处理；更正投票的报错改为中文「Harness / 服务商」。
+- 后台作品列表支持 `harness` / `provider` 筛选（注册表 ID、`other`、`unset`），搜索覆盖两者名称。管理界面在审核、编辑信息、收件箱登记三处可选登记项、其他、未注明及 Harness 版本；「其他」原文命中注册表名称或别名时提示「可能是 X」并可一键改选，不自动改写；只提交改动过的字段。注册表直接取管理页已加载的 `/data.json`，未新增接口。
+- `npm run check` 54 文件 0 错；`npm test` 116/116。临时库真实浏览器验证了列表显示与筛选、审核改选、编辑清空、收件箱登记，控制台无错误；截图因浏览器面板未绘制而改用 DOM 检查。
+- 上线顺序：server 第 2 轮 → 本轮 → Show2 第 3 轮（wsnxxxs/same-prompt-gallery#5，合并即发布 Pages）。详见 `docs/archive/2026-09-30-provenance-round3-admin-wsnxxxs.md`。
+
+## 2026-09-30 · provenance-round2（已合并为 PR #9 / `fec38c2`，未部署）
 
 - 从 `origin/main@2ae065df3fc78f08022c4a04209b5f6a608d9bb3` 建立。数据仓第 1 轮已合并并发布；本分支 pin 为产物 `e5ef61c882e11319ebe1f06ca5534cb1b4723adb`，`npm run fetch:datapack` 校验通过。线上 pin 在第 2 轮部署前仍为 `574b17e`。
 - 追加幂等 v16 迁移：`works` 新增 Harness/服务商的 ID、「其他」和 Harness 版本共五列及两个部分索引；不回填。投稿、管理员审核/编辑/录入、馆藏映射、收录导出与公开视图接入新字段。`tool` 保留供旧客户端使用，不再以「管理员代传」填录入渠道。对局身份快照新增三个来源键，不改变计分 key、摘要和排行榜筛选。Show1 旧兼容端点及 Q13 两项修复未动。

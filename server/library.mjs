@@ -278,7 +278,8 @@ export function createLibrary({ db, catalog, config, limits }) {
       const idField = `${prefix}Id`, otherField = `${prefix}Other`;
       const hasId = Object.hasOwn(body, idField), hasOther = Object.hasOwn(body, otherField);
       if (!hasId && !hasOther) continue;
-      const id = hasId ? body[idField] : null;
+      // An empty id means "not stated", the same as null.
+      const id = hasId && body[idField] !== '' ? body[idField] : null;
       const other = hasOther ? fieldText(body[otherField], label) : '';
       if (hasId && id !== null && (typeof id !== 'string' || !catalog[lookup](id))) fail(400, `所选${label}不存在`);
       if (id && other) fail(400, `${label}不能同时填写登记项和其他`);

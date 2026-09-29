@@ -69,21 +69,24 @@ export function createLibrary({ db, catalog, config, limits }) {
     worksOfTask: db.prepare(`${WORK} WHERE works.task_id = ? AND works.deleted_at IS NULL`),
     worksOfOwner: db.prepare(`${WORK} WHERE works.owner_id = ? AND works.deleted_at IS NULL ORDER BY works.created_at DESC`),
     pendingOf: db.prepare("SELECT COUNT(*) AS n FROM works WHERE owner_id = ? AND status = 'unverified' AND deleted_at IS NULL"),
-    insertWork: db.prepare(`INSERT INTO works (id, task_id, owner_id, title, summary, model_id, model_name, vendor, effort, tool, note, content_key,
+    insertWork: db.prepare(`INSERT INTO works (id, task_id, owner_id, title, summary, model_id, model_name, vendor, effort, tool,
+      harness_id, harness_other, harness_version, provider_id, provider_other, note, content_key,
       source_name, root, entry, file_count, bytes, digest, checks, trial, cover, created_at, updated_at, show_gallery, show_arena)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`),
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`),
     deleteWork: db.prepare('DELETE FROM works WHERE id = ?'),
     deleteSubmitAudit: db.prepare("DELETE FROM audit WHERE action = 'submit' AND work_id = ?"),
     restoreDraft: db.prepare(`INSERT INTO drafts (id, owner_id, task_id, token, source_name, root, entry, file_count, bytes, digest, checks, created_at, expires_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
     review: db.prepare(`UPDATE works SET status = ?, status_reason = ?, model_id = ?, model_name = ?, vendor = ?, effort = ?,
+      harness_id = ?, harness_other = ?, harness_version = ?, provider_id = ?, provider_other = ?,
       audience = ?, show_gallery = ?, show_arena = ?, title = ?, summary = ?, reviewed_by = ?, reviewed_at = ?, updated_at = ? WHERE id = ?`),
     remove: db.prepare('UPDATE works SET deleted_at = ?, deleted_by = ?, updated_at = ? WHERE id = ?'),
     captures: db.prepare('UPDATE works SET captures = ? WHERE id = ?'),
     calibration: db.prepare('UPDATE works SET trial = ?, updated_at = ? WHERE id = ?'),
     arenaCalibration: db.prepare('UPDATE works SET calibration_arena = ?, updated_at = ? WHERE id = ?'),
     faceSettings: db.prepare('UPDATE works SET show_gallery = ?, show_arena = ?, audience = ?, updated_at = ? WHERE id = ?'),
-    meta: db.prepare('UPDATE works SET title = ?, summary = ?, model_id = ?, model_name = ?, vendor = ?, effort = ?, updated_at = ? WHERE id = ?'),
+    meta: db.prepare(`UPDATE works SET title = ?, summary = ?, model_id = ?, model_name = ?, vendor = ?, effort = ?,
+      harness_id = ?, harness_other = ?, harness_version = ?, provider_id = ?, provider_other = ?, updated_at = ? WHERE id = ?`),
     curatedAs: db.prepare('UPDATE works SET curated_as = ?, updated_at = ? WHERE id = ?'),
     votesOfWork: db.prepare('SELECT COUNT(*) AS n FROM votes WHERE task_id = ? AND (a_work = ? OR b_work = ?)'),
     override: db.prepare('SELECT * FROM work_overrides WHERE task_id = ? AND work_id = ?'),
@@ -124,6 +127,11 @@ export function createLibrary({ db, catalog, config, limits }) {
       vendor: row.vendor,
       effort: row.effort,
       tool: row.tool,
+      harnessId: row.harness_id,
+      harnessOther: row.harness_other,
+      harnessVersion: row.harness_version,
+      providerId: row.provider_id,
+      providerOther: row.provider_other,
       note: row.note,
       ownerId: row.owner_id,
       ownerName: row.owner_name ?? null,
@@ -255,6 +263,45 @@ export function createLibrary({ db, catalog, config, limits }) {
     return { modelId: null, modelName, vendor: clip(body.vendor, 40) };
   }
 
+  function provenance(body, current = {}) {
+    const next = {
+      harnessId: current.harnessId ?? null, harnessOther: current.harnessOther ?? '',
+      harnessVersion: current.harnessVersion ?? '', providerId: current.providerId ?? null,
+      providerOther: current.providerOther ?? '',
+    };
+    const fieldText = (value, label) => {
+      const text = String(value ?? '').normalize('NFKC').trim();
+      if ([...text].length > 40) fail(400, `${label}不能超过 40 字`);
+      return text;
+    };
+    for (const [prefix, lookup, label] of [['harness', 'harness', 'Harness'], ['provider', 'provider', '服务商']]) {
+      const idField = `${prefix}Id`, otherField = `${prefix}Other`;
+      const hasId = Object.hasOwn(body, idField), hasOther = Object.hasOwn(body, otherField);
+      if (!hasId && !hasOther) continue;
+      const id = hasId ? body[idField] : null;
+      const other = hasOther ? fieldText(body[otherField], label) : '';
+      if (hasId && id !== null && (typeof id !== 'string' || !catalog[lookup](id))) fail(400, `所选${label}不存在`);
+      if (id && other) fail(400, `${label}不能同时填写登记项和其他`);
+      if (id) { next[idField] = id; next[otherField] = ''; }
+      else if (hasOther && other) { next[idField] = null; next[otherField] = other; }
+      else { next[idField] = null; next[otherField] = ''; }
+    }
+    if (Object.hasOwn(body, 'harnessVersion')) next.harnessVersion = fieldText(body.harnessVersion, 'Harness 版本');
+    if (!next.harnessId && !next.harnessOther) {
+      if (next.harnessVersion && Object.hasOwn(body, 'harnessVersion')) fail(400, '填写 Harness 后才能填写版本');
+      next.harnessVersion = '';
+    }
+    return next;
+  }
+
+  const publicProvenance = (work) => ({
+    harness: work.harnessId ?? null,
+    harnessName: work.harnessId ? (catalog.harness(work.harnessId)?.name ?? work.harnessId) : (work.harnessOther || null),
+    harnessVersion: work.harnessVersion ?? '',
+    provider: work.providerId ?? null,
+    providerName: work.providerId ? (catalog.provider(work.providerId)?.name ?? work.providerId) : (work.providerOther || null),
+  });
+
   const effortOf = (value) => {
     const effort = clip(value, 20);
     const known = EFFORTS.find((item) => item.toLowerCase() === effort.toLowerCase());
@@ -292,7 +339,7 @@ export function createLibrary({ db, catalog, config, limits }) {
     },
 
     toPublic(work, viewer) {
-      if (work.curated) return { task: work.taskId, id: work.id, curated: true, title: work.title, model: work.modelId, modelName: work.modelName, vendor: work.vendor, effort: work.effort, tool: work.tool, cover: work.cover, status: 'verified' };
+      if (work.curated) return { task: work.taskId, id: work.id, curated: true, title: work.title, model: work.modelId, modelName: work.modelName, vendor: work.vendor, effort: work.effort, tool: work.tool, ...publicProvenance(work), cover: work.cover, status: 'verified' };
       const privileged = viewer && (viewer.id === work.ownerId || viewer.role === 'admin');
       return {
         task: work.taskId,
@@ -305,6 +352,7 @@ export function createLibrary({ db, catalog, config, limits }) {
         vendor: work.vendor,
         effort: work.effort,
         tool: work.tool,
+        ...publicProvenance(work),
         note: work.note,
         status: work.status,
         ...(privileged ? { audience: work.audience } : {}),
@@ -474,8 +522,9 @@ export function createLibrary({ db, catalog, config, limits }) {
       if (body.confirmed !== true) fail(400, '请先确认作品在试加载中运行正常');
       const title = clip(body.title, 40);
       if (!title) fail(400, '请填写作品标题');
-      const tool = clip(body.tool, 40);
-      if (!tool) fail(400, '请填写生成工具');
+      const source = provenance(body);
+      const tool = clip(body.tool, 40) || (source.harnessId ? catalog.harness(source.harnessId).name : source.harnessOther);
+      if (user.role !== 'admin' && !tool && !source.harnessId && !source.harnessOther) fail(400, '请选择或填写 Harness');
       const who = identity(body);
       const cover = coverFrom(body.cover);
       // Admins stage inbox registrations as unverified works in bulk; the per-user
@@ -502,7 +551,8 @@ export function createLibrary({ db, catalog, config, limits }) {
         moved = true;
         transaction(db, () => {
           q.insertWork.run(id, draft.task_id, user.id, title, clip(body.summary, 200), who.modelId, who.modelName, who.vendor,
-            effortOf(body.effort), tool, clip(body.note, 1000), token('w'), draft.source_name, draft.root, draft.entry, draft.file_count,
+            effortOf(body.effort), tool, source.harnessId, source.harnessOther, source.harnessVersion, source.providerId,
+            source.providerOther, clip(body.note, 1000), token('w'), draft.source_name, draft.root, draft.entry, draft.file_count,
             draft.bytes, draft.digest, draft.checks, JSON.stringify(sanitizeTrial(body.trial)), coverName, now, now);
           q.deleteDraft.run(draft.id);
           q.audit.run(now, user.id, user.name, 'submit', draft.task_id, id, `${who.modelName}${effortOf(body.effort) ? ` · ${effortOf(body.effort)}` : ''}`);
@@ -532,13 +582,16 @@ export function createLibrary({ db, catalog, config, limits }) {
       const work = upload(taskId, id);
       if (!work) fail(404, '作品不存在', 'not_found');
       if (!plainObject(body) || !Object.keys(body).length ||
-        Object.keys(body).some((key) => !['title', 'summary', 'modelName', 'modelId', 'effort'].includes(key))) fail(400, '没有可修改的内容');
+        Object.keys(body).some((key) => !['title', 'summary', 'modelName', 'modelId', 'effort',
+          'harnessId', 'harnessOther', 'harnessVersion', 'providerId', 'providerOther'].includes(key))) fail(400, '没有可修改的内容');
       const title = body.title === undefined ? work.title : clip(body.title, 40);
       if (!title) fail(400, '请填写作品标题');
       const summary = body.summary === undefined ? work.summary : clip(body.summary, 200);
       const who = body.modelId !== undefined || body.modelName !== undefined ? identity(body) : work;
       const effort = body.effort !== undefined ? effortOf(body.effort) : work.effort;
-      q.meta.run(title, summary, who.modelId, who.modelName, who.vendor, effort, Date.now(), id);
+      const source = provenance(body, work);
+      q.meta.run(title, summary, who.modelId, who.modelName, who.vendor, effort,
+        source.harnessId, source.harnessOther, source.harnessVersion, source.providerId, source.providerOther, Date.now(), id);
       audit(admin, 'meta', work, '编辑信息');
       return this.adminWork(upload(taskId, id));
     },
@@ -557,6 +610,7 @@ export function createLibrary({ db, catalog, config, limits }) {
       if (status === 'questioned' && !reason) fail(400, '标记存疑时请写明原因，作者和访客都会看到');
       const who = body.modelId !== undefined || body.modelName !== undefined ? identity(body) : work;
       const effort = body.effort !== undefined ? effortOf(body.effort) : work.effort;
+      const source = provenance(body, work);
       const audience = body.audience === undefined ? work.audience : String(body.audience);
       if (!['hidden', 'show1', 'show2', 'both'].includes(audience)) fail(400, '展示站点无效');
       for (const key of ['show_gallery', 'show_arena']) if (body[key] !== undefined && typeof body[key] !== 'boolean') fail(400, '门面开关无效', 'invalid_face_settings');
@@ -571,6 +625,7 @@ export function createLibrary({ db, catalog, config, limits }) {
       const summary = body.summary === undefined ? work.summary : clip(body.summary, 200);
       const now = Date.now();
       q.review.run(status, status === 'verified' ? '' : reason, who.modelId, who.modelName, who.vendor, effort,
+        source.harnessId, source.harnessOther, source.harnessVersion, source.providerId, source.providerOther,
         nextAudience, Number(gallery), Number(arena), title, summary, admin.id, now, now, id);
       const updated = upload(taskId, id);
       const labels = { verified: '通过验证', questioned: '标记存疑', unverified: '退回未验证' };

@@ -25,6 +25,8 @@ function readSnapshot(root) {
   const commit = source?.source === 'github' ? source.commit : null;
   const version = commit ? `${root}|${commit}` : `${root}|dev:${catalogDigest}`;
   const models = new Map(data.models.map((model) => [model.id, model]));
+  const harnesses = new Map((data.harnesses ?? []).map((item) => [item.id, item]));
+  const providers = new Map((data.providers ?? []).map((item) => [item.id, item]));
   const tasks = new Map(data.tasks.map((task) => [task.id, {
     id: task.id, title: task.title, acceptsUploads: !task.promptPending,
     works: new Map(task.results.map((result) => {
@@ -35,6 +37,8 @@ function readSnapshot(root) {
         title: result.title, summary: result.summary ?? '', modelId: result.model,
         modelName: model?.name ?? result.model, vendor: model?.vendor ?? '',
         effort: result.effort ?? '', tool: result.sourceLabel ?? '', ownerId: null,
+        harnessId: result.harness ?? null, harnessOther: '', harnessVersion: result.harnessVersion ?? '',
+        providerId: result.provider ?? null, providerOther: '',
         scene: result.scene, dir: result.scene ? join(root, result.scene) : null,
         cover: Object.values(result.captures ?? {})[0] ?? result.gallery?.[0]?.src ?? null,
       }];
@@ -59,6 +63,10 @@ function readSnapshot(root) {
     tags() { return [...new Set(data.tasks.flatMap((task) => task.tags ?? []))]; },
     model(id) { return models.get(id) ?? null; },
     models() { return [...models.values()]; },
+    harness(id) { return harnesses.get(id) ?? null; },
+    harnesses() { return [...harnesses.values()]; },
+    provider(id) { return providers.get(id) ?? null; },
+    providers() { return [...providers.values()]; },
     work(taskId, id) { return tasks.get(taskId)?.works.get(id) ?? null; },
     works(taskId) { return [...(tasks.get(taskId)?.works.values() ?? [])]; },
     entryDigest,
@@ -148,6 +156,10 @@ export function createCatalog(dist, questions = null) {
     tags() { return [...new Set([...refresh().tags(), ...(questions?.all() ?? []).flatMap((task) => task.tags ?? [])])]; },
     model(id) { return refresh().model(id); },
     models() { return refresh().models(); },
+    harness(id) { return refresh().harness(id); },
+    harnesses() { return refresh().harnesses(); },
+    provider(id) { return refresh().provider(id); },
+    providers() { return refresh().providers(); },
     work(taskId, id) { return refresh().work(taskId, id); },
     works(taskId) { return refresh().works(taskId); },
     duplicateOf(digest) { return refresh().duplicateOf(digest); },

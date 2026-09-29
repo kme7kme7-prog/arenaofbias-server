@@ -123,7 +123,9 @@ export function createInbox({ library, config, limits }) {
           modelName: String(body.modelName ?? '').trim() || suggest.model,
           modelId: body.modelId || undefined,
           effort: body.effort || undefined,
-          tool: '管理员代传',
+          tool: body.tool ?? '',
+          ...Object.fromEntries(['harnessId', 'harnessOther', 'harnessVersion', 'providerId', 'providerOther']
+            .filter((key) => Object.hasOwn(body, key)).map((key) => [key, body[key]])),
         });
       } catch (error) {
         library.discardDraft(admin, draft.id);

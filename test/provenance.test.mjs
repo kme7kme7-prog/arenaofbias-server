@@ -195,6 +195,20 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
     assert.equal(corrected.harnessId, 'codex');
     const after = await platform.arena.leaderboard({ task: 'one' });
     assert.deepEqual({ ...before, updatedAt: null }, { ...after, updatedAt: null });
+    assert.equal(after.filters, undefined, 'an unfiltered board keeps its old shape');
+    const board = (query) => call('alice', 'GET', `/api/leaderboard?task=one&${query}`);
+    // Sides are drawn in random order; pin side b to "not stated" so the checks below are deterministic.
+    platform.arena.correctVote({ id: 'root', name: 'root', role: 'admin' }, vote.id, 'b', { harnessId: null, providerId: null }, 'test');
+    assert.equal((await board('harness=codex')).data.totals.votes, 0, 'side b has no Harness, so the vote is left out');
+    assert.equal((await board('harness=unset')).data.totals.votes, 0, 'side a has a Harness, so the vote is left out');
+    platform.arena.correctVote({ id: 'root', name: 'root', role: 'admin' }, vote.id, 'b', { harnessId: 'codex' }, 'test');
+    assert.equal((await board('harness=codex')).data.totals.votes, 1);
+    assert.equal((await board('harness=codex&provider=official')).data.totals.votes, 0, 'side b still has no provider');
+    platform.arena.correctVote({ id: 'root', name: 'root', role: 'admin' }, vote.id, 'b', { providerId: 'official' }, 'test');
+    const codex = (await board('harness=codex&provider=official')).data;
+    assert.deepEqual([codex.totals.votes, codex.filters], [1, { harness: 'codex', provider: 'official' }]);
+    assert.equal((await board('provider=unset')).data.totals.votes, 0);
+    assert.equal((await board('harness=missing')).status, 400);
   } finally {
     await new Promise((resolve) => site.close(resolve));
     await platform.close();

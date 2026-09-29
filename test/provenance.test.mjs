@@ -147,6 +147,9 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
     const legacy = await call('alice', 'POST', '/api/works', { ...baseBody, draftId: await draft(), tool: '原始工具' });
     assert.equal(legacy.status, 200);
     assert.equal(legacy.data.work.harness, null);
+    const blank = await call('alice', 'POST', '/api/works', { ...baseBody, draftId: await draft(), tool: 'CLI', harnessId: '', providerId: '' });
+    assert.equal(blank.status, 200, 'an empty id means not stated');
+    assert.deepEqual([blank.data.work.harness, blank.data.work.harnessName, blank.data.work.provider], [null, null, null]);
     const meta = `/api/admin/works/one/${id}/meta`;
     assert.equal((await call('root', 'POST', meta, { harnessOther: '备用工具', providerOther: '其他服务' })).data.work.harnessName, '备用工具');
     const cleared = await call('root', 'POST', meta, { harnessId: null, providerId: null });
@@ -156,6 +159,17 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
       { status: 'verified', show_gallery: true, harnessId: 'codex', harnessVersion: '3', providerId: 'official' });
     assert.equal(reviewed.status, 200);
     assert.equal(platform.library.work('one', id).harnessVersion, '3');
+    const listed = async (query) => {
+      const response = await call('root', 'GET', `/api/admin/works?task=one&pageSize=100&${query}`);
+      assert.equal(response.status, 200, query);
+      return response.data.works.map((work) => work.id).sort();
+    };
+    assert.deepEqual(await listed('harness=codex'), ['a1', id].sort());
+    assert.deepEqual(await listed('harness=other'), [other.data.work.id]);
+    assert.deepEqual(await listed('harness=unset'), ['b1', legacy.data.work.id, blank.data.work.id].sort());
+    assert.deepEqual(await listed('provider=official&harness=codex'), ['a1', id].sort());
+    assert.deepEqual(await listed('search=自制'), [other.data.work.id]);
+    assert.equal((await call('root', 'GET', '/api/admin/works?harness=missing')).status, 400);
     const nomination = await call('root', 'POST', `/api/admin/works/one/${id}/nominate`);
     assert.equal(nomination.status, 200);
     const exported = await call('alice', 'GET', new URL(nomination.data.exportUrl).pathname);
@@ -175,7 +189,7 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
     const vote = platform.db.prepare('SELECT id FROM votes WHERE match_id = ?').get(match.id);
     const before = await platform.arena.leaderboard({ task: 'one' });
     assert.throws(() => platform.arena.correctVote({ id: 'root', name: 'root', role: 'admin' }, vote.id, 'a',
-      { harnessId: 'missing' }, 'test'), /所选harness不存在/);
+      { harnessId: 'missing' }, 'test'), /所选Harness不存在/);
     const corrected = platform.arena.correctVote({ id: 'root', name: 'root', role: 'admin' }, vote.id, 'a',
       { harnessId: 'codex', providerId: 'official' }, 'test');
     assert.equal(corrected.harnessId, 'codex');

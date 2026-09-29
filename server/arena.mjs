@@ -310,9 +310,9 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       if (!['a', 'b'].includes(side) || !String(reason ?? '').trim()) fail(400, '更正侧与原因必填');
       if (!replacement || typeof replacement !== 'object' || Array.isArray(replacement)
         || Object.keys(replacement).some((key) => !['modelId', 'modelName', 'vendor', 'effort', 'harnessId', 'providerId'].includes(key))) fail(400, '仅可更正模型、厂商、档位、Harness 和服务商');
-      for (const [field, lookup] of [['harnessId', 'harness'], ['providerId', 'provider']]) {
+      for (const [field, lookup, label] of [['harnessId', 'harness', 'Harness'], ['providerId', 'provider', '服务商']]) {
         if (Object.hasOwn(replacement, field) && replacement[field] !== null &&
-          (typeof replacement[field] !== 'string' || !catalog[lookup](replacement[field]))) fail(400, `所选${lookup}不存在`);
+          (typeof replacement[field] !== 'string' || !catalog[lookup](replacement[field]))) fail(400, `所选${label}不存在`);
       }
       const row = q.vote.get(voteId);
       if (!row) fail(404, '投票不存在');

@@ -88,6 +88,8 @@
 .admin-work-title { display: flex; align-items: center; gap: 10px; min-width: 180px; }
 .admin-work-title .work-thumb { width: 48px; height: 48px; flex: none; }
 .admin-work-title small { display: block; color: var(--muted); }
+.work-provenance { display: block; color: var(--muted); font-size: 12px; }
+.provenance-suggestion { display: flex; align-items: center; gap: 8px; margin-top: 6px; color: var(--muted); font-size: 12.5px; }
 .admin-work-table td { vertical-align: middle; }
 .admin-bulk { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
 .admin-bulk [data-bulk-count] { margin-right: 8px; color: var(--muted); font-size: 13px; }

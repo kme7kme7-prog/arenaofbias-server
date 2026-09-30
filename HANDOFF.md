@@ -1,5 +1,21 @@
 # HANDOFF.md · 当前状态
 
+## 2026-09-30 · schema-cleanup-release（已获推送与上线授权）
+
+- 用户复核 `0c7d94f`、`8c5a8eb` 和 data `ef10cdd` 后明确授权按顺序上线；采用普通 main 快进推送。data `ef10cdd9ab28dfe52a60a5a072a3cd10ae422ab3` 已发布不可变数据包 `2cb2a5b265e8bda8c8069a4b498f1046d825acee`，本轮 server pin 更新到该包。后端修复已推送，GitHub CI 118/118 通过。
+- 现场门禁：公网 bootstrap、版本文件均为 `338bb3f3befcf0a76293018072c00e5d8a7d8b8a`；线上全部已跟踪文件与该提交一致，库 v16。服务仍为 systemd `arenaofbias-server`，正式目录 `/www/wwwroot/arenaofbias-server`。
+- 上线前演练：服务器隔离检出 `8c5a8eb`，语法检查与 118/118 测试通过；新包差异安装的完整树校验通过。最新线上快照 v16→v18，267 件作品、622 张票、27 用户和所有表保留；投票快照、更正、对局及既有审计逐行一致，quick_check/外键通过，全部 45 个模型 ID 可解析，3 个旧 ID 不进入下拉。
+- 回滚材料与验收记录集中在服务器 `/root/arenaofbias-predeploy-20260930T042530Z`：`code.tar.gz`、`server-version`、`datapack-current`、`platform-preview.db`、`rehearsal.json`。实际切换前停写后另存 `platform.db`；部署后的 `verification.json`、`http-verification.json` 是最终验收依据，尚未生成时不得认为已上线。只回滚旧代码不兼容 v18，必须同时恢复数据库和旧包指针。
+- 两项已知小问题按用户意见保留：setMeta 不接收 vendor，管理员可写入备注；兼容厂商追加后备注可略超 1000 字。详情见 `docs/archive/2026-09-30-schema-cleanup-release-wsnxxxs.md`。
+
+## 2026-09-30 · security-review（本地审查，未修复、未部署）
+
+- 审查代码基线 `8c5a8eb7973b2b4b9cc26a6e6d0381e1d4445ddc`。发现 4 项：P1 数据包作品 HTML 可在 API 同源执行；P1 作品请求 URL 异常可退出共享服务；P1 启用截图时缺少导航/网络边界；P2 信任 X-Forwarded-For 首项导致条件性限流绕过。详细证据、触发条件和最小修复建议见 `docs/archive/2026-09-30-security-review-wsnxxxs.md`。
+- 同源 HTML 已用临时库和浏览器确认：读取管理员接口、PATCH 本人资料均 200。畸形作品请求在隔离子进程中使进程 exit=1。截图边界仅验证当前 CSP 下页面导航到另一个环回端口会产生请求，未运行实际后台截图或取得内部页面截图。限流探针：固定转发头第 11 次登录返回 429，轮换首项后 11 次均进入鉴权并返回 401。
+- 既有防护复核：管理员保留名拒绝公开注册，Secure 会话使用 Host 前缀并拒绝重复 Cookie，写 API 校验 Origin，收件箱响应施加无同源权限的 CSP sandbox，上传路径/解压量有约束，SQL 参数绑定，验证码错误次数及会话撤销有覆盖。未发现这些检查路径的新越权。
+- 验证：`npm run check` 56 文件 0 错；`npm test` 118/118。未连接生产、未读取现有业务库/密钥/日志，未核实线上 Nginx 转发头、静态路由、CAPTURE 或作品域名；报告不把历史部署记录当作当前线上状态。
+- 本轮只更新交接与归档；浏览器证据在本地生成物 `output/audit/security-review-20260930-api-origin.png`。审查期间出现的 `datapack.json` 更新不属于本轮，保留且不纳入提交。提交授权沿用用户 initial AGENTS 的完成修改后提交要求，身份已核实为 GitHub `wsnxxxs`；不推送。
+
 ## 2026-09-30 · schema-cleanup-review（本地修订，未推送、未部署）
 
 - 修复审阅指出的手填模型厂商丢失：未发布的 v18 在删除 vendor 前将非空手填厂商原样追加到 note，原备注不截断；新投稿和审核的兼容 vendor 声明也写入 note，同一声明不重复追加。作品 API 的 vendor 对手填模型仍为空，厂商声明可从 note 查看和导出。

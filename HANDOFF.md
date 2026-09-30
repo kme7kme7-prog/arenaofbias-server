@@ -1,5 +1,14 @@
 # HANDOFF.md · 当前状态
 
+## 2026-09-30 · luna-flex-relay（正式连接已接通，真实图文审核通过）
+
+- 用户提供 154.36.185.169 并授权配置，明确保留 Xray 与 443。新增独立 Node 内置模块审核接口 `scripts/moderation-relay.mjs`，仅监听审查服务器 127.0.0.1:5280，经现有服务器的 SSH 本地转发访问。只接受已配置 Key 的指定模型、Flex、store=false、非流式 Responses 请求；仅连接官方接口，保留 HTTP 状态，不降档、不重试，正文上限 81 MiB、上游时限 15 分钟。
+- 审查服务器独立运行环境为 `/opt/arenaofbias-review/runtime/node-v22.23.3-linux-x64/`（官方 SHA256 校验），原全局 Node v22.12.0 保留；relay 以无登录 shell 的 arena-review 用户运行，Key 环境文件 /etc/arenaofbias-review.env 为 root 0600。专用 SSH 公钥只允许目标 127.0.0.1:5280，访问其他端口实测被 administratively prohibited 拒绝；固定远端主机公钥。未修改共享 sshd 配置、Nginx、Xray 或防火墙。
+- 新服务器 `arenaofbias-review-relay`、原服务器 `arenaofbias-moderation-tunnel` 均 active、enabled。原服务器 moderation.conf 的 base URL 已为 http://127.0.0.1:5280/v1，Wants/After 专用 tunnel，保留审核/截图开关；实际进程已加载，公网 contentModeration=true。原平台运行源码仍 d69919e，无前端、数据包、数据库迁移或代码重新部署。
+- 首次真实 Flex 调用正常返回 review，原因是原截图机器无中文字体；本地下载图像确认方框，安装 Debian fonts-noto-cjk 后重启截图环境。第二次实际桌面/手机截图经 SSH→relay→官方 Responses→原审核模块返回 HTTP 200、completed、gpt-6-luna、flex、approved，理由为文字图片正常，2362 输入/34 输出共 2396 tokens；首次 2579 tokens。两个验证均使用隔离页面与内存 library，未创建生产投稿、用户或人工决定。
+- 验证：check 61 文件 0 错，新增 1 项定向测试覆盖凭证、路径、JSON、模型/Flex/store/stream 限制、正常透传、429 无重试及断连 503。两侧 health 通过，SSH 密钥限制通过；正式画廊、bootstrap、管理页、榜单 200；库 v19 quick_check=ok，267 件作品/27 用户均保留，所有旧作品 legacy。Xray ActiveState/MainPID/启动时间与 443 原监听逐项保持一致，没有重启或删除 Xray。
+- 审查服务器证据在 `/root/arenaofbias-review-setup-20260930/`；原服务器备份原 moderation.conf、API/截图/字体/运行/数据库验证在 `/root/arenaofbias-review-connect-20260930/`。本地截图前后与测试生成物为 output/release-luna-relay/，不提交；密钥与密码均未写入仓库或验收日志。回滚只恢复配置、重启平台并停止专用新服务，不触碰 Xray 或数据库。详见 `docs/archive/2026-09-30-luna-flex-relay-wsnxxxs.md` 与 docs/deploy.md 6.1。
+
 ## 2026-09-30 · luna-flex-enable（密钥与开关已配置，VPS 官方接口连接未通）
 
 - 用户授权代填 Key 并启用。密钥经隐藏输入写入服务器 moderation.conf（root，0600），不入库、不写本地文件或日志；保留原禁用配置于 `/root/arenaofbias-luna-enable-20260930/moderation-before.conf`。daemon-reload、重启后服务 active，运行进程确认 Key 存在，CONTENT_MODERATION=1、CAPTURE=1、gpt-6-luna、官方 base URL；公网 bootstrap 的 site.contentModeration=true。运行源码仍 d69919e，未重新部署代码。

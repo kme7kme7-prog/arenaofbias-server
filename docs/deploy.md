@@ -248,7 +248,7 @@ Environment="TURNSTILE_SECRET_KEY=<secret-key>"
 
 ## 6. Luna Flex 内容审查
 
-本轮只完成本地实现；不代表线上开关或截图环境已经启用。按本文版本门禁与备份流程先发布配套后端（启动追加 v19），再发布前端。密钥只放受限服务器环境文件，不写入仓库、前端构建变量或验收日志：
+实际运行状态以 HANDOFF 最新部署记录为准。首次启用时，按本文版本门禁与备份流程先发布配套后端（启动追加 v19），再发布前端。密钥只放受限服务器环境文件，不写入仓库、前端构建变量或验收日志：
 
 ```ini
 # /etc/systemd/system/arenaofbias-server.service.d/moderation.conf
@@ -260,8 +260,32 @@ Environment="MODERATION_MODEL=gpt-6-luna"
 Environment="MODERATION_API_KEY=<server-only-key>"
 ```
 
-截图仍需已有的 Playwright ≥ 1.48 与 Chrome，服务不新增 npm 依赖。先在隔离环境确认两档截图及 Responses API 的 Flex 结构化响应；真实调用会计费，本轮本地验证使用模拟接口。配置后 daemon-reload 并重启，在 bootstrap 核对 `site.contentModeration`；用测试投稿确认公开列表/原作品源/媒体均被限制，作者与管理员可预览，自动通过后公开，疑似与错误转人工。后台人工决定需填写理由。
+截图仍需已有的 Playwright ≥ 1.48 与 Chrome，服务不新增 npm 依赖。先在隔离环境确认两档截图及 Responses API 的 Flex 结构化响应；真实调用会计费，本地回归可使用模拟接口。配置后 daemon-reload 并重启，在 bootstrap 核对 `site.contentModeration`；用测试投稿确认公开列表/原作品源/媒体均被限制，作者与管理员可预览，自动通过后公开，疑似与错误转人工。后台人工决定需填写理由。
+
+截图机器需能显示中文；Debian 可安装 `fonts-noto-cjk`，用 `fc-list :lang=zh` 确认可用，并用实际截图核对。缺少中文字体时，页面 innerText 仍可能正确，但图片中的文字会显示为方框，导致模型交人工；安装后需让截图浏览器重新启动。
 
 Flex 固定为唯一计费档，不自动改用标准档。密钥缺失、`CAPTURE=0`、浏览器不可用、容量不足或超时均会进入人工队列；不要以「上传成功」判断审查完成。旧作品标记 legacy，默认不批量重审。送审涵盖声明、页面文字、封面和两档首屏，不覆盖整包及全部交互。
 
 关闭 `CONTENT_MODERATION` 会停止自动队列，新作品走旧流程，已有待审/拒绝作品仍保持限制。退回不理解 v19 内容状态的旧代码会公开这些作品，不能直接只回滚代码；须先停写并按备份流程恢复兼容数据库及文件，或保留支持内容访问限制的版本。
+
+### 6.1 独立审查服务器与 SSH 连接
+
+正式站无法连接官方 API 时，可以在可用的审查服务器运行 `scripts/moderation-relay.mjs`。它只接受已配置 Key 的 `/v1/responses` 请求，限定 `gpt-6-luna`、`service_tier=flex`、`store=false` 和非流式响应；只连接官方 Responses API，保留上游 HTTP 状态，不重试或切换计费档。请求最多 81 MiB、上游时限 15 分钟，客户端断开会取消上游请求。未记录 Key、请求正文或提供商错误消息。
+
+审查服务器用独立的 Node ≥ 22.13 运行环境与 systemd `arenaofbias-review-relay`，监听 `127.0.0.1:5280`。`/etc/arenaofbias-review.env` 为 root 持有的 0600 文件，配置 `MODERATION_API_KEY`、`MODERATION_MODEL=gpt-6-luna`、`REVIEW_PORT=5280`。服务以无登录 shell 的 `arena-review` 用户运行。无需新增 npm 依赖、公开 HTTP 端口、域名或修改已有 Nginx / Xray。
+
+正式服务器通过 systemd `arenaofbias-moderation-tunnel` 维护 SSH 本地转发：
+
+```sh
+ssh -NT -i /root/.ssh/arenaofbias-review-154.36.185.169 \
+  -o BatchMode=yes -o StrictHostKeyChecking=yes \
+  -o UserKnownHostsFile=/root/.ssh/arenaofbias-review-known-hosts \
+  -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
+  -L 127.0.0.1:5280:127.0.0.1:5280 arena-review@154.36.185.169
+```
+
+SSH 使用独立 Ed25519 身份并固定主机公钥；远端授权公钥限制为 `restrict,port-forwarding,permitopen="127.0.0.1:5280"`，用户无登录 shell。上述两项新服务设为开机启动、失败后恢复，既有 Xray、443 监听及全局 Node 均不改动。
+
+先在正式服务器请求 `http://127.0.0.1:5280/health`，再用隔离作品跑实际截图和内容审查模块、确认 Luna Flex 响应。成功后将现有 moderation.conf 的 `MODERATION_BASE_URL` 改为 `http://127.0.0.1:5280/v1`，保留 Key 与审核/截图开关；daemon-reload、重启正式服务，再核对运行进程设置和公网 bootstrap。loopback HTTP 由上述 SSH 通道加密跨机传输。
+
+回滚该连接仅需恢复备份 moderation.conf 并重启平台，再停止专用 tunnel/relay；不涉及数据迁移，也不删除 Xray 或修改共享端口。当前部署、实际验证与备份位置以 HANDOFF 最新记录为准。

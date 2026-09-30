@@ -78,3 +78,16 @@
 - [2026-09-28 · 画廊接入文档跟进 · wsnxxxs](docs/archive/2026-09-28-gallery-integration-docs-followup-wsnxxxs.md)
 - [2026-09-28 · 汇合 gallery-integration 进 main · kme7kme7-prog](docs/archive/2026-09-28-汇合gallery-integration-kme7kme7-prog.md)
 - [2026-09-27 · 管理端（admin web app）· kme7kme7-prog](docs/archive/2026-09-27-管理端-kme7kme7-prog.md)
+
+## 控制框折叠审计与修复（2026-09-30–10-01，未提交、未推送、未部署）
+
+- 授权与范围：先交付83件修改前审计表；用户随后批准同时修复两处漏藏并追加回归。仅修改 `server/fold.js`、在 `test/platform.test.mjs` 追加本轮回归、在本页末尾追加记录；保留已有头像等并行工作，不把其改动计入本轮。零新增依赖，不改 content 注入路由、作品文件或消费者数据 pin。
+- 数据基线：使用正式 pin `4c926d5f8a3c240ff769de360a9168abbe4e9dfc` 的已有 rehearsal-2 副本，来源 `27f9a680886772ae9298cc188fef0868873e6921`，20题/83件作品；默认旧包92f8ab9与其422个文件仅未引用的 build-info 时间不同。另行处理的 data PR #5 新增38件尚未进入这个正式 pin，本审计不声称覆盖未发布的121件包。
+- 真实复核：本地真实 `createContentHandler`、m token、隔离作品子域与 iframe；只读作品映射替代对局持久化，不写业务数据库。全部83件完成修改前/最终修改后的隐藏与恢复截图、DOM及消息记录，并逐图审阅；最终均为父页1280×720/iframe1280×660，尺寸变化的临时记录已按基线补跑。截图、日志、完整表和本轮 diff 全在忽略的 `output/fold-audit-20260930-445a1454/`，不入库。
+- 结果：标记元素84→68；最终58件有标记、25件为0。解除唯一被阻断的 GPT-6 Luna Max 键盘体验入口（默认折叠下实点后“正在体验 A—Z”且 pressed），解除10个透明 checkbox/radio 的误标记，保留误藏的正文/页头/导航、小地图与建筑分页。补藏铁路 Gemini3.8 的1块底栏及飞机 DeepSeek High 的4块 static 调参卡片。键盘本体与配置按钮阵列保留。计数指被标记的 DOM 元素，仍包含1个原本 visibility:hidden 的空 toast，不等同于68个可见面板。
+- 取舍：正文、导航、唯一体验入口所在混合区域整体保留，其内嵌调参按钮也保持可见；部分纯调参板附带标题/提示仍随板隐藏。飞机机构“启动”属于调参板且保留既有 F/E 快捷键，没有泛化豁免所有 Start/Play/点击类词语。无真实迟到样本，因此保留 load 后0/600/1800/4000ms扫描，不增加 MutationObserver 或查询协议。
+- 协议：顶部注释供前端引用，子→父 `{source:'sp-fold', count}` 在 load 首报一次（可能0），每新批次再报、累计不减；父→子 `{source:'sp-arena', fold:boolean}` 默认隐藏，true隐藏/false显示，仅接受 parent。83件首报0、计数单调、末次与标记数相等，false恢复全部标记；本批 console error 为0。
+- 验证：最终 `npm run check` 68文件/0错；完整 `npm test` 145/145通过、0失败/取消/跳过（8820ms）；`git diff --check` 通过。本轮新增3项回归覆盖内容/入口/原生输入保护、全屏层内static卡片识别、批次报告与parent消息约束/输入状态；已有上传内容服务用例追加 w 原作不注入断言，已有 m 注入断言保持。完整测试包含工作区已有头像等改动，不能把145项全部归因本轮。
+- 证据：[修改前83件表](output/fold-audit-20260930-445a1454/audit-table.md)、[最终83件对照表](output/fold-audit-20260930-445a1454/after/audit-table.md)、[仅本轮fold/test差异](output/fold-audit-20260930-445a1454/our-changes.diff)、[check日志](output/fold-audit-20260930-445a1454/check-after.log)、[完整测试日志](output/fold-audit-20260930-445a1454/tests-after.log)。输出表含每件数量、元素、误藏/漏藏及两态截图绝对路径。
+- 未执行：未逐件覆盖手机、全部滚动/指南/部件动画、交互后新建面板或音频可听性；这些超出本轮实际证据，不宣称全部交互验收。前端开关由另一人实现，本轮未改前端；未连接生产、未部署、未提交或推送后端。本轮本地审计服务已停止。
+- 后续数据整理与发布（2026-10-01）：按用户另行授权，data PR #5 的38件完成题目去重映射、模型注册与收录验收，并已合入 main，源码 `638937a58d6aec02644106d76e2b84d51fbf9fe9`；不可变 tag `datapack/638937a58d6aec02644106d76e2b84d51fbf9fe9` 指向产物 `39a2fa43b25488b09069644fdcd6df50adc06dc0`。发布包 schema 1、sourceDirty false、20题/121件、37展示模型/203完整模型、11 Harness/10服务商；PR CI 36731000102 与发布 CI 36731686651 均成功。本地 data check 28文件/0错、测试16/16、完整构建成功、收录检查0错/4提示；原作已有空白提示保留，范围与限制见 data 本轮归档。本轮只提交/推送/合并 data，未更新消费者 pin、未部署、未提交后端；上面的折叠审计仍只覆盖固定正式83件，不包含新增38件。合并、产物与CI核对证据位于 data 忽略目录 `output/intake-pr5-reconcile/worktree/output/pr5-review/published-package-verification.json`。

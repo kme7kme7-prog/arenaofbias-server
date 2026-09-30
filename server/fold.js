@@ -3,11 +3,16 @@
 // floating control panels (small fixed / absolute boxes holding buttons or inputs, plus the
 // common GUI libraries) so both sides are compared on the work itself. The arena toolbar
 // shows them again; hidden panels keep their DOM and state.
+// Protocol for the parent arena toolbar (default: hidden):
+// Child -> parent: {source:'sp-fold', count} once on window load (possibly 0), then
+// once per newly hidden batch. count is cumulative and never decreases.
+// Parent -> child: {source:'sp-arena', fold:boolean}; true hides, false shows.
+// Only messages whose source is this window's parent are accepted.
 (() => {
   const root = document.documentElement;
   const LIBS = '.lil-gui.root, .dg.main, .tp-dfwv';
   const CONTROLS = 'button, input, select, textarea, [role="button"], [role="slider"], summary';
-  const SCENE = 'canvas, video, iframe';
+  const SCENE = 'canvas, video, iframe, svg[role="img"]';
   const marked = new Set();
 
   root.setAttribute('data-sp-fold', '');
@@ -19,13 +24,33 @@
     try { parent.postMessage({ source: 'sp-fold', count: marked.size }, '*'); } catch { /* detached */ }
   };
 
-  // The outermost positioned, panel-sized ancestor of a control that holds no scene.
+  // Real works mix tuning controls with navigation, descriptions and an activation
+  // button. Keep those regions intact rather than hiding their contents together.
+  function isContent(el) {
+    if (el.matches('header') || (el.matches('[aria-live], [aria-labelledby]') && el.querySelector('p'))) return true;
+    if (el.matches('section') && el.querySelector('strong + p')) return true;
+    if ([...el.querySelectorAll('li')].some((item) => item.textContent.trim() && !item.matches(CONTROLS) && !item.querySelector(CONTROLS))) return true;
+    const buttons = el.matches('button, [role="button"]') ? [el] : el.querySelectorAll('button, [role="button"]');
+    return [...buttons].some((button) => /键盘体验/.test(`${button.textContent} ${button.getAttribute('aria-label') ?? ''}`));
+  }
+
+  // The outermost small positioned box, or a small static card in a full-page overlay.
   function panelOf(control, limit) {
     let best = null;
+    let small = null;
     for (let el = control; el && el !== document.body && el !== root; el = el.parentElement) {
       const rect = el.getBoundingClientRect();
-      if (rect.width * rect.height > limit || el.querySelector(SCENE)) break;
-      if (/^(fixed|absolute|sticky)$/.test(getComputedStyle(el).position)) best = el;
+      if (el.querySelector(SCENE)) break;
+      if (isContent(el)) return null;
+      const positioned = /^(fixed|absolute|sticky)$/.test(getComputedStyle(el).position);
+      if (rect.width * rect.height > limit) {
+        if (positioned && !best && small !== control) best = small;
+        break;
+      }
+      // A positioned checkbox/radio may only be a visually hidden input behind a
+      // label, not a panel. Hiding it removes native focus and inflates the count.
+      if (positioned && (el !== control || !el.matches('input, select, textarea'))) best = el;
+      small = el;
     }
     return best;
   }

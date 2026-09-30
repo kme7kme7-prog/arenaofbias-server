@@ -2,13 +2,14 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { scryptSync } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, before, describe, test } from 'node:test';
+import { runInNewContext } from 'node:vm';
 import { crc32, deflateRawSync } from 'node:zlib';
 import { createPlatform } from '../server/app.mjs';
 import { createAuth } from '../server/auth.mjs';
@@ -84,6 +85,109 @@ function zip(entries) {
 
 const PAGE = '<!doctype html><html><head><title>t</title></head><body><canvas></canvas><script src="app.js"></script></body></html>';
 const inspect = (buffer, name = 'work.zip') => inspectUpload(buffer, name, { limits: defaultLimits, cdn: ['unpkg.com'] });
+
+// Small DOM fixtures exercise the served script without adding a browser dependency.
+function foldElement(tag, { position = 'static', width = 100, height = 30, text = '', attrs = {}, selectors = [] } = {}, children = []) {
+  const attributes = new Map(Object.entries(attrs));
+  const el = {
+    tagName: tag.toUpperCase(), position, children: [], parentElement: null,
+    get textContent() { return text + this.children.map(child => child.textContent).join(''); },
+    set textContent(value) { text = value; },
+    setAttribute(name, value) { attributes.set(name, value); },
+    getAttribute(name) { return attributes.get(name) ?? null; },
+    hasAttribute(name) { return attributes.has(name); },
+    toggleAttribute(name, force) { if (force) attributes.set(name, ''); else attributes.delete(name); },
+    getBoundingClientRect() { return { width, height }; },
+    getClientRects() { return [{}]; },
+    matches(selector) {
+      return selector.split(',').some(part => {
+        const key = part.trim(), attr = /^\[([^=\]]+)(?:="([^"]*)")?\]$/.exec(key);
+        return key === tag || selectors.includes(key) || (attr && attributes.has(attr[1]) && (attr[2] === undefined || attributes.get(attr[1]) === attr[2]));
+      });
+    },
+    appendChild(child) { this.children.push(child); child.parentElement = this; return child; },
+    contains(other) { return this === other || this.children.some(child => child.contains(other)); },
+    querySelectorAll(selector) { return this.children.flatMap(child => [...(child.matches(selector) ? [child] : []), ...child.querySelectorAll(selector)]); },
+    querySelector(selector) { return this.querySelectorAll(selector)[0] ?? null; },
+  };
+  for (const child of children) el.appendChild(child);
+  return el;
+}
+
+function foldFrame(children) {
+  const body = foldElement('body', {}, children);
+  const root = foldElement('html', {}, [body]);
+  const events = new Map(), timers = [], reports = [];
+  const parent = { postMessage(data) { reports.push({ ...data }); } };
+  const document = { body, documentElement: root, createElement: tag => foldElement(tag), querySelectorAll: selector => root.querySelectorAll(selector) };
+  runInNewContext(readFileSync(new URL('../server/fold.js', import.meta.url), 'utf8'), {
+    document, parent, innerWidth: 1280, innerHeight: 660,
+    getComputedStyle: el => ({ position: el.position }),
+    addEventListener: (type, callback) => events.set(type, callback),
+    setTimeout: callback => timers.push(callback),
+  });
+  return { body, root, parent, reports, load: () => events.get('load')(), scan: () => timers.shift()(), message: event => events.get('message')(event) };
+}
+
+test('fold keeps activation buttons, native form inputs and work content', () => {
+  const button = text => foldElement('button', { text });
+  const fixed = (tag, children, attrs = {}) => foldElement(tag, { position: 'fixed', attrs }, children);
+  const input = foldElement('input', { position: 'absolute' });
+  const protectedBoxes = [
+    input,
+    fixed('div', [button('键盘体验 A—Z'), button('复位视角')]),
+    fixed('header', [button('关于作品')]),
+    fixed('section', [foldElement('strong', { text: '一轴 · 两院 · 十一筑' }), foldElement('p', { text: '对称有序，向山而生', selectors: ['strong + p'] }), button('晨光')]),
+    fixed('section', [foldElement('p', { text: '作品介绍' }), button('车身配色')], { 'aria-labelledby': 'title' }),
+    fixed('aside', [foldElement('p', { text: '建筑的故事' }), button('走近主殿')], { 'aria-live': 'polite' }),
+    fixed('section', [foldElement('p', { text: '建筑详情' }), fixed('div', [button('下一座')])], { 'aria-live': 'polite' }),
+    fixed('aside', [foldElement('ul', {}, [foldElement('li', { text: '营造规制正文' })]), button('时辰')]),
+    fixed('section', [foldElement('svg', { selectors: ['svg[role="img"]'] }), button('建筑导览')]),
+  ];
+  const tuning = fixed('div', [button('晨曦'), button('夜景')]);
+  const frame = foldFrame([...protectedBoxes, tuning]);
+  frame.load(); frame.scan();
+  for (const el of protectedBoxes) assert.equal(el.hasAttribute('data-sp-fold-ui'), false);
+  assert.equal(tuning.hasAttribute('data-sp-fold-ui'), true, 'pure tuning panels still fold');
+  assert.deepEqual(frame.reports.map(report => report.count), [0, 1]);
+});
+
+test('fold finds static tuning cards inside a full-page positioned overlay', () => {
+  const card = children => foldElement('section', { width: 260, height: 160 }, children);
+  const views = card([foldElement('button', { text: '俯瞰' })]);
+  const speed = card([foldElement('input')]);
+  const overlay = foldElement('div', { position: 'fixed', width: 1280, height: 660 }, [views, speed]);
+  const scene = foldElement('canvas');
+  const frame = foldFrame([scene, overlay]);
+  frame.load(); frame.scan();
+  assert.equal(views.hasAttribute('data-sp-fold-ui'), true);
+  assert.equal(speed.hasAttribute('data-sp-fold-ui'), true);
+  assert.equal(overlay.hasAttribute('data-sp-fold-ui'), false);
+  assert.equal(scene.hasAttribute('data-sp-fold-ui'), false);
+  assert.deepEqual(frame.reports.map(report => report.count), [0, 2]);
+});
+
+test('fold reports cumulative batches and only accepts its parent toolbar messages', () => {
+  const input = foldElement('input');
+  input.value = '0.75';
+  const gui = foldElement('div', { selectors: ['.lil-gui.root'] }, [input]);
+  const frame = foldFrame([gui]);
+  assert.equal(frame.root.hasAttribute('data-sp-fold'), true);
+  frame.load(); frame.scan(); frame.scan();
+  assert.deepEqual(frame.reports, [{ source: 'sp-fold', count: 0 }, { source: 'sp-fold', count: 1 }]);
+  frame.message({ source: {}, data: { source: 'sp-arena', fold: false } });
+  assert.equal(frame.root.hasAttribute('data-sp-fold'), true);
+  frame.message({ source: frame.parent, data: { source: 'other', fold: false } });
+  assert.equal(frame.root.hasAttribute('data-sp-fold'), true);
+  frame.message({ source: frame.parent, data: { source: 'sp-arena', fold: false } });
+  assert.equal(frame.root.hasAttribute('data-sp-fold'), false);
+  assert.equal(input.value, '0.75');
+  frame.body.appendChild(foldElement('div', { position: 'fixed' }, [foldElement('button', { text: '速度' })]));
+  frame.scan();
+  frame.message({ source: frame.parent, data: { source: 'sp-arena', fold: true } });
+  assert.equal(frame.root.hasAttribute('data-sp-fold'), true);
+  assert.deepEqual(frame.reports.map(report => report.count), [0, 1, 2]);
+});
 
 test('cross-site sessions use the configured cookie policy and require HTTPS', async () => {
   const db = openDatabase(':memory:');
@@ -426,7 +530,9 @@ describe('platform lifecycle', () => {
     assert.equal(upload.status, 'unverified');
     assert.deepEqual([...Object.values(platform.db.prepare('SELECT show_gallery, show_arena FROM works WHERE id = ?').get(upload.id))], [1, 0], '新投稿默认展览馆开、竞技场关');
     assert.equal(upload.effort, 'High');
-    assert.equal((await fetchContent(upload.scene)).status, 200);
+    const original = await fetchContent(upload.scene);
+    assert.equal(original.status, 200);
+    assert.doesNotMatch(original.text, /__sp_fold\.js/);
     const boot = await call('bob', 'GET', '/api/bootstrap');
     assert.equal(boot.data.arena.one.works, 0, 'unverified uploads and unapproved curated works all stay out of blind comparisons');
     assert.equal(boot.data.works[0].checks, undefined, 'upload reports are private');

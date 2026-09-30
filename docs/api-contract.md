@@ -113,6 +113,7 @@ API 域静态 `/data.json`（含等价编码路径）仅管理员登录后返回
 | `humanIntervention` | string | `none`（仅初始提示，未改代码）、`prompt-guided`（额外人工提示指导，未改代码）、`code-edited`（人工改代码）；空串为未注明 |
 | `generatedOn` | string | 实际生成日期，有效的 `YYYY-MM-DD`；不以上传日期代填 |
 | `evidenceUrl` | string | 公开对话或运行记录的 HTTP / HTTPS 链接，≤2000 字、不含账号密码；服务端不抓取链接内容 |
+| `promptVariant` | string | 生成时使用的题目提示词版本 ID（数据包 `promptVariants[].id`）；单一提示词题目为空串（schema v21） |
 | `tool` | string | 兼容输出，由 Harness 注册表名称或「其他」原文生成，不再独立存储 |
 | `harnessId` / `harnessOther` | string / null、string | Harness 注册表 ID 或自填「其他」，两者互斥；旧作品分别为 null、空串。写入时 ID 传空串与 null 相同，表示未注明 |
 | `harnessVersion` | string | Harness 版本（≤40 字）；仅有 Harness 时可填写 |
@@ -348,7 +349,11 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 **认证**：登录（仅草稿所有者）。响应 `{ "ok": true }`。错误：`404 试加载已结束`（草稿不存在或非本人）。
 
-### 3.6 投稿：`POST /api/works` 与 `DELETE /api/works/:task/:id`
+**`GET /api/drafts?task=<题目id>`** —— 取回本人在该题最新的未过期草稿
+
+**认证**：登录。响应 `{ "draft": <同上草稿对象> | null }`，供投稿页离开后继续试加载；不存在或已过期时为 `null`。
+
+### 3.6 投稿：`POST /api/works`、`PATCH /api/works/:task/:id` 与 `DELETE /api/works/:task/:id`
 
 **`POST /api/works`** —— 由草稿正式投稿
 
@@ -365,6 +370,8 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
   "effort": "High",
   "tool": "CLI",
   "harnessId": "claude-code", "harnessVersion": "1.0", "providerId": "official",
+  "promptVariant": "short",
+  "modelVersion": "", "generationMode": "agent", "humanIntervention": "none", "generatedOn": "2026-09-30", "evidenceUrl": "",
   "cover": "data:image/webp;base64,…",
   "trial": { "loaded": true, "loadMs": 120, "errors": 0, "errorSamples": [], "failedResources": [], "blocked": [], "canvases": 1, "media": 3, "words": 120 }
 }
@@ -376,6 +383,8 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 - `cover` 仅接受 PNG / JPEG / WebP（魔数校验），≤3 MB。
 - `harnessId` / `providerId` 须存在于当前数据包注册表，停用的 `listed: false` 条目仍可引用；也可分别填写 `harnessOther` / `providerOther`。同一维度的 ID 与「其他」不能同时非空；设置一边会清空另一边。两个「其他」及 `harnessVersion` 经 NFKC 归一化并去首尾空白后最多 40 字。版本只能随 Harness 填写，清空 Harness 会清空版本。字段未出现时保持原值，旧数据包没有注册表时可填「其他」。
 - 普通用户须填写 Harness ID、「其他」或兼容字段 `tool` 中至少一项；过渡期旧前端只传 `tool` 仍可投稿。管理员可留空。仅传 `tool`（或 Harness 两项均空）时将其存入 `harness_other`；有非空 Harness 声明时以声明为准。输出 `tool` 从 Harness 派生，不自动猜测 ID。
+- `promptVariant`（schema v21）：题目在数据包里有 `promptVariants` 时，普通用户必须填写其中一个 `id`，管理员可留空；无效 ID 为 `400 invalid_prompt_variant`。单一提示词的题目忽略该字段并存为空串。作品视图仅在非空时输出 `promptVariant`，前端据此与同模型、同来源的其他版本合为一张卡片。
+- 生成信息五个字段的取值规则见作品字段表，服务端不要求必填；Gallery 前端要求填写 `generationMode` 与 `humanIntervention`。
 
 成功 `200`：`{ "work": <作品公开视图> }`。作品初始状态 `unverified`，并自动排队无头截图（1440×900 与 390×844 两档，写回 `captures`；截图能力可用性见 `bootstrap.site.capture`）。
 
@@ -384,6 +393,10 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 截图浏览器只允许当前作品源的文档，以及该源和 HTTPS CDN 白名单内的 GET/HEAD 资源。请求逐跳检查重定向，跨源导航、WebSocket、Service Worker 及未经过路由的浏览器连接被阻断；截图环境须预配置 Playwright ≥ 1.48 和 Chrome。
 
 错误：`401`；`404 试加载已过期`；`400`（未确认 / 缺标题 / 缺 Harness 与 tool / 模型不存在或缺失 / 来源字段无效 / 封面无效）；`413 封面图片不能超过 3 MB`；`429 你已有 5 件作品在等待核验`（`pendingPerUser`）。
+
+**`PATCH /api/works/:task/:id`** —— 作者修改投稿信息
+
+**认证**：登录，作者本人；管理员调用时等同 `/api/admin/works/:task/:id/meta`。**限流**：write 桶。请求体可含 `title`、`summary`、`note`、`modelId` / `modelName` / `vendor`、`effort`、`promptVariant`、Harness 与服务商字段及生成信息五个字段，未出现的保持原值，规则同 `POST /api/works`。作者只能在 `status` 为 `unverified` 时修改，已核验或存疑返回 `409`；多版本题目不能清空 `promptVariant`，也不能清空 Harness。文字变化且开启内容审查时重新置为 `pending` 并排队。成功 `200`：`{ "work": <作者作品视图> }`，写 `meta` audit。错误：`401` / `403 只能修改自己上传的作品` / `404` / `409` / `400`（没有可修改的内容或字段无效）/ `429`。
 
 **`DELETE /api/works/:task/:id`** —— 删除投稿
 

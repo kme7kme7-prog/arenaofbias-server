@@ -81,6 +81,7 @@ export function createLibrary({ db, catalog, config, limits }) {
     draft: db.prepare('SELECT * FROM drafts WHERE id = ?'),
     draftByToken: db.prepare('SELECT * FROM drafts WHERE token = ? AND expires_at > ?'),
     draftsOf: db.prepare('SELECT id FROM drafts WHERE owner_id = ? ORDER BY created_at DESC'),
+    latestDraft: db.prepare('SELECT * FROM drafts WHERE owner_id = ? AND task_id = ? AND expires_at > ? ORDER BY created_at DESC LIMIT 1'),
     expiredDrafts: db.prepare('SELECT id FROM drafts WHERE expires_at <= ?'),
     insertDraft: db.prepare(`INSERT INTO drafts (id, owner_id, task_id, token, source_name, root, entry, file_count, bytes, digest, checks, created_at, expires_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
@@ -96,8 +97,8 @@ export function createLibrary({ db, catalog, config, limits }) {
     insertWork: db.prepare(`INSERT INTO works (id, task_id, owner_id, title, summary, model_id, model_other, effort,
       harness_id, harness_other, harness_version, provider_id, provider_other, note, content_key,
       source_name, root, entry, file_count, bytes, digest, checks, trial, cover, created_at, updated_at,
-      model_version, generation_mode, human_intervention, generated_on, evidence_url, moderation, show_gallery, show_arena)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`),
+      model_version, generation_mode, human_intervention, generated_on, evidence_url, moderation, prompt_variant, show_gallery, show_arena)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`),
     deleteWork: db.prepare('DELETE FROM works WHERE id = ?'),
     deleteSubmitAudit: db.prepare("DELETE FROM audit WHERE action = 'submit' AND work_id = ?"),
     restoreDraft: db.prepare(`INSERT INTO drafts (id, owner_id, task_id, token, source_name, root, entry, file_count, bytes, digest, checks, created_at, expires_at)
@@ -115,7 +116,8 @@ export function createLibrary({ db, catalog, config, limits }) {
     faceSettings: db.prepare('UPDATE works SET show_gallery = ?, show_arena = ?, updated_at = ? WHERE id = ?'),
     meta: db.prepare(`UPDATE works SET title = ?, summary = ?, model_id = ?, model_other = ?, effort = ?,
       harness_id = ?, harness_other = ?, harness_version = ?, provider_id = ?, provider_other = ?,
-      model_version = ?, generation_mode = ?, human_intervention = ?, generated_on = ?, evidence_url = ?, updated_at = ? WHERE id = ?`),
+      model_version = ?, generation_mode = ?, human_intervention = ?, generated_on = ?, evidence_url = ?,
+      prompt_variant = ?, note = ?, updated_at = ? WHERE id = ?`),
     curatedAs: db.prepare('UPDATE works SET curated_as = ?, updated_at = ? WHERE id = ?'),
     votesOfWork: db.prepare('SELECT COUNT(*) AS n FROM votes WHERE task_id = ? AND (a_work = ? OR b_work = ?)'),
     override: db.prepare('SELECT * FROM work_overrides WHERE task_id = ? AND work_id = ?'),
@@ -169,6 +171,7 @@ export function createLibrary({ db, catalog, config, limits }) {
       humanIntervention: row.human_intervention,
       generatedOn: row.generated_on,
       evidenceUrl: row.evidence_url,
+      promptVariant: row.prompt_variant,
       note: row.note,
       ownerId: row.owner_id,
       ownerName: row.owner_name ?? null,
@@ -332,6 +335,15 @@ export function createLibrary({ db, catalog, config, limits }) {
     return next;
   }
 
+  // Tasks with several prompt versions need each upload to name the one it answers.
+  const promptVariantFrom = (taskId, body, current = '', required = false) => {
+    const variants = catalog.task(taskId)?.promptVariants ?? [];
+    const value = Object.hasOwn(body, 'promptVariant') ? String(body.promptVariant ?? '') : current;
+    if (!variants.length) return '';
+    if (value && !variants.some((variant) => variant.id === value)) fail(400, '提示词版本无效', 'invalid_prompt_variant');
+    if (!value && required) fail(400, '请选择生成时使用的提示词版本', 'invalid_prompt_variant');
+    return value;
+  };
   const publicProvenance = (work) => ({
     ...generationOf(work),
     harness: work.harnessId ?? null,
@@ -408,6 +420,7 @@ export function createLibrary({ db, catalog, config, limits }) {
         effort: work.effort,
         tool: work.tool,
         ...publicProvenance(work),
+        ...(work.promptVariant ? { promptVariant: work.promptVariant } : {}),
         note: work.note,
         status: work.status,
         ...(privileged ? { moderation: work.moderation } : {}),
@@ -564,6 +577,11 @@ export function createLibrary({ db, catalog, config, limits }) {
       return row ? { ...row, dir: join(dirs.drafts, row.id, row.root) } : null;
     },
     draftTask(id) { return q.draft.get(id)?.task_id ?? null; },
+    // The author's newest unexpired draft for a task, so a reopened upload page can resume it.
+    latestDraft(user, taskId) {
+      const row = q.latestDraft.get(user.id, taskId, Date.now());
+      return row ? publicDraft(row) : null;
+    },
 
     discardDraft(user, id) {
       const row = q.draft.get(id);
@@ -582,6 +600,7 @@ export function createLibrary({ db, catalog, config, limits }) {
       const source = provenance(!body.harnessId && !body.harnessOther && body.tool
         ? { ...body, harnessOther: clip(body.tool, 40) } : body);
       const generation = generationFrom(body);
+      const promptVariant = promptVariantFrom(draft.task_id, body, '', user.role !== 'admin');
       if (user.role !== 'admin' && !source.harnessId && !source.harnessOther) fail(400, '请选择或填写 Harness');
       const who = identity(body);
       const cover = coverFrom(body.cover);
@@ -612,7 +631,7 @@ export function createLibrary({ db, catalog, config, limits }) {
             effortOf(body.effort), source.harnessId, source.harnessOther, source.harnessVersion, source.providerId,
             source.providerOther, noteWithVendor(clip(body.note, 1000), who.modelId, body.vendor), token('w'), draft.source_name, draft.root, draft.entry, draft.file_count,
             draft.bytes, draft.digest, draft.checks, JSON.stringify(sanitizeTrial(body.trial)), coverName, now, now,
-            ...GENERATION_FIELDS.map((key) => generation[key]), JSON.stringify(config.moderation?.enabled ? pendingModeration() : { status: 'legacy' }));
+            ...GENERATION_FIELDS.map((key) => generation[key]), JSON.stringify(config.moderation?.enabled ? pendingModeration() : { status: 'legacy' }), promptVariant);
           q.deleteDraft.run(draft.id);
           q.audit.run(now, user.id, user.name, 'submit', draft.task_id, id, `${who.modelName}${effortOf(body.effort) ? ` · ${effortOf(body.effort)}` : ''}`);
         });
@@ -637,11 +656,15 @@ export function createLibrary({ db, catalog, config, limits }) {
       audit(admin, 'curate', work, `收录为馆藏 ${curatedId}`);
     },
 
-    setMeta(admin, taskId, id, body) {
+    // Admins edit any upload; authors edit their own until it has been reviewed.
+    setMeta(actor, taskId, id, body, { author = false } = {}) {
       const work = upload(taskId, id);
       if (!work) fail(404, '作品不存在', 'not_found');
+      const admin = !author;
+      if (!admin && work.ownerId !== actor.id) fail(403, '只能修改自己上传的作品');
+      if (!admin && work.status !== 'unverified') fail(409, '作品已核验，信息不能再修改；如有错误请删除后重新上传');
       if (!plainObject(body) || !Object.keys(body).length ||
-        Object.keys(body).some((key) => !['title', 'summary', 'modelName', 'modelId', 'effort',
+        Object.keys(body).some((key) => !['title', 'summary', 'note', 'modelName', 'modelId', 'vendor', 'effort', 'promptVariant',
           'harnessId', 'harnessOther', 'harnessVersion', 'providerId', 'providerOther', ...GENERATION_FIELDS].includes(key))) fail(400, '没有可修改的内容');
       const title = body.title === undefined ? work.title : clip(body.title, 40);
       if (!title) fail(400, '请填写作品标题');
@@ -649,16 +672,19 @@ export function createLibrary({ db, catalog, config, limits }) {
       const who = body.modelId !== undefined || body.modelName !== undefined ? identity(body) : work;
       const effort = body.effort !== undefined ? effortOf(body.effort) : work.effort;
       const source = provenance(body, work);
+      if (!admin && !source.harnessId && !source.harnessOther) fail(400, '请选择或填写 Harness');
       const generation = generationFrom(body, work);
+      const promptVariant = promptVariantFrom(taskId, body, work.promptVariant, !admin);
+      const note = noteWithVendor(body.note === undefined ? work.note : clip(body.note, 1000), who.modelId, body.vendor);
       transaction(db, () => {
         q.meta.run(title, summary, who.modelId, who.modelId ? '' : who.modelName, effort,
           source.harnessId, source.harnessOther, source.harnessVersion, source.providerId, source.providerOther,
-          ...GENERATION_FIELDS.map((key) => generation[key]), Date.now(), id);
-        audit(admin, 'meta', work, `编辑信息${generationAudit(work, generation)}`);
+          ...GENERATION_FIELDS.map((key) => generation[key]), promptVariant, note, Date.now(), id);
+        audit(actor, 'meta', work, `编辑信息${generationAudit(work, generation)}`);
         const next = upload(taskId, id);
         if (config.moderation?.enabled && moderationText(work) !== moderationText(next)) q.moderation.run(JSON.stringify(pendingModeration()), id);
       });
-      return this.adminWork(upload(taskId, id));
+      return admin ? this.adminWork(upload(taskId, id)) : this.toPublic(upload(taskId, id), actor);
     },
 
     setCaptures(id, captures) {

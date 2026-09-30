@@ -446,6 +446,7 @@ describe('platform lifecycle', () => {
       tasks: [
         { id: 'one', title: 'One', category: '建模', tags: ['Three.js'], promptPending: false, results: results.map(([id, model, effort]) => ({ id, model, effort, title: id.toUpperCase(), summary: '', scene: `results/one/${id}/`, captures: {}, gallery: [] })) },
         { id: 'closed', title: 'Closed', promptPending: true, results: [] },
+        { id: 'versions', title: 'Versions', promptPending: false, promptVariants: [{ id: 'long', label: '长版', prompt: 'Long' }, { id: 'short', label: '短版', prompt: 'Short' }], results: [] },
       ],
     }));
     const config = { dist, dataDir: join(root, 'data'), contentTemplate: '', siteOrigins: ['http://127.0.0.1'], admins: ['root'], cdn: [], capture: false, secureCookies: false, trustProxy: false };
@@ -861,5 +862,33 @@ describe('platform lifecycle', () => {
     assert.ok((await call('guest', 'GET', '/api/show1/works')).data.works.some((work) => work.id === id));
     assert.equal((await call('guest', 'GET', `${path}/comments`)).status, 200);
     assert.equal((await call('guest', 'GET', '/api/bootstrap')).data.arena.one.works, 4, 'the voted upload stays in the pool: match history anchors it');
+  });
+
+  test('uploads name their prompt version, resume their draft and stay editable by the author until reviewed', async () => {
+    const html = '<!doctype html><html><head><title>Versioned</title></head><body><h1>Versioned</h1></body></html>';
+    const staged = await call('bob', 'POST', '/api/drafts?task=versions&name=v.html', html, { raw: true });
+    assert.equal(staged.status, 200);
+    assert.equal((await call('bob', 'GET', '/api/drafts?task=versions')).data.draft.id, staged.data.draft.id);
+    assert.equal((await call('alice', 'GET', '/api/drafts?task=versions')).data.draft, null);
+    const form = { draftId: staged.data.draft.id, confirmed: true, title: 'Versioned', modelId: 'm-a', harnessOther: 'CLI' };
+    assert.equal((await call('bob', 'POST', '/api/works', form)).status, 400, 'a versioned task needs the prompt version');
+    assert.equal((await call('bob', 'POST', '/api/works', { ...form, promptVariant: 'medium' })).status, 400);
+    const submitted = await call('bob', 'POST', '/api/works', { ...form, promptVariant: 'short', generationMode: 'agent', humanIntervention: 'none' });
+    assert.equal(submitted.status, 200, JSON.stringify(submitted.data));
+    const { id } = submitted.data.work;
+    assert.equal(submitted.data.work.promptVariant, 'short');
+    assert.equal(submitted.data.work.generationMode, 'agent');
+
+    const path = `/api/works/versions/${id}`;
+    assert.equal((await call('alice', 'PATCH', path, { title: 'Stolen' })).status, 403);
+    assert.equal((await call('bob', 'PATCH', path, { promptVariant: '' })).status, 400);
+    assert.equal((await call('bob', 'PATCH', path, { harnessOther: '' })).status, 400);
+    const edited = await call('bob', 'PATCH', path, { promptVariant: 'long', note: 'Two rounds', humanIntervention: 'prompt-guided' });
+    assert.equal(edited.status, 200, JSON.stringify(edited.data));
+    assert.deepEqual([edited.data.work.promptVariant, edited.data.work.note, edited.data.work.humanIntervention, edited.data.work.title], ['long', 'Two rounds', 'prompt-guided', 'Versioned']);
+    assert.equal((await call('root', 'POST', `${path}/review`, { status: 'verified' })).status, 200);
+    assert.equal((await call('bob', 'PATCH', path, { title: 'Late' })).status, 409, 'reviewed works are frozen for the author');
+    assert.equal((await call('root', 'POST', `/api/admin/works/versions/${id}/meta`, { title: 'Fixed' })).status, 200);
+    assert.equal((await call('bob', 'DELETE', path)).status, 200);
   });
 });

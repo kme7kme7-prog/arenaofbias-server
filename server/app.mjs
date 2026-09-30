@@ -175,6 +175,8 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     const buffer = await readBody(ctx.req, limits.uploadBytes);
     return { draft: library.createDraft(user, task, name, buffer, ctx.url.searchParams.get('template')) };
   });
+  router.on('GET', '/api/drafts', (ctx) =>
+    ({ draft: library.latestDraft(signedIn(ctx), ctx.url.searchParams.get('task') ?? '') }));
   router.on('DELETE', '/api/drafts/:id', (ctx) => {
     library.discardDraft(signedIn(ctx), ctx.params.id);
     return { ok: true };
@@ -251,6 +253,15 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   router.on('GET', '/api/me', (ctx) => {
     const user = signedIn(ctx);
     return { questions: questions.byOwner(user.id), works: publicList(library.uploadsOf(user.id), user), votes: arena.votesBy(user.id), ...profile.summary(user) };
+  });
+  // Registered after the calibration route, whose path has the same shape.
+  router.on('PATCH', '/api/works/:task/:id', async (ctx) => {
+    const user = signedIn(ctx);
+    limit.write(user.id);
+    const work = library.setMeta(user, ctx.params.task, ctx.params.id, await readJson(ctx.req), { author: user.role !== 'admin' });
+    moderator.enqueue(library.work(ctx.params.task, ctx.params.id));
+    arena.invalidate();
+    return { work };
   });
   router.on('PATCH', '/api/me', async (ctx) => {
     const user = signedIn(ctx);
@@ -338,7 +349,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         draftId: draft.id, confirmed: true, title: params.get('title'), summary: params.get('summary'),
         modelId: params.get('modelId'), modelName: params.get('modelName'), effort: params.get('effort'), tool: params.get('tool') || '',
         ...Object.fromEntries(['harnessId', 'harnessOther', 'harnessVersion', 'providerId', 'providerOther',
-          'modelVersion', 'generationMode', 'humanIntervention', 'generatedOn', 'evidenceUrl']
+          'modelVersion', 'generationMode', 'humanIntervention', 'generatedOn', 'evidenceUrl', 'promptVariant']
           .filter((key) => params.has(key)).map((key) => [key, params.get(key)])),
       });
     } catch (error) {

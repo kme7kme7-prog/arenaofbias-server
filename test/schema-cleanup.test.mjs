@@ -48,6 +48,7 @@ test('v18 preserves v16/v17 metadata, audit actors and frozen vote identities on
           ...(version === 16 ? { model_version: '', generation_mode: '', human_intervention: '', generated_on: '', evidence_url: '' } : {}),
           model_other: row.model_id ? '' : model_name,
           moderation: '{"status":"legacy"}',
+          prompt_variant: '',
           harness_other: row.harness_id ? '' : tool,
           note: row.model_id || !vendor ? retained.note : [retained.note, `手填模型厂商：${vendor}`].filter(Boolean).join('\n'),
         });

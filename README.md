@@ -116,8 +116,10 @@ npm start
 | POST | `/api/auth/password/reset` | 凭邮箱验证码重置密码并撤销所有会话 |
 | POST | `/api/questions` | 发布社区题目，保留提示词、标签和允许的提交格式（需登录） |
 | POST | `/api/drafts?task=&name=&template=` | 上传 ZIP/HTML，检查后暂存为草稿；`template=static|vite` 可选，Vite 项目必须含构建产物（需登录，限流） |
+| GET | `/api/drafts?task=` | 本人在该题最新的未过期草稿，供继续试加载（需登录） |
 | DELETE | `/api/drafts/:id` | 丢弃草稿（需登录） |
 | POST | `/api/works` | 由草稿正式投稿，入审核队列并排队截图（需登录） |
+| PATCH | `/api/works/:task/:id` | 作者在核验前修改投稿信息（含提示词版本与生成信息） |
 | DELETE | `/api/works/:task/:id` | 删除投稿（需登录，本人或管理员） |
 | POST | `/api/works/:task/:id/review` | 审核投稿（仅管理员） |
 | POST | `/api/works/:task/:id/moderation` | 人工内容通过/拒绝，需理由（仅管理员） |

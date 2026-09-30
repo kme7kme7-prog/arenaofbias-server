@@ -336,6 +336,11 @@ const MIGRATIONS = [
     const columns = new Set(db.prepare('PRAGMA table_info(users)').all().map((column) => column.name));
     if (!columns.has('avatar')) db.exec("ALTER TABLE users ADD COLUMN avatar TEXT NOT NULL DEFAULT ''");
   },
+  // Which prompt version of a task an upload answers; '' for tasks with a single prompt.
+  (db) => {
+    const columns = new Set(db.prepare('PRAGMA table_info(works)').all().map((column) => column.name));
+    if (!columns.has('prompt_variant')) db.exec("ALTER TABLE works ADD COLUMN prompt_variant TEXT NOT NULL DEFAULT ''");
+  },
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

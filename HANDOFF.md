@@ -1,23 +1,25 @@
 # HANDOFF.md · 当前状态
 
-## 四仓统一发布准备（2026-10-01）
+## 四仓统一发布完成（2026-10-01 Brisbane）
 
 - 用户已确认四个仓库同属本轮，授权提交、推送、部署 Show1、Gallery、共享后端和新增 38 件作品；此前将 Show1 / 新数据排除的发布范围已撤回。下面早期归档中的两仓范围仅为当时状态。
-- 后端题目审核与静态 ZIP 修复已提交、推送 `f1d45b5a817c32ff2e1f108b610acb71b7228204`；Gallery 标题修复已提交、推送 `f9565049592d2c88b669ecd67ebf22de294d9c40`。生产尚未切换，旧服务源码与现场 56 个运行文件逐项 SHA-256 一致。
-- 数据 main `638937a58d6aec02644106d76e2b84d51fbf9fe9` 已合并 PR #5，CI 36731686651 成功；不可变产物 `39a2fa43b25488b09069644fdcd6df50adc06dc0` 为 schema 1、sourceDirty false、20 题 / 121 件。本轮更新后端 pin，Gallery 本地私有 pin 同步更新。差异包本地试应用与完整树哈希核验通过；保留旧版本供回滚。
-- 本轮新增门禁：Show1 typecheck / lint / build 通过；数据 check 28 文件 / 0 错、test 16/16、intake 121 件 / 0 错 / 4 已知提示。新增数据的 main CI 已完整 build:data，本轮直接验证该已发布不可变包，不以本地脏构建代替。
-- 部署后先保留一致性数据库备份，再复核四道测试题作品 / 投票均为零，经管理员 API 清理；用户已确认一并执行。实际发布、清理与备份证据将在完成后追加。
+- 现场于 2026-09-30T17:19:05Z（Brisbane 2026-10-01 03:19:05）切换：后端 `566782e54a403c79a5ca4257a34a4beb6caa8d54`、Gallery `a68c94cb4c050202f240a64a9b3e5c69d0025d6e`、Show1 `79266513b295fb6ce8892f0afd08fbd32f61ab09`。功能与此前本地提交均已推送 main；Show1 上游与 fork 同步。后续文档提交不代表重新部署。
+- 数据源码 `638937a58d6aec02644106d76e2b84d51fbf9fe9` 已合并 PR #5，CI 36731686651 成功；实际消费不可变产物 `39a2fa43b25488b09069644fdcd6df50adc06dc0`，schema 1、sourceDirty false、20 题 / 121 件。后端与 Gallery pin、catalogDigest 一致；Show1 公开 25 题（20 共用 + 5 历史）。数据完整树及 Gallery 1555 文件、Show1 802 文件逐项 SHA-256 / 精确文件集合核验通过，旧版本保留。
+- 后端本地与 VPS Node 22.23.2 均 check 69 文件 / 0 错、test 154/154；Gallery check 41 / 0、test 14/14、干净源码 build 121 件 / 55 个 site 文件；数据 check 28 / 0、test 16/16、intake 121 件 / 0 错 / 4 已知提示。Show1 干净源码 typecheck / lint / build 通过，但 npm ci 因锁文件缺两个 @emnapi 可选依赖失败，使用已验证 checkout 的 node_modules 构建，未修改依赖；此例外未隐瞒。
+- 备份目录 `/root/arenaofbias-question-review-release-20260930T171825Z/`：部署前一致性 v19 `platform.db`、旧代码 `code.tar.gz`、版本/pin 记录，以及清理前 v22 `platform-before-question-delete-v22.db`；两份快照 integrity_check 均 ok。2026-09-30T17:19:52.309Z，执行人 wsnxxxs 逐题核对 kme7 的四道指定测试题零作品 / 零票后，以管理员 kme7 的短期会话通过 DELETE API 全部软删除，四条 question-delete 审计完整，会话随后撤销。结果见同目录 `question-cleanup.json`、`verification.json`。
+- 生产库 v22，原始计数保留：users 27、works 267、votes 0、matches 1、comments 16、reactions 56；questions 4 条均软删除。公开 bootstrap、作者与管理员列表均不再返回四道题。服务 active，Nginx 配置检查通过，未改环境或 Nginx；CAPTURE=1、CONTENT_MODERATION=1 保留。
+- 公网首页、Gallery 新作品预览、Show1 条款/隐私 375px 直达验收通过，console error 0。Gallery viewport override 未生效，本轮未完成窄屏验收；未做生产注册/投稿、真实 Luna/capture、新增 38 件完整交互或真机验证。详细版本、备份、回滚与边界见 [四仓发布归档](docs/archive/2026-10-01-four-repository-release-wsnxxxs.md)。Gallery 过时 PR #1 不合并，关闭/删分支仍待确认；占用中的本地 worktree 保留。
 
 接手先读 [AGENTS.md](AGENTS.md)。运行与仓库边界见 [README](README.md)，接口见 [API 契约](docs/api-contract.md)，发布与回滚见 [部署文档](docs/deploy.md)。本页只保留当前状态、后续事项与历史入口；归档中的“未推送/未部署/待审阅”是各轮结束时的状态，不是当前待办。
 
-## 当前发布阶段（2026-10-01，提交与部署前）
+## 发布前实现与验证记录（历史，已由顶部发布结果覆盖）
 
-- 用户已授权两仓 commit、push、deploy，以及部署后先备份、确认 4 道测试题各为零作品零票，再通过管理员 API 逐条软删除。当前题目审核与 ZIP 格式修复仍未提交、未推送、未部署；生产备份与清理尚未执行。发布结果另作后续记录。
+- 最初两仓发布范围后来扩展为四仓和最新作品，提交、推送、部署及四题清理均已完成，见顶部。
 - 后端题目审核实现已完成，Gallery 未公开题作品标题修复已完成；两仓 API 契约完全一致。既有本地提交的头像、题型榜单、投稿流程等待与本轮一起发布；下文旧轮标题里的发布状态仅描述当轮结束时。
 - 最新门禁：check 69 文件、0 错；全量 test 154/154。门禁前一轮为 153/154，既有 moderation mock 期望 rejected、实际 review；单独 moderation 6/6 和再次全量均通过，记录为间歇失败，未声称已消除原因。
-- 用户以同一静态 ZIP（dist 旁有 README）实测建题成功，状态 pending；本地服务已停止。本轮不纳入无关 Show1 工作树改动或新的 121 件作品数据发布。
+- 用户以同一静态 ZIP（dist 旁有 README）实测建题成功，状态 pending；本地服务已停止。Show1 配套改动和最新 121 件作品包随后纳入统一发布。
 - 本轮归档：[question-review](docs/archive/2026-10-01-question-review-wsnxxxs.md)。
-## 已实现：社区题目附示例结果与人工审核（2026-10-01，未提交、未推送、未部署）
+## 已发布：社区题目附示例结果与人工审核（2026-10-01）
 
 - v22 仅在 `server/db.mjs` 迁移末尾追加幂等迁移：`questions.moderation` 默认 legacy、`deleted_at` 可空。旧题仍公开，新题始终 pending（含 at），只走人工审核；每个作者最多 3 道 pending。公开 catalog、bootstrap、作品源、榜单和盲评同时受题目状态约束；作者与管理员可读取未公开题目及私有作品预览，删除题目从各列表与个人题目活动读取排除。
 - `__new__` 草稿支持 static / vite 上传、自动推断和本人最新草稿恢复；禁止通过 `/api/works` 提交。`POST /api/questions` 必须带 `draftId`、`confirmed`、`work`，复用 library.submit 全部作品校验与限额，在同一事务创建题目、unverified 示例作品及两条审计。提交格式须符合题目 templates；数据库、封面文件步骤失败时整体回滚并还原草稿。成功返回作者 question/work 视图。示例作品依原 CONTENT_MODERATION 配置排队审核与截图，异常转人工，不将题目送 Luna。
@@ -27,7 +29,7 @@
 - 验证：`npm run check` 69 文件、0 错；最终全量 `npm test` 153/153，0 失败/取消/跳过；`git diff --check` 通过。新增 6 项用例覆盖草稿限制、人工可见性与 private p 预览、内容审核与题目审核互不替代、额度、删除权限/连带删除/两站投票、注入 INSERT 失败后的题目/作品/审计整体回滚和草稿文件保留。验证期间补齐旧 auth/datapack 夹具缺少的 questions 表，并将旧建题夹具改为携带示例、经人工通过；最后补强标题校验用例时，只有 title 标签的 HTML 被入口检查拒绝，补充 h1 后最终全过。预期故障注入会输出 sample insert failed，不是未解决错误。
 - 格式判定跟进修复（2026-10-01）：`server/library.mjs` 将 createDraft 判定的格式保存到现有 `checks` 的 format 检查项（template 字段），建题 submit 复用该值；旧草稿缺少该值时用 package.json 与 root 同时存在才判为 vite。避免将仅有 dist 入口的 static ZIP 误判，也保留显式 static 选择，无新增迁移。`test/platform.test.mjs` 新增一项回归覆盖 dist/index.html + README 的显式 static / 自动推断，以及带 package.json 的显式 static，验证预览、建题成功及 unverified 示例。最新 `npm run check` 69 文件/0 错；全量 `npm test` 154/154，0 失败/取消/跳过；`git diff --check` 通过。只改 library、平台测试与本页；未提交、推送或部署。
 - 本地隔离库后台浏览器验证：登录、题目详情与提示词展开、pending 示例私有预览、拒绝必填理由、拒绝/通过后状态与计数更新、删除二次确认并取消、question-create / question-review 日志；console error 0。截图在忽略目录 `output/question-review-browser.png`，临时服务已停止。未完成 Gallery 真实前端联调（本轮未启动 Gallery）、真实 Luna 外部调用或真实截图服务验证（本轮隔离配置无 API 密钥、capture 关闭，自动审核由本地测试桩/无密钥转人工验证）；未覆盖后台移动端。删除执行与 question-delete 日志由 API 集成测试验证，浏览器只验证确认框。
-- 已授权但尚未执行的生产清理：`q-9becba326438d52c`、`q-9c39b8642a46c310`、`q-82a12216062f8541`、`q-fa132f1b3b3bfa93`。本轮未连接 VPS、未备份或改生产库、未清理这 4 道题。部署后先按部署文档备份，再核对每题无作品/无投票，由管理员逐条软删除并记录执行时间、结果和备份位置。用户已授权提交、推送与部署；使用 wsnxxxs 的 GitHub noreply 身份与英文简单句。本轮归档已按模板补写，实际部署与清理结果另行记录。
+- 生产清理已完成：`q-9becba326438d52c`、`q-9c39b8642a46c310`、`q-82a12216062f8541`、`q-fa132f1b3b3bfa93`，逐题结果和备份位置见顶部及四仓发布归档。实现阶段的未提交状态仅为历史；本轮提交使用 wsnxxxs 的 GitHub noreply 身份与英文简单句。
 
 ## 历史轮次：已提交投稿流程对齐（2026-10-01，44df198，未推送、未部署）
 
@@ -51,12 +53,12 @@
 
 - 本轮整理基线为 `main@1b55bb0`；fetch 后与 `origin/main` 一致，开放 PR 为零。远端只保留 main；主 agent 已删除完全合入的 show1-vote-processing 及只剩历史文档补记的 codex/shared-question-intake，本地占用中的 worktree 保留。
 - 本仓是两站唯一动态 API 和数据库写入者，使用 Node ≥ 22.13 内置模块；包含 `/admin/` 管理页面。`arenaofbias` 与 `wsnxxxs/ArenaGalleri` 是独立用户前端，私有 `arenaofbias-data` 构建馆藏数据包；旧 same-prompt-gallery 已归档。
-- 整理基线当时的迁移序列到 v19；当前待发布代码已追加至 v22。`datapack.json` 固定不可变产物 `4c926d5f8a3c240ff769de360a9168abbe4e9dfc`，来源为数据源 `27f9a680886772ae9298cc188fef0868873e6921`；文档提交或数据源 main 前进不要求消费者自动追包。
+- 整理基线当时迁移到 v19、固定数据包 `4c926d5`；现在生产 v22 / 固定包 `39a2fa4`，见顶部。文档提交或数据源 main 前进不要求消费者自动追包。
 - Show1 榜单、Elo 配对分与六维画像由后端聚合，只读库内 Show1 新票；旧快照票不回流。Gallery 继续使用独立的 Bradley–Terry 口径。自动审核、SSH relay、读取限流、共享题库与提示词变体均已进入 main。
 
 ## 最近已记录的部署
 
-以下来自已有发布证据，本轮未连接 VPS、重新部署或写入业务数据库；下一次发布必须现场核对，不能以本页替代版本门禁。
+最新为顶部 2026-10-01 四仓发布；下列保留 2026-09-30 历史发布证据。下一次发布仍须现场核对，不能以本页替代版本门禁。
 
 - 2026-09-30 shared-question-release：实际服务代码 `f4685c9345fa26688ae337555e5a842aba08093c`，数据包 `4c926d5`；Gallery `ccfd11d11e407af3c75c2e5482cc773a74996c2a`，Show1 静态仍为 `980541642706a3cd9141c3c90ab0da55bec93b87`。后端 main 的随后交接提交不代表服务重部署。
 - Gallery 为 20 道正式题、83 件既有作品，Show1 为 25 题（20 共用 + 5 历史）；014 SupernovAI、016 云山巨城各有两份原文，长短版保持同一个 task ID。公开变体只含 id/label/prompt，不输出私有链接。Gallery 跳过空题榜单读取，首页由 20 次减为 5 次。
@@ -66,7 +68,7 @@
 
 ## 后续事项与已知边界
 
-- 2026-09-30 共享题库、投票聚合、审核和反爬发布已完成；本轮及本地后续提交待按当前发布阶段执行。以后收录长短版作品时应声明实际 `promptVariant`，有真实样本后再验收同模型卡片与两栏配对；不伪造作品。
+- 2026-09-30 共享题库、投票聚合、审核和反爬，以及本次四仓配套功能和新增作品均已发布。以后收录长短版作品时应声明实际 `promptVariant`，有真实样本后再验收同模型卡片与两栏配对；不伪造作品。
 - 作品目前使用 `*.w.arenaofbias.icu`，迁至与主站不同的可注册主域仍是已记录的运维项，需另行制定发布计划。
 - setMeta 不接收 vendor，管理员可把手填厂商写进备注；兼容厂商追加后备注可能略超 1000 字。这两项按既有用户决定保留。猜模型每日答案可由前端推导，仍是娱乐玩法的设计边界。
 - 自动审核只审声明、入口及两档页面文字、封面与首屏，不覆盖全部交互；错误/疑似转人工，不降至标准档。历史作品维持 legacy，公开展示仍受访问状态与门面开关约束。
@@ -74,7 +76,7 @@
 
 ## 回滚入口
 
-- 最新题库发布备份与验收在 VPS `/root/arenaofbias-questions-release-20260930-8132028b/`；`gallery.prev` 对应 `307df34`，中间版与更早备份位置见 [shared-question-release](docs/archive/2026-09-30-shared-question-release-wsnxxxs.md)。回退该轮代码/pin/数据/Gallery 时保留当前 v19 库及上线后写入。
+- 最新备份在 VPS `/root/arenaofbias-question-review-release-20260930T171825Z/`；`gallery.prev` 对应 `ccfd11d`，`show1-dist.prev` 对应 `9805416`。原有 prev 另存为 `.prev.bak-20260930T171905Z`。代码和数据回退先核对 v22 及上线后写入；不得直接覆盖恢复旧 v19 库或撤销本次授权清理。步骤见 [四仓发布归档](docs/archive/2026-10-01-four-repository-release-wsnxxxs.md)，更早证据见 [shared-question-release](docs/archive/2026-09-30-shared-question-release-wsnxxxs.md)。
 - Nginx 防护备份见 [gallery-protection-deploy](docs/archive/2026-09-30-gallery-protection-deploy-wsnxxxs.md)；审核配置和 tunnel/relay 回退见 [luna-flex-relay](docs/archive/2026-09-30-luna-flex-relay-wsnxxxs.md) 与部署文档 6.1，不触碰 Xray 或业务库。
 - 投票清零前备份在 `/root/arenaofbias-vote-release-20260930-c0ab6ac/`。退回旧投票代码可能重新读取冻结票快照；不得为新题库或 Nginx 回退误用清零前库。确需恢复旧票时先核对全部后续写入并按 [vote-release](docs/archive/2026-09-30-vote-release-wsnxxxs.md) 执行配套数据库/代码恢复。
 
@@ -87,6 +89,7 @@
 
 按日期保存的原始轮次记录保留；旧状态由后续发布记录覆盖。以下索引包含现有所有轮次归档，新增记录按 [模板](docs/archive/_TEMPLATE.md) 编写。
 
+- [2026-10-01 · 四仓发布、121 件作品与测试题清理 · wsnxxxs](docs/archive/2026-10-01-four-repository-release-wsnxxxs.md)
 - [2026-10-01 · 社区题目审核与静态 ZIP 修复 · wsnxxxs](docs/archive/2026-10-01-question-review-wsnxxxs.md)
 - [2026-09-30 · repository-cleanup · wsnxxxs](docs/archive/2026-09-30-repository-cleanup-wsnxxxs.md)
 - [2026-09-30 · 作品生成信息与后台选项 · wsnxxxs](docs/archive/2026-09-30-work-generation-metadata-wsnxxxs.md)

@@ -47,7 +47,7 @@ cp -a "$conf" "$conf.bak-$(date -u +%Y%m%dT%H%M%SZ)"
 3. Nginx 限制按真实 `$binary_remote_addr` 跨四个域名共享，GET/HEAD 都计数：资源持续 20 次/秒（突发 200），整表/榜单/`data.json` 持续 30 次/分钟（突发 15），HTML/目录页持续 60 次/分钟（突发 30），模型包/ZIP 持续 120 次/分钟（突发 40），最多 64 个并发读取。超限返回 JSON 429、`Retry-After: 30` 和两个正式前端的错误 CORS 许可。写入不占这些边缘读取额度。Nginx 漏桶与后端固定窗口独立生效，后端额度见 README。
 4. 保持 API 和作品 Node 端口只监听环回，代理覆盖客户端 XFF。前置 CDN 时先配置只信任该 CDN 地址段的真实 IP，否则共享桶会误把所有用户视为一个 IP；不要信任任意来源的真实 IP 头。学校/公司共用 IP 也共享额度，现场正常双站浏览后按日志调节突发值及额度。
 5. 执行 `/www/server/nginx/sbin/nginx -t`，通过才 reload。在独立探针 IP 小量验证 429 与 Retry-After；普通浏览核对两个前端首屏、Show1 榜单、画廊模型包/盲评双 iframe、管理员登录和模型下拉。不要对生产做高频压测。
-6. Gallery 工作流移除 Pages 发布后，旧副本仍在线；待用户授权上线并且正式站点验收通过后，在 `wsnxxxs/same-prompt-gallery` Settings → Pages 将 Source 设为 None，或按 GitHub 的 Pages API 关闭站点。不要删除原作、数据仓库或 gh-pages 历史；确认 Pages 的首页和 `data.json` 均已不可访问。工作流变更需先进入 main，避免副本重新发布。
+6. Gallery 已迁至 `wsnxxxs/ArenaGalleri`，旧 same-prompt-gallery 仓库已设为 private 并归档，旧 Pages 已关闭。后续使用新仓库维护前端，正式入口为 `https://gallery.arenaofbias.icu/`。公开 CI 只检查源码和合成数据，不取私有数据包、不缓存站点产物、不恢复 Pages 发布；完整站点构建在具有数据读取权限的受信任环境执行。
 
 API 域完整 `data.json` 仅供管理员获取，`.datapack-source.json` 不公开；这不影响后台登录页或两个前端的展示目录。画廊构建只裁掉展示端未使用的完整模型池和收录接管字段。Show1 仍在客户端重放逐票数据，本轮不改评分或逐票接口形状。限制可以提高批量抓取成本，不能阻止低频抓取、分布式 IP 或从公开 GitHub 源码/已发布数据包下载。CORS、CSP、随机作品 URL 不能替代这些读取额度。
 

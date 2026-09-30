@@ -25,12 +25,13 @@
 - 配套主站仓库同名分支从 `38dad57` 接入聚合接口；画廊已有服务端 Bradley–Terry，前端无改动。发布顺序：新共享后端与停机备份清零 → 主站前端。只回滚旧后端会重新显示冻结快照票，恢复旧状态需连同数据库备份恢复。
 - 本轮只清隔离演练库；现有本地业务库与生产库均未操作。用户尚未回答实际清零的执行环境问题；不据范围确认推断上线授权。沿用完成修改后英文简单句提交的用户授权，身份 `wsnxxxs`，不 push。详细归档见 `docs/archive/2026-09-30-show1-vote-processing-wsnxxxs.md`；验收生成物在忽略的 `output/`，临时服务收工关闭。
 
-## 2026-09-30 · shared-question-intake（本地完成，未发布）
+## 2026-09-30 · shared-question-intake（代码已上线，新题库待更新数据包）
 
 - 正式题目由 arenaofbias-data 共用登记，兼容层读取稳定 arenaId/kind/category/promptVariants，并保留未迁移的历史题目、名称和权重。长短版使用同一 task ID，不拆题。
 - 本地数据包 20 道正式题映射为 Show1 的 25 道题（含 5 道仅历史题）。新增题目的已验证且开启 arena 展示的投稿可参与娱乐玩法；未更改审核/展示开关或历史票。
 - check 59 文件 0 错，npm test 127/127；真实 HTTP 核对编号和两组变体，前端浏览器原文切换通过。测试数据库位于 output/shared-question-intake-20260930，业务 .data/platform.db 未写入。
-- 当前 pin 保留，须在数据正式发布后配套部署；本轮仅本地提交，无 push/部署。归档见 docs/archive/2026-09-30-shared-question-intake-wsnxxxs.md。
+- 实现 `aa67258` 已推送 `codex/shared-question-intake`，随后随 vote-release 合入 main 的 `c0ab6ac` 并上线；本次只更新文档，不重新部署。公网 bootstrap 仍报告生产数据包 `2cb2a5b`，20 道正式题的新版数据包尚未切入生产。数据包已正式发布，下一步更新消费版本并配套发布 Gallery，不能把源码上线视为新题库上线。
+- Gallery 当前维护仓库为 `wsnxxxs/ArenaGalleri`，旧仓已归档；Gallery 本轮 UI 实现在新仓功能分支，尚未合入 main。原实现验证与后续状态补记见 docs/archive/2026-09-30-shared-question-intake-wsnxxxs.md。
 
 ## 2026-09-30 · anti-scraping（本地完成，未推送、未部署）
 

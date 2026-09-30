@@ -31,7 +31,7 @@ function readSnapshot(root) {
   const tasks = new Map(data.tasks.map((task) => [task.id, {
     id: task.id, title: task.title, summary: task.summary, prompt: task.prompt,
     arenaId: task.arenaId ?? null, kind: task.kind ?? 'web', category: task.category ?? '',
-    promptVariants: task.promptVariants ?? [],
+    promptVariants: (task.promptVariants ?? []).map(({ id, label, prompt }) => ({ id, label, prompt })),
     acceptsUploads: !task.promptPending,
     works: new Map(task.results.map((result) => {
       const model = models.get(result.model);

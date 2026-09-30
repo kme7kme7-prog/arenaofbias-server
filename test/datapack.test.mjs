@@ -174,8 +174,11 @@ test('unversioned development data never claims a source pin and detects content
   const root = mkdtempSync(join(tmpdir(), 'dev-pack-'));
   try {
     const file = join(root, 'data.json');
-    writeFileSync(file, JSON.stringify({ title: 'One', sourceCommit: SHA_A, models: [], tasks: [] }));
+    writeFileSync(file, JSON.stringify({ title: 'One', sourceCommit: SHA_A, models: [], tasks: [{ id: 'one', results: [],
+      promptVariants: [{ id: 'long', label: 'Long', prompt: 'Full prompt', promptUrl: 'https://example.com/private-source', internal: 'private' }],
+    }] }));
     const catalog = createCatalog(root);
+    assert.deepEqual(catalog.task('one').promptVariants, [{ id: 'long', label: 'Long', prompt: 'Full prompt' }]);
     const first = catalog.version;
     assert.equal(catalog.datapack, null);
     assert.equal(catalog.title, 'One');

@@ -1,8 +1,14 @@
 # HANDOFF.md · 当前状态
 
+## 2026-09-30 · vote-branch-sync（改名与远端检查，未推送）
+
+- 用户要求移除本轮分支名的 codex 字样；server 与主站两条分支均已改名为 `show1-vote-processing`。worktree 路径不变；其他人的分支未操作。
+- 已 fetch origin；server `origin/main@26da6d6` 无新增提交，当前分支包含远端主线，`git merge-tree --write-tree HEAD origin/main` 无冲突。后端功能代码不变，沿用上一轮 133/133 测试结果，本轮未重复运行。
+- 主站远端新增双主题提交，已 rebase 到 `origin/main@09387a9`；唯一 HANDOFF 冲突保留双方记录，榜单代码自动合并且主题/动效检查通过。详情见 `docs/archive/2026-09-30-vote-branch-sync-wsnxxxs.md`。本轮未 push、部署或操作业务数据库。
+
 ## 2026-09-30 · show1-vote-processing（本地实现，未推送、未部署）
 
-- 用户确认主站和画廊全部投票清零，计算继续放在 server。分支 `codex/show1-vote-processing` 位于 `C:\Users\Ryan\.codex\worktrees\show1-vote-processing\arenaofbias-server`；从 `115ac34` 开始，收工前快进到本轮期间新增的 `main@2e879fb`，保留公开读取限流，并将新接口接入该规则。原工作区的他人改动未操作。
+- 用户确认主站和画廊全部投票清零，计算继续放在 server。当前分支 `show1-vote-processing` 位于 `C:\Users\Ryan\.codex\worktrees\show1-vote-processing\arenaofbias-server`；从 `115ac34` 开始，收工前快进到本轮期间新增的 `main@2e879fb`，保留公开读取限流，并将新接口接入该规则。原工作区的他人改动未操作。
 - 新增 `/api/show1/leaderboard`：主站顺序 Elo、胜负平统计、六维加权画像、娱乐/正式与综合/写作/网页分榜全部由后端聚合并缓存；配对 `/api/ratings` 复用同一聚合。保留单题模型不进榜、家族显示名等现行规则。管理员身份更正参与计分，更正后同模型比较不计分；同 UUID 改模式返回冲突。
 - 旧快照票停止参与读取、计分和配对，题库与作品快照保留。`npm run reset:votes` 默认只读预览；停服务后显式指定数据库、备份和操作者执行，先 `VACUUM INTO`，再同事务清除全部 votes/matches、写审计。两站去重一起重置，旧对局失效；账号、作品、评论、表情和猜题成绩保留。无依赖、迁移或数据包变更。
 - 验证：`npm run check` 64 文件 0 错；`npm test` 133/133。临时库覆盖所有票源、备份、审计失败回滚、完整性与外键；真实 HTTP 和浏览器验证主站投票/平局/分榜/失败重试、390px 布局及清零重启后旧快照不回流。隔离演练库 3 票/3 对局归零，画廊聚合也为零。

@@ -2,7 +2,23 @@
 
 接手先读 [AGENTS.md](AGENTS.md)。运行与仓库边界见 [README](README.md)，接口见 [API 契约](docs/api-contract.md)，发布与回滚见 [部署文档](docs/deploy.md)。本页只保留当前状态、后续事项与历史入口；归档中的“未推送/未部署/待审阅”是各轮结束时的状态，不是当前待办。
 
-## 进行中：头像库（2026-09-30，未提交、未部署）
+## 待办：社区题目附示例结果与人工审核（2026-10-01，未开始）
+
+- 用户确定：发起题目必须同时提交一份模型结果；新题目一律人工审核，不交 Luna；结果照常走 AI 内容审核。生产上已有 4 道无意义测试题需在部署后备份并软删除。完整任务说明由用户另行交给执行 agent（Gallery 前端已按该契约提交，依赖 v22 题目审核、`__new__` 草稿、带 work 的 `POST /api/questions`、`GET /api/admin/questions`、题目人工审核与删除接口）。
+
+## 已提交：投稿流程对齐（2026-10-01，44df198，未推送、未部署）
+
+- 迁移 v21 追加 `works.prompt_variant`（默认空串）。`POST /api/works` 接收 `promptVariant`：题目有 `promptVariants` 时普通用户必填、须为其中 ID，管理员可空；管理员上传查询参数同样接受。作品视图非空时输出 `promptVariant`。
+- 新增 `GET /api/drafts?task=`（本人该题最新未过期草稿）与 `PATCH /api/works/:task/:id`（作者在 `unverified` 时修改信息，已核验 / 存疑 409）。`setMeta` 增加 `{ author }` 选项区分作者与管理员路径，允许的字段加入 `note`、`vendor`、`promptVariant`；作者路径仍要求 Harness。PATCH 路由注册在 `/api/works/:id/calibration` 之后，避免同形路径被抢先匹配。API 契约、README 路由表已同步。
+- 测试：`test/platform.test.mjs` 夹具加一道双版本题目与一条新用例；`schema-cleanup` 的整行快照补 `prompt_variant`。check 68 文件 0 错，全量 test 147/147。
+- 联调：本地隔离库 + `CONTENT_MODERATION=1`、`CAPTURE=0`（无密钥，自动审查转 review），配合 Gallery 同名改动走完恢复草稿、版本选择、字段校验、提交、我的作品审核状态、作者编辑，管理员人工通过后长短两份投稿合为一张卡片并可切换。Gallery 同名改动需一起发布。
+
+## 已提交：排行榜按题型分榜（2026-10-01，8efaccc，未推送、未部署）
+
+- `GET /api/leaderboard` 新增 `category=<数据包题目 category>`（与 `task` 互斥，无效为 400 invalid_query），只统计该题型题目的票与作品池；响应回显 `category`。无 task/category 的综合榜多 `standings: { [题型]: { [key]: 名次 } }`，按同一单位与来源筛选分别计算、各自缓存。社区题目无题型，只进综合榜。改动在 `server/arena.mjs`、`server/app.mjs` 路由、`test/platform.test.mjs` 一条新用例，API 契约与 README 已同步。Gallery 同名改动消费这些字段，需一起发布。
+- 验证：check 68 文件 0 错；全量 test 146/146（首次一轮出现 1 个失败，未能复现，随后连续 3 轮全过）。本地用 Gallery 缓存的正式 pin `4c926d5` 与临时库起服务，CLI 建管理员、开 82 件馆藏进盲评、6 个测试账号投 234 票，核对综合 / 建模 / 单题 / 非法参数与 Gallery 页面。未部署。
+
+## 已提交：头像库（2026-09-30，7435d06，未推送、未部署）
 
 - 工作区改动：`users.avatar` 以 v20 幂等迁移追加（`server/db.mjs` 末尾）；头像 id 白名单 `AVATARS` 在 `server/config.mjs`，经 bootstrap `site.avatars` 下发，图片由各前端自带。未选头像的账号按用户 id 的 FNV-1a 在前 16 个里取默认值（`avatarOf`，`server/auth.mjs`）；前 16 个的顺序不能改，新头像只追加。
 - 接口：`auth.public` 增加 `avatar`（Show1 兼容用户同样带上）；`PATCH /api/me` 可单独提交 `avatar` 或 `nickname`，两者都不带仍要求昵称；社区题目 DTO 增加 `ownerAvatar`。评论作者暂未带头像，Show1 需要时再加。Show1 读取会话用的 `/api/auth/me` 也返回 `avatar`（show1compat 用例同步）。`docs/api-contract.md` 尚未同步。邮箱仍为自愿绑定：强制注册绑定的尝试已按用户决定撤回，没有留下迁移。
@@ -85,7 +101,7 @@
 - [2026-09-28 · 汇合 gallery-integration 进 main · kme7kme7-prog](docs/archive/2026-09-28-汇合gallery-integration-kme7kme7-prog.md)
 - [2026-09-27 · 管理端（admin web app）· kme7kme7-prog](docs/archive/2026-09-27-管理端-kme7kme7-prog.md)
 
-## 控制框折叠审计与修复（2026-09-30–10-01，未提交、未推送、未部署）
+## 控制框折叠审计与修复（2026-09-30–10-01，已提交 9b19ade，未推送、未部署）
 
 - 授权与范围：先交付83件修改前审计表；用户随后批准同时修复两处漏藏并追加回归。仅修改 `server/fold.js`、在 `test/platform.test.mjs` 追加本轮回归、在本页末尾追加记录；保留已有头像等并行工作，不把其改动计入本轮。零新增依赖，不改 content 注入路由、作品文件或消费者数据 pin。
 - 数据基线：使用正式 pin `4c926d5f8a3c240ff769de360a9168abbe4e9dfc` 的已有 rehearsal-2 副本，来源 `27f9a680886772ae9298cc188fef0868873e6921`，20题/83件作品；默认旧包92f8ab9与其422个文件仅未引用的 build-info 时间不同。另行处理的 data PR #5 新增38件尚未进入这个正式 pin，本审计不声称覆盖未发布的121件包。

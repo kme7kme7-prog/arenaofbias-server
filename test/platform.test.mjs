@@ -414,13 +414,14 @@ describe('platform lifecycle', () => {
     assert.match(preview.text, /<head><script src="\/__sp_probe\.js"><\/script>/);
     assert.match(preview.headers['content-security-policy'], /^sandbox allow-scripts/);
 
-    const form = { draftId: staged.data.draft.id, title: 'Mine', modelName: 'Model X', vendor: 'VX', effort: 'high', tool: 'CLI', trial: { loaded: true, loadMs: 120 } };
+    const form = { draftId: staged.data.draft.id, title: 'Mine', modelName: 'Model X', vendor: 'VX', note: 'Original note', effort: 'high', tool: 'CLI', trial: { loaded: true, loadMs: 120 } };
     assert.equal((await call('alice', 'POST', '/api/works', form)).status, 400);
     const submitted = await call('alice', 'POST', '/api/works', { ...form, confirmed: true });
     assert.equal(submitted.status, 200);
     upload = submitted.data.work;
     assert.equal(upload.modelName, 'Model X');
     assert.equal(upload.vendor, '');
+    assert.equal(upload.note, 'Original note\n手填模型厂商：VX');
     assert.equal(platform.db.prepare('SELECT model_other FROM works WHERE id = ?').get(upload.id).model_other, 'Model X');
     assert.equal(upload.status, 'unverified');
     assert.deepEqual([...Object.values(platform.db.prepare('SELECT show_gallery, show_arena FROM works WHERE id = ?').get(upload.id))], [1, 0], '新投稿默认展览馆开、竞技场关');
@@ -456,7 +457,9 @@ describe('platform lifecycle', () => {
   test('review moves uploads into the arena; questioned works stop counting and interacting', async () => {
     assert.equal((await call('alice', 'POST', `/api/works/one/${upload.id}/review`, { status: 'verified' })).status, 403);
     // 裸审核 = 默认门面（展览馆开、竞技场关）；显式开竞技场才进配对池。
-    assert.equal((await call('root', 'POST', `/api/works/one/${upload.id}/review`, { status: 'verified', show_gallery: true, show_arena: true })).status, 200);
+    const reviewed = await call('root', 'POST', `/api/works/one/${upload.id}/review`, { status: 'verified', show_gallery: true, show_arena: true, vendor: 'VX' });
+    assert.equal(reviewed.status, 200);
+    assert.equal(reviewed.data.work.note, 'Original note\n手填模型厂商：VX');
     assert.equal((await call('bob', 'GET', '/api/bootstrap')).data.arena.one.entries, 3);
 
     // Alice never meets her own work; Bob may.

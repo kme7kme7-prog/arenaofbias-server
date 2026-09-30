@@ -23,6 +23,7 @@ test('v18 preserves v16/v17 metadata, audit actors and frozen vote identities on
       insert.run('registered', 'Registered', 'm-a', 'Old model name', 'Old tool', 'codex', 'key-a', 'digest-a', null, null);
       insert.run('manual', 'Manual', null, 'Custom model', 'Original tool', null, 'key-b', 'digest-b', 'admin', 60);
       insert.run('audited', 'Audited', null, 'Custom model', '', null, 'key-c', 'digest-c', null, null);
+      db.prepare('UPDATE works SET note = ? WHERE id = ?').run('x'.repeat(1000), 'manual');
       db.exec(`INSERT INTO audit (at, actor_id, actor_name, action, task_id, work_id)
         VALUES (50, 'admin', 'Admin', 'unverified', 'one', 'audited');`);
       const identity = '{"modelId":"m-a","modelName":"Frozen name","vendor":"Frozen vendor","modelKey":"m-a"}';
@@ -47,6 +48,7 @@ test('v18 preserves v16/v17 metadata, audit actors and frozen vote identities on
           ...(version === 16 ? { model_version: '', generation_mode: '', human_intervention: '', generated_on: '', evidence_url: '' } : {}),
           model_other: row.model_id ? '' : model_name,
           harness_other: row.harness_id ? '' : tool,
+          note: row.model_id || !vendor ? retained.note : [retained.note, `手填模型厂商：${vendor}`].filter(Boolean).join('\n'),
         });
       }
       assert.deepEqual(db.prepare('SELECT * FROM votes ORDER BY id').all().map((row) => ({ ...row })), originalVotes);

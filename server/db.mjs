@@ -301,6 +301,9 @@ const MIGRATIONS = [
     const columns = new Set(db.prepare('PRAGMA table_info(works)').all().map((column) => column.name));
     if (columns.has('tool')) db.exec(`UPDATE works SET harness_other = tool
       WHERE tool <> '' AND harness_id IS NULL AND harness_other = '';`);
+    if (columns.has('vendor')) db.exec(`UPDATE works SET note =
+      CASE WHEN note = '' THEN '' ELSE note || char(10) END || '手填模型厂商：' || vendor
+      WHERE model_id IS NULL AND vendor <> '';`);
     // Preserve actors from old rows that have no corresponding audit entry.
     for (const [actor, at, actions, fallback] of [
       ['reviewed_by', 'reviewed_at', "'verified', 'questioned', 'unverified'", 'status'],

@@ -1,5 +1,13 @@
 # HANDOFF.md · 当前状态
 
+## 2026-09-30 · schema-cleanup-review（本地修订，未推送、未部署）
+
+- 修复审阅指出的手填模型厂商丢失：未发布的 v18 在删除 vendor 前将非空手填厂商原样追加到 note，原备注不截断；新投稿和审核的兼容 vendor 声明也写入 note，同一声明不重复追加。作品 API 的 vendor 对手填模型仍为空，厂商声明可从 note 查看和导出。
+- 已获授权只读连接服务器。当前代码 `338bb3f3befcf0a76293018072c00e5d8a7d8b8a`、库 v16、267 件作品，手填厂商非空 0 件；5 份备份同条件均 0 件。预升级库用 model_name 查询，不存在 model_other；未更新线上代码/数据包或迁移线上库。
+- 线上作品有 24 个模型 ID 不在展示列表，其中 3 个也不在完整注册表，共影响 21 件作品。用户确认按备份原名称/厂商在 data 仓补登记 `gemini-3.5-flash-lite`、`qwen3.8-27b`、`qwen3.8-max`，均 listed:false，不猜测版本和对应关系。服务端 catalog.model 改查完整 modelPool（展示条目优先），catalog.models 仍返回展示列表。
+- 最新备份 `/root/arenaofbias-predeploy-20260929T172856Z/platform.db` 下载副本迁移 v16→v18：267 件作品、599 张票和其余表保留，投票快照/更正及对局原样不变，重跑、quick_check 和外键通过。用 data 新构建核对全部 45 个已引用模型 ID 均可解析。本地原业务库仅读取，为 v13 且有 works 表，未迁移。
+- 验证：server 语法检查 56 文件 0 错、完整测试 118/118；补审核备注断言后定向 30/30。data 语法检查 25 文件 0 错、收录检查 83 件 0 错/3 条既有 warning、assemble 成功。上线须先发布含这 3 个旧 ID 的数据包并更新 server pin，再迁移后端；本轮未发布/未改 pin。归档见 `docs/archive/2026-09-30-schema-cleanup-review-wsnxxxs.md`。
+
 ## 2026-09-30 · schema-cleanup（本地实现，未推送、未部署）
 
 - 按用户第一档范围追加幂等 v18，保留 v1–v17：删除作品表 `audience`、`tool`、`vendor`、`reviewed_by`、`deleted_by` 五列及投票表 `identity_source`。`model_name` 改为 `model_other`，仅保留未登记模型手填名；登记模型不再复制名称、厂商，读取当前字典，缺项时返回模型 ID 与空厂商。

@@ -69,6 +69,19 @@ test('catalog tolerates an old pack with no registries', () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('catalog resolves retired models from modelPool while keeping the displayed list', () => {
+  const root = mkdtempSync(join(tmpdir(), 'retired-model-'));
+  try {
+    const dist = pack(root);
+    const data = JSON.parse(readFileSync(join(dist, 'data.json'), 'utf8'));
+    data.modelPool = [...data.models, { id: 'retired', name: 'Retired model', vendor: 'Original vendor' }];
+    writeFileSync(join(dist, 'data.json'), JSON.stringify(data));
+    const catalog = createCatalog(dist);
+    assert.deepEqual(catalog.model('retired'), data.modelPool.at(-1));
+    assert.deepEqual(catalog.models(), data.models);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('an old pack accepts a custom Harness but no registry ID', async () => {
   const root = mkdtempSync(join(tmpdir(), 'provenance-old-api-'));
   const dist = pack(root, false);

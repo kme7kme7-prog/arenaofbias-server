@@ -25,7 +25,7 @@ function readSnapshot(root) {
   }
   const commit = source?.source === 'github' ? source.commit : null;
   const version = commit ? `${root}|${commit}` : `${root}|dev:${catalogDigest}`;
-  const models = new Map(data.models.map((model) => [model.id, model]));
+  const models = new Map([...(data.modelPool ?? []), ...data.models].map((model) => [model.id, model]));
   const harnesses = new Map((data.harnesses ?? []).map((item) => [item.id, item]));
   const providers = new Map((data.providers ?? []).map((item) => [item.id, item]));
   const tasks = new Map(data.tasks.map((task) => [task.id, {
@@ -64,7 +64,7 @@ function readSnapshot(root) {
     tasks() { return [...tasks.values()]; },
     tags() { return [...new Set(data.tasks.flatMap((task) => task.tags ?? []))]; },
     model(id) { return models.get(id) ?? null; },
-    models() { return [...models.values()]; },
+    models() { return data.models; },
     harness(id) { return harnesses.get(id) ?? null; },
     harnesses() { return [...harnesses.values()]; },
     provider(id) { return providers.get(id) ?? null; },

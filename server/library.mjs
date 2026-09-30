@@ -15,6 +15,11 @@ const workId = () => `up-${[...randomBytes(8)].map((byte) => (byte % 36).toStrin
 const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
 const clip = (value, max) => String(value ?? '').normalize('NFKC').trim().slice(0, max);
 const plainObject = (value) => value && typeof value === 'object' && !Array.isArray(value);
+const noteWithVendor = (note, modelId, vendor) => {
+  const name = modelId ? '' : clip(vendor, 40);
+  const line = name ? `手填模型厂商：${name}` : '';
+  return line && !note.split('\n').includes(line) ? [note, line].filter(Boolean).join('\n') : note;
+};
 
 function validFraming(value) {
   if (!plainObject(value)) return false;
@@ -85,7 +90,7 @@ export function createLibrary({ db, catalog, config, limits }) {
     review: db.prepare(`UPDATE works SET status = ?, status_reason = ?, model_id = ?, model_other = ?, effort = ?,
       harness_id = ?, harness_other = ?, harness_version = ?, provider_id = ?, provider_other = ?,
       model_version = ?, generation_mode = ?, human_intervention = ?, generated_on = ?, evidence_url = ?,
-      show_gallery = ?, show_arena = ?, title = ?, summary = ?, reviewed_at = ?, updated_at = ? WHERE id = ?`),
+      show_gallery = ?, show_arena = ?, title = ?, summary = ?, note = ?, reviewed_at = ?, updated_at = ? WHERE id = ?`),
     remove: db.prepare('UPDATE works SET deleted_at = ?, updated_at = ? WHERE id = ?'),
     captures: db.prepare('UPDATE works SET captures = ? WHERE id = ?'),
     calibration: db.prepare('UPDATE works SET trial = ?, updated_at = ? WHERE id = ?'),
@@ -571,7 +576,7 @@ export function createLibrary({ db, catalog, config, limits }) {
         transaction(db, () => {
           q.insertWork.run(id, draft.task_id, user.id, title, clip(body.summary, 200), who.modelId, who.modelId ? '' : who.modelName,
             effortOf(body.effort), source.harnessId, source.harnessOther, source.harnessVersion, source.providerId,
-            source.providerOther, clip(body.note, 1000), token('w'), draft.source_name, draft.root, draft.entry, draft.file_count,
+            source.providerOther, noteWithVendor(clip(body.note, 1000), who.modelId, body.vendor), token('w'), draft.source_name, draft.root, draft.entry, draft.file_count,
             draft.bytes, draft.digest, draft.checks, JSON.stringify(sanitizeTrial(body.trial)), coverName, now, now,
             ...GENERATION_FIELDS.map((key) => generation[key]));
           q.deleteDraft.run(draft.id);
@@ -651,7 +656,8 @@ export function createLibrary({ db, catalog, config, limits }) {
       transaction(db, () => {
         q.review.run(status, status === 'verified' ? '' : reason, who.modelId, who.modelId ? '' : who.modelName, effort,
           source.harnessId, source.harnessOther, source.harnessVersion, source.providerId, source.providerOther,
-          ...GENERATION_FIELDS.map((key) => generation[key]), Number(gallery), Number(arena), title, summary, now, now, id);
+          ...GENERATION_FIELDS.map((key) => generation[key]), Number(gallery), Number(arena), title, summary,
+          noteWithVendor(work.note, who.modelId, body.vendor), now, now, id);
         audit(admin, status, work, [labels[status], reason].filter(Boolean).join('：') + generationAudit(work, generation));
       });
       return upload(taskId, id);

@@ -165,7 +165,7 @@
 
 ### 2.3 模型（model）
 
-由数据包 `models` 数组定义：`{ id, name, vendor, logo, brandUrl, brandName }`。投稿时若给出 `modelId` 且命中模型表，服务端以表内 `name` / `vendor` 为准；未登记模型只记录作者自填的 `modelName`（≤60 字，存为 `model_other`），`vendor` 返回空串，`modelId` 置 null（排行键退化为 `x:<小写模型名>`）。
+由数据包完整注册表 `modelPool` 和展示列表 `models` 定义：`{ id, name, vendor, logo, brandUrl, brandName }`。投稿时若给出 `modelId` 且命中模型表，服务端以表内 `name` / `vendor` 为准；未登记模型的自填 `modelName`（≤60 字）存为 `model_other`，提交或审核中传入的厂商声明（≤40 字）追加到 `note`，`vendor` 返回空串，`modelId` 置 null（排行键退化为 `x:<小写模型名>`）。
 
 ### 2.4 用户（user）
 
@@ -709,7 +709,7 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 
 追加迁移删除 `works.audience`、`tool`、`vendor`、`reviewed_by`、`deleted_by` 和 `votes.identity_source`。`model_name` 改名为 `model_other`：仅保留未登记模型的手填名称，登记模型的名称和厂商读取当前数据包字典；字典缺少该 ID 时名称返回 ID、厂商为空。模型版本 `model_version` 保持不变。
 
-旧 `tool` 只在没有 Harness ID 且「其他」为空时回填 `harness_other`。缺失的审核、删除 audit 从旧操作人列补存，审核人通过最近一次审核记录读取。展示开关保留原值；所有历史对局、投票身份快照及更正值原样保留。旧客户端仍可提交 `tool`、`audience`，API 和收录导出的兼容字段由保留字段生成。升级前须备份数据库，退回 v17 或更早的代码须同时恢复兼容的数据库备份。
+旧 `tool` 只在没有 Harness ID 且「其他」为空时回填 `harness_other`。未登记模型的非空旧 `vendor` 在删列前原样追加为 `note` 中的「手填模型厂商：…」，保留原备注且不截断。缺失的审核、删除 audit 从旧操作人列补存，审核人通过最近一次审核记录读取。展示开关保留原值；所有历史对局、投票身份快照及更正值原样保留。旧客户端仍可提交 `tool`、`audience`，API 和收录导出的兼容字段由保留字段生成。升级前须备份数据库，退回 v17 或更早的代码须同时恢复兼容的数据库备份。
 
 ## 4. 数据包契约（`dist/data.json`）
 
@@ -730,7 +730,7 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 
 **模型（model）**：`{ "id", "name", "vendor", "logo", "brandUrl", "brandName" }`。
 
-**Harness / 服务商注册表**：顶层 `harnesses`、`providers` 均含完整条目与 `listed`，停用 ID 仍可解析历史作品。旧包缺少数组时服务端按 `[]` 读取。注册表条目含 `id`、`name`、`kind`、`maker`（Harness）或 `operator`（服务商）、`url`、`logo`、`aliases`、`listed`。服务端 `catalog.model()` 仅查 `listed` 模型；Harness 与服务商查询接纳注册表中全部 ID。
+**Harness / 服务商注册表**：顶层 `harnesses`、`providers` 均含完整条目与 `listed`，停用 ID 仍可解析历史作品。旧包缺少数组时服务端按 `[]` 读取。注册表条目含 `id`、`name`、`kind`、`maker`（Harness）或 `operator`（服务商）、`url`、`logo`、`aliases`、`listed`。服务端 `catalog.model()` 查完整 `modelPool`（含停用模型），同 ID 的 `models` 条目优先；`catalog.models()` 仍只返回展示列表。缺少 `modelPool` 的旧包只查 `models`。Harness 与服务商查询接纳注册表中全部 ID。
 
 **题目（task）**：
 

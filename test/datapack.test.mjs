@@ -156,6 +156,7 @@ test('an old database migrates votes as legacy without inventing identity snapsh
       INSERT INTO votes VALUES ('old-vote', 'old', NULL, 'one', 'a1', 'b1', 'one:a1+b1', 'a', 2);
       CREATE TABLE audit (id INTEGER PRIMARY KEY, at INTEGER, actor_id TEXT, actor_name TEXT, action TEXT, task_id TEXT, work_id TEXT, detail TEXT);
       PRAGMA user_version = 3;`);
+    old.exec(MIGRATIONS[1]);
   } finally { old.close(); }
   const db = openDatabase(file);
   try {

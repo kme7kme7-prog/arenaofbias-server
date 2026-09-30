@@ -6,7 +6,7 @@ export function createProfile(db) {
   const activity = db.prepare(`
     SELECT date(created_at / 1000, 'unixepoch', '+8 hours') AS date, COUNT(*) AS count
     FROM (
-      SELECT created_at FROM questions WHERE owner_id = $owner
+      SELECT created_at FROM questions WHERE owner_id = $owner AND deleted_at IS NULL
       UNION ALL SELECT created_at FROM works WHERE owner_id = $owner
       UNION ALL SELECT created_at FROM votes WHERE user_id = $owner
       UNION ALL SELECT created_at FROM reactions WHERE user_id = $owner

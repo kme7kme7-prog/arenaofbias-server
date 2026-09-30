@@ -52,7 +52,7 @@
 - `code` 仅在少数业务错误上出现，例如 `"insufficient"`（对战池不足）、`"exhausted"`（该用户已评完全部组合）。前端逻辑判断请用 `code`，不要匹配 `error` 文案。
 - HTTP 状态码全集：`400`（参数无效）、`401`（未登录 / 凭证错误）、`403`（无权限 / 来源无效）、`404`（不存在）、`405`（方法不允许）、`409`（状态冲突）、`413`（体积超限）、`415`（Content-Type 非 JSON）、`429`（限流 / 待审超限）、`500`（服务端错误，固定文案「服务器出错了，请稍后再试」）。
 - 非 GET/HEAD 的 `/api/*` 请求必须带有可信 `Origin`：请求自身的完整 origin 或 `SITE_ORIGINS` 白名单中的完整 origin（精确协议、主机与端口），否则 `403 请求来源无效`。同源判断只在 `TRUST_PROXY=1` 时使用代理传入的 HTTPS 协议。
-- JSON 请求体默认上限 64 KB；`POST /api/works` 单独放宽至 6 MB（封面以 data URL 内嵌所致）。
+- JSON 请求体默认上限 64 KB；`POST /api/works` 与 `POST /api/questions` 放宽至 6 MB（示例作品封面以 data URL 内嵌所致）。
 - JSON 请求体必须是对象；合法的 `null`、数组或其它标量返回 `400`。
 
 ### 1.5 跨域约定（CORS）
@@ -169,7 +169,7 @@ API 域静态 `/data.json`（含等价编码路径）仅管理员登录后返回
 
 ### 2.2 任务 / 题目（task）
 
-馆藏题目由数据包定义；社区题目经 `POST /api/questions` 写入 SQLite，加入同一个投稿与盲评目录。字段见第 4 节与 3.14。平台层关心的两个派生属性：
+馆藏题目由数据包定义；社区题目经 `POST /api/questions` 连同示例作品写入 SQLite，人工通过后加入同一个投稿与盲评目录。只有未删除、题目内容状态为 `legacy` 或 `approved` 的社区题目及其关联作品能进入公开列表、上传入口与对战池；作品还须满足自己的内容审核、来源核验与门面开关。字段见第 4 节与 3.14。平台层关心的两个派生属性：
 
 - `id` / `title`：标识与标题。
 - `acceptsUploads`：`promptPending` 为真时置假——提示词原文尚未公开的题目**不接受上传**（`POST /api/drafts` 返回 `409`）。
@@ -247,7 +247,7 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
     "limits": { "uploadBytes": 31457280, "coverBytes": 3145728, "pendingPerUser": 5, "provisionalGames": 30 }
   },
   "works": [ /* 全部未删除投稿的公开视图，按创建时间倒序 */ ],
-  "questions": [ /* 社区题目公开视图，见 3.14 */ ],
+  "questions": [ /* 未删除且 legacy/approved 的社区题目公开视图，见 3.14 */ ],
   "reactions": {
     "counts": { "task-id/work-id": { "🔥": 3 } },
     "mine": { "task-id/work-id": ["🔥"] }
@@ -263,7 +263,7 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
 - `datapack` 只在已加载数据包带有有效 GitHub 来源文件时返回真实 SHA；无来源元数据或标为 `local` 的本地包返回 `null`。`catalogDigest` 是实际加载的 `data.json` 原始字节的 SHA-256，本地开发前后端在 `datapack=null` 时可据此比较是否使用同一目录数据版本。`serverVersion` 在进程启动时优先读取 `SERVER_VERSION`，其次读取部署目录 Git HEAD；非 Git 部署读取 `.server-version`，均不可用时为 `dev`。它标识服务代码，不是数据包版本；数据包以 `datapack` 字段判读，部署后分别核对两者。
 - `works` **包含未验证与存疑投稿**（不含馆藏作品，馆藏经数据包分发），访客可见非特权字段。
 - `arena[题目]`：`works` = 对战池作品数（馆藏 + 已验证投稿），`entries` = 不同「模型+档位」配置数，`uploads` = 该题是否接受上传。
-- 匿名：`user`、`me` 为 `null`，`reactions.mine` 为 `{}`；`review` 仅管理员非 null（`{ "unverified": <待审数> }`）。
+- 匿名：`user`、`me` 为 `null`，`reactions.mine` 为 `{}`；`review` 仅管理员非 null（`{ "unverified": <作品待审数>, "questions": <未删除的 pending 题目数> }`）。
 
 ### 3.2 `POST /api/auth/register` —— 注册
 
@@ -308,6 +308,8 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 ### 3.5 草稿：`POST /api/drafts` 与 `DELETE /api/drafts/:id`
 
 草稿是「上传 → 检查 → 试加载 → 确认提交」流水线的中间态，有效期 24 小时。
+
+新题目示例使用 `task=__new__`。此保留值支持 POST 上传与 GET 恢复草稿，支持 `static` / `vite`；不能作为真实题目公开或经 `POST /api/works` 提交，后者返回 `400`。须连同题目通过 `POST /api/questions` 提交。
 
 **`POST /api/drafts?task=<题目id>&name=<文件名>&template=<static|vite>`**
 
@@ -442,7 +444,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 ```json
 {
-  "questions": [ <本人社区题目公开视图> ],
+  "questions": [ <本人未删除社区题目视图，含 moderation（pending / approved / rejected / legacy）> ],
   "works": [ <本人投稿公开视图，含特权字段> ], "votes": 12,
   "joinedAt": "…ISO…",
   "activity": { "from": "YYYY-MM-DD", "to": "YYYY-MM-DD", "days": [ { "date": "YYYY-MM-DD", "count": 2 } ], "total": 12, "activeDays": 5 },
@@ -602,11 +604,19 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 `GET /*`（非 `/api/`、非 `/media/`、非 `/admin/`）分发 `DIST_DIR` 内的数据包资源。HTML/HTM（含目录映射的 `index.html`）及不存在的文件返回纯文本 `404 Not found`；其余响应使用 `Content-Security-Policy: sandbox; default-src 'none'` 与 `Referrer-Policy: no-referrer`，防止 SVG/XML 在 API 同源执行脚本。可信管理端 `/admin/` 保留自身站点 CSP。作品 HTML 从独立内容源打开；独立画廊从自己的静态部署读取馆藏数据与作品目录（见第 4 节）。
 
-### 3.14 `POST /api/questions` —— 发布社区题目
+### 3.14 社区题目与人工审核（schema v22）
 
-认证：登录；限流：write 桶。请求体 `{ "title": "…", "summary": "…", "prompt": "…", "tags": ["UI"], "templates": ["static", "vite"] }`。标题、测试简述、完整提示词必填，最多 70 / 400 / 20000 字；提示词除首尾空白外保留原文。标签 1–6 个，每个 1–24 字，按 NFKC 与大小写归一去重，已有标签沿用其名称。格式至少选一种 `static` / `vite`，省略时默认两种。
+**`POST /api/questions`**：认证登录；限流 write 桶；请求体上限 6 MB。请求 `{ "title": "…", "summary": "…", "prompt": "…", "tags": ["UI"], "templates": ["static", "vite"], "draftId": "…", "confirmed": true, "work": { "title": "示例结果", "modelId": "…", "effort": "High", "harnessId": "…", "trial": { "loaded": true }, "cover": "data:image/png;base64,…" } }`。`draftId` 必须属于本人、未过期且 `task=__new__`；`work` 复用 `POST /api/works` 的作品字段、Harness、封面及生成信息校验，所选提交格式必须允许草稿的实际格式。缺少 `draftId` 或 `work` 返回中文 `400`，未确认试加载同样 `400`。标题、测试简述、完整提示词必填，最多 70 / 400 / 20000 字；提示词除首尾空白外保留原文。标签 1–6 个，每个 1–24 字，按 NFKC 与大小写归一去重，已有标签沿用其名称。格式至少选一种 `static` / `vite`，省略时默认两种。
 
-成功 `200`：`{ "question": { "id": "q-<16hex>", "title": "…", "summary": "…", "prompt": "…", "tags": ["UI"], "templates": ["static", "vite"], "owner": "作者昵称", "version": 1, "community": true, "createdAt": "…ISO…", "date": "YYYY-MM-DD" } }`。作者从会话读取，不能由客户端指定。错误：`401` / `400` / `429`。社区题目通过 `bootstrap.questions` 公开、通过 `me.questions` 返回本人题目，立即接受关联投稿；其 `arena` 初始为空池。
+成功 `200`：`{ "question": { "id": "q-<16hex>", "title": "…", "summary": "…", "prompt": "…", "tags": ["UI"], "templates": ["static", "vite"], "owner": "作者昵称", "ownerAvatar": "…", "version": 1, "community": true, "createdAt": "…ISO…", "date": "YYYY-MM-DD", "moderation": { "status": "pending" } }, "work": <作者示例作品视图> }`。作者从会话读取；题目始终人工审核，不送自动审查，示例作品照常走内容审核并保持 `unverified`。题目与示例作品同时落库；失败不保留题目或作品，草稿保持可重试。每位作者最多 3 道未删除的 pending 题目，超限 `429`。其它错误：`401` / `400` / `404`（草稿不属于本人、不存在或过期）/ `429`。人工通过前题目及其作品不进入公开 bootstrap、Show1 列表、排行榜或盲评池；`me.questions` 可读本人全部未删除题目及审核状态。
+
+**`GET /api/admin/questions`**：仅管理员，返回 `{ "questions": [...] }`，包含全部未删除社区题目。每项为题目 DTO，加 `moderation`、`ownerName`、`works`（未删除关联投稿数量）和 `samples`（作者自己上传的示例作品）。每份示例含 `id`、`task`、`title`、`modelName`、`effort`、`status`、`moderation`、`scene`；`scene` 使用有效一小时的私密 `p` 预览令牌，不能作为公开作品地址分发。匿名 `401`，非管理员 `403`。
+
+**`POST /api/questions/:id/moderation`**：仅管理员，write 限流，请求 `{ "status": "approved" | "rejected", "reason": "…" }`；通过可省略理由，拒绝必须填非空理由，最多 500 字。成功 `{ "question": <含 moderation 的题目视图> }`，人工结果含 `source: "human"`、审核人、时间与理由，写 `question-review` audit。题目通过不改变示例作品自身的审核与核验状态。错误 `400` / `401` / `403` / `404` / `429`。
+
+**`DELETE /api/questions/:id`**：登录，write 限流，成功 `{ "ok": true }`。作者可删除本人 pending/rejected 题目及本人关联作品；公开 legacy/approved 题目还须没有其他作者的未删除作品、没有 Gallery 或 Show1 投票。管理员可连同全部关联作品软删除题目，但有投票仍返回 `409`。删除设置 `questions.deleted_at` 和关联 `works.deleted_at`，写 `question-delete` audit；公开与本人/管理员题目列表随后不返回该题。错误 `401` / `403`（非本人且非管理员）/ `404` / `409` / `429`。
+
+v22 只在 `questions` 追加 `moderation` JSON 与可空 `deleted_at`。已有题目默认 `{ "status": "legacy" }`，保持公开；新题目为 pending。
 
 ### 3.15 作品评论
 

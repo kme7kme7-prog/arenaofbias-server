@@ -115,7 +115,10 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       arena: Object.fromEntries(catalog.tasks().map((task) => [task.id, { ...arena.poolStats(task.id), uploads: task.acceptsUploads }])),
       totals: (await arena.leaderboard()).totals,
       me: user ? { votes: arena.votesBy(user.id), pending: library.pendingCount(user.id) } : null,
-      review: user?.role === 'admin' ? { unverified: uploads.filter((work) => work.status === 'unverified' || !library.contentAllowed(work)).length } : null,
+      review: user?.role === 'admin' ? {
+        unverified: uploads.filter((work) => work.status === 'unverified' || !['legacy', 'approved'].includes(work.moderation.status)).length,
+        questions: questions.pendingCount(),
+      } : null,
     };
   }
 
@@ -160,14 +163,46 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   router.on('POST', '/api/questions', async (ctx) => {
     const user = signedIn(ctx);
     limit.write(user.id);
-    const question = questions.create(user, await readJson(ctx.req), catalog.tags());
+    const body = await readJson(ctx.req, 6 * 1024 * 1024);
+    if (!body.draftId || !body.work || typeof body.work !== 'object' || Array.isArray(body.work)) fail(400, '请附上一份模型结果');
+    let question;
+    const work = library.submit(user, { ...body.work, draftId: body.draftId, confirmed: body.confirmed }, {
+      createQuestion: () => (question = questions.create(user, body, catalog.tags())),
+    });
+    queueWork(work);
+    arena.invalidate();
+    return { question, work: library.toPublic(work, user) };
+  });
+
+  router.on('GET', '/api/admin/questions', (ctx) => {
+    const admin = adminOnly(ctx);
+    return { questions: questions.adminAll().map(({ ownerId, ...question }) => ({
+      ...question,
+      samples: library.uploadsOf(ownerId).filter((work) => work.taskId === question.id).map((work) => {
+        const { id, task, title, modelName, effort, status, moderation, scene } = library.toPublic(work, admin);
+        return { id, task, title, modelName, effort, status, moderation, scene };
+      }),
+    })) };
+  });
+  router.on('POST', '/api/questions/:id/moderation', async (ctx) => {
+    const admin = adminOnly(ctx);
+    limit.write(admin.id);
+    const question = questions.review(admin, ctx.params.id, await readJson(ctx.req));
     arena.invalidate();
     return { question };
+  });
+  router.on('DELETE', '/api/questions/:id', (ctx) => {
+    const user = signedIn(ctx);
+    limit.write(user.id);
+    questions.remove(user, ctx.params.id);
+    arena.invalidate();
+    return { ok: true };
   });
 
   // Upload: the raw ZIP/HTML body is inspected and staged as a draft for the trial load.
   router.on('POST', '/api/drafts', async (ctx) => {
     const user = signedIn(ctx);
+    limit.write(user.id);
     limit.drafts(user.id);
     const task = ctx.url.searchParams.get('task') ?? '';
     checkDatapack(ctx, task);
@@ -178,7 +213,9 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   router.on('GET', '/api/drafts', (ctx) =>
     ({ draft: library.latestDraft(signedIn(ctx), ctx.url.searchParams.get('task') ?? '') }));
   router.on('DELETE', '/api/drafts/:id', (ctx) => {
-    library.discardDraft(signedIn(ctx), ctx.params.id);
+    const user = signedIn(ctx);
+    limit.write(user.id);
+    library.discardDraft(user, ctx.params.id);
     return { ok: true };
   });
   router.on('POST', '/api/works', async (ctx) => {

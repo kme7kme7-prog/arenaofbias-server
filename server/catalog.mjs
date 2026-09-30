@@ -157,7 +157,12 @@ export function createCatalog(dist, questions = null) {
     get datapack() { return refresh().commit; },
     get catalogDigest() { return refresh().catalogDigest; },
     get title() { return refresh().title; },
-    task(id) { return refresh().task(id) ?? (questions?.get(id) ? { ...questions.get(id), acceptsUploads: true, works: new Map() } : null); },
+    task(id, viewer = null) {
+      const curated = refresh().task(id);
+      if (curated) return curated;
+      const question = questions?.get(id, viewer);
+      return question ? { ...question, acceptsUploads: true, works: new Map() } : null;
+    },
     tasks() { return [...refresh().tasks(), ...(questions?.all() ?? []).map((question) => ({ ...question, acceptsUploads: true, works: new Map() }))]; },
     tags() { return [...new Set([...refresh().tags(), ...(questions?.all() ?? []).flatMap((task) => task.tags ?? [])])]; },
     model(id) { return refresh().model(id); },

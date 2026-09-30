@@ -269,6 +269,16 @@ select.input { appearance: none; padding-right: 32px; background-image: linear-g
 
 .block { margin-top: 8px; }
 .review-tabs, .works-filter { margin-bottom: 22px; }
+.question-list { border-top: 1px solid var(--ink); }
+.question-card { padding: 22px 0; border-bottom: 1px solid var(--line); }
+.question-card header, .question-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.question-card h3 { margin-right: auto; font-size: 18px; }
+.question-card h4 { margin: 18px 0 8px; color: var(--muted); font-size: 12px; }
+.question-prompt { margin-top: 14px; }
+.question-prompt summary { cursor: pointer; font-size: 13px; }
+.question-samples { display: grid; gap: 8px; padding: 0; list-style: none; }
+.question-samples li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
+.question-card .field { margin-top: 16px; max-width: 640px; }
 
 /* ---- work rows --------------------------------------------------------------- */
 .work-list { border-top: 1px solid var(--ink); }

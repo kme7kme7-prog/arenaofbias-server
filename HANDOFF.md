@@ -2,23 +2,38 @@
 
 接手先读 [AGENTS.md](AGENTS.md)。运行与仓库边界见 [README](README.md)，接口见 [API 契约](docs/api-contract.md)，发布与回滚见 [部署文档](docs/deploy.md)。本页只保留当前状态、后续事项与历史入口；归档中的“未推送/未部署/待审阅”是各轮结束时的状态，不是当前待办。
 
-## 待办：社区题目附示例结果与人工审核（2026-10-01，未开始）
+## 当前发布阶段（2026-10-01，提交与部署前）
 
-- 用户确定：发起题目必须同时提交一份模型结果；新题目一律人工审核，不交 Luna；结果照常走 AI 内容审核。生产上已有 4 道无意义测试题需在部署后备份并软删除。完整任务说明由用户另行交给执行 agent（Gallery 前端已按该契约提交，依赖 v22 题目审核、`__new__` 草稿、带 work 的 `POST /api/questions`、`GET /api/admin/questions`、题目人工审核与删除接口）。
+- 用户已授权两仓 commit、push、deploy，以及部署后先备份、确认 4 道测试题各为零作品零票，再通过管理员 API 逐条软删除。当前题目审核与 ZIP 格式修复仍未提交、未推送、未部署；生产备份与清理尚未执行。发布结果另作后续记录。
+- 后端题目审核实现已完成，Gallery 未公开题作品标题修复已完成；两仓 API 契约完全一致。既有本地提交的头像、题型榜单、投稿流程等待与本轮一起发布；下文旧轮标题里的发布状态仅描述当轮结束时。
+- 最新门禁：check 69 文件、0 错；全量 test 154/154。门禁前一轮为 153/154，既有 moderation mock 期望 rejected、实际 review；单独 moderation 6/6 和再次全量均通过，记录为间歇失败，未声称已消除原因。
+- 用户以同一静态 ZIP（dist 旁有 README）实测建题成功，状态 pending；本地服务已停止。本轮不纳入无关 Show1 工作树改动或新的 121 件作品数据发布。
+- 本轮归档：[question-review](docs/archive/2026-10-01-question-review-wsnxxxs.md)。
+## 已实现：社区题目附示例结果与人工审核（2026-10-01，未提交、未推送、未部署）
 
-## 已提交：投稿流程对齐（2026-10-01，44df198，未推送、未部署）
+- v22 仅在 `server/db.mjs` 迁移末尾追加幂等迁移：`questions.moderation` 默认 legacy、`deleted_at` 可空。旧题仍公开，新题始终 pending（含 at），只走人工审核；每个作者最多 3 道 pending。公开 catalog、bootstrap、作品源、榜单和盲评同时受题目状态约束；作者与管理员可读取未公开题目及私有作品预览，删除题目从各列表与个人题目活动读取排除。
+- `__new__` 草稿支持 static / vite 上传、自动推断和本人最新草稿恢复；禁止通过 `/api/works` 提交。`POST /api/questions` 必须带 `draftId`、`confirmed`、`work`，复用 library.submit 全部作品校验与限额，在同一事务创建题目、unverified 示例作品及两条审计。提交格式须符合题目 templates；数据库、封面文件步骤失败时整体回滚并还原草稿。成功返回作者 question/work 视图。示例作品依原 CONTENT_MODERATION 配置排队审核与截图，异常转人工，不将题目送 Luna。
+- 新增 `GET /api/admin/questions`（题目 DTO + moderation / ownerName / works 数量 / 作者 samples），`POST /api/questions/:id/moderation`（人工 approved / rejected，拒绝理由必填，最多 500 字），`DELETE /api/questions/:id`（按作者/管理员、公开状态、他人作品与投票限制软删除并逐作品审计）。题目通过不改变作品内容审核或核验状态；bootstrap.review 添加 questions，保留 unverified 的原计数口径。所有新增写接口沿用 Origin、登录与 write 桶；草稿写接口也纳入 write 桶。没有增加 retry 接口。
+- `admin/admin.js`、`admin/admin.css` 增加题目审核标签：pending 最早优先、详情/提示词展开、作者示例预览、通过/拒绝/删除确认、待审数与三种 question 审计 action。README 路由表和 `docs/api-contract.md` 同步 v22。接口字段、路径、取值与 Gallery 提供的契约一致，无需前端调整。
+- 文件：上述后台与文档，以及 `server/app.mjs`、`server/catalog.mjs`、`server/db.mjs`、`server/library.mjs`、`server/profile.mjs`、`server/questions.mjs`；新增 `test/questions.test.mjs`，更新 `test/platform.test.mjs` 建题流程和 `test/datapack.test.mjs` 旧库夹具。作品整行快照未受题目新列影响；新迁移用例核对旧题字段保留、legacy 默认与重复执行。零依赖。
+- 验证：`npm run check` 69 文件、0 错；最终全量 `npm test` 153/153，0 失败/取消/跳过；`git diff --check` 通过。新增 6 项用例覆盖草稿限制、人工可见性与 private p 预览、内容审核与题目审核互不替代、额度、删除权限/连带删除/两站投票、注入 INSERT 失败后的题目/作品/审计整体回滚和草稿文件保留。验证期间补齐旧 auth/datapack 夹具缺少的 questions 表，并将旧建题夹具改为携带示例、经人工通过；最后补强标题校验用例时，只有 title 标签的 HTML 被入口检查拒绝，补充 h1 后最终全过。预期故障注入会输出 sample insert failed，不是未解决错误。
+- 格式判定跟进修复（2026-10-01）：`server/library.mjs` 将 createDraft 判定的格式保存到现有 `checks` 的 format 检查项（template 字段），建题 submit 复用该值；旧草稿缺少该值时用 package.json 与 root 同时存在才判为 vite。避免将仅有 dist 入口的 static ZIP 误判，也保留显式 static 选择，无新增迁移。`test/platform.test.mjs` 新增一项回归覆盖 dist/index.html + README 的显式 static / 自动推断，以及带 package.json 的显式 static，验证预览、建题成功及 unverified 示例。最新 `npm run check` 69 文件/0 错；全量 `npm test` 154/154，0 失败/取消/跳过；`git diff --check` 通过。只改 library、平台测试与本页；未提交、推送或部署。
+- 本地隔离库后台浏览器验证：登录、题目详情与提示词展开、pending 示例私有预览、拒绝必填理由、拒绝/通过后状态与计数更新、删除二次确认并取消、question-create / question-review 日志；console error 0。截图在忽略目录 `output/question-review-browser.png`，临时服务已停止。未完成 Gallery 真实前端联调（本轮未启动 Gallery）、真实 Luna 外部调用或真实截图服务验证（本轮隔离配置无 API 密钥、capture 关闭，自动审核由本地测试桩/无密钥转人工验证）；未覆盖后台移动端。删除执行与 question-delete 日志由 API 集成测试验证，浏览器只验证确认框。
+- 已授权但尚未执行的生产清理：`q-9becba326438d52c`、`q-9c39b8642a46c310`、`q-82a12216062f8541`、`q-fa132f1b3b3bfa93`。本轮未连接 VPS、未备份或改生产库、未清理这 4 道题。部署后先按部署文档备份，再核对每题无作品/无投票，由管理员逐条软删除并记录执行时间、结果和备份位置。用户已授权提交、推送与部署；使用 wsnxxxs 的 GitHub noreply 身份与英文简单句。本轮归档已按模板补写，实际部署与清理结果另行记录。
+
+## 历史轮次：已提交投稿流程对齐（2026-10-01，44df198，未推送、未部署）
 
 - 迁移 v21 追加 `works.prompt_variant`（默认空串）。`POST /api/works` 接收 `promptVariant`：题目有 `promptVariants` 时普通用户必填、须为其中 ID，管理员可空；管理员上传查询参数同样接受。作品视图非空时输出 `promptVariant`。
 - 新增 `GET /api/drafts?task=`（本人该题最新未过期草稿）与 `PATCH /api/works/:task/:id`（作者在 `unverified` 时修改信息，已核验 / 存疑 409）。`setMeta` 增加 `{ author }` 选项区分作者与管理员路径，允许的字段加入 `note`、`vendor`、`promptVariant`；作者路径仍要求 Harness。PATCH 路由注册在 `/api/works/:id/calibration` 之后，避免同形路径被抢先匹配。API 契约、README 路由表已同步。
 - 测试：`test/platform.test.mjs` 夹具加一道双版本题目与一条新用例；`schema-cleanup` 的整行快照补 `prompt_variant`。check 68 文件 0 错，全量 test 147/147。
 - 联调：本地隔离库 + `CONTENT_MODERATION=1`、`CAPTURE=0`（无密钥，自动审查转 review），配合 Gallery 同名改动走完恢复草稿、版本选择、字段校验、提交、我的作品审核状态、作者编辑，管理员人工通过后长短两份投稿合为一张卡片并可切换。Gallery 同名改动需一起发布。
 
-## 已提交：排行榜按题型分榜（2026-10-01，8efaccc，未推送、未部署）
+## 历史轮次：已提交排行榜按题型分榜（2026-10-01，8efaccc，未推送、未部署）
 
 - `GET /api/leaderboard` 新增 `category=<数据包题目 category>`（与 `task` 互斥，无效为 400 invalid_query），只统计该题型题目的票与作品池；响应回显 `category`。无 task/category 的综合榜多 `standings: { [题型]: { [key]: 名次 } }`，按同一单位与来源筛选分别计算、各自缓存。社区题目无题型，只进综合榜。改动在 `server/arena.mjs`、`server/app.mjs` 路由、`test/platform.test.mjs` 一条新用例，API 契约与 README 已同步。Gallery 同名改动消费这些字段，需一起发布。
 - 验证：check 68 文件 0 错；全量 test 146/146（首次一轮出现 1 个失败，未能复现，随后连续 3 轮全过）。本地用 Gallery 缓存的正式 pin `4c926d5` 与临时库起服务，CLI 建管理员、开 82 件馆藏进盲评、6 个测试账号投 234 票，核对综合 / 建模 / 单题 / 非法参数与 Gallery 页面。未部署。
 
-## 已提交：头像库（2026-09-30，7435d06，未推送、未部署）
+## 历史轮次：已提交头像库（2026-09-30，7435d06，未推送、未部署）
 
 - 工作区改动：`users.avatar` 以 v20 幂等迁移追加（`server/db.mjs` 末尾）；头像 id 白名单 `AVATARS` 在 `server/config.mjs`，经 bootstrap `site.avatars` 下发，图片由各前端自带。未选头像的账号按用户 id 的 FNV-1a 在前 16 个里取默认值（`avatarOf`，`server/auth.mjs`）；前 16 个的顺序不能改，新头像只追加。
 - 接口：`auth.public` 增加 `avatar`（Show1 兼容用户同样带上）；`PATCH /api/me` 可单独提交 `avatar` 或 `nickname`，两者都不带仍要求昵称；社区题目 DTO 增加 `ownerAvatar`。评论作者暂未带头像，Show1 需要时再加。Show1 读取会话用的 `/api/auth/me` 也返回 `avatar`（show1compat 用例同步）。`docs/api-contract.md` 尚未同步。邮箱仍为自愿绑定：强制注册绑定的尝试已按用户决定撤回，没有留下迁移。
@@ -28,7 +43,7 @@
 
 - 本轮整理基线为 `main@1b55bb0`；fetch 后与 `origin/main` 一致，开放 PR 为零。远端只保留 main；主 agent 已删除完全合入的 show1-vote-processing 及只剩历史文档补记的 codex/shared-question-intake，本地占用中的 worktree 保留。
 - 本仓是两站唯一动态 API 和数据库写入者，使用 Node ≥ 22.13 内置模块；包含 `/admin/` 管理页面。`arenaofbias` 与 `wsnxxxs/ArenaGalleri` 是独立用户前端，私有 `arenaofbias-data` 构建馆藏数据包；旧 same-prompt-gallery 已归档。
-- 当前代码的迁移序列到 v19。`datapack.json` 固定不可变产物 `4c926d5f8a3c240ff769de360a9168abbe4e9dfc`，来源为数据源 `27f9a680886772ae9298cc188fef0868873e6921`；文档提交或数据源 main 前进不要求消费者自动追包。
+- 整理基线当时的迁移序列到 v19；当前待发布代码已追加至 v22。`datapack.json` 固定不可变产物 `4c926d5f8a3c240ff769de360a9168abbe4e9dfc`，来源为数据源 `27f9a680886772ae9298cc188fef0868873e6921`；文档提交或数据源 main 前进不要求消费者自动追包。
 - Show1 榜单、Elo 配对分与六维画像由后端聚合，只读库内 Show1 新票；旧快照票不回流。Gallery 继续使用独立的 Bradley–Terry 口径。自动审核、SSH relay、读取限流、共享题库与提示词变体均已进入 main。
 
 ## 最近已记录的部署
@@ -43,7 +58,7 @@
 
 ## 后续事项与已知边界
 
-- 当前没有因共享题库、投票聚合、审核或反爬实现而待合并/待部署的步骤。以后收录长短版作品时应声明实际 `promptVariant`，有真实样本后再验收同模型卡片与两栏配对；不伪造作品。
+- 2026-09-30 共享题库、投票聚合、审核和反爬发布已完成；本轮及本地后续提交待按当前发布阶段执行。以后收录长短版作品时应声明实际 `promptVariant`，有真实样本后再验收同模型卡片与两栏配对；不伪造作品。
 - 作品目前使用 `*.w.arenaofbias.icu`，迁至与主站不同的可注册主域仍是已记录的运维项，需另行制定发布计划。
 - setMeta 不接收 vendor，管理员可把手填厂商写进备注；兼容厂商追加后备注可能略超 1000 字。这两项按既有用户决定保留。猜模型每日答案可由前端推导，仍是娱乐玩法的设计边界。
 - 自动审核只审声明、入口及两档页面文字、封面与首屏，不覆盖全部交互；错误/疑似转人工，不降至标准档。历史作品维持 legacy，公开展示仍受访问状态与门面开关约束。
@@ -64,6 +79,7 @@
 
 按日期保存的原始轮次记录保留；旧状态由后续发布记录覆盖。以下索引包含现有所有轮次归档，新增记录按 [模板](docs/archive/_TEMPLATE.md) 编写。
 
+- [2026-10-01 · 社区题目审核与静态 ZIP 修复 · wsnxxxs](docs/archive/2026-10-01-question-review-wsnxxxs.md)
 - [2026-09-30 · repository-cleanup · wsnxxxs](docs/archive/2026-09-30-repository-cleanup-wsnxxxs.md)
 - [2026-09-30 · 作品生成信息与后台选项 · wsnxxxs](docs/archive/2026-09-30-work-generation-metadata-wsnxxxs.md)
 - [2026-09-30 · vote-release · wsnxxxs](docs/archive/2026-09-30-vote-release-wsnxxxs.md)

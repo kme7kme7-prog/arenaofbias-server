@@ -275,6 +275,7 @@ test('v6 migrates legacy password hashes on first successful login', async () =>
     PRAGMA user_version = 5;`);
   legacy.prepare('INSERT INTO users (id, name, name_key, role, salt, hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
     .run('legacy-user', 'olduser', 'olduser', 'member', salt, oldHash, Date.now());
+  legacy.exec(MIGRATIONS[1]);
   legacy.close();
   const db = openDatabase(file);
   try {
@@ -310,6 +311,7 @@ test('malformed legacy hash_params are treated as a wrong password, never a 500'
     CREATE TABLE votes (id TEXT PRIMARY KEY, identity_source TEXT NOT NULL DEFAULT 'legacy');
     CREATE TABLE audit (id INTEGER PRIMARY KEY, at INTEGER, actor_id TEXT, actor_name TEXT, action TEXT, task_id TEXT, work_id TEXT, detail TEXT);
     PRAGMA user_version = 5;`);
+  setup.exec(MIGRATIONS[1]);
   setup.close();
   const db = openDatabase(file);
   try {
@@ -707,7 +709,9 @@ describe('platform lifecycle', () => {
   });
 
   test('publishing requires a session and complete question details', async () => {
-    const body = { title: 'Keyboard', summary: 'Test product interaction', prompt: 'Build a keyboard.', tags: ['Three.js'], templates: ['static'] };
+    const staged = await call('bob', 'POST', '/api/drafts?task=__new__&name=validation.html', '<!doctype html><title>Validation</title><h1>Validation</h1>', { raw: true });
+    assert.equal(staged.status, 200);
+    const body = { title: 'Keyboard', summary: 'Test product interaction', prompt: 'Build a keyboard.', tags: ['Three.js'], templates: ['static'], draftId: staged.data.draft.id, confirmed: true, work: { title: 'Validation', modelId: 'm-a', tool: 'CLI' } };
     assert.equal((await call('guest', 'POST', '/api/questions', body)).status, 401);
     assert.equal((await call('bob', 'POST', '/api/questions', body, { origin: false })).status, 403);
     for (const invalid of [{ title: ' ' }, { summary: '' }, { prompt: '' }, { tags: [] }, { tags: ['bad,tag'] }, { tags: Array.from({ length: 7 }, (_, i) => `tag${i}`) }, { templates: [] }, { templates: ['server'] }]) {
@@ -716,21 +720,26 @@ describe('platform lifecycle', () => {
   });
 
   test('a published question persists, joins the catalogue and binds uploads to itself', async () => {
+    const sample = await call('bob', 'POST', '/api/drafts?task=__new__&name=sample.html', '<!doctype html><title>Sample</title><h1>Sample</h1>', { raw: true });
     const created = await call('bob', 'POST', '/api/questions', {
       title: 'Dense question grid', summary: 'Compare responsive layouts.', prompt: 'Build a page.\nKeep this exact prompt.',
       tags: [' #three.js ', 'Three.js', '界面'], templates: ['static'], owner: 'root',
+      draftId: sample.data.draft.id, confirmed: true, work: { title: 'Sample', modelId: 'm-a', tool: 'CLI' },
     });
     assert.equal(created.status, 200);
     const question = created.data.question;
     assert.deepEqual(question.tags, ['Three.js', '界面']);
     assert.equal(question.owner, 'bob');
     assert.equal(question.version, 1);
+    const approved = await call('root', 'POST', `/api/questions/${question.id}/moderation`, { status: 'approved' });
+    assert.equal(approved.status, 200);
+    await call('root', 'POST', `/api/works/${question.id}/${created.data.work.id}/review`, { status: 'verified' });
     const boot = (await call('guest', 'GET', '/api/bootstrap')).data;
     assert.equal(boot.questions.find((q) => q.id === question.id).prompt, question.prompt);
     assert.equal(boot.arena[question.id].uploads, true);
     assert.equal((await call('guest', 'GET', `/api/leaderboard?task=${question.id}`)).status, 200);
     const reopened = openDatabase(join(root, 'data', 'platform.db'));
-    try { assert.deepEqual(createQuestions(reopened).get(question.id), question); } finally { reopened.close(); }
+    try { const { moderation, ...publicQuestion } = approved.data.question; assert.deepEqual(createQuestions(reopened).get(question.id), publicQuestion); } finally { reopened.close(); }
 
     const html = '<!doctype html><title>New question answer</title><h1>Answer</h1>';
     assert.equal((await call('bob', 'POST', `/api/drafts?task=${question.id}&template=vite&name=answer.html`, html, { raw: true })).status, 400);
@@ -748,17 +757,49 @@ describe('platform lifecycle', () => {
     assert.ok(!(await call('alice', 'GET', '/api/me')).data.questions.some((q) => q.id === question.id), 'another account cannot see the question in its own submissions');
   });
 
+  test('static question samples can serve a dist entry without being classified as Vite', async () => {
+    for (const { template, packageJson } of [
+      { template: 'static', packageJson: false },
+      { template: '', packageJson: false },
+      { template: 'static', packageJson: true },
+    ]) {
+      const archive = zip([
+        { name: 'dist/index.html', data: '<!doctype html><h1>Static sample</h1>' },
+        { name: 'README.md', data: 'A static HTML export.' },
+        ...(packageJson ? [{ name: 'package.json', data: '{}' }] : []),
+      ]);
+      const staged = await call('bob', 'POST', `/api/drafts?task=__new__&name=static.zip${template ? `&template=${template}` : ''}`, archive, { raw: true });
+      assert.equal(staged.status, 200, JSON.stringify(staged.data));
+      assert.equal(staged.data.draft.root, 'dist');
+      assert.match((await fetchContent(staged.data.draft.preview)).text, /Static sample/);
+      const created = await call('bob', 'POST', '/api/questions', {
+        title: 'Static export', summary: 'A static page in dist.', prompt: 'Make an HTML page.', tags: ['UI'], templates: ['static'],
+        draftId: staged.data.draft.id, confirmed: true, work: { title: 'Static sample', modelId: 'm-a', tool: 'CLI' },
+      });
+      assert.equal(created.status, 200, JSON.stringify(created.data));
+      assert.equal(created.data.question.moderation.status, 'pending');
+      assert.equal(created.data.work.status, 'unverified');
+      assert.equal(created.data.work.root, 'dist');
+      assert.equal(await fetchContent(created.data.work.scene).then((result) => result.status), 200);
+      assert.equal((await call('bob', 'DELETE', `/api/questions/${created.data.question.id}`)).status, 200);
+    }
+  });
+
   test('Vite-only questions require a built project and serve its dist entry', async () => {
-    const created = await call('alice', 'POST', '/api/questions', { title: 'Vite', summary: 'Built browser page', prompt: 'Build it.', tags: ['Vite'], templates: ['vite'] });
-    const id = created.data.question.id;
-    assert.deepEqual((await call('alice', 'GET', '/api/me')).data.questions.map((q) => q.id), [id]);
-    assert.ok(!(await call('bob', 'GET', '/api/me')).data.questions.some((q) => q.id === id));
-    assert.equal((await call('alice', 'POST', `/api/drafts?task=${id}&name=answer.html`, '<html>hi</html>', { raw: true })).status, 400);
     const archive = zip([
       { name: 'package.json', data: '{}' },
       { name: 'index.html', data: '<html><script type="module" src="/src/main.js"></script></html>' },
       { name: 'dist/index.html', data: '<html><h1>Built answer</h1></html>' },
     ]);
+    const sample = await call('alice', 'POST', '/api/drafts?task=__new__&template=vite&name=sample.zip', archive, { raw: true });
+    const created = await call('alice', 'POST', '/api/questions', { title: 'Vite', summary: 'Built browser page', prompt: 'Build it.', tags: ['Vite'], templates: ['vite'], draftId: sample.data.draft.id, confirmed: true, work: { title: 'Sample', modelId: 'm-a', tool: 'CLI' } });
+    assert.equal(created.status, 200);
+    const id = created.data.question.id;
+    await call('root', 'POST', `/api/questions/${id}/moderation`, { status: 'approved' });
+    await call('root', 'POST', `/api/works/${id}/${created.data.work.id}/review`, { status: 'verified' });
+    assert.deepEqual((await call('alice', 'GET', '/api/me')).data.questions.map((q) => q.id), [id]);
+    assert.ok(!(await call('bob', 'GET', '/api/me')).data.questions.some((q) => q.id === id));
+    assert.equal((await call('alice', 'POST', `/api/drafts?task=${id}&name=answer.html`, '<html>hi</html>', { raw: true })).status, 400);
     const staged = await call('alice', 'POST', `/api/drafts?task=${id}&template=vite&name=answer.zip`, archive, { raw: true });
     assert.equal(staged.status, 200);
     assert.equal(staged.data.draft.root, 'dist');
@@ -812,10 +853,11 @@ describe('platform lifecycle', () => {
     assert.equal(empty.activity.activeDays, 0);
     assert.equal(empty.receivedReactions.total, 0);
 
-    const created = await call('charlie', 'POST', '/api/questions', { title: 'Profile test', summary: 'A profile fixture', prompt: 'Make a page.', tags: ['UI'], templates: ['static'] });
+    const staged = await call('charlie', 'POST', '/api/drafts?task=__new__&name=answer.html', '<!doctype html><title>Answer</title><h1>Answer</h1>', { raw: true });
+    const created = await call('charlie', 'POST', '/api/questions', { title: 'Profile test', summary: 'A profile fixture', prompt: 'Make a page.', tags: ['UI'], templates: ['static'], draftId: staged.data.draft.id, confirmed: true, work: { title: 'Answer', modelId: 'm-a', tool: 'CLI' } });
     const task = created.data.question.id;
-    const staged = await call('charlie', 'POST', `/api/drafts?task=${task}&name=answer.html`, '<!doctype html><title>Answer</title><h1>Answer</h1>', { raw: true });
-    const submitted = await call('charlie', 'POST', '/api/works', { draftId: staged.data.draft.id, confirmed: true, title: 'Answer', modelId: 'm-a', tool: 'CLI' });
+    await call('root', 'POST', `/api/questions/${task}/moderation`, { status: 'approved' });
+    const submitted = { status: created.status, data: { work: created.data.work } };
     assert.equal(submitted.status, 200);
     const workPath = `/api/works/${task}/${submitted.data.work.id}`;
     const match = await call('charlie', 'POST', '/api/arena/matches', { task: 'one' });

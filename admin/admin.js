@@ -151,6 +151,7 @@ const statusBadge = (status, reason = '') => {
   return info ? `<span class="status status-${status}" title="${esc(reason || info.hint)}">${icon(info.icon)}${info.label}</span>` : '';
 };
 const ACTIONS = { submit: '提交作品', verified: '通过验证', questioned: '标记存疑', unverified: '退回未验证', delete: '删除作品', role: '调整角色',
+  'question-create': '发起题目', 'question-review': '审核题目', 'question-delete': '删除题目',
   'content-review': '内容审查', 'content-retry': '重新内容审查',
   'face-settings': '门面开关', meta: '编辑信息', curate: '收录为馆藏', nominate: '提名收录', 'withdraw-nomination': '撤回提名', 'inbox-upload': '收件箱上传', 'inbox-register': '登记入库', 'inbox-remove': '收件箱移除' };
 // Per-face review: the same work is approved separately for the gallery (display)
@@ -173,7 +174,10 @@ function contentPanel(w) {
       <button class="btn sm primary" data-content-decide="approved">人工确认内容通过</button></div></section>`;
 }
 const FACE_LABEL = { gallery: '展览馆', arena: '竞技场' };
-const REVIEW_TABS = { pending: '待审', shown: '已展示', questioned: '存疑', log: '记录' };
+const REVIEW_TABS = { pending: '待审', questions: '题目审核', shown: '已展示', questioned: '存疑', log: '记录' };
+const QUESTION_STATUS = { pending: '等待人工审核', approved: '已通过', rejected: '已拒绝', legacy: '历史题目' };
+const pendingQuestions = () => state.adminQuestions?.filter((q) => q.moderation.status === 'pending').length ?? state.reviewCounts?.questions ?? 0;
+const reviewCount = (face) => (state.works?.filter((w) => w.status !== 'questioned' && !faceOn(w, face)).length ?? state.reviewCounts?.unverified ?? 0) + pendingQuestions();
 const skeleton = (count = 4, kind = 'row') => `<div class="skeleton-list" aria-label="正在载入" role="status">${Array.from({ length: count }, () => `<div class="skeleton skeleton-${kind}"></div>`).join('')}</div>`;
 function busy(button, text = '处理中…') {
   if (!button) return () => {};
@@ -191,7 +195,7 @@ const state = { user: undefined, data: null, works: null, audit: [], users: null
   sidebarCollapsed: store.get('admin-sidebar-collapsed') === '1',
   workPage: 1, workTask: '', workStatus: '', workShow: '', workHarness: '', workProvider: '', workSearch: '', traffic: null,
   workModel: '', workEffort: '', workGenerationMode: '', workHumanIntervention: '', workEfforts: [],
-  inbox: null, inboxForms: {} };
+  inbox: null, inboxForms: {}, adminQuestions: null, reviewCounts: null };
 const taskTitle = (id) => [...(state.data?.tasks ?? []), ...(state.questions ?? [])].find((t) => t.id === id)?.title ?? id;
 
 async function loadCatalog() {
@@ -205,9 +209,10 @@ async function loadCatalog() {
 }
 
 async function loadReview() {
-  const data = await api('review');
+  const [data, questions] = await Promise.all([api('review'), api('admin/questions')]);
   state.works = data.works;
   state.audit = data.audit;
+  state.adminQuestions = questions.questions;
 }
 
 async function loadInbox() {
@@ -627,7 +632,7 @@ function topbar(route) {
     <a class="brand" href="${state.system === 'common' ? '#/dashboard' : '#/review'}">${LOGO}<span class="brand-name">同题异答<b>${state.system === 'common' ? '通用后台' : '管理后台'}</b></span></a>
     ${systemSwitch()}
     <nav class="tabs" aria-label="管理">
-      ${tabsForSystem().map((tab) => `<a href="#/${tab.id}"${tab.id === route ? ' aria-current="page"' : ''}>${icon(tab.icon)}${tab.label}</a>`).join('')}
+      ${tabsForSystem().map((tab) => `<a href="#/${tab.id}"${tab.id === route ? ' aria-current="page"' : ''}>${icon(tab.icon)}${tab.label}${tab.id === 'review' ? `<span class="badge">${reviewCount(state.system)}</span>` : ''}</a>`).join('')}
     </nav>
     <span class="topbar-space"></span>
     ${themeButton()}
@@ -640,7 +645,7 @@ function arenaSidebar(route, sub) {
   return `<aside class="workspace-sidebar" aria-label="竞技场工作台导航">
     <div class="sidebar-head"><a class="sidebar-brand" href="#/works">${LOGO}<span class="sidebar-copy"><b>偏见试验场</b><small>竞技场管理工作台</small></span></a>
       <button class="icon-btn sidebar-collapse" type="button" data-sidebar-collapse aria-label="${state.sidebarCollapsed ? '展开侧栏' : '折叠侧栏'}" aria-expanded="${!state.sidebarCollapsed}" title="${state.sidebarCollapsed ? '展开侧栏' : '折叠侧栏'}">${icon('panel')}</button></div>
-    <nav class="sidebar-nav">${ARENA_NAV.map(([group, items]) => `<div class="sidebar-group"><span class="sidebar-caption">${group}</span>${items.map(([id, label, glyph, href]) => `<a href="${href}" title="${label}" ${selected === id ? 'aria-current="page"' : ''}>${icon(glyph)}<span class="sidebar-label">${label}</span>${id === 'review' && state.works ? `<i>${state.works.filter((w) => w.status !== 'questioned' && !faceOn(w, 'arena')).length}</i>` : ''}</a>`).join('')}</div>`).join('')}</nav>
+    <nav class="sidebar-nav">${ARENA_NAV.map(([group, items]) => `<div class="sidebar-group"><span class="sidebar-caption">${group}</span>${items.map(([id, label, glyph, href]) => `<a href="${href}" title="${label}" ${selected === id ? 'aria-current="page"' : ''}>${icon(glyph)}<span class="sidebar-label">${label}</span>${id === 'review' ? `<i>${reviewCount('arena')}</i>` : ''}</a>`).join('')}</div>`).join('')}</nav>
     <div class="sidebar-foot"><span>共享数据 · 双系统门面</span><small>竞技场 / 管理后台</small></div>
   </aside>`;
 }
@@ -728,14 +733,36 @@ async function inboxUpload(files) {
   render({ soft: true });
 }
 
+function questionList() {
+  const rows = [...(state.adminQuestions ?? [])].sort((a, b) => {
+    const ap = a.moderation.status === 'pending', bp = b.moderation.status === 'pending';
+    return ap !== bp ? (ap ? -1 : 1) : ap ? Date.parse(a.createdAt) - Date.parse(b.createdAt) : Date.parse(b.createdAt) - Date.parse(a.createdAt);
+  });
+  if (!rows.length) return '<div class="board-empty"><p class="board-empty-title">没有社区题目</p><p>发起题目需要附上一份模型结果，由管理员在这里人工审核。</p></div>';
+  return `<div class="question-list">${rows.map((q) => `<article class="question-card" data-question="${esc(q.id)}">
+    <header><h3>${esc(q.title)}</h3><span class="badge">${esc(QUESTION_STATUS[q.moderation.status] ?? q.moderation.status)}</span></header>
+    <p class="work-meta">发布者 ${esc(q.ownerName)} · ${formatTime(q.createdAt)} · ${q.works} 份结果</p>
+    <p class="question-tags">${(q.tags ?? []).map((tag) => `<span class="badge">${esc(tag)}</span>`).join('')}</p>
+    <p class="review-text">${esc(q.summary)}</p>
+    <details class="question-prompt"><summary>完整提示词</summary><p class="review-text">${esc(q.prompt)}</p></details>
+    ${q.moderation.reason ? `<p class="work-reason">${esc(q.moderation.reason)}</p>` : ''}
+    <h4>示例结果</h4><ul class="question-samples">${(q.samples ?? []).map((w) => `<li><b>${esc(w.title)}</b><span>${esc(w.modelName)}${w.effort ? ` · ${esc(w.effort)}` : ''}</span>${statusBadge(w.status)}<span class="badge">${esc(CONTENT_STATUS[w.moderation?.status ?? 'legacy'] ?? w.moderation?.status)}</span>${w.scene ? `<a class="btn sm" href="${esc(w.scene)}" target="_blank" rel="noopener">预览 ${icon('arrow')}</a>` : ''}</li>`).join('') || '<li class="muted">没有作者本人上传的结果。</li>'}</ul>
+    <label class="field"><span class="field-label">审核理由（拒绝必填）</span><textarea class="input" data-question-reason rows="2" maxlength="500"></textarea></label>
+    <p class="form-error" data-question-error role="alert"></p>
+    <div class="actions"><button class="btn sm primary" data-question-decide="approved">通过</button><button class="btn sm danger ghost" data-question-decide="rejected">拒绝</button><button class="btn sm danger ghost" data-question-delete>删除</button></div>
+  </article>`).join('')}</div>`;
+}
+
 function reviewView(sub) {
   const tab = Object.hasOwn(REVIEW_TABS, sub ?? '') ? sub : 'pending';
   const works = state.works ?? [];
   const face = state.system;
-  const count = (kind) => works.filter((w) => kind === 'questioned' ? w.status === 'questioned' : kind === 'shown' ? faceOn(w, face) : !faceOn(w, face) && w.status !== 'questioned').length;
+  const count = (kind) => kind === 'questions' ? pendingQuestions() : works.filter((w) => kind === 'questioned' ? w.status === 'questioned' : kind === 'shown' ? faceOn(w, face) : !faceOn(w, face) && w.status !== 'questioned').length;
   let list;
   if (tab === 'log') {
     list = auditList(state.audit.length);
+  } else if (tab === 'questions') {
+    list = questionList();
   } else {
     const rows = works.filter((w) => tab === 'questioned' ? w.status === 'questioned' : tab === 'shown' ? faceOn(w, face) : !faceOn(w, face) && w.status !== 'questioned')
       .sort((a, b) => (tab === 'pending' ? Date.parse(a.addedAt) - Date.parse(b.addedAt) : Date.parse(b.addedAt) - Date.parse(a.addedAt)));
@@ -746,7 +773,7 @@ function reviewView(sub) {
   const lead = face === 'gallery'
     ? '决定哪些作品上展览馆展示；盲测的进出在竞技场系统里审，两边互不影响。'
     : '决定哪些作品进入盲测；展览馆的上下架在展览馆系统里审，两边互不影响。';
-  return `${pageHero('审核管理', '审核', lead, [['待审', count('pending')], ['已展示', count('shown')], ['存疑', count('questioned')]])}
+  return `${pageHero('审核管理', '审核', lead, [['待审作品', count('pending')], ['待审题目', pendingQuestions()], ['已展示', count('shown')], ['存疑', count('questioned')]])}
   <section class="block">
     <nav class="seg review-tabs" aria-label="审核分类">${Object.entries(REVIEW_TABS).map(([id, text]) => `<a href="#/review/${id}"${id === tab ? ' aria-current="page"' : ''}>${text}${id === 'log' ? '' : `<span>${count(id)}</span>`}</a>`).join('')}</nav>
     ${state.works === null ? skeleton(5) : list}
@@ -755,9 +782,12 @@ function reviewView(sub) {
 
 // -- common area: dashboard + unified upload -----------------------------------
 const auditList = (limit) => {
-  const titles = new Map((state.works ?? []).map((w) => [w.id, w.title]));
+  const titles = new Map([...(state.works ?? []), ...(state.adminQuestions ?? [])].map((w) => [w.id, w.title]));
   return state.audit.length
-    ? `<ol class="audit">${state.audit.slice(0, limit).map((row) => `<li><time>${formatTime(row.at)}</time><span class="audit-actor">${esc(row.actor)}</span><b>${esc(ACTIONS[row.action] ?? row.action)}</b><span class="audit-work">${row.work ? esc(titles.get(row.work) ?? `${row.work}（已删除）`) : ''}${row.detail ? ` · ${esc(row.detail)}` : ''}</span></li>`).join('')}</ol>`
+    ? `<ol class="audit">${state.audit.slice(0, limit).map((row) => {
+      const target = row.action.startsWith('question-') ? row.task : row.work;
+      return `<li><time>${formatTime(row.at)}</time><span class="audit-actor">${esc(row.actor)}</span><b>${esc(ACTIONS[row.action] ?? row.action)}</b><span class="audit-work">${target ? esc(titles.get(target) ?? `${target}（已删除）`) : ''}${row.detail ? ` · ${esc(row.detail)}` : ''}</span></li>`;
+    }).join('')}</ol>`
     : '<p class="muted">还没有记录。</p>';
 };
 
@@ -1202,6 +1232,8 @@ function render({ soft = false, world = false } = {}) {
     renderedContent = content;
   }
   document.title = `${route === 'guess' ? '模一把' : route === 'activity' ? '活动管理' : tabsForSystem().find((tab) => tab.id === route)?.label ?? '管理后台'} · 管理后台`;
+  const reviewEntry = $('.tabs a[href="#/review"] .badge, .sidebar-nav a[href="#/review"] i', app());
+  if (reviewEntry) reviewEntry.textContent = reviewCount(state.system);
   if (route === 'works') updateBulkSelection();
   syncThemeUi();
 }
@@ -1211,6 +1243,8 @@ async function boot() {
     const data = await api('bootstrap');
     state.user = data.user;
     state.questions = data.questions;
+    state.reviewCounts = data.review;
+    state.adminQuestions = null;
   } catch {
     state.user = null;
   }
@@ -1262,6 +1296,27 @@ document.addEventListener('click', async (e) => {
     return;
   }
   if (e.target.closest('[data-theme-toggle]')) { toggleTheme(); return; }
+  const questionAction = e.target.closest('[data-question-decide], [data-question-delete]');
+  if (questionAction) {
+    const card = questionAction.closest('[data-question]');
+    const q = state.adminQuestions?.find((item) => item.id === card.dataset.question);
+    if (!q) return;
+    const errorEl = $('[data-question-error]', card);
+    const reason = $('[data-question-reason]', card).value.trim();
+    const status = questionAction.dataset.questionDecide;
+    errorEl.textContent = '';
+    if (status === 'rejected' && !reason) { errorEl.textContent = '拒绝题目时请填写理由。'; $('[data-question-reason]', card).focus(); return; }
+    if (!status && !await confirmDialog({ title: '删除这道题目？', message: `「${q.title}」及其所有作品会从公开列表移除。有投票记录的题目不能删除，操作会记入审核记录。`, confirm: '删除题目', danger: true })) return;
+    const done = busy(questionAction, status ? '正在审核…' : '正在删除…');
+    try {
+      await api(`questions/${encodeURIComponent(q.id)}${status ? '/moderation' : ''}`, { method: status ? 'POST' : 'DELETE', ...(status ? { body: { status, reason } } : {}) });
+      state.questions = (await api('bootstrap')).questions;
+      toast(status ? `题目已${status === 'approved' ? '通过' : '拒绝'}` : '题目已删除');
+      await reload();
+    } catch (error) { errorEl.textContent = error.message; }
+    finally { done(); }
+    return;
+  }
   const inboxPick = e.target.closest('[data-inbox-pick]');
   if (inboxPick) { $('.inbox-panel [data-inbox-input]')?.click(); return; }
   const inboxReload = e.target.closest('[data-inbox-reload]');

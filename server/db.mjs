@@ -341,6 +341,12 @@ const MIGRATIONS = [
     const columns = new Set(db.prepare('PRAGMA table_info(works)').all().map((column) => column.name));
     if (!columns.has('prompt_variant')) db.exec("ALTER TABLE works ADD COLUMN prompt_variant TEXT NOT NULL DEFAULT ''");
   },
+  // Existing questions remain public; new submissions require human approval.
+  (db) => {
+    const columns = new Set(db.prepare('PRAGMA table_info(questions)').all().map((column) => column.name));
+    if (!columns.has('moderation')) db.exec(`ALTER TABLE questions ADD COLUMN moderation TEXT NOT NULL DEFAULT '{"status":"legacy"}'`);
+    if (!columns.has('deleted_at')) db.exec('ALTER TABLE questions ADD COLUMN deleted_at INTEGER');
+  },
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

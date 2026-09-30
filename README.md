@@ -114,8 +114,11 @@ npm start
 | POST | `/api/auth/email/verify` | 预校验验证码 |
 | POST | `/api/auth/email/bind` | 登录后绑定或更换邮箱 |
 | POST | `/api/auth/password/reset` | 凭邮箱验证码重置密码并撤销所有会话 |
-| POST | `/api/questions` | 发布社区题目，保留提示词、标签和允许的提交格式（需登录） |
-| POST | `/api/drafts?task=&name=&template=` | 上传 ZIP/HTML，检查后暂存为草稿；`template=static|vite` 可选，Vite 项目必须含构建产物（需登录，限流） |
+| POST | `/api/questions` | 用 `__new__` 草稿连同示例结果提交社区题目，等待人工审核（需登录） |
+| GET | `/api/admin/questions` | 全部未删除社区题目、人工审核状态及作者示例结果（仅管理员） |
+| POST | `/api/questions/:id/moderation` | 人工通过或拒绝社区题目；拒绝须填理由（仅管理员） |
+| DELETE | `/api/questions/:id` | 软删除题目及关联投稿；作者受归属与投票限制，管理员也不能删除有票题目 |
+| POST | `/api/drafts?task=&name=&template=` | 上传 ZIP/HTML，检查后暂存为草稿；新题目使用 `task=__new__`，仅能经 `/api/questions` 提交；`template=static|vite` 可选（需登录，限流） |
 | GET | `/api/drafts?task=` | 本人在该题最新的未过期草稿，供继续试加载（需登录） |
 | DELETE | `/api/drafts/:id` | 丢弃草稿（需登录） |
 | POST | `/api/works` | 由草稿正式投稿，入审核队列并排队截图（需登录） |

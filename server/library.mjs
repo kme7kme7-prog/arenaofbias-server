@@ -15,7 +15,6 @@ const workId = () => `up-${[...randomBytes(8)].map((byte) => (byte % 36).toStrin
 const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
 const clip = (value, max) => String(value ?? '').normalize('NFKC').trim().slice(0, max);
 const plainObject = (value) => value && typeof value === 'object' && !Array.isArray(value);
-const contentAllowed = (work) => Boolean(work && (work.curated || ['legacy', 'approved'].includes(work.moderation?.status)));
 const pendingModeration = () => ({ status: 'pending', revision: token('r'), at: Date.now() });
 const moderationText = (work) => JSON.stringify([work.title, work.summary, work.modelName, work.effort, work.note,
   work.harnessOther, work.harnessVersion, work.providerOther, ...GENERATION_FIELDS.map((key) => work[key])]);
@@ -56,6 +55,8 @@ function writeTree(target, files) {
 }
 
 export function createLibrary({ db, catalog, config, limits }) {
+  const contentAllowed = (work) => Boolean(work && (work.curated ||
+    (catalog.task(work.taskId) && ['legacy', 'approved'].includes(work.moderation?.status))));
   const dirs = { drafts: join(config.dataDir, 'drafts'), works: join(config.dataDir, 'works'), media: join(config.dataDir, 'media') };
   for (const dir of Object.values(dirs)) mkdirSync(dir, { recursive: true });
   const originOf = (key) => config.contentTemplate.replace('{token}', key);
@@ -77,6 +78,8 @@ export function createLibrary({ db, catalog, config, limits }) {
     LEFT JOIN audit review_audit ON review_audit.id = (
       SELECT id FROM audit WHERE work_id = works.id AND action IN ('verified', 'questioned', 'unverified') ORDER BY id DESC LIMIT 1)
     LEFT JOIN users reviewer ON reviewer.id = review_audit.actor_id`;
+  const liveWork = `works.deleted_at IS NULL AND NOT EXISTS (
+    SELECT 1 FROM questions WHERE questions.id = works.task_id AND questions.deleted_at IS NOT NULL)`;
   const q = {
     draft: db.prepare('SELECT * FROM drafts WHERE id = ?'),
     draftByToken: db.prepare('SELECT * FROM drafts WHERE token = ? AND expires_at > ?'),
@@ -86,23 +89,19 @@ export function createLibrary({ db, catalog, config, limits }) {
     insertDraft: db.prepare(`INSERT INTO drafts (id, owner_id, task_id, token, source_name, root, entry, file_count, bytes, digest, checks, created_at, expires_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
     deleteDraft: db.prepare('DELETE FROM drafts WHERE id = ?'),
-    work: db.prepare(`${WORK} WHERE works.id = ? AND works.deleted_at IS NULL`),
+    work: db.prepare(`${WORK} WHERE works.id = ? AND ${liveWork}`),
     storedWork: db.prepare('SELECT id, cover FROM works WHERE id = ?'),
-    workByKey: db.prepare(`${WORK} WHERE works.content_key = ? AND works.deleted_at IS NULL`),
+    workByKey: db.prepare(`${WORK} WHERE works.content_key = ? AND ${liveWork}`),
     workByDigest: db.prepare('SELECT id, title, task_id FROM works WHERE digest = ? AND deleted_at IS NULL LIMIT 1'),
-    works: db.prepare(`${WORK} WHERE works.deleted_at IS NULL ORDER BY works.created_at DESC`),
-    worksOfTask: db.prepare(`${WORK} WHERE works.task_id = ? AND works.deleted_at IS NULL`),
-    worksOfOwner: db.prepare(`${WORK} WHERE works.owner_id = ? AND works.deleted_at IS NULL ORDER BY works.created_at DESC`),
+    works: db.prepare(`${WORK} WHERE ${liveWork} ORDER BY works.created_at DESC`),
+    worksOfTask: db.prepare(`${WORK} WHERE works.task_id = ? AND ${liveWork}`),
+    worksOfOwner: db.prepare(`${WORK} WHERE works.owner_id = ? AND ${liveWork} ORDER BY works.created_at DESC`),
     pendingOf: db.prepare("SELECT COUNT(*) AS n FROM works WHERE owner_id = ? AND status = 'unverified' AND deleted_at IS NULL"),
     insertWork: db.prepare(`INSERT INTO works (id, task_id, owner_id, title, summary, model_id, model_other, effort,
       harness_id, harness_other, harness_version, provider_id, provider_other, note, content_key,
       source_name, root, entry, file_count, bytes, digest, checks, trial, cover, created_at, updated_at,
       model_version, generation_mode, human_intervention, generated_on, evidence_url, moderation, prompt_variant, show_gallery, show_arena)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`),
-    deleteWork: db.prepare('DELETE FROM works WHERE id = ?'),
-    deleteSubmitAudit: db.prepare("DELETE FROM audit WHERE action = 'submit' AND work_id = ?"),
-    restoreDraft: db.prepare(`INSERT INTO drafts (id, owner_id, task_id, token, source_name, root, entry, file_count, bytes, digest, checks, created_at, expires_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
     review: db.prepare(`UPDATE works SET status = ?, status_reason = ?, model_id = ?, model_other = ?, effort = ?,
       harness_id = ?, harness_other = ?, harness_version = ?, provider_id = ?, provider_other = ?,
       model_version = ?, generation_mode = ?, human_intervention = ?, generated_on = ?, evidence_url = ?,
@@ -542,7 +541,7 @@ export function createLibrary({ db, catalog, config, limits }) {
 
     // ---- drafts: stage → trial load → submit --------------------------------------------
     createDraft(user, taskId, filename, buffer, template = null) {
-      const task = catalog.task(taskId);
+      const task = taskId === '__new__' ? { acceptsUploads: true, templates: ['static', 'vite'] } : catalog.task(taskId, user);
       if (!task) fail(404, '题目不存在');
       if (!task.acceptsUploads) fail(409, '这道题的提示词原文尚未公开，暂不接受上传');
       purgeDrafts();
@@ -553,6 +552,7 @@ export function createLibrary({ db, catalog, config, limits }) {
       const format = selected ?? (inspected.files.has('package.json') && inspected.root ? 'vite' : 'static');
       if (!allowed.includes(format)) fail(400, '该题不支持此提交格式');
       if (format === 'vite' && (!inspected.files.has('package.json') || !inspected.root)) fail(400, 'Vite 项目请包含 package.json 和构建后的 dist/ 目录');
+      inspected.checks.find((check) => check.id === 'format').template = format;
       const curatedTwin = catalog.duplicateOf(inspected.entryDigest);
       const uploadTwin = q.workByDigest.get(inspected.digest);
       if (curatedTwin) inspected.checks.push({ id: 'duplicate', state: 'warn', label: '重复检测', detail: `入口页面与馆藏作品「${curatedTwin.title}」（${curatedTwin.modelName}）完全相同，核验时会重点比对。` });
@@ -590,9 +590,11 @@ export function createLibrary({ db, catalog, config, limits }) {
       q.deleteDraft.run(id);
     },
 
-    submit(user, body) {
+    submit(user, body, { createQuestion = null } = {}) {
       const draft = q.draft.get(String(body.draftId ?? ''));
       if (!draft || draft.owner_id !== user.id || draft.expires_at <= Date.now()) fail(404, '试加载已过期，请重新选择文件');
+      if (createQuestion ? draft.task_id !== '__new__' : draft.task_id === '__new__') fail(400, '新题目草稿只能用于发起题目');
+      if (!createQuestion && !catalog.task(draft.task_id, user)) fail(404, '题目不存在');
       if (body.confirmed !== true) fail(400, '请先确认作品在试加载中运行正常');
       const title = clip(body.title, 40);
       if (!title) fail(400, '请填写作品标题');
@@ -622,33 +624,33 @@ export function createLibrary({ db, catalog, config, limits }) {
         catch (error) { rmSync(media, { recursive: true, force: true }); throw error; }
       }
       let moved = false;
-      let committed = false;
+      let taskId = draft.task_id;
       try {
         renameSync(staged, stored);
         moved = true;
         transaction(db, () => {
-          q.insertWork.run(id, draft.task_id, user.id, title, clip(body.summary, 200), who.modelId, who.modelId ? '' : who.modelName,
+          if (createQuestion) {
+            const question = createQuestion();
+            const format = JSON.parse(draft.checks).find((check) => check.id === 'format')?.template
+              ?? (draft.root && existsSync(join(stored, 'package.json')) ? 'vite' : 'static');
+            if (!question.templates.includes(format)) fail(400, '该题不支持此提交格式');
+            taskId = question.id;
+          }
+          q.insertWork.run(id, taskId, user.id, title, clip(body.summary, 200), who.modelId, who.modelId ? '' : who.modelName,
             effortOf(body.effort), source.harnessId, source.harnessOther, source.harnessVersion, source.providerId,
             source.providerOther, noteWithVendor(clip(body.note, 1000), who.modelId, body.vendor), token('w'), draft.source_name, draft.root, draft.entry, draft.file_count,
             draft.bytes, draft.digest, draft.checks, JSON.stringify(sanitizeTrial(body.trial)), coverName, now, now,
             ...GENERATION_FIELDS.map((key) => generation[key]), JSON.stringify(config.moderation?.enabled ? pendingModeration() : { status: 'legacy' }), promptVariant);
           q.deleteDraft.run(draft.id);
-          q.audit.run(now, user.id, user.name, 'submit', draft.task_id, id, `${who.modelName}${effortOf(body.effort) ? ` · ${effortOf(body.effort)}` : ''}`);
+          q.audit.run(now, user.id, user.name, 'submit', taskId, id, `${who.modelName}${effortOf(body.effort) ? ` · ${effortOf(body.effort)}` : ''}`);
+          if (cover) renameSync(pendingCover, join(media, coverName));
         });
-        committed = true;
-        if (cover) renameSync(pendingCover, join(media, coverName));
       } catch (error) {
-        if (committed) transaction(db, () => {
-          q.deleteSubmitAudit.run(id);
-          q.deleteWork.run(id);
-          q.restoreDraft.run(draft.id, draft.owner_id, draft.task_id, draft.token, draft.source_name, draft.root,
-            draft.entry, draft.file_count, draft.bytes, draft.digest, draft.checks, draft.created_at, draft.expires_at);
-        });
         if (moved) renameSync(stored, staged);
         if (cover) rmSync(media, { recursive: true, force: true });
         throw error;
       }
-      return upload(draft.task_id, id);
+      return upload(taskId, id);
     },
 
     markCurated(admin, work, curatedId) {

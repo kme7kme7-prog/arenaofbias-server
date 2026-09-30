@@ -1,7 +1,8 @@
-// Community questions follow the original publish flow and live alongside the curated
-// archive. Prompt text is stored verbatim (apart from outer whitespace), at version 1.
+// Community questions need human approval before joining the public catalog.
+// Prompt text is stored verbatim (apart from outer whitespace), at version 1.
 import { randomBytes } from 'node:crypto';
 import { avatarOf } from './auth.mjs';
+import { transaction } from './db.mjs';
 import { fail } from './http.mjs';
 
 const tagName = (value) => String(value).normalize('NFKC').trim().replace(/^#+/, '').trim();
@@ -29,22 +30,42 @@ export function normalizeTags(input, existing = []) {
 
 export function createQuestions(db) {
   const select = `SELECT questions.*, COALESCE(NULLIF(users.nickname, ''), users.name) AS owner_name, users.avatar AS owner_avatar FROM questions JOIN users ON users.id = questions.owner_id`;
-  const all = db.prepare(`${select} ORDER BY questions.created_at DESC, questions.id`);
-  const one = db.prepare(`${select} WHERE questions.id = ?`);
-  const owned = db.prepare(`${select} WHERE questions.owner_id = ? ORDER BY questions.created_at DESC, questions.id`);
-  const insert = db.prepare(`INSERT INTO questions (id, owner_id, title, summary, prompt, tags, templates, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
-  const fromRow = (row) => row ? {
+  const publicRow = (row) => ['legacy', 'approved'].includes(JSON.parse(row.moderation).status);
+  const all = db.prepare(`${select} WHERE questions.deleted_at IS NULL ORDER BY questions.created_at DESC, questions.id`);
+  const one = db.prepare(`${select} WHERE questions.id = ? AND questions.deleted_at IS NULL`);
+  const owned = db.prepare(`${select} WHERE questions.owner_id = ? AND questions.deleted_at IS NULL ORDER BY questions.created_at DESC, questions.id`);
+  const pending = db.prepare(`SELECT COUNT(*) AS n FROM questions WHERE owner_id = ? AND deleted_at IS NULL AND json_extract(moderation, '$.status') = 'pending'`);
+  const insert = db.prepare(`INSERT INTO questions (id, owner_id, title, summary, prompt, tags, templates, created_at, moderation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const audit = db.prepare('INSERT INTO audit (at, actor_id, actor_name, action, task_id, work_id, detail) VALUES (?, ?, ?, ?, ?, ?, ?)');
+  const works = db.prepare('SELECT id, owner_id, task_id FROM works WHERE task_id = ? AND deleted_at IS NULL ORDER BY created_at, id');
+  const votes = db.prepare('SELECT COUNT(*) AS n FROM votes WHERE task_id = ?');
+  const deleteWork = db.prepare('UPDATE works SET deleted_at = ?, updated_at = ? WHERE id = ?');
+  const deleteQuestion = db.prepare('UPDATE questions SET deleted_at = ? WHERE id = ?');
+  const setModeration = db.prepare('UPDATE questions SET moderation = ? WHERE id = ?');
+  const fromRow = (row, privateView = false) => row ? {
     id: row.id, title: row.title, summary: row.summary, prompt: row.prompt,
     tags: JSON.parse(row.tags), templates: JSON.parse(row.templates),
     owner: row.owner_name, ownerAvatar: avatarOf({ id: row.owner_id, avatar: row.owner_avatar }), version: row.version, community: true,
     createdAt: new Date(row.created_at).toISOString(),
     date: new Date(row.created_at).toISOString().slice(0, 10),
+    ...(privateView ? { moderation: JSON.parse(row.moderation) } : {}),
   } : null;
 
   return {
-    all: () => all.all().map(fromRow),
-    get: (id) => fromRow(one.get(id)),
-    byOwner: (id) => owned.all(id).map(fromRow),
+    all: () => all.all().filter(publicRow).map((row) => fromRow(row)),
+    get(id, viewer = null) {
+      const row = one.get(id);
+      const privileged = row && (viewer?.id === row.owner_id || viewer?.role === 'admin');
+      return row && (publicRow(row) || privileged) ? fromRow(row, privileged) : null;
+    },
+    byOwner: (id) => owned.all(id).map((row) => fromRow(row, true)),
+    pendingCount: () => all.all().filter((row) => JSON.parse(row.moderation).status === 'pending').length,
+    adminAll() {
+      return all.all().map((row) => {
+        const samples = works.all(row.id).map((work) => ({ id: work.id, taskId: work.task_id }));
+        return { ...fromRow(row, true), ownerId: row.owner_id, ownerName: row.owner_name, works: samples.length, samples };
+      });
+    },
     create(user, body, existingTags = []) {
       const title = required(body.title, '题目标题', 70);
       const summary = required(body.summary, '测试简述', 400);
@@ -52,9 +73,46 @@ export function createQuestions(db) {
       const tags = normalizeTags(body.tags, existingTags);
       const templates = Array.isArray(body.templates) ? [...new Set(body.templates)] : ['static', 'vite'];
       if (!templates.length || templates.some((type) => !['static', 'vite'].includes(type))) fail(400, '请至少选择一种有效的提交格式');
+      if (pending.get(user.id).n >= 3) fail(429, '你已有 3 道题目在等待审核');
       const id = `q-${randomBytes(8).toString('hex')}`;
-      insert.run(id, user.id, title, summary, prompt, JSON.stringify(tags), JSON.stringify(templates), Date.now());
-      return fromRow(one.get(id));
+      const now = Date.now();
+      insert.run(id, user.id, title, summary, prompt, JSON.stringify(tags), JSON.stringify(templates), now, JSON.stringify({ status: 'pending', at: now }));
+      audit.run(now, user.id, user.name, 'question-create', id, null, title);
+      return fromRow(one.get(id), true);
+    },
+    review(actor, id, body) {
+      if (actor.role !== 'admin') fail(403, '仅管理员可以操作');
+      if (!one.get(id)) fail(404, '题目不存在');
+      if (!['approved', 'rejected'].includes(body.status)) fail(400, '题目审核结果无效');
+      if (body.reason != null && typeof body.reason !== 'string') fail(400, '审核理由格式不正确');
+      const reason = (body.reason ?? '').trim();
+      if (reason.length > 500) fail(400, '审核理由最多 500 字');
+      if (body.status === 'rejected' && !reason) fail(400, '请填写拒绝理由');
+      const moderation = { status: body.status, source: 'human', reason, reviewer: actor.name, at: Date.now() };
+      transaction(db, () => {
+        setModeration.run(JSON.stringify(moderation), id);
+        audit.run(moderation.at, actor.id, actor.name, 'question-review', id, null, JSON.stringify(moderation));
+      });
+      return fromRow(one.get(id), true);
+    },
+    remove(actor, id) {
+      const row = one.get(id);
+      if (!row) fail(404, '题目不存在');
+      if (actor.id !== row.owner_id && actor.role !== 'admin') fail(403, '只能删除自己发起的题目');
+      const items = works.all(id);
+      if (actor.role === 'admin' && votes.get(id).n > 0) fail(409, '这道题目已有投票记录，不能删除');
+      if (actor.role !== 'admin' && publicRow(row) && (votes.get(id).n > 0 || items.some((work) => work.owner_id !== actor.id))) fail(409, '已经有人作答的题目不能删除');
+      const removed = actor.role === 'admin' ? items : items.filter((work) => work.owner_id === actor.id);
+      const now = Date.now();
+      transaction(db, () => {
+        for (const work of removed) {
+          deleteWork.run(now, now, work.id);
+          audit.run(now, actor.id, actor.name, 'delete', id, work.id, '随题目删除');
+        }
+        deleteQuestion.run(now, id);
+        audit.run(now, actor.id, actor.name, 'question-delete', id, null, row.title);
+      });
+      return { ok: true, deletedWorks: removed.map((work) => work.id) };
     },
   };
 }

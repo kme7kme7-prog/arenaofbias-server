@@ -76,7 +76,7 @@
 | guess result | 20 次 / 分钟 | 客户端 IP | `POST /api/guess/result`，另受 guess/matches 桶约束 |
 | export | 2000 次 / 分钟 | 导出令牌 | 导出元数据及文件；另有每 IP 10000 次 / 分钟兜底 |
 
-`TRUST_PROXY=1` 时 IP 取 `X-Forwarded-For` 首段。限流为单机内存计数，进程重启即清零，多实例部署不共享。
+`TRUST_PROXY=1` 仅适用于本机单层反代：连接来源必须为环回地址，IP 取 `X-Forwarded-For` 最后一项有效 IP；其他连接或无效头回退到连接 IP。边缘代理必须覆盖原头或在尾部追加真实客户端 IP，多层代理部署须另行明确解析链路。限流为单机内存计数，进程重启即清零，多实例部署不共享。
 
 ---
 
@@ -369,6 +369,8 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 成功 `200`：`{ "work": <作品公开视图> }`。作品初始状态 `unverified`，并自动排队无头截图（1440×900 与 390×844 两档，写回 `captures`；截图能力可用性见 `bootstrap.site.capture`）。
 
+截图浏览器只允许当前作品源的文档，以及该源和 HTTPS CDN 白名单内的 GET/HEAD 资源。请求逐跳检查重定向，跨源导航、WebSocket、Service Worker 及未经过路由的浏览器连接被阻断；截图环境须预配置 Playwright ≥ 1.48 和 Chrome。
+
 错误：`401`；`404 试加载已过期`；`400`（未确认 / 缺标题 / 缺 Harness 与 tool / 模型不存在或缺失 / 来源字段无效 / 封面无效）；`413 封面图片不能超过 3 MB`；`429 你已有 5 件作品在等待核验`（`pendingPerUser`）。
 
 **`DELETE /api/works/:task/:id`** —— 删除投稿
@@ -562,6 +564,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 | `w…` | 投稿提交（`contentKey`） | 作品目录 | 随作品存续 | 无 | `private, max-age=600` |
 
 - 仅接受 GET / HEAD，其余方法 `405`。
+- 畸形 URL 返回 `400` 错误页，不使共享进程退出；请求期间消失的资源返回 `404`。
 - 令牌无效：`404` 错误页「作品地址无效」；令牌存在但目标不可用（草稿过期、对局结束、作品删除、对局侧作品被下架）：`410` 错误页「作品已不可用」。
 - 全部响应施加沙盒 CSP：`sandbox allow-scripts allow-same-origin allow-forms allow-modals allow-popups …`，外部资源仅放行 `bootstrap.site.cdn` 白名单内的公共 CDN；`frame-ancestors` 限定为 `SITE_ORIGINS`（即作品只能被站点 iframe 嵌入）；`Referrer-Policy: no-referrer`。
 - 注入脚本作为 HTML 首个 `<script>` 插入，仅作用于 `d` / `m` 令牌；`w` 令牌作品**原样伺服**。
@@ -569,7 +572,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 ### 3.13 站点静态文件
 
-`GET /*`（非 `/api/`、非 `/media/`）伺服 `DIST_DIR` 内文件：目录映射 `index.html`，不存在返回纯文本 `404 Not found`。`index.html` 附加站点 CSP 与 `Referrer-Policy: same-origin`。这条路由可分发数据包文件，但后端仓库不包含画廊入口页面，也不自带 `dist/`；独立画廊从自己的静态部署读取馆藏数据与作品目录（见第 4 节）。
+`GET /*`（非 `/api/`、非 `/media/`、非 `/admin/`）分发 `DIST_DIR` 内的数据包资源。HTML/HTM（含目录映射的 `index.html`）及不存在的文件返回纯文本 `404 Not found`；其余响应使用 `Content-Security-Policy: sandbox; default-src 'none'` 与 `Referrer-Policy: no-referrer`，防止 SVG/XML 在 API 同源执行脚本。可信管理端 `/admin/` 保留自身站点 CSP。作品 HTML 从独立内容源打开；独立画廊从自己的静态部署读取馆藏数据与作品目录（见第 4 节）。
 
 ### 3.14 `POST /api/questions` —— 发布社区题目
 
@@ -765,7 +768,7 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 - 已发布数据包目录包含 `.datapack-source.json`，形如 `{ "source": "github", "repo": "owner/arenaofbias-data", "commit": "<40 位数据包 SHA>" }`。`data.json.sourceCommit` 是打包前的源码 SHA，与数据包 SHA 分别校验格式，不要求相等；缺少来源文件或来源标为 `local` 时视为 `unversioned/dev`，即使 `data.json` 自称某 SHA 也不作为可信 pin。旧数据包缺少 `schemaVersion` 按版本 1 读取；不支持其它 schemaVersion。
 - `DIST_DIR` 可直接指向不可变版本目录，或为指向它的 symlink/junction。切换指针到另一版本目录后，服务无需重启；缓存以真实目录和来源 SHA 为版本标识，不依赖 mtime。无来源文件的开发目录按 `data.json` 内容摘要检测变化。
 - 对局保存其原版本真实目录，作品页面及资源在切换或重启后仍从该目录读取；历史票的计分身份自足于数据库，不要求永久保留旧包。清理旧目录时应保留当前目录，以及 `matches.expires_at` 尚未超过宽限期所引用的 `matches.datapack_root`。目录已被清理的对局，令牌不再提供内容，投票返回 `410`；服务也会释放该目录的内存快照。
-- 后端可从 `DIST_DIR` 静态分发馆藏作品目录，不走 API；独立画廊则从自身静态部署加载馆藏资源。
+- 后端站点端口可从 `DIST_DIR` 分发 JSON、图片等资源，但不提供作品 HTML；馆藏盲评使用内容端口的独立令牌源，独立画廊则从自身静态部署加载馆藏资源与页面。
 - 版本目录一经发布必须保持内容不可变；直接覆盖仍被旧对局引用的同一目录不能保证旧资源可用。
 
 ### 4.3 消费方注意点

@@ -34,6 +34,8 @@ cp -a "$conf" "$conf.bak-$(date -u +%Y%m%dT%H%M%SZ)"
 | `api.arenaofbias.icu.conf` | API 和管理端 | 代理 `127.0.0.1:5273` |
 | `w.arenaofbias.icu.conf` | `*.w.arenaofbias.icu` 作品沙盒 | 代理 `127.0.0.1:5180` |
 
+`TRUST_PROXY=1` 只信任本机单层反代的转发 IP。API 代理应覆盖客户端传入的头，例如 `proxy_set_header X-Forwarded-For $remote_addr;`，并设置 `proxy_set_header X-Forwarded-Proto $scheme;`、`proxy_set_header Host $host;`；后端继续只监听环回。若前面还有 CDN/负载均衡，先核实 Nginx 的真实 IP 信任范围，不直接把多层头当作客户端 IP。部署本轮代码后，API 数据包静态入口不再提供 HTML/HTM；画廊静态站照常提供自己的作品页面，后端作品从独立内容源打开。
+
 旧 `/www/wwwroot/arenaofbias` 目录和 PM2 的 `arena` 进程已经退役，不能再使用旧 Show1 `deploy:vps` 路径。画廊现用 JS/CSS/JSON/HTML `Cache-Control: no-cache`；图片和字体 `expires 1d`。旧画廊配置只匹配 JS/CSS/WebP/PNG/JPG/SVG/WOFF2 并设 `immutable`，`index.html` 从未设为 `immutable`；修改前的备份在同目录 `gallery.arenaofbias.icu.conf.bak-<时间戳>`。**不带内容哈希的文件不能设置 `immutable`**。画廊构建为全部主站模块与样式生成版本 URL，页面仅包含一个合并 Three.js 映射的 import map；须整体发布该次 HTML 和资产，才能绕开旧的无版本 URL 缓存。
 
 ## 静态站差异部署（Show1 / Gallery）

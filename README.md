@@ -63,11 +63,11 @@ npm start
 | `SITE_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | 可信前端 origin（逗号分隔，含协议与端口），同时允许凭据 CORS、API 写操作和 iframe 嵌入作品 |
 | `ADMIN_USERNAMES` | 空 | 始终持有管理员角色的用户名（逗号分隔） |
 | `CONTENT_CDN_ALLOWLIST` | `cdn.jsdelivr.net,unpkg.com,cdnjs.cloudflare.com,esm.sh,fonts.googleapis.com,fonts.gstatic.com` | 作品允许加载脚本/样式/字体/数据的公共 CDN 白名单 |
-| `CAPTURE` | 开（`0` 关闭） | 投稿作品的无头截图（Playwright + 本地 Chrome） |
+| `CAPTURE` | 开（`0` 关闭） | 投稿作品的无头截图（预配置 Playwright ≥ 1.48 + 本地 Chrome）；文档只访问当前作品源，资源只访问作品源和 HTTPS CDN 白名单，逐跳检查重定向，禁用 Service Worker / WebSocket |
 | `CAPTURE_BROWSER` | `chrome` | 截图所用浏览器通道 |
 | `COOKIE_SECURE` | 关（`1` 开启） | session cookie 改名 `__Host-sp_session`，加 Secure 标记，Path=/ 且不带 Domain；本地未开启时仍为 `sp_session` |
 | `COOKIE_SAME_SITE` | `Lax` | `Lax` / `Strict` / `None`；跨站 HTTPS 部署用 `None`，并必须开启 `COOKIE_SECURE=1` |
-| `TRUST_PROXY` | 关（`1` 开启） | 信任反向代理的客户端 IP 头 |
+| `TRUST_PROXY` | 关（`1` 开启） | 仅信任本机单层反代的 `X-Forwarded-For` 最后一项有效 IP；非本机连接或无效头使用连接 IP。边缘代理须覆盖原头或追加真实客户端 IP |
 | `SERVER_VERSION` | Git HEAD 或 `dev` | 启动时确定的服务端版本，返回在 bootstrap 中 |
 | `SMTP_HOST` / `SMTP_PORT` | 未配置 / `465` | 验证码 SMTP 主机与端口（465 隐式 TLS；其它端口默认 STARTTLS） |
 | `SMTP_USER` / `SMTP_PASS` | 未配置 | SMTP 登录身份和密码；缺少任一项时不能发验证码 |
@@ -110,7 +110,7 @@ npm start
 | POST | `/api/arena/matches/:id/vote` | 对一场对战投票（限流） |
 | GET | `/api/leaderboard?task=&by=` | 排行榜，`by=config|model`，`task` 可选 |
 | GET | `/media/up-xxxxxxxx/(cover.png|cover.jpg|cover.webp|first.jpg|mobile.jpg)` | 投稿的封面/截图（CSP: default-src 'none'） |
-| GET | `/*` | `DIST_DIR` 内的静态数据包文件；不承诺提供画廊入口页面 |
+| GET | `/*` | `DIST_DIR` 内的静态数据包资源；HTML/HTM（含目录入口）返回 404，其余响应使用无脚本 CSP sandbox；作品只从内容源运行 |
 
 内容端口（默认 5180）：按 `CONTENT_ORIGIN_TEMPLATE` 的 `{token}` 子域伺服单个作品目录，施加沙盒 CSP 与 CDN 白名单（见 `server/content.mjs`）。
 

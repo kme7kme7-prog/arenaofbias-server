@@ -50,7 +50,7 @@ export function createContentHandler({ config, library, arena, siteOrigins }) {
     `frame-ancestors ${siteOrigins.join(' ')}`,
   ].join('; ');
 
-  return (req, res) => {
+  function serve(req, res) {
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       res.writeHead(405, { Allow: 'GET, HEAD' });
       return res.end();
@@ -91,5 +91,17 @@ export function createContentHandler({ config, library, arena, siteOrigins }) {
       return res.end(req.method === 'HEAD' ? undefined : body);
     }
     return streamFile(req, res, found, headers);
+  }
+
+  return async (req, res) => {
+    try {
+      return await serve(req, res);
+    } catch (error) {
+      if (res.headersSent) return res.destroy();
+      if (error.code === 'ERR_INVALID_URL') return errorPage(res, 400, '作品地址无效', '请求路径无法解析。');
+      if (['ENOENT', 'ENOTDIR'].includes(error.code)) return errorPage(res, 404, '找不到文件', '作品资源已不可用。');
+      console.error('Content request failed:', error);
+      return errorPage(res, 500, '作品暂时不可用', '请稍后再试。');
+    }
   };
 }

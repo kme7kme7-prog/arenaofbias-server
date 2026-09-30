@@ -2,6 +2,7 @@
 // cookies, a pattern router, rate limits and safe static file responses.
 import { createReadStream, statSync } from 'node:fs';
 import { extname, resolve, sep } from 'node:path';
+import { isIP } from 'node:net';
 import { pipeline } from 'node:stream/promises';
 
 export class HttpError extends Error {
@@ -76,8 +77,12 @@ export function uniqueCookie(header = '', name) {
 }
 
 export function clientIp(req, trustProxy) {
-  const forwarded = trustProxy ? String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim() : '';
-  return forwarded || req.socket.remoteAddress || 'unknown';
+  const remote = req.socket.remoteAddress || 'unknown';
+  // TRUST_PROXY covers one local reverse proxy. It appends the actual client IP;
+  // any prefix supplied by the client must not become a rate-limit identity.
+  const localProxy = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remote);
+  const forwarded = trustProxy && localProxy ? String(req.headers['x-forwarded-for'] ?? '').split(',').at(-1).trim() : '';
+  return isIP(forwarded) ? forwarded : remote;
 }
 
 // Trust complete origins, including their scheme and port. Proxy headers affect the

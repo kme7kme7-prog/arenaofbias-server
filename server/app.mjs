@@ -1,5 +1,5 @@
 // Wires the platform together: the site (static build + API) and the content handler.
-import { join, resolve } from 'node:path';
+import { extname, join, resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createArena } from './arena.mjs';
@@ -443,12 +443,14 @@ export function createPlatform({ config, limits }) {
       return streamFile(req, res, found, { 'Cache-Control': 'no-cache', ...(shell ? { 'Content-Security-Policy': siteCsp, 'Referrer-Policy': 'same-origin' } : {}) });
     }
     const found = resolveInside(config.dist, pathname);
-    if (!found) {
+    // The package contains executable works, not a trusted site shell. HTML may
+    // only run on the content origin; SVG/XML remain usable as inert resources.
+    if (!found || ['.html', '.htm'].includes(extname(found.file).toLowerCase())) {
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
       return res.end('Not found');
     }
-    const shell = found.file === join(config.dist, 'index.html');
-    return streamFile(req, res, found, { 'Cache-Control': 'no-cache', ...(shell ? { 'Content-Security-Policy': siteCsp, 'Referrer-Policy': 'same-origin' } : {}) });
+    return streamFile(req, res, found, { 'Cache-Control': 'no-cache',
+      'Content-Security-Policy': "sandbox; default-src 'none'", 'Referrer-Policy': 'no-referrer' });
   }
 
   async function handleSite(req, res) {

@@ -1,5 +1,14 @@
 # HANDOFF.md · 当前状态
 
+## 2026-09-30 · security-fixes（本地修复，未推送、未部署）
+
+- 修复上一轮 SR-01～SR-04：API 数据包静态路由拒绝 HTML/HTM（含目录入口），其他资源附加无脚本 CSP sandbox；作品请求异常转为 400/404/500，避免退出共享进程；截图文档限当前作品源、资源限该源及 HTTPS CDN，逐跳验证重定向，禁用 Service Worker/WebSocket，浏览器其他连接经拒绝代理阻断；代理限流只使用本机单层反代尾部的有效 IP。
+- 截图保持两档尺寸，补 Windows 默认 HTTP `*.localhost` 的 Node 取资源兼容，保留原 Host 与浏览器 origin；预配置 Playwright 最低版本为 1.48。无 npm 依赖、迁移或数据包改动；管理员页面、JSON 与图片仍可用。README、接口契约和部署注意事项同步。
+- 验证：`npm run check` 57 文件、0 错；`npm test` 122/122。新增 4 项定向回归覆盖静态同源边界、畸形 URL 后进程存活、伪造 XFF 前缀的真实登录限流、截图资源/重定向路由。实际 Chrome / Playwright 1.62.1 完成桌面和手机截图，直接请求、WebSocket 与跨源重定向的测试端口收到 0 次请求；默认作品 Host 与 HTTPS CDN 脚本在两档均正常。
+- 所有 HTTP 验证使用隔离测试服务/临时库；未连接生产、未操作现有业务库或 Nginx。截图证据为本地生成物 `output/audit/security-capture-20260930/`，不提交。详情见 `docs/archive/2026-09-30-security-fixes-wsnxxxs.md`。
+- 本轮沿用用户完成修改后提交一条英文 commit 的授权，GitHub 身份已核实为 `wsnxxxs`；不推送或上线。本轮临时测试服务已关闭，测试创建的临时库由测试清理。
+- 用户要求删除上一轮目录 `C:\Users\Ryan\AppData\Local\Temp\arenaofbias-security-review-lAEFO8`；本轮按明确路径执行原生 PowerShell 删除再次被自动审批以 `blocked by policy` 拒绝，目录仍在，未改用其他方式绕过。
+
 ## 2026-09-30 · schema-cleanup-release（已获推送与上线授权）
 
 - 用户复核 `0c7d94f`、`8c5a8eb` 和 data `ef10cdd` 后明确授权按顺序上线；采用普通 main 快进推送。data `ef10cdd9ab28dfe52a60a5a072a3cd10ae422ab3` 已发布不可变数据包 `2cb2a5b265e8bda8c8069a4b498f1046d825acee`，本轮 server pin 更新到该包。后端修复已推送，GitHub CI 118/118 通过。

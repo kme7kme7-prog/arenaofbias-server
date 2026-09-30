@@ -1,5 +1,14 @@
 # HANDOFF.md · 当前状态
 
+## 2026-09-30 · luna-flex-release（已部署，自动审核待配置密钥）
+
+- 用户明确授权先部署。server `d69919eedb0731c1edeb834763a4c018d69a8568` 与配套 gallery `50c0893c07806bb05c746dca5e6d71c41260b0a0` 已普通快进推送到各仓 main 并上线；包含内容审核所需的先前安全修复。线上后端跟踪文件逐字节匹配 d69919e，服务 active；本轮收尾文档提交不重新部署，公网版本继续指向实际代码 d69919e。
+- 线上库从 v18 升至 v19。迁移演练与停写后的正式迁移均确认原 16 张表的所有原列/行保持一致；quick_check 与外键检查通过，267 件作品、27 用户、622 张票保留，旧作品按 legacy 保持原发布状态。
+- server 数据包保持 `2cb2a5b265e8bda8c8069a4b498f1046d825acee`，gallery pin 同步到该线上包，catalogDigest 一致。前端从已推送提交的 Git archive 构建，1183 个文件完整 SHA256 清单校验通过，实际更新 7 个文件、删除 0 个；未夹带未上线的海报迁移。
+- 截图运行环境独立安装在 `/opt/arenaofbias-capture`，Playwright 1.63.0 与 Chrome 154 的实际生产截图模块完成桌面/手机本地夹具验证；服务源码仍只用 Node 内置模块。`/etc/systemd/system/arenaofbias-server.service.d/moderation.conf` 已准备模型、官方接口和 Chrome 配置；当前 `CONTENT_MODERATION=0`、`CAPTURE=0`，未配置 MODERATION_API_KEY，bootstrap 的 contentModeration=false，尚未自动审查。
+- 验证：Windows 与 VPS 后端 check 59 文件 0 错、测试 128/128；server GitHub CI 36681917167 成功。前端 check 36 文件 0 错、测试 11/11、固定数据包构建及配套 integration smoke 通过；intake 83 件 0 错/3 条既有 warning。公网 bootstrap、管理页、画廊、Show1 首页、榜单均 200；浏览器桌面/390px 手机页面正常，无控制台错误或手机横向溢出。前端 GitHub workflow 原已手动停用，本轮未启用，验证在本地执行。
+- 回滚材料、停写备份与验收证据在 `/root/arenaofbias-luna-release-20260930/`；旧画廊在 `/www/wwwroot/gallery.prev`，更早副本保留为 gallery.prev.before-luna-20260930。回滚后端须同时恢复备份 v18 库与旧 26da6d6 代码，不能只退代码。原工作区他人改动保留。实际付费 API、生产投稿与登录人工审核未执行；密钥配置后再启用并验证一次真实投稿。详细记录见 `docs/archive/2026-09-30-luna-flex-release-wsnxxxs.md`。
+
 ## 2026-09-30 · luna-flex-moderation（本地实现，未推送、未部署）
 
 - 用户选择 GPT-6 Luna Flex 自动审查文字/图片，疑似交人工；默认 OpenAI 官方 Responses API，可用环境变量配置网关。不新增 npm 依赖。`CONTENT_MODERATION=1` 启用，密钥只在服务器配置；要求已有 Playwright/Chrome 和 `CAPTURE=1`。无密钥、截图不足、容量错误、拒答、无效响应或超时转人工，不切换标准档。

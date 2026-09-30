@@ -69,3 +69,7 @@ export const limits = {
 // Effort levels offered on the upload form; curated works keep their own labels.
 export const EFFORTS = ['Low', 'Medium', 'High', 'XHigh', 'Max'];
 export const EMOJIS = ['👍', '❤️', '🔥', '🤯', '👏', '👀'];
+// Avatar ids; each frontend ships an image per id. Append new ones only: an account that has
+// not picked one gets a default hashed over the first 16, so that set must never change.
+export const AVATARS = ['teapot', 'bunny', 'cube', 'cursor', 'ghost', 'donut', 'brackets', 'frame',
+  'seal', 'moon', 'robot', 'cat', 'plant', 'bulb', 'dice', 'planet'];

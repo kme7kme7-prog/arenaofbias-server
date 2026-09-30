@@ -778,7 +778,8 @@ describe('auth dual shape', () => {
     const guest = await call('guest', 'GET', '/api/auth/me');
     assert.deepEqual(guest.data, { user: null });
     const me = await call('u1', 'GET', '/api/auth/me');
-    assert.deepEqual(Object.keys(me.data.user).sort(), ['email', 'id', 'role', 'username']);
+    assert.deepEqual(Object.keys(me.data.user).sort(), ['avatar', 'email', 'id', 'role', 'username']);
+    assert.equal(me.data.user.avatar, registered.data.user.avatar, 'the session read carries the same avatar');
     assert.equal(me.data.user.username, 'show1user');
     assert.equal(me.data.user.role, null, 'members read role null in the old shape');
     assert.equal(me.data.user.email, null);

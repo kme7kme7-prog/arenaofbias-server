@@ -331,6 +331,11 @@ const MIGRATIONS = [
     const columns = new Set(db.prepare('PRAGMA table_info(works)').all().map((column) => column.name));
     if (!columns.has('moderation')) db.exec(`ALTER TABLE works ADD COLUMN moderation TEXT NOT NULL DEFAULT '{"status":"legacy"}'`);
   },
+  // An avatar picked from the library; '' keeps the default derived from the user id.
+  (db) => {
+    const columns = new Set(db.prepare('PRAGMA table_info(users)').all().map((column) => column.name));
+    if (!columns.has('avatar')) db.exec("ALTER TABLE users ADD COLUMN avatar TEXT NOT NULL DEFAULT ''");
+  },
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

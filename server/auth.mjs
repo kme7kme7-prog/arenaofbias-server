@@ -1,6 +1,7 @@
 // Accounts and sessions. Passwords use scrypt; the session token lives only in an
 // HttpOnly cookie and the database keeps its SHA-256.
 import { createHash, randomBytes, scrypt, scryptSync, timingSafeEqual } from 'node:crypto';
+import { AVATARS } from './config.mjs';
 import { fail, HttpError, uniqueCookie } from './http.mjs';
 
 const COOKIE = 'sp_session';
@@ -10,6 +11,14 @@ const DUMMY_SALT = randomBytes(16).toString('hex');
 export const newId = (bytes = 12) => randomBytes(bytes).toString('hex');
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 export const nameKey = (name) => name.normalize('NFKC').trim().toLowerCase();
+
+// The picked avatar, or a stable default: FNV-1a of the user id over the frozen first 16.
+export function avatarOf(user) {
+  if (AVATARS.includes(user.avatar)) return user.avatar;
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < user.id.length; i++) hash = Math.imul(hash ^ user.id.charCodeAt(i), 0x01000193) >>> 0;
+  return AVATARS[hash % 16];
+}
 
 export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', sessionTtl }) {
   if (!['Lax', 'Strict', 'None'].includes(cookieSameSite)) throw new Error('COOKIE_SAME_SITE must be Lax, Strict or None');
@@ -22,6 +31,7 @@ export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', 
     upgradeHash: db.prepare('UPDATE users SET salt = ?, hash = ?, hash_params = NULL WHERE id = ?'),
     setRole: db.prepare('UPDATE users SET role = ? WHERE id = ?'),
     setNickname: db.prepare('UPDATE users SET nickname = ? WHERE id = ?'),
+    setAvatar: db.prepare('UPDATE users SET avatar = ? WHERE id = ?'),
     setEmail: db.prepare('UPDATE users SET email = ?, email_verified_at = ? WHERE id = ?'),
     resetPassword: db.prepare('UPDATE users SET salt = ?, hash = ?, hash_params = NULL WHERE id = ?'),
     deleteUserSessions: db.prepare('DELETE FROM sessions WHERE user_id = ?'),
@@ -59,13 +69,19 @@ export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', 
   }
 
   return {
-    public: (user) => (user ? { id: user.id, name: user.name, nickname: user.nickname || user.name, role: user.role } : null),
+    public: (user) => (user ? { id: user.id, name: user.name, nickname: user.nickname || user.name, avatar: avatarOf(user), role: user.role } : null),
 
+    // Either field may be sent alone; a body with neither still asks for a nickname.
     updateProfile(user, body) {
-      if (typeof body.nickname !== 'string') fail(400, '请填写昵称');
-      const nickname = body.nickname.normalize('NFKC').trim();
-      if (!nickname || nickname.length > 24 || /[\u0000-\u001f\u007f]/.test(nickname)) fail(400, '昵称为 1–24 个字，不能包含换行或控制字符');
-      q.setNickname.run(nickname, user.id);
+      if (body.avatar !== undefined && !AVATARS.includes(body.avatar)) fail(400, '请从头像库中选择头像');
+      let nickname = null;
+      if (body.nickname !== undefined || body.avatar === undefined) {
+        if (typeof body.nickname !== 'string') fail(400, '请填写昵称');
+        nickname = body.nickname.normalize('NFKC').trim();
+        if (!nickname || nickname.length > 24 || /[\u0000-\u001f\u007f]/.test(nickname)) fail(400, '昵称为 1–24 个字，不能包含换行或控制字符');
+      }
+      if (body.avatar !== undefined) q.setAvatar.run(body.avatar, user.id);
+      if (nickname !== null) q.setNickname.run(nickname, user.id);
       return q.userById.get(user.id);
     },
 

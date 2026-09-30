@@ -3,13 +3,13 @@ import { extname, join, relative, resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createArena } from './arena.mjs';
-import { createAuth } from './auth.mjs';
+import { avatarOf, createAuth } from './auth.mjs';
 import { createEmailAuth } from './auth-email.mjs';
 import { createCapturer } from './capture.mjs';
 import { createModerator } from './moderation.mjs';
 import { createCatalog } from './catalog.mjs';
 import { createComments } from './comments.mjs';
-import { EFFORTS, EMOJIS } from './config.mjs';
+import { AVATARS, EFFORTS, EMOJIS } from './config.mjs';
 import { createContentHandler } from './content.mjs';
 import { openDatabase } from './db.mjs';
 import {
@@ -106,6 +106,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         contentModeration: moderator.enabled,
         efforts: EFFORTS,
         emojis: EMOJIS,
+        avatars: AVATARS,
         limits: { uploadBytes: limits.uploadBytes, coverBytes: limits.coverBytes, pendingPerUser: limits.pendingPerUser, provisionalGames: limits.provisionalGames },
       },
       works: publicList(uploads.filter((work) => !work.curatedAs && library.visibleTo(work, 'show2')), user),
@@ -144,7 +145,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     return { user: compatUser(user) };
   });
   router.on('GET', '/api/auth/me', (ctx) => ({
-    user: ctx.user ? { id: ctx.user.id, username: ctx.user.name, role: ctx.user.role === 'admin' ? 'admin' : null, email: ctx.user.email ?? null } : null,
+    user: ctx.user ? { id: ctx.user.id, username: ctx.user.name, role: ctx.user.role === 'admin' ? 'admin' : null, email: ctx.user.email ?? null, avatar: avatarOf(ctx.user) } : null,
   }));
   router.on('GET', '/api/auth/turnstile', () => ({ siteKey: turnstileEnabled() ? turnstileSiteKey() : null }));
   router.on('POST', '/api/auth/email/send', async (ctx) => emailAuth.send(await readJson(ctx.req), ctx.user, ctx.ip));

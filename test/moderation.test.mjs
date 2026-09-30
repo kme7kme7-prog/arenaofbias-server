@@ -233,9 +233,9 @@ test('missing credentials and missing screenshots route to review without callin
 
 test('v19 is idempotent and keeps its legacy publication default', () => {
   const db = openDatabase(':memory:');
-  const step = MIGRATIONS.at(-1);
+  const step = MIGRATIONS[18];
   step(db);
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 19);
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, MIGRATIONS.length);
   assert.equal(db.prepare("SELECT dflt_value FROM pragma_table_info('works') WHERE name = 'moderation'").get().dflt_value, "'{\"status\":\"legacy\"}'");
   assert.equal(db.prepare('PRAGMA quick_check').get().quick_check, 'ok');
   db.close();

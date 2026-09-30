@@ -774,6 +774,24 @@ describe('platform lifecycle', () => {
     assert.equal(login.data.user.nickname, '河畔观测员');
   });
 
+  test('an avatar defaults from the user id and can be picked from the library alone', async () => {
+    const boot = (await call('alice', 'GET', '/api/bootstrap')).data;
+    const { avatars } = boot.site;
+    assert.ok(avatars.slice(0, 16).includes(boot.user.avatar));
+    assert.equal((await call('alice', 'GET', '/api/bootstrap')).data.user.avatar, boot.user.avatar);
+    for (const avatar of ['', 'unknown', null, 3]) {
+      assert.equal((await call('alice', 'PATCH', '/api/me', { avatar, nickname: '不该保存' })).status, 400);
+    }
+    const picked = avatars.find((id) => id !== boot.user.avatar);
+    const changed = await call('alice', 'PATCH', '/api/me', { avatar: picked });
+    assert.equal(changed.status, 200);
+    assert.equal(changed.data.user.avatar, picked);
+    assert.notEqual(changed.data.user.nickname, '不该保存');
+    assert.ok((await call('bob', 'GET', '/api/bootstrap')).data.questions
+      .filter((question) => question.community && question.owner === changed.data.user.nickname)
+      .every((question) => question.ownerAvatar === picked));
+  });
+
   test('personal activity counts participation while received reactions exclude self and deleted works', async () => {
     assert.equal((await call('charlie', 'POST', '/api/auth/register', { name: 'charlie', password: 'correct horse' })).status, 200);
     const empty = (await call('charlie', 'GET', '/api/me')).data;

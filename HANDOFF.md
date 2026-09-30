@@ -2,6 +2,12 @@
 
 接手先读 [AGENTS.md](AGENTS.md)。运行与仓库边界见 [README](README.md)，接口见 [API 契约](docs/api-contract.md)，发布与回滚见 [部署文档](docs/deploy.md)。本页只保留当前状态、后续事项与历史入口；归档中的“未推送/未部署/待审阅”是各轮结束时的状态，不是当前待办。
 
+## 进行中：头像库（2026-09-30，未提交、未部署）
+
+- 工作区改动：`users.avatar` 以 v20 幂等迁移追加（`server/db.mjs` 末尾）；头像 id 白名单 `AVATARS` 在 `server/config.mjs`，经 bootstrap `site.avatars` 下发，图片由各前端自带。未选头像的账号按用户 id 的 FNV-1a 在前 16 个里取默认值（`avatarOf`，`server/auth.mjs`）；前 16 个的顺序不能改，新头像只追加。
+- 接口：`auth.public` 增加 `avatar`（Show1 兼容用户同样带上）；`PATCH /api/me` 可单独提交 `avatar` 或 `nickname`，两者都不带仍要求昵称；社区题目 DTO 增加 `ownerAvatar`。评论作者暂未带头像，Show1 需要时再加。Show1 读取会话用的 `/api/auth/me` 也返回 `avatar`（show1compat 用例同步）。`docs/api-contract.md` 尚未同步。邮箱仍为自愿绑定：强制注册绑定的尝试已按用户决定撤回，没有留下迁移。
+- 验证：最近一次全量 test 145/145（含同工作区另一位 agent 的 fold 改动）；此前 check 68 文件、test 142/142（新增头像用例，v19 幂等用例改为按下标取 v19）。本地起服务配合 Gallery 副本做了无头 Chrome 验收：换头像后顶栏与个人中心更新，无 console error。未部署，生产库仍为 v19。
+
 ## 仓库与实现状态（2026-09-30）
 
 - 本轮整理基线为 `main@1b55bb0`；fetch 后与 `origin/main` 一致，开放 PR 为零。远端只保留 main；主 agent 已删除完全合入的 show1-vote-processing 及只剩历史文档补记的 codex/shared-question-intake，本地占用中的 worktree 保留。

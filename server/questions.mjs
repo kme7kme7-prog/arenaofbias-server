@@ -1,6 +1,7 @@
 // Community questions follow the original publish flow and live alongside the curated
 // archive. Prompt text is stored verbatim (apart from outer whitespace), at version 1.
 import { randomBytes } from 'node:crypto';
+import { avatarOf } from './auth.mjs';
 import { fail } from './http.mjs';
 
 const tagName = (value) => String(value).normalize('NFKC').trim().replace(/^#+/, '').trim();
@@ -27,7 +28,7 @@ export function normalizeTags(input, existing = []) {
 }
 
 export function createQuestions(db) {
-  const select = `SELECT questions.*, COALESCE(NULLIF(users.nickname, ''), users.name) AS owner_name FROM questions JOIN users ON users.id = questions.owner_id`;
+  const select = `SELECT questions.*, COALESCE(NULLIF(users.nickname, ''), users.name) AS owner_name, users.avatar AS owner_avatar FROM questions JOIN users ON users.id = questions.owner_id`;
   const all = db.prepare(`${select} ORDER BY questions.created_at DESC, questions.id`);
   const one = db.prepare(`${select} WHERE questions.id = ?`);
   const owned = db.prepare(`${select} WHERE questions.owner_id = ? ORDER BY questions.created_at DESC, questions.id`);
@@ -35,7 +36,7 @@ export function createQuestions(db) {
   const fromRow = (row) => row ? {
     id: row.id, title: row.title, summary: row.summary, prompt: row.prompt,
     tags: JSON.parse(row.tags), templates: JSON.parse(row.templates),
-    owner: row.owner_name, version: row.version, community: true,
+    owner: row.owner_name, ownerAvatar: avatarOf({ id: row.owner_id, avatar: row.owner_avatar }), version: row.version, community: true,
     createdAt: new Date(row.created_at).toISOString(),
     date: new Date(row.created_at).toISOString().slice(0, 10),
   } : null;

@@ -70,7 +70,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     return !want || (want === 'unset' ? !id : id === want);
   });
 
-  async function countedVotes(taskId, snapshot, keyOf, filters = null) {
+  async function countedVotes(taskId, snapshot, keyOf, filters = null, taskIds = null) {
     const works = new Map();
     const lookup = (task, id) => {
       const key = `${task}/${id}`;
@@ -84,7 +84,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     const rankedKeys = new Set();
     let scanned = 0;
     for (const row of taskId ? q.votesOfTask.all(taskId) : q.votes.all()) {
-      if (!row.a_identity || !row.b_identity) continue;
+      if (!row.a_identity || !row.b_identity || (taskIds && !taskIds.has(row.task_id))) continue;
       const a = lookup(row.task_id, row.a_work);
       const b = lookup(row.task_id, row.b_work);
       if (a && b) {
@@ -125,18 +125,29 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     });
   }
 
-  function leaderboard({ task = null, by = 'config', snapshot = null, harness = null, provider = null } = {}) {
+  // `category` (the datapack's task category, e.g. 建模) scores only that category's tasks.
+  // The unscoped board also reports each entry's rank inside every category.
+  function leaderboard({ task = null, category = null, by = 'config', snapshot = null, harness = null, provider = null } = {}) {
     const archive = snapshot ?? catalog.snapshot();
     const filters = harness || provider ? { harness, provider } : null;
-    const cacheKey = `${archive.version}|${task ?? '*'}|${by}${filters ? `|${harness ?? ''}|${provider ?? ''}` : ''}`;
+    const cacheKey = `${archive.version}|${task ?? '*'}|${category ?? '*'}|${by}${filters ? `|${harness ?? ''}|${provider ?? ''}` : ''}`;
     if (cache.has(cacheKey)) return cache.get(cacheKey);
     const activeCache = cache;
     const pending = Promise.resolve().then(async () => {
       const keyOf = (work) => by === 'model' ? (work.modelKey ?? modelKey(work)) : (work.configKey ?? entityKey(work));
-      const { votes, rankedEntryCount } = await countedVotes(task, archive, keyOf, filters);
+      const scoped = category ? catalog.tasks().filter((t) => t.category === category) : null;
+      const { votes, rankedEntryCount } = await countedVotes(task, archive, keyOf, filters, scoped && new Set(scoped.map((t) => t.id)));
       const ranked = await rankOffThread(votes, by, rankedEntryCount);
-      const pool = (task ? library.eligible(task, archive) : catalog.tasks().flatMap((t) => library.eligible(t.id, archive)))
+      const pool = (task ? library.eligible(task, archive) : (scoped ?? catalog.tasks()).flatMap((t) => library.eligible(t.id, archive)))
         .filter((work) => !filters || provenanceMatch(filters, work));
+      let standings;
+      if (!task && !category) {
+        standings = {};
+        for (const name of new Set(catalog.tasks().map((t) => t.category).filter(Boolean))) {
+          const board = await leaderboard({ category: name, by, snapshot, harness, provider });
+          if (board.rows.length) standings[name] = Object.fromEntries(board.rows.map((row) => [row.key, row.rank]));
+        }
+      }
       const works = new Map();
       for (const work of pool) {
         const key = keyOf(work);
@@ -146,7 +157,9 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       const rankedKeys = new Set(ranked.map((row) => row.key));
       const result = {
         task,
+        category,
         by,
+        ...(standings ? { standings } : {}),
         ...(filters ? { filters } : {}),
         totals: { votes: votes.length, voters: new Set(votes.map((vote) => vote.userId)).size, entries: ranked.length },
         rows: ranked.map((row, i) => ({

@@ -527,7 +527,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 **认证**：无。**限流**：无。
 
-查询参数：`task=<题目id>`（缺省为全部题目合计）；`by=config`（默认，按「模型+档位」）或 `by=model`（按模型跨档位合计）；可选的 `harness`、`provider`（注册表 ID，或 `unset` 表示未登记）。
+查询参数：`task=<题目id>`（缺省为全部题目合计）；`category=<题型>`（数据包题目的 `category`，如 `建模`、`文学`、`静态网页`；只统计该题型的题目，不能与 `task` 同用）；`by=config`（默认，按「模型+档位」）或 `by=model`（按模型跨档位合计）；可选的 `harness`、`provider`（注册表 ID，或 `unset` 表示未登记）。
 
 来源筛选只缩小计入的票和作品池，**不改变计分维度**（仍是「模型+档位」或模型）：
 - 一张票只有两侧的身份快照（有更正时取更正）都满足全部筛选条件时才计入；只满足一侧的是跨来源比较，不计入。
@@ -535,9 +535,12 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 - `unranked` 与 `works` 计数按作品当前的来源字段筛选。
 - 带筛选时响应多一个 `"filters": { "harness": …, "provider": … }`；不带筛选时响应形状、计票范围与缓存键都与不支持筛选时完全相同。
 
+题型：响应回显 `category`（未指定为 `null`）。既无 `task` 也无 `category` 的综合榜多一个 `standings`：`{ [题型]: { [key]: 该题型内名次 } }`，只列已有排名的题型，沿用同一计分单位与来源筛选。社区题目没有题型，只计入综合榜。
+
 ```json
 {
-  "task": null, "by": "config",
+  "task": null, "category": null, "by": "config",
+  "standings": { "建模": { "grok-4.6|high": 2 } },
   "totals": { "votes": 128, "voters": 17, "entries": 33 },
   "rows": [
     { "rank": 1, "key": "grok-4.6|high", "model": "grok-4.6", "modelName": "Grok 4.6", "vendor": "xAI",
@@ -555,7 +558,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 - `unranked`：池内存在但尚无计入对局的配置，按模型名字典序排列。
 - 排行在票数或作品状态变化时失效重建，并以数据包版本参与缓存键。
 
-错误：`404 题目不存在`（`task` 参数无效）；`400 invalid_query`（`harness` 或 `provider` 既不是当前注册表 ID 也不是 `unset`）。
+错误：`404 题目不存在`（`task` 参数无效）；`400 invalid_query`（`harness` 或 `provider` 既不是当前注册表 ID 也不是 `unset`；`category` 不是当前题目的题型，或与 `task` 同时出现）。
 
 ### 3.11 `/media/*` —— 投稿媒体
 

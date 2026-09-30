@@ -444,7 +444,7 @@ describe('platform lifecycle', () => {
       title: 'test',
       models: [{ id: 'm-a', name: 'Model A', vendor: 'VA' }, { id: 'm-b', name: 'Model B', vendor: 'VB' }],
       tasks: [
-        { id: 'one', title: 'One', tags: ['Three.js'], promptPending: false, results: results.map(([id, model, effort]) => ({ id, model, effort, title: id.toUpperCase(), summary: '', scene: `results/one/${id}/`, captures: {}, gallery: [] })) },
+        { id: 'one', title: 'One', category: '建模', tags: ['Three.js'], promptPending: false, results: results.map(([id, model, effort]) => ({ id, model, effort, title: id.toUpperCase(), summary: '', scene: `results/one/${id}/`, captures: {}, gallery: [] })) },
         { id: 'closed', title: 'Closed', promptPending: true, results: [] },
       ],
     }));
@@ -558,6 +558,18 @@ describe('platform lifecycle', () => {
     const board = await call('alice', 'GET', '/api/leaderboard?task=one');
     assert.equal(board.data.totals.votes, 1);
     assert.equal(board.data.rows.length, 2);
+  });
+
+  test('the leaderboard scores one task category and the combined board ranks entries per category', async () => {
+    const scoped = (await call('alice', 'GET', '/api/leaderboard?category=建模')).data;
+    assert.equal(scoped.category, '建模');
+    assert.equal(scoped.totals.votes, 1);
+    const combined = (await call('alice', 'GET', '/api/leaderboard')).data;
+    assert.equal(combined.category, null);
+    assert.deepEqual(combined.standings, { 建模: Object.fromEntries(scoped.rows.map((row) => [row.key, row.rank])) });
+    for (const query of ['category=文学', 'category=建模&task=one']) {
+      assert.equal((await call('alice', 'GET', `/api/leaderboard?${query}`)).status, 400);
+    }
   });
 
   test('review moves uploads into the arena; questioned works stop counting and interacting', async () => {

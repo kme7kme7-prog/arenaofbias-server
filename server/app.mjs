@@ -425,12 +425,14 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   router.on('GET', '/api/leaderboard', (ctx) => {
     const task = ctx.url.searchParams.get('task') || null;
     if (task && !catalog.task(task)) fail(404, '题目不存在');
+    const category = ctx.url.searchParams.get('category') || null;
+    if (category && (task || !catalog.tasks().some((t) => t.category === category))) fail(400, '题型筛选无效', 'invalid_query');
     const filters = Object.fromEntries(['harness', 'provider'].map((field) => {
       const value = ctx.url.searchParams.get(field) || null;
       if (value && value !== 'unset' && !catalog[field](value)) fail(400, `${field === 'harness' ? 'Harness' : '服务商'}筛选无效`, 'invalid_query');
       return [field, value];
     }));
-    return arena.leaderboard({ task, by: ctx.url.searchParams.get('by') === 'model' ? 'model' : 'config', ...filters });
+    return arena.leaderboard({ task, category, by: ctx.url.searchParams.get('by') === 'model' ? 'model' : 'config', ...filters });
   });
 
   // Show1 娱乐面兼容层（fusion/show1-adapter/DESIGN.md）：快照 + live 合并的同形状端点。

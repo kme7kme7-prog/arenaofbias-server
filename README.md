@@ -128,7 +128,7 @@ npm start
 | GET | `/api/review` | 全部投稿与审计日志（仅管理员） |
 | POST | `/api/arena/matches` | 创建一场盲投对战（限流） |
 | POST | `/api/arena/matches/:id/vote` | 对一场对战投票（限流） |
-| GET | `/api/leaderboard?task=&by=` | 排行榜，`by=config|model`，`task` 可选 |
+| GET | `/api/leaderboard?task=&category=&by=` | 排行榜，`by=config|model`，`task` 或题型 `category` 可选 |
 | GET | `/api/show1/leaderboard?scope=entertainment&category=all` | 主站 Elo 榜单、比较统计、六维画像；`scope=entertainment|formal`，`category=all|text|web` |
 | GET | `/media/up-xxxxxxxx/(cover.png|cover.jpg|cover.webp|first.jpg|mobile.jpg)` | 投稿的封面/截图（CSP: default-src 'none'） |
 | GET | `/*` | `DIST_DIR` 内的静态数据包资源；HTML/HTM（含目录入口）返回 404，其余响应使用无脚本 CSP sandbox；作品只从内容源运行 |

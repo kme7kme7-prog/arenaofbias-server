@@ -75,6 +75,16 @@
 | matches | 60 次 / 分钟 | 用户 ID（未登录时为 IP） | 创建对战 |
 | guess result | 20 次 / 分钟 | 客户端 IP | `POST /api/guess/result`，另受 guess/matches 桶约束 |
 | export | 2000 次 / 分钟 | 导出令牌 | 导出元数据及文件；另有每 IP 10000 次 / 分钟兜底 |
+| read API | 180 次 / 分钟 | 客户端 IP | `/api/*` GET/HEAD（收录导出除外），跨端点、登录状态共享 |
+| read catalog | 30 次 / 分钟 | 客户端 IP | bootstrap、show1/works、works、prompts、votes、ratings、leaderboard、guess/today 的 GET/HEAD，共用一桶，参数不影响计数 |
+| read files | 1200 次 / 分钟 | 客户端 IP | 后端静态文件与所有作品源 GET/HEAD，共用一桶 |
+| read pages | 60 次 / 分钟 | 客户端 IP | 所有作品源 HTML/HTM，共用一桶；HTML 同时计入 read files |
+
+读取额度可通过 `READ_API_PER_MIN`、`READ_CATALOG_PER_MIN`、`READ_FILES_PER_MIN`、`READ_PAGES_PER_MIN` 调整（最小 1）。超限响应带 `Retry-After` 秒数；可信 Origin 的 API 错误仍保留 CORS 许可。HEAD 计数与 GET 相同。OPTIONS 和写 API 不占读取额度，继续沿用自己的来源校验和写限流。
+
+`/api/curate/export/:token` 及其 `/file` 由 export 桶单独计数，不受新的通用 API/边缘资源桶限制，保持批量收录所需额度。导出令牌的校验、失效及每 IP 兜底不变。
+
+API 域静态 `/data.json`（含等价编码路径）仅管理员登录后返回；其他访问返回 404。`.datapack-source.json` 对所有人返回 404。管理员页面无需改请求方式；画廊使用自己部署的展示目录。Show1 的逐票接口仍用于客户端榜单重放，数据形状及评分不变。VPS 的两个静态前端需安装 Nginx 读取限制，详见 [部署说明](deploy.md#公开读取与反爬配置)。
 
 `TRUST_PROXY=1` 仅适用于本机单层反代：连接来源必须为环回地址，IP 取 `X-Forwarded-For` 最后一项有效 IP；其他连接或无效头回退到连接 IP。边缘代理必须覆盖原头或在尾部追加真实客户端 IP，多层代理部署须另行明确解析链路。限流为单机内存计数，进程重启即清零，多实例部署不共享。
 

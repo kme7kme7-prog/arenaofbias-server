@@ -2,7 +2,8 @@
 // draft is reached through its own host name ({token}.<content domain>), so every page gets
 // a separate origin and can reach neither the site's session nor another work.
 import { readFileSync } from 'node:fs';
-import { resolveInside, streamFile } from './http.mjs';
+import { HttpError, resolveInside, streamFile } from './http.mjs';
+import { createReadGuard } from './read-guard.mjs';
 
 // Scripts the content server adds to a page: the trial-load probe for drafts, the panel
 // fold for blind-comparison frames. Stored works are otherwise served as uploaded.
@@ -11,11 +12,11 @@ const SCRIPTS = {
   match: { path: '/__sp_fold.js', body: readFileSync(new URL('./fold.js', import.meta.url)) },
 };
 
-function errorPage(res, status, title, detail) {
+function errorPage(res, status, title, detail, headers = {}) {
   const body = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title>`
     + '<style>html{color-scheme:light dark}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#121211;color:#ecebe6;font:15px/1.7 system-ui,sans-serif;text-align:center}b{display:block;font:600 22px "Songti SC","Noto Serif SC",serif;letter-spacing:.04em}span{color:#8d8a82;font-size:13px}</style>'
     + `<main><b>${title}</b><span>${detail}</span></main>`;
-  res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+  res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...headers });
   res.end(body);
 }
 
@@ -31,7 +32,7 @@ function withScript(buffer, path) {
   return Buffer.from(out, 'latin1');
 }
 
-export function createContentHandler({ config, library, arena, siteOrigins }) {
+export function createContentHandler({ config, library, arena, siteOrigins, readGuard = createReadGuard(config) }) {
   const cdn = config.cdn.map((host) => `https://${host}`).join(' ');
   const policy = [
     'sandbox allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-pointer-lock allow-downloads',
@@ -55,6 +56,7 @@ export function createContentHandler({ config, library, arena, siteOrigins }) {
       res.writeHead(405, { Allow: 'GET, HEAD' });
       return res.end();
     }
+    readGuard.file(req);
     const key = String(req.headers.host ?? '').split('.')[0].toLowerCase();
     if (!/^[wmd][0-9a-f]{32}$/.test(key)) return errorPage(res, 404, '作品地址无效', '请从展厅重新打开作品。');
 
@@ -85,6 +87,7 @@ export function createContentHandler({ config, library, arena, siteOrigins }) {
     }
     const found = resolveInside(target.dir, pathname === '/' ? `/${target.entry}` : pathname);
     if (!found) return errorPage(res, 404, '找不到文件', pathname.slice(0, 120));
+    if (/\.html?$/i.test(found.file)) readGuard.page(req);
     if (inject && /\.html?$/i.test(found.file)) {
       const body = withScript(readFileSync(found.file), inject.path);
       res.writeHead(200, { ...headers, 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': body.length, 'X-Content-Type-Options': 'nosniff' });
@@ -98,6 +101,8 @@ export function createContentHandler({ config, library, arena, siteOrigins }) {
       return await serve(req, res);
     } catch (error) {
       if (res.headersSent) return res.destroy();
+      if (error instanceof HttpError) return errorPage(res, error.status, error.message, '请稍后从展厅重新打开作品。',
+        error.retryAfter ? { 'Retry-After': String(error.retryAfter) } : {});
       if (error.code === 'ERR_INVALID_URL') return errorPage(res, 400, '作品地址无效', '请求路径无法解析。');
       if (['ENOENT', 'ENOTDIR'].includes(error.code)) return errorPage(res, 404, '找不到文件', '作品资源已不可用。');
       console.error('Content request failed:', error);

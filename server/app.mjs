@@ -1,5 +1,5 @@
 // Wires the platform together: the site (static build + API) and the content handler.
-import { extname, join, resolve } from 'node:path';
+import { extname, join, relative, resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createArena } from './arena.mjs';
@@ -23,6 +23,7 @@ import { createProfile } from './profile.mjs';
 import { registerShow1Compat } from './show1compat.mjs';
 import { registerShow1Guess } from './show1/guess.mjs';
 import { turnstileEnabled, turnstileSiteKey } from './turnstile.mjs';
+import { createReadGuard } from './read-guard.mjs';
 
 export function createPlatform({ config, limits }) {
   const serverVersion = process.env.SERVER_VERSION || (() => {
@@ -46,6 +47,7 @@ export function createPlatform({ config, limits }) {
   catalog.onChange(curator.takeover);
   const comments = createComments(db, library);
   const capturer = createCapturer({ config, library });
+  const readGuard = createReadGuard(config);
   const limit = {
     auth: rateLimit(60e3, 10, '尝试次数太多，请一分钟后再试'),
     write: rateLimit(60e3, 120),
@@ -412,6 +414,7 @@ export function createPlatform({ config, limits }) {
   registerShow1Guess(router, { db, limit });
 
   function serveSite(req, res, pathname) {
+    readGuard.file(req);
     const media = /^\/media\/(up-[a-z0-9]{8})\/(cover\.(?:png|jpg|webp)|first\.jpg|mobile\.jpg)$/.exec(pathname);
     if (pathname.startsWith('/media/')) {
       const found = media && resolveInside(library.mediaDir, `/${media[1]}/${media[2]}`);
@@ -443,6 +446,13 @@ export function createPlatform({ config, limits }) {
       return streamFile(req, res, found, { 'Cache-Control': 'no-cache', ...(shell ? { 'Content-Security-Policy': siteCsp, 'Referrer-Policy': 'same-origin' } : {}) });
     }
     const found = resolveInside(config.dist, pathname);
+    const packagePath = found && relative(config.dist, found.file).replaceAll('\\', '/').toLowerCase();
+    // Only the admin UI needs the complete registry. Public frontends carry their
+    // own display catalog; never expose package origin metadata on this host.
+    if (packagePath === '.datapack-source.json'
+      || (packagePath === 'data.json' && auth.userFrom(req)?.role !== 'admin')) {
+      return sendJson(res, 404, { error: '文件不存在' });
+    }
     // The package contains executable works, not a trusted site shell. HTML may
     // only run on the content origin; SVG/XML remain usable as inert resources.
     if (!found || ['.html', '.htm'].includes(extname(found.file).toLowerCase())) {
@@ -483,6 +493,7 @@ export function createPlatform({ config, limits }) {
         if (req.method !== 'GET' && req.method !== 'HEAD') fail(405, '不支持这个操作');
         return serveSite(req, res, url.pathname);
       }
+      if (req.method === 'GET' || req.method === 'HEAD') readGuard.api(req, url.pathname);
       const route = router.match(req.method, url.pathname);
       if (!route) fail(404, '接口不存在');
       if (route.methodNotAllowed) fail(405, '不支持这个操作');
@@ -505,7 +516,7 @@ export function createPlatform({ config, limits }) {
     library,
     arena,
     handleSite,
-    handleContent: createContentHandler({ config, library, arena, siteOrigins: config.siteOrigins }),
+    handleContent: createContentHandler({ config, library, arena, siteOrigins: config.siteOrigins, readGuard }),
     async close() {
       await emailAuth.drain();
       await capturer.close();

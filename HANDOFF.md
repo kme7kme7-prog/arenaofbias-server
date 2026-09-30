@@ -1,5 +1,14 @@
 # HANDOFF.md · 当前状态
 
+## 2026-09-30 · anti-scraping（本地完成，未推送、未部署）
+
+- 为两个前端的共享后端增加按真实 IP 的 GET/HEAD 读取额度：API 180/min、整表/榜单共用 30/min、静态与所有作品域名共用 1200/min、作品 HTML 共用 60/min；换参数、Cookie 或域名不重置。超限带 429、Retry-After，可信 API Origin 保留 CORS；写操作沿用现有规则，收录导出保留独立令牌/IP 额度。
+- API 域完整 `/data.json` 仅管理员可读，编码与 Windows 大小写别名一并检查；包来源文件不公开。准备 `deploy/nginx/` 两份 include，在 Show1、Gallery、API、作品四个 vhost 共享资源、整表、HTML、模型包及并发限制；安装、真实 IP、验收与回滚步骤见 `docs/deploy.md`。仅更新 Node 不会保护 Nginx 直接提供的两个前端。
+- Gallery 已移除 Pages 发布 job，保留只读 CI；展示目录裁掉 modelPool/sourceUpload/sourceDigest，429 显示稍后刷新。用户明确选择只保留正式站点，现有 Pages 需在后续获准上线、正式站验收后关闭；目前旧副本仍在线。Show1 客户端逐票重放与评分未改，无需前端代码调整。
+- 验证：check 59 文件、0 错；完整测试 126/126，新增 4 项真实 HTTP 回归。隔离 Nginx 1.30.5 语法通过，跨四个 Host 的 GET/HEAD、参数/Cookie/XFF 轮换达到共享 429，Retry-After=30，导出仍校验令牌。画廊最新正式包的首页/模型预览正常且控制台无 error，限流提示已目视检查。
+- 无依赖、迁移或本轮数据包 pin 改动；未改现有业务库、生产 Nginx 或线上站点，未做公网压力测试或全部原作交互验收。公开源码/数据包及低频、分布式抓取仍是边界。隔离服务与浏览器标签已关闭，证据在忽略的 `output/anti-scraping-7232a4ec8f9347cba866be53a91e5a2f/`。
+- 用户 initial AGENTS 已授权完成修改后提交；本轮使用已核实 GitHub 身份 wsnxxxs，各改动仓库一条英文 commit，不 push。详细范围与验证见 `docs/archive/2026-09-30-anti-scraping-wsnxxxs.md`。
+
 ## 2026-09-30 · security-fixes（本地修复，未推送、未部署）
 
 - 修复上一轮 SR-01～SR-04：API 数据包静态路由拒绝 HTML/HTM（含目录入口），其他资源附加无脚本 CSP sandbox；作品请求异常转为 400/404/500，避免退出共享进程；截图文档限当前作品源、资源限该源及 HTTPS CDN，逐跳验证重定向，禁用 Service Worker/WebSocket，浏览器其他连接经拒绝代理阻断；代理限流只使用本机单层反代尾部的有效 IP。

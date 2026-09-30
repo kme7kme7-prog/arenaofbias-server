@@ -37,6 +37,12 @@ export const config = {
   secureCookies: env.COOKIE_SECURE === '1',
   cookieSameSite: env.COOKIE_SAME_SITE || 'Lax',
   trustProxy: env.TRUST_PROXY === '1',
+  readLimits: {
+    api: Math.max(1, int(env.READ_API_PER_MIN, 180)),
+    catalog: Math.max(1, int(env.READ_CATALOG_PER_MIN, 30)),
+    files: Math.max(1, int(env.READ_FILES_PER_MIN, 1200)),
+    pages: Math.max(1, int(env.READ_PAGES_PER_MIN, 60)),
+  },
 };
 
 export const limits = {

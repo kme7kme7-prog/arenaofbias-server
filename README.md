@@ -68,6 +68,8 @@ npm start
 | `COOKIE_SECURE` | 关（`1` 开启） | session cookie 改名 `__Host-sp_session`，加 Secure 标记，Path=/ 且不带 Domain；本地未开启时仍为 `sp_session` |
 | `COOKIE_SAME_SITE` | `Lax` | `Lax` / `Strict` / `None`；跨站 HTTPS 部署用 `None`，并必须开启 `COOKIE_SECURE=1` |
 | `TRUST_PROXY` | 关（`1` 开启） | 仅信任本机单层反代的 `X-Forwarded-For` 最后一项有效 IP；非本机连接或无效头使用连接 IP。边缘代理须覆盖原头或追加真实客户端 IP |
+| `READ_API_PER_MIN` / `READ_CATALOG_PER_MIN` | `180` / `30` | 按真实 IP 限制 API GET/HEAD（收录导出沿用自己的令牌/IP 桶），以及跨端点共享的整表/榜单读取；最小为 1 |
+| `READ_FILES_PER_MIN` / `READ_PAGES_PER_MIN` | `1200` / `60` | 按真实 IP 限制后端静态/作品资源与作品 HTML，跨作品域名共享；最小为 1 |
 | `SERVER_VERSION` | Git HEAD 或 `dev` | 启动时确定的服务端版本，返回在 bootstrap 中 |
 | `SMTP_HOST` / `SMTP_PORT` | 未配置 / `465` | 验证码 SMTP 主机与端口（465 隐式 TLS；其它端口默认 STARTTLS） |
 | `SMTP_USER` / `SMTP_PASS` | 未配置 | SMTP 登录身份和密码；缺少任一项时不能发验证码 |
@@ -80,6 +82,8 @@ npm start
 | `TURNSTILE_VERIFY_URL` | Cloudflare siteverify | 校验地址，本地测试可指向桩服务 |
 
 收录流程不需要数据仓库路径环境变量：管理员提名后，在 `arenaofbias-data` 中运行返回的命令；数据包发布并切换后，带 `sourceUpload` 的馆藏作品自动接管投稿。
+
+公开浏览保留，超出读取额度返回 `429` 和 `Retry-After`；登录、换 Cookie、换参数或作品域名不会重置 IP 额度。API 域的完整 `/data.json` 仅供已登录管理员使用，包来源文件不公开。两个前端的 Nginx 静态资源需另按 [部署说明](docs/deploy.md#公开读取与反爬配置)启用 `deploy/nginx/` 配置；仅升级后端不会保护前端静态站。公开展示内容仍可被低频读取，公开源码仓库也不受这些限流保护。
 
 ## API 概览（server/app.mjs）
 

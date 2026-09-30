@@ -385,7 +385,7 @@ describe('platform lifecycle', () => {
     assert.equal(unauthorized.status, 401);
     assert.equal(unauthorized.headers.get('access-control-allow-origin'), origin);
     const data = await fetch(`${base}/data.json`, { headers: { origin } });
-    assert.equal(data.status, 200);
+    assert.equal(data.status, 404);
     assert.equal(data.headers.get('access-control-allow-origin'), origin);
     for (const foreign of ['https://evil.example', base.replace('http:', 'https:')]) {
       const rejected = await fetch(`${base}/api/me`, { method: 'PATCH', headers: { origin: foreign, cookie, 'Content-Type': 'application/json' }, body: '{"nickname":"foreign"}' });

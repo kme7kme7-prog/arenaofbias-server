@@ -32,7 +32,7 @@ async function withSite(run, trustProxy = false) {
   }
 }
 
-test('API static files cannot execute package HTML or SVG, while JSON and the admin shell still work', async () => {
+test('API static files cannot execute package HTML or SVG, and the full catalog is private', async () => {
   await withSite(async (base) => {
     for (const path of ['/', '/index.html', '/_scenes/probe/', '/_scenes/probe/index.html']) {
       const response = await fetch(base + path);
@@ -44,8 +44,8 @@ test('API static files cannot execute package HTML or SVG, while JSON and the ad
     assert.equal(svg.headers.get('content-security-policy'), "sandbox; default-src 'none'");
     await svg.arrayBuffer();
     const data = await fetch(base + '/data.json');
-    assert.equal(data.status, 200);
-    assert.equal((await data.json()).title, 'Audit');
+    assert.equal(data.status, 404);
+    await data.arrayBuffer();
     const admin = await fetch(base + '/admin/');
     assert.equal(admin.status, 200);
     assert.match(admin.headers.get('content-security-policy'), /script-src 'self'/);

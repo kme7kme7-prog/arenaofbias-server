@@ -40,20 +40,21 @@ cp -a "$conf" "$conf.bak-$(date -u +%Y%m%dT%H%M%SZ)"
 
 ## 公开读取与反爬配置
 
-本节文件是待安装配置，提交代码不代表线上已启用。先完成第 0 节现场核对，再备份 Nginx 主配置与四个 vhost。
+2026-09-30 已在四个正式 HTTPS vhost 安装并验收本节规则，详见 HANDOFF 的 gallery-protection-deploy 及对应归档。提交配置文件本身不代表部署；后续操作仍先完成第 0 节现场核对，再备份 Nginx 主配置与四个 vhost。
 
 1. 将 `deploy/nginx/read-zones.conf`、`read-server.conf` 放到正式服务目录；在 Nginx 主配置的 `http {}` 中、vhost include 之前加入 `include /www/wwwroot/arenaofbias-server/deploy/nginx/read-zones.conf;`，仅加载一次。
 2. 在 Show1、Gallery、API、作品泛域名四个 `server {}` 中分别加入 `include /www/wwwroot/arenaofbias-server/deploy/nginx/read-server.conf;`。保留现有 root、proxy、缓存、TLS 和 SPA 路由。如果某个 location 已有 `limit_req` / `limit_conn`，server 层配置不会自动继承，须合并这些限制到该 location。已有 429 error_page 也需核对冲突。
 3. Nginx 限制按真实 `$binary_remote_addr` 跨四个域名共享，GET/HEAD 都计数：资源持续 20 次/秒（突发 200），整表/榜单/`data.json` 持续 30 次/分钟（突发 15），HTML/目录页持续 60 次/分钟（突发 30），模型包/ZIP 持续 120 次/分钟（突发 40），最多 64 个并发读取。超限返回 JSON 429、`Retry-After: 30` 和两个正式前端的错误 CORS 许可。写入不占这些边缘读取额度。Nginx 漏桶与后端固定窗口独立生效，后端额度见 README。
 4. 保持 API 和作品 Node 端口只监听环回，代理覆盖客户端 XFF。前置 CDN 时先配置只信任该 CDN 地址段的真实 IP，否则共享桶会误把所有用户视为一个 IP；不要信任任意来源的真实 IP 头。学校/公司共用 IP 也共享额度，现场正常双站浏览后按日志调节突发值及额度。
 5. 执行 `/www/server/nginx/sbin/nginx -t`，通过才 reload。在独立探针 IP 小量验证 429 与 Retry-After；普通浏览核对两个前端首屏、Show1 榜单、画廊模型包/盲评双 iframe、管理员登录和模型下拉。不要对生产做高频压测。
-6. Gallery 工作流移除 Pages 发布后，旧副本仍在线；待用户授权上线并且正式站点验收通过后，在 `wsnxxxs/same-prompt-gallery` Settings → Pages 将 Source 设为 None，或按 GitHub 的 Pages API 关闭站点。不要删除原作、数据仓库或 gh-pages 历史；确认 Pages 的首页和 `data.json` 均已不可访问。工作流变更需先进入 main，避免副本重新发布。
+6. 从 ArenaGalleri 仓库取 `deploy/nginx/gallery-private-files.conf`，安装到网页根目录之外（现用 `/www/server/nginx/conf/aob-protection/`），在 Gallery、API、作品的 HTTPS `server {}` 中分别 include。共享限流不会自动阻止内部构建说明等文件；三处都须核对来源标记、私有配置、build-info、posters 清单及 `.map` 返回 404。Gallery 差异发布还须移除旧内部文件，不能仅依靠 Nginx 隐藏。
+7. 正式画廊源码现为 `wsnxxxs/ArenaGalleri`，仅包含 Gallery。旧 Pages 已关闭、gh-pages 与 Actions 缓存已清理，旧 `wsnxxxs/same-prompt-gallery` 已 private 且 archived；认证 API 已确认数据仓 private。新公开 CI 不取私有包、不发布或缓存产物。后续发布不要恢复旧公开副本；权限变更无法收回此前已经下载的内容。
 
-API 域完整 `data.json` 仅供管理员获取，`.datapack-source.json` 不公开；这不影响后台登录页或两个前端的展示目录。画廊构建只裁掉展示端未使用的完整模型池和收录接管字段。Show1 仍在客户端重放逐票数据，本轮不改评分或逐票接口形状。限制可以提高批量抓取成本，不能阻止低频抓取、分布式 IP 或从公开 GitHub 源码/已发布数据包下载。CORS、CSP、随机作品 URL 不能替代这些读取额度。
+API 域完整 `data.json` 仅供管理员获取，匿名请求返回 404，`.datapack-source.json` 不公开；这不影响后台登录页或两个前端的展示目录。画廊展示字段使用白名单，裁掉完整模型池、源码入口和内部收录字段；完整提示词继续显示和复制。Show1 的聚合与 Gallery 计分均由后台执行，已发布投票逻辑本次未改。限制可以提高批量抓取成本，公开展示内容仍可被低频或分布式读取。CORS、CSP、随机作品 URL 不能替代这些读取额度。
 
 带不可猜测令牌的 `/api/curate/export/:token` 收录下载不占新通用读取/边缘资源桶，保留后端已有的每令牌 2000 次/分钟和每 IP 10000 次/分钟限制，避免大作品收录中途被打断。该例外不允许访问其他公开接口。
 
-回滚时恢复四个 vhost 和主配置备份，`nginx -t` 后 reload；仅调后端 `READ_*` 环境变量不会撤销 Nginx 限制。关闭的 Pages 不自动恢复，需要单独重新发布。
+回滚时恢复四个 vhost 和主配置备份，`nginx -t` 后 reload；仅调后端 `READ_*` 环境变量不会撤销 Nginx 限制。若仍保留私有文件防护，只移除共享限流 include；先确认所有旧内部文件已删除，再考虑撤下私有文件规则。关闭的 Pages 不自动恢复。此次数据 pin 更新不含数据库迁移，回退本轮代码/数据时应保留当前 v19 数据库与新写入，不恢复上一轮投票清零前的库。
 
 ## 静态站差异部署（Show1 / Gallery）
 

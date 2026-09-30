@@ -1,5 +1,15 @@
 # HANDOFF.md · 当前状态
 
+## 2026-09-30 · gallery-protection-deploy（正式站与 Nginx 已部署）
+
+- 用户明确要求代为部署。先核实线上 `c0ab6ac` 的 139 个跟踪文件均匹配投票发布提交，再快进到上游 main；没有用旧工作区覆盖新投票、审核或 relay 代码。功能提交 `9ebf472b3020adeda94e6514373e2e0a1da7eb2b` 只将数据包 pin 对齐画廊所需的 `1fb62c19d890faceccd68c8641d673062aeee383`，已推送、上线；本轮收尾文档提交不重新部署。
+- 正式 Gallery 从新仓 ArenaGalleri 的 `307df34c5966c3e45d98ce2b257b57bbd4042c49` 独立归档、认证取包及构建上线，完整 1177 文件校验通过。差异发布更新 6 文件、移除 6 个旧内部文件；提示词逐字保留。未合入主站或后端源码。
+- Nginx 主配置一次加载共享 zones，Show1、Gallery、API、作品四个 HTTPS vhost 加载共享读取/并发限制；Gallery、API、作品三处安装私有文件规则，API/作品覆盖客户端 XFF。语法检查与 reload 成功。生产环回独立探针验证跨四域整表桶、跨 Gallery/API 模型桶均返回 429、Retry-After=30，换参数/Cookie/XFF 不重置。
+- API 匿名完整目录与内部构建说明返回 404；Gallery 来源标记、私有配置、构建记录、海报指纹和源码映射均 404。前后端包版本与目录摘要一致，展示目录无内部字段。只读 GitHub API 已确认数据仓 private，旧画廊 private 且 archived；未重新开放 Pages。
+- 本机及 VPS 后端 check 68 文件、0 错，141/141 测试通过，GitHub CI 36702168922 成功；Gallery check 37 文件、13/13 测试、完整构建和 CI=1 收录检查通过（83 件、0 错、3 条既有 warning）。浏览器首页、卡片模型、实际提示词复制、一个原作 3D iframe、主站空榜与管理登录页正常，无 console error。
+- 库仍 v19，quick_check/外键通过，27 用户、267 作品、0 票/0 对局、16 评论、56 表情、6 猜题成绩保留；未执行清零或创建生产测试票。数据更新不改题目/作品 ID、提示词或完整模型池；既有 SMTP、Turnstile、截图、Luna 和 SSH tunnel 配置哈希保持一致。主站静态版本 `9805416` 未重新发布。
+- 回滚材料与最终证据在 VPS `/root/arenaofbias-gallery-protection-20260930-307df34-4783ba76/`，旧 Gallery 为 `/www/wwwroot/gallery.prev`，更早副本另存。只回退本轮代码 pin/数据和 Nginx 不需要恢复旧库；保留当前 v19 与上线后写入，禁止误用上一轮清零备份。未验证手机、全部原作、生产登录投票/投稿或付费审核。详见 `docs/archive/2026-09-30-gallery-protection-deploy-wsnxxxs.md`；本机材料在忽略的 `output/gallery-protection-deploy-20260930-4783ba7604a748bba676bdadbe37f27f/`，凭据不入库。
+
 ## 2026-09-30 · vote-release（已推送、上线，两站旧票已清零）
 
 - 用户明确要求「推送部署」，与此前两站全部投票清零的授权一起执行。已通过 SSH 核实公网和版本文件均为 `d69919e`，数据包 `2cb2a5b`、库 v19、622 票/622 对局、267 作品/27 用户；quick_check=ok。保留当前 Luna Flex、截图和 SSH relay 配置，不更改密钥。

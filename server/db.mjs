@@ -327,6 +327,10 @@ const MIGRATIONS = [
     const voteColumns = new Set(db.prepare('PRAGMA table_info(votes)').all().map((column) => column.name));
     if (voteColumns.has('identity_source')) db.exec('ALTER TABLE votes DROP COLUMN identity_source');
   },
+  (db) => {
+    const columns = new Set(db.prepare('PRAGMA table_info(works)').all().map((column) => column.name));
+    if (!columns.has('moderation')) db.exec(`ALTER TABLE works ADD COLUMN moderation TEXT NOT NULL DEFAULT '{"status":"legacy"}'`);
+  },
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

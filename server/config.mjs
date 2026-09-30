@@ -33,6 +33,13 @@ export const config = {
   // Headless screenshots of submitted works (Playwright + a local Chrome); off with CAPTURE=0.
   capture: env.CAPTURE !== '0',
   captureChannel: env.CAPTURE_BROWSER ?? 'chrome',
+  // New uploads stay private until the Flex check or a human review passes.
+  moderation: {
+    enabled: env.CONTENT_MODERATION === '1',
+    apiKey: env.MODERATION_API_KEY || env.OPENAI_API_KEY || '',
+    baseUrl: env.MODERATION_BASE_URL || 'https://api.openai.com/v1',
+    model: env.MODERATION_MODEL || 'gpt-6-luna',
+  },
   // 「收录为馆藏」用的 arenaofbias-data 本地克隆（main 分支，部署钥写权限）。
   secureCookies: env.COOKIE_SECURE === '1',
   cookieSameSite: env.COOKIE_SAME_SITE || 'Lax',

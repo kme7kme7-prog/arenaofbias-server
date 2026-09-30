@@ -24,6 +24,41 @@
 - 无依赖、迁移或本轮数据包 pin 改动；未改现有业务库、生产 Nginx 或线上站点，未做公网压力测试或全部原作交互验收。公开源码/数据包及低频、分布式抓取仍是边界。隔离服务与浏览器标签已关闭，证据在忽略的 `output/anti-scraping-7232a4ec8f9347cba866be53a91e5a2f/`。
 - 用户 initial AGENTS 已授权完成修改后提交；本轮使用已核实 GitHub 身份 wsnxxxs，各改动仓库一条英文 commit，不 push。详细范围与验证见 `docs/archive/2026-09-30-anti-scraping-wsnxxxs.md`。
 
+## 2026-09-30 · luna-flex-relay（正式连接已接通，真实图文审核通过）
+
+- 用户提供 154.36.185.169 并授权配置，明确保留 Xray 与 443。新增独立 Node 内置模块审核接口 `scripts/moderation-relay.mjs`，仅监听审查服务器 127.0.0.1:5280，经现有服务器的 SSH 本地转发访问。只接受已配置 Key 的指定模型、Flex、store=false、非流式 Responses 请求；仅连接官方接口，保留 HTTP 状态，不降档、不重试，正文上限 81 MiB、上游时限 15 分钟。
+- 审查服务器独立运行环境为 `/opt/arenaofbias-review/runtime/node-v22.23.3-linux-x64/`（官方 SHA256 校验），原全局 Node v22.12.0 保留；relay 以无登录 shell 的 arena-review 用户运行，Key 环境文件 /etc/arenaofbias-review.env 为 root 0600。专用 SSH 公钥只允许目标 127.0.0.1:5280，访问其他端口实测被 administratively prohibited 拒绝；固定远端主机公钥。未修改共享 sshd 配置、Nginx、Xray 或防火墙。
+- 新服务器 `arenaofbias-review-relay`、原服务器 `arenaofbias-moderation-tunnel` 均 active、enabled。原服务器 moderation.conf 的 base URL 已为 http://127.0.0.1:5280/v1，Wants/After 专用 tunnel，保留审核/截图开关；实际进程已加载，公网 contentModeration=true。原平台运行源码仍 d69919e，无前端、数据包、数据库迁移或代码重新部署。
+- 首次真实 Flex 调用正常返回 review，原因是原截图机器无中文字体；本地下载图像确认方框，安装 Debian fonts-noto-cjk 后重启截图环境。第二次实际桌面/手机截图经 SSH→relay→官方 Responses→原审核模块返回 HTTP 200、completed、gpt-6-luna、flex、approved，理由为文字图片正常，2362 输入/34 输出共 2396 tokens；首次 2579 tokens。两个验证均使用隔离页面与内存 library，未创建生产投稿、用户或人工决定。
+- 验证：check 61 文件 0 错，新增 1 项定向测试覆盖凭证、路径、JSON、模型/Flex/store/stream 限制、正常透传、429 无重试及断连 503。两侧 health 通过，SSH 密钥限制通过；正式画廊、bootstrap、管理页、榜单 200；库 v19 quick_check=ok，267 件作品/27 用户均保留，所有旧作品 legacy。Xray ActiveState/MainPID/启动时间与 443 原监听逐项保持一致，没有重启或删除 Xray。
+- 审查服务器证据在 `/root/arenaofbias-review-setup-20260930/`；原服务器备份原 moderation.conf、API/截图/字体/运行/数据库验证在 `/root/arenaofbias-review-connect-20260930/`。本地截图前后与测试生成物为 output/release-luna-relay/，不提交；密钥与密码均未写入仓库或验收日志。回滚只恢复配置、重启平台并停止专用新服务，不触碰 Xray 或数据库。详见 `docs/archive/2026-09-30-luna-flex-relay-wsnxxxs.md` 与 docs/deploy.md 6.1。
+
+## 2026-09-30 · luna-flex-enable（密钥与开关已配置，VPS 官方接口连接未通）
+
+- 用户授权代填 Key 并启用。密钥经隐藏输入写入服务器 moderation.conf（root，0600），不入库、不写本地文件或日志；保留原禁用配置于 `/root/arenaofbias-luna-enable-20260930/moderation-before.conf`。daemon-reload、重启后服务 active，运行进程确认 Key 存在，CONTENT_MODERATION=1、CAPTURE=1、gpt-6-luna、官方 base URL；公网 bootstrap 的 site.contentModeration=true。运行源码仍 d69919e，未重新部署代码。
+- VPS 用实际生产截图/审核模块验证隔离正常页面，两档截图生成成功，但连接官方 API 失败，结果进入 review/request_failed；未收到 OpenAI HTTP 响应。独立探测连接超时 ETIMEDOUT，系统 DNS 将 api.openai.com 解析为 179.60.193.16 与 2a03:2880:f129:83:face:b00c:0:25de；无相关 hosts 项、无既有代理环境变量，Cloudflare DoH 探测 ECONNRESET。未更改系统 DNS、hosts 或设置转发代理。
+- 本机用隐藏输入进行一次真实文字+两张生成纯色图片的调用：HTTP 200、completed、model=gpt-6-luna、service_tier=flex、approved；176 输入/53 输出，共 229 tokens。因此 Key 和目标模型在本机已验证，不能把该结果称为 VPS 自动审核已跑通。
+- 重启前后均 267 件作品、27 用户，全部 legacy，库 v19 quick_check=ok；无生产测试投稿或旧作品重审。新的自动审核任务当前会因接口连接失败转人工，不自动放行或降至标准档。证据在远端 `/root/arenaofbias-luna-enable-20260930/` 与本地 `output/release-luna-enable/`。
+- 用户询问第二台服务器用途，已解释可由支持地区的审核服务接收文字/截图、调用 OpenAI、返回结果，网站与数据库可留在当前 VPS；尚无现成服务器连接信息，未购买、迁移或搭建远端审核服务。详见 `docs/archive/2026-09-30-luna-flex-enable-wsnxxxs.md`。
+
+## 2026-09-30 · luna-flex-release（已部署，自动审核待配置密钥）
+
+- 用户明确授权先部署。server `d69919eedb0731c1edeb834763a4c018d69a8568` 与配套 gallery `50c0893c07806bb05c746dca5e6d71c41260b0a0` 已普通快进推送到各仓 main 并上线；包含内容审核所需的先前安全修复。线上后端跟踪文件逐字节匹配 d69919e，服务 active；本轮收尾文档提交不重新部署，公网版本继续指向实际代码 d69919e。
+- 线上库从 v18 升至 v19。迁移演练与停写后的正式迁移均确认原 16 张表的所有原列/行保持一致；quick_check 与外键检查通过，267 件作品、27 用户、622 张票保留，旧作品按 legacy 保持原发布状态。
+- server 数据包保持 `2cb2a5b265e8bda8c8069a4b498f1046d825acee`，gallery pin 同步到该线上包，catalogDigest 一致。前端从已推送提交的 Git archive 构建，1183 个文件完整 SHA256 清单校验通过，实际更新 7 个文件、删除 0 个；未夹带未上线的海报迁移。
+- 截图运行环境独立安装在 `/opt/arenaofbias-capture`，Playwright 1.63.0 与 Chrome 154 的实际生产截图模块完成桌面/手机本地夹具验证；服务源码仍只用 Node 内置模块。`/etc/systemd/system/arenaofbias-server.service.d/moderation.conf` 已准备模型、官方接口和 Chrome 配置；当前 `CONTENT_MODERATION=0`、`CAPTURE=0`，未配置 MODERATION_API_KEY，bootstrap 的 contentModeration=false，尚未自动审查。
+- 验证：Windows 与 VPS 后端 check 59 文件 0 错、测试 128/128；server GitHub CI 36681917167 成功。前端 check 36 文件 0 错、测试 11/11、固定数据包构建及配套 integration smoke 通过；intake 83 件 0 错/3 条既有 warning。公网 bootstrap、管理页、画廊、Show1 首页、榜单均 200；浏览器桌面/390px 手机页面正常，无控制台错误或手机横向溢出。前端 GitHub workflow 原已手动停用，本轮未启用，验证在本地执行。
+- 回滚材料、停写备份与验收证据在 `/root/arenaofbias-luna-release-20260930/`；旧画廊在 `/www/wwwroot/gallery.prev`，更早副本保留为 gallery.prev.before-luna-20260930。回滚后端须同时恢复备份 v18 库与旧 26da6d6 代码，不能只退代码。原工作区他人改动保留。实际付费 API、生产投稿与登录人工审核未执行；密钥配置后再启用并验证一次真实投稿。详细记录见 `docs/archive/2026-09-30-luna-flex-release-wsnxxxs.md`。
+
+## 2026-09-30 · luna-flex-moderation（本地实现，未推送、未部署）
+
+- 用户选择 GPT-6 Luna Flex 自动审查文字/图片，疑似交人工；默认 OpenAI 官方 Responses API，可用环境变量配置网关。不新增 npm 依赖。`CONTENT_MODERATION=1` 启用，密钥只在服务器配置；要求已有 Playwright/Chrome 和 `CAPTURE=1`。无密钥、截图不足、容量错误、拒答、无效响应或超时转人工，不切换标准档。
+- 追加幂等 v19 `works.moderation` JSON，历史作品 legacy 保持原发布规则；新投稿、管理员上传、收件箱登记先 pending。内容状态独立于来源核验，未通过的作品从公开列表/Show1 动态池/盲评/互动/收录导出移除，原作品源及媒体受限。作者/管理员获一小时 bearer 预览源，预览地址不可公开转发。启动恢复 pending，送审文字变更重审，旧结果不能覆盖人工决定或较新声明。后台与前端均有人工决定/重试入口和审计。
+- 范围：声明、入口静态文字、两档实际页面文字、可选封面及桌面/手机首屏；没有扫描整包、所有页面、滚动区或交互后画面。自动通过也不验证模型来源；盲评仍需原核验通过。关闭开关不会放行已有待审/拒绝作品。
+- 验证：check 59 文件 0 错，完整测试 128/128。6 项内容审核 HTTP 回归涵盖持有与放行、权限、直传/收件箱、Flex 失败无降档、人工/编辑旧结果竞争、队列恢复、缺密钥/截图、迁移重跑；v16/v17 升级回归保持历史行、投票和审计。真实 Chrome / Playwright 1.63.0 完成 1440×900、390×844 截图并送到本地模拟接口；模拟 429 后正确转人工。实际浏览器验证后台人工通过、前端人工拒绝/重试、手机上传成功与状态，390px 无横向溢出。
+- 使用隔离 worktree `C:\Users\Ryan\.codex\worktrees\luna-flex-moderation\arenaofbias-server`，分支 `codex/luna-flex-moderation`，基线 `115ac342`；原工作区他人未提交文件未动。前端配套在 `luna-flex-gallery\same-prompt-gallery`，同名分支；不修改数据仓和 pin。本地证据/独立测试库在 `output/playwright/`，服务器 worktree `node_modules` 是指向既有前端依赖的测试 junction，不提交、不代表新增服务依赖。
+- 真实付费 API 未调用，缺正式密钥；未操作现有业务库或生产配置。部署先按 docs/deploy.md 备份、发布配套后端再前端。退回旧代码会忽略访问限制，不能只回滚代码。用户已授权一轮一条英文 commit，GitHub 身份核实为 wsnxxxs；不 push、不上线。详细记录见 `docs/archive/2026-09-30-luna-flex-moderation-wsnxxxs.md`。
+
 ## 2026-09-30 · security-fixes（本地修复，未推送、未部署）
 
 - 修复上一轮 SR-01～SR-04：API 数据包静态路由拒绝 HTML/HTM（含目录入口），其他资源附加无脚本 CSP sandbox；作品请求异常转为 400/404/500，避免退出共享进程；截图文档限当前作品源、资源限该源及 HTTPS CDN，逐跳验证重定向，禁用 Service Worker/WebSocket，浏览器其他连接经拒绝代理阻断；代理限流只使用本机单层反代尾部的有效 IP。

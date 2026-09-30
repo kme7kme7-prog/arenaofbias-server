@@ -55,7 +55,8 @@ export function createCapturer({ config, library }) {
   let browser = null;
   let networkBlocker = null;
   let available = config.capture;
-  let running = false;
+  let running = null;
+  let closed = false;
   const queue = [];
 
   async function launch() {
@@ -82,17 +83,21 @@ export function createCapturer({ config, library }) {
 
   async function capture(work) {
     const instance = await launch();
-    const origin = library.originOf(work.contentKey);
+    const origin = library.contentAllowed(work) ? library.originOf(work.contentKey) : library.previewOrigin(work);
     const captures = {};
+    const texts = [];
     for (const shot of SHOTS) {
+      if (closed) break;
       const context = await instance.newContext({ viewport: shot.viewport, deviceScaleFactor: 1, isMobile: shot.mobile, hasTouch: shot.mobile, colorScheme: 'light', serviceWorkers: 'block' });
       try {
         await guardCaptureContext(context, { origin, cdn: config.cdn });
         const page = await context.newPage();
-        await page.goto(`${origin}/`, { waitUntil: 'load', timeout: 30000 });
+        const response = await page.goto(`${origin}/`, { waitUntil: 'load', timeout: 30000 });
+        if (!response?.ok()) throw new Error('作品页面未成功加载');
         await page.waitForTimeout(3500);
         mkdirSync(join(library.mediaDir, work.id), { recursive: true });
         await page.screenshot({ path: join(library.mediaDir, work.id, `${shot.id}.jpg`), type: 'jpeg', quality: 84 });
+        texts.push(await page.locator('body').innerText());
         captures[shot.id] = `${shot.id}.jpg`;
       } catch (error) {
         console.warn(`截图失败 ${work.id} ${shot.id}：${error.message.split('\n')[0]}`);
@@ -100,33 +105,39 @@ export function createCapturer({ config, library }) {
         await context.close();
       }
     }
-    if (Object.keys(captures).length && library.hasDirectory(work.id)) library.setCaptures(work.id, captures);
+    if (!closed && Object.keys(captures).length && library.hasDirectory(work.id)) library.setCaptures(work.id, captures);
+    return { captures, texts };
   }
 
   async function drain() {
-    if (running) return;
-    running = true;
-    while (queue.length && available) {
-      const work = queue.shift();
+    while (queue.length && available && !closed) {
+      const { work, resolve } = queue.shift();
       try {
-        await capture(work);
+        resolve(await capture(work));
       } catch (error) {
         available = false;
-        queue.length = 0;
+        resolve(null);
         console.warn(`自动截图不可用（${error.message.split('\n')[0]}）。上传作品将显示文字封面。`);
       }
     }
-    running = false;
+    for (const item of queue.splice(0)) item.resolve(null);
   }
 
   return {
     get available() { return available; },
     enqueue(work) {
-      if (!available) return;
-      queue.push(work);
-      drain();
+      if (!available || closed) return Promise.resolve(null);
+      return new Promise((resolve) => {
+        queue.push({ work, resolve });
+        if (!running) running = drain().finally(() => { running = null; });
+      });
     },
     async close() {
+      closed = true;
+      for (const item of queue.splice(0)) item.resolve(null);
+      await browser?.close().catch(() => {});
+      await running;
+      // A launch already in flight can finish after close() starts.
       await browser?.close().catch(() => {});
       if (networkBlocker?.listening) await new Promise((resolve) => networkBlocker.close(resolve));
     },

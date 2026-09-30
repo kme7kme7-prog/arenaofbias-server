@@ -61,7 +61,7 @@ test('malformed content URLs return 400 and the same process continues serving w
     import { createServer, request } from 'node:http';
     import { createContentHandler } from ${JSON.stringify(new URL('../server/content.mjs', import.meta.url).href)};
     const handler = createContentHandler({ config: { cdn: [] }, siteOrigins: ['http://localhost'], arena: {},
-      library: { byContentKey: () => ({ dir: ${JSON.stringify(root)}, entry: 'index.html' }) } });
+      library: { contentAllowed: () => true, byContentKey: () => ({ dir: ${JSON.stringify(root)}, entry: 'index.html', moderation: { status: 'legacy' } }) } });
     const server = createServer(handler);
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     const statuses = [];

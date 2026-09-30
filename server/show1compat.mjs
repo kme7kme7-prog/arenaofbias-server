@@ -74,7 +74,7 @@ export function registerShow1Compat(router, deps) {
     addReaction: db.prepare('INSERT OR IGNORE INTO reactions (task_id, work_id, user_id, emoji, created_at) VALUES (?, ?, ?, ?, ?)'),
     pageView: db.prepare('INSERT INTO page_views (day, path, ip_hash, created_at) VALUES (?, ?, ?, ?)'),
     arenaEditorial: db.prepare("SELECT commentary, weights_json FROM task_editorial WHERE task_id = ? AND face = 'arena'"),
-    liveWorks: db.prepare("SELECT id, task_id, model_id, model_other, title, content_key FROM works WHERE status = 'verified' AND show_arena = 1 AND curated_as IS NULL AND deleted_at IS NULL ORDER BY created_at, id"),
+    liveWorks: db.prepare("SELECT id, task_id, model_id, model_other, title, content_key FROM works WHERE status = 'verified' AND show_arena = 1 AND json_extract(moderation, '$.status') IN ('legacy', 'approved') AND curated_as IS NULL AND deleted_at IS NULL ORDER BY created_at, id"),
   };
 
   const promptOf = (id) => snapshot.prompts.find((prompt) => prompt.id === id) ?? null;

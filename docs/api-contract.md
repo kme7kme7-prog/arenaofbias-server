@@ -379,6 +379,8 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 成功 `200`：`{ "work": <作品公开视图> }`。作品初始状态 `unverified`，并自动排队无头截图（1440×900 与 390×844 两档，写回 `captures`；截图能力可用性见 `bootstrap.site.capture`）。
 
+启用内容审查时，响应含作者特权字段 `moderation.status: "pending"`，上传请求不等待 Flex。此时 `scene` 是一小时有效的随机 `p<32hex>` 预览源，作品尚不公开；内容状态与 `unverified` 核验状态独立，详见 3.24 节。
+
 截图浏览器只允许当前作品源的文档，以及该源和 HTTPS CDN 白名单内的 GET/HEAD 资源。请求逐跳检查重定向，跨源导航、WebSocket、Service Worker 及未经过路由的浏览器连接被阻断；截图环境须预配置 Playwright ≥ 1.48 和 Chrome。
 
 错误：`401`；`404 试加载已过期`；`400`（未确认 / 缺标题 / 缺 Harness 与 tool / 模型不存在或缺失 / 来源字段无效 / 封面无效）；`413 封面图片不能超过 3 MB`；`429 你已有 5 件作品在等待核验`（`pendingPerUser`）。
@@ -559,7 +561,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 `GET /media/<work-id>/<file>`，其中 `<work-id>` 形如 `up-XXXXXXXX`，`<file>` ∈ `cover.png` / `cover.jpg` / `cover.webp` / `first.jpg` / `mobile.jpg`。
 
-- 响应头：`Cache-Control: public, max-age=300`、`Content-Security-Policy: default-src 'none'`（防止媒体被当页面执行）。
+- 响应头：旧流程作品为 `Cache-Control: public, max-age=300`，参与内容审查的作品为 `no-store`；`Content-Security-Policy: default-src 'none'`（防止媒体被当页面执行）。内容未通过的媒体只供作者或管理员会话访问，其他请求为 404。
 - 404：`{ "error": "文件不存在" }`。
 - 路径越界（`..` 等）在路径解析层被拒，等同 404。
 
@@ -732,6 +734,27 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 追加迁移删除 `works.audience`、`tool`、`vendor`、`reviewed_by`、`deleted_by` 和 `votes.identity_source`。`model_name` 改名为 `model_other`：仅保留未登记模型的手填名称，登记模型的名称和厂商读取当前数据包字典；字典缺少该 ID 时名称返回 ID、厂商为空。模型版本 `model_version` 保持不变。
 
 旧 `tool` 只在没有 Harness ID 且「其他」为空时回填 `harness_other`。未登记模型的非空旧 `vendor` 在删列前原样追加为 `note` 中的「手填模型厂商：…」，保留原备注且不截断。缺失的审核、删除 audit 从旧操作人列补存，审核人通过最近一次审核记录读取。展示开关保留原值；所有历史对局、投票身份快照及更正值原样保留。旧客户端仍可提交 `tool`、`audience`，API 和收录导出的兼容字段由保留字段生成。升级前须备份数据库，退回 v17 或更早的代码须同时恢复兼容的数据库备份。
+
+### 3.24 自动内容审查（schema v19）
+
+追加幂等迁移，仅新增 `works.moderation` JSON 列；默认 `{ "status": "legacy" }`，既有作品保持原行为。`CONTENT_MODERATION=1` 时新投稿、管理员上传、收件箱登记均先设 `pending`。送审声明变更后重新设 `pending`，随机 revision 防止旧调用结果覆盖新版声明；人工决定也不会被较早的自动结果覆盖。启动恢复持久化的 pending 队列。内容状态与来源核验 `status` 独立。
+
+| `moderation.status` | 含义 | 可公开 |
+| --- | --- | --- |
+| `legacy` | 旧流程，未自动审查 | 按原门面/核验规则 |
+| `pending` | 排队或审查中 | 否 |
+| `approved` | 自动或人工确认内容通过 | 按原门面/核验规则 |
+| `review` | 疑似风险或自动审查失败，待人工 | 否 |
+| `rejected` | 内容不通过 | 否 |
+
+`moderation` 仅返回作者/管理员，包含 `status`、毫秒 `at`，完成结果可含 `source: automatic|human`、中文 `reason`、风险 `categories`、`error` 代码、`model`、`serviceTier`、`responseId`、`usage`、`coverage` 或人工 `reviewer`。不含 API 密钥或服务商原始错误响应。`bootstrap.site.contentModeration` 表示开关；管理员 `review.unverified` 同时计算来源待核验与内容待处理作品。
+
+内容尚未通过时，公开 bootstrap、Show1 动态作品、盲评、评论/表情与收录导出均不可使用该作品；公开 `w<32hex>` 源返回 410，媒体请求仅允许作者/管理员，否则 404。作者/管理员作品 DTO 的 `scene` 是随机 `p<32hex>` 源，有效一小时、进程重启失效，返回 `Cache-Control: no-store`。该地址本身具有预览能力，不应公开转发。自动截图也使用此源。参与审查的已公开作品源与媒体使用 `no-store`，防止新审核状态被已有缓存跳过。
+
+- **`POST /api/works/:task/:id/moderation`**：仅管理员；JSON `{ "status": "approved" | "rejected", "reason": "人工理由" }`。理由必填，最多 500 字；无效决定或缺理由 400，无权限 403，作品不存在 404。成功 200 `{ "work": <作者/管理员作品视图> }`，写 `content-review` audit。内容通过不改变来源核验或门面开关。
+- **`POST /api/works/:task/:id/moderation/retry`**：仅管理员，无需请求体；仅开启自动审查时可用，否则 409。成功 200 `{ "work": <pending 作品视图> }`，写 `content-retry` audit，重新进入队列并暂不公开。
+
+送审使用 Responses API，`gpt-6-luna`、`service_tier: flex`、`store: false`、低推理档、严格 JSON schema。材料为投稿声明、入口静态文字、两档实际页面文字、可选封面及桌面/手机首屏。疑似风险返回 review，明确风险可返回 rejected。未遍历所有文件、滚动区域或交互；语境模糊交人工。缺密钥、截图不完整、超出材料限额、请求超过 15 分钟、429/其他错误、未完成/拒答/无效结构或未确认 Flex 均转 review，不自动重试或切换标准档。`CAPTURE=0` 无法完成自动审查。关闭开关不放行已有待审或被拒作品。
 
 ## 4. 数据包契约（`dist/data.json`）
 

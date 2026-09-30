@@ -15,6 +15,7 @@
 - 既有防护复核：管理员保留名拒绝公开注册，Secure 会话使用 Host 前缀并拒绝重复 Cookie，写 API 校验 Origin，收件箱响应施加无同源权限的 CSP sandbox，上传路径/解压量有约束，SQL 参数绑定，验证码错误次数及会话撤销有覆盖。未发现这些检查路径的新越权。
 - 验证：`npm run check` 56 文件 0 错；`npm test` 118/118。未连接生产、未读取现有业务库/密钥/日志，未核实线上 Nginx 转发头、静态路由、CAPTURE 或作品域名；报告不把历史部署记录当作当前线上状态。
 - 本轮只更新交接与归档；浏览器证据在本地生成物 `output/audit/security-review-20260930-api-origin.png`。审查期间出现的 `datapack.json` 更新不属于本轮，保留且不纳入提交。提交授权沿用用户 initial AGENTS 的完成修改后提交要求，身份已核实为 GitHub `wsnxxxs`；不推送。
+- 本轮临时服务已停止；临时目录 `C:\Users\Ryan\AppData\Local\Temp\arenaofbias-security-review-lAEFO8` 删除被自动审批以 `blocked by policy` 拒绝，保留待人工清理。
 
 ## 2026-09-30 · schema-cleanup-review（本地修订，未推送、未部署）
 

@@ -50,11 +50,11 @@ function fixtureSnapshot(votes = { entertainment: [], formal: [] }) {
 
 // The same dispatch core as app.mjs's handleSite, so 201/204 retargeting and error
 // envelopes behave exactly like production wiring.
-function createFixture({ snapshot = fixtureSnapshot(), admins = ['root'] } = {}) {
+function createFixture({ snapshot = fixtureSnapshot(), admins = ['root'], tasks = [] } = {}) {
   const db = openDatabase(':memory:');
   const auth = createAuth(db, { admins, secureCookies: false, sessionTtl: 60000 });
   const router = createRouter();
-  registerShow1Compat(router, { db, catalog: { model: (id) => ({ name: `Model ${id.at(-1).toUpperCase()}` }) }, snapshot, config: { contentTemplate: 'https://{token}.works.test' }, limit: {} });
+  registerShow1Compat(router, { db, catalog: { tasks: () => tasks, model: (id) => ({ name: `Model ${id.at(-1).toUpperCase()}` }) }, snapshot, config: { contentTemplate: 'https://{token}.works.test' }, limit: {} });
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://test.invalid');
@@ -267,6 +267,48 @@ test('snapshot vote weights stay fixed after editorial changes', () => withServe
     assert.equal((await call(base, 'GET', '/api/votes?scope=entertainment')).data.votes.at(-1).winnerRid, live.id);
     db.prepare("UPDATE works SET show_arena = 0 WHERE id = 'up-live0001'").run();
     assert.equal((await call(base, 'GET', '/api/works')).data.works.some((work) => work.id === live.id), false);
+  }));
+
+  test('shared questions preserve legacy IDs and expose prompt variants within one question', () => withServer({ tasks: [
+    { id: 'chinese-architecture', arenaId: '004', kind: 'web', category: '建模', title: '古典建筑', prompt: '完整建筑提示词', summary: '建筑' },
+    { id: 'little-red-riding-hood', arenaId: '013', kind: 'text', category: '文学', title: '小红帽', prompt: '创作全新故事', summary: '故事' },
+    { id: 'supernovai', arenaId: '014', kind: 'web', category: '静态网页', title: 'SupernovAI', prompt: '长提示词', summary: '网站',
+      promptVariants: [{ id: 'long', label: '长提示词', prompt: '长提示词' }, { id: 'short', label: '短提示词', prompt: '短提示词' }] },
+  ] }, async ({ db, auth, base }) => {
+    const prompts = (await call(base, 'GET', '/api/prompts')).data.prompts;
+    assert.deepEqual(prompts.map((prompt) => prompt.id), ['001', '004', '013', '014']);
+    assert.equal(prompts[1].name, '营造法式');
+    assert.equal(prompts[1].prompt, '完整建筑提示词');
+    assert.equal(prompts[2].kind, 'text');
+    assert.equal(prompts[2].category, '文学');
+    assert.deepEqual(prompts[3].promptVariants.map((variant) => variant.id), ['long', 'short']);
+    assert.equal(prompts[3].promptVariants[1].prompt, '短提示词');
+    seedWorks(db);
+    const columns = db.prepare('PRAGMA table_info(works)').all().map((column) => column.name);
+    for (const [id, task, source] of [
+      ['up-long-a', 'supernovai', 'up-cccc0003'],
+      ['up-long-b', 'supernovai', 'up-bbbb0002'],
+      ['up-short-b', 'little-red-riding-hood', 'up-bbbb0002'],
+    ]) {
+      db.exec(`INSERT INTO works (${columns.join(', ')}) SELECT ${columns.map((name) => ({
+        id: `'${id}'`, task_id: `'${task}'`, content_key: `'w${id}'`, digest: `'d${id}'`,
+      })[name] ?? name).join(', ')} FROM works WHERE id = '${source}'`);
+    }
+    const works = (await call(base, 'GET', '/api/works')).data.works;
+    assert.equal(works.find((work) => work.id === 'up-long-a').promptId, '014');
+    assert.equal(works.find((work) => work.id === 'up-short-b').promptId, '013');
+    const voter = await signIn(auth, 'shared-voter');
+    const ballot = { promptId: '014', winnerRid: 'up-long-a', winnerMid: 'model-c',
+      loserRid: 'up-long-b', loserMid: 'model-b', mode: 'party' };
+    const vote = await call(base, 'POST', '/api/votes', { cookie: voter.cookie, body: { id: randomUUID(), ...ballot } });
+    assert.equal(vote.status, 201, vote.text);
+    assert.equal(vote.data.vote.promptId, '014');
+    assert.equal(db.prepare("SELECT task_id FROM votes WHERE source = 'show1'").get().task_id, 'supernovai');
+    assert.equal((await call(base, 'POST', '/api/votes', { cookie: voter.cookie,
+      body: { id: randomUUID(), ...ballot, loserRid: 'up-short-b' } })).status, 400);
+    assert.equal((await call(base, 'GET', '/api/comments?round=014')).status, 200);
+    db.prepare("UPDATE works SET show_arena = 0 WHERE id = 'up-long-b'").run();
+    assert.equal((await call(base, 'GET', '/api/works')).data.works.some((work) => work.id === 'up-long-b'), false);
   }));
 
   test('live votes retain different weights saved between editorial changes', () => withServer({}, async ({ db, auth, base }) => {

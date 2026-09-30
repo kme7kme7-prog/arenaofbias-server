@@ -691,7 +691,7 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 
 | 方法与路径 | 请求与响应 |
 | --- | --- |
-| `GET /api/prompts` | `{ prompts: [...] }`；竞技场 editorial 覆盖对应题目的 `commentary`、`weights`。 |
+| `GET /api/prompts` | `{ prompts: [...] }`；合并历史快照与数据包正式题目，竞技场 editorial 覆盖对应题目的 `commentary`、`weights`。 |
 | `GET /api/works` | `{ works: [...] }`；快照作品加符合条件的 live 投稿。 |
 | `GET /api/votes?scope=entertainment\|formal` | `{ votes: [...] }`；按时间和 ID 合并历史与 live 票，默认娱乐范围。 |
 | `POST /api/votes` | 登录必需；提交 `id`、`promptId`、`winnerRid/Mid`、`loserRid/Mid`、`mode`、`outcome`，成功 `201 { vote }`；同 ID 同票幂等重放，已投同一对返回 `409 pair`；`formal` 仅管理员。 |
@@ -701,6 +701,8 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 | `GET /api/reactions?prompt=<题目编号>` | `{ counts, mine }`；无效题目 `400`。 |
 | `POST /api/reactions` | 登录必需；请求 `id`、`promptId`、`mid`、`kind`，成功 `201 { counts, mine }`；`kind:null` 撤销。 |
 | `POST /api/track` | 最佳努力记录 `path` 浏览量，成功 `204`。 |
+
+正式题目在数据仓库登记 `arenaId`（稳定三位编号）、`kind`（`text` / `web`）和 `category`。共享后端将同一个 task ID 映射到 Show1 编号，新增题目及其已验证、开启竞技场展示的投稿可以进入娱乐玩法；长短提示词使用同一个 task ID 与编号，以 `promptVariants: [{id, label, prompt}]` 返回两份原文，由前端按钮切换；作品可通过 `promptVariant` 标明使用的版本，同一模型的两版展示在一起。既有快照题目保留编号、名称及权重，正式提示词由数据包提供；未进入数据包的历史题目仍保留。此登记不写入社区 `questions` 表，也不改变作品审核和展示开关。
 
 旧分享卡端点已移除，访问返回 `404`。兼容层的详细字段可参考 `test/fixtures/show1-golden/` 中的固定响应。
 

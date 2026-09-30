@@ -74,15 +74,47 @@ export function registerShow1Compat(router, deps) {
     liveWorks: db.prepare("SELECT id, task_id, model_id, model_other, title, content_key FROM works WHERE status = 'verified' AND show_arena = 1 AND curated_as IS NULL AND deleted_at IS NULL ORDER BY created_at, id"),
   };
 
-  const promptOf = (id) => snapshot.prompts.find((prompt) => prompt.id === id) ?? null;
-  const published = (round) => Object.hasOwn(snapshot.taskByRound, round);
+  // Stable arena IDs live with the authoritative question definitions in the datapack.
+  // Unmigrated legacy questions and their historical identities remain in the snapshot.
+  function promptCatalog() {
+    const taskByRound = { ...snapshot.taskByRound }, roundByTask = { ...snapshot.roundByTask };
+    const prompts = new Map(snapshot.prompts.map((prompt) => [prompt.id, prompt]));
+    for (const task of deps.catalog.tasks?.() ?? []) {
+      if (!task.arenaId) continue;
+      if (!/^\d{3}$/.test(task.arenaId) || (taskByRound[task.arenaId] && taskByRound[task.arenaId] !== task.id)
+        || (roundByTask[task.id] && roundByTask[task.id] !== task.arenaId)) {
+        throw new Error(`Conflicting arena question ID: ${task.id}`);
+      }
+      const previous = prompts.get(task.arenaId);
+      taskByRound[task.arenaId] = task.id;
+      roundByTask[task.id] = task.arenaId;
+      prompts.set(task.arenaId, {
+        ...previous, id: task.arenaId, kind: task.kind,
+        category: previous?.category ?? task.category,
+        code: previous?.code ?? (task.kind === 'text' ? 'STORY' : 'WEB'),
+        name: previous?.name ?? task.title, prompt: task.prompt,
+        ...(task.promptVariants?.length ? { promptVariants: task.promptVariants } : {}),
+        commentary: previous?.commentary ?? task.summary,
+        detail: previous?.detail ?? '同一提示词 · 不同模型的结果',
+      });
+    }
+    return { prompts: [...prompts.values()].sort((a, b) => a.id.localeCompare(b.id)), taskByRound, roundByTask };
+  }
+  const taskOfRound = (round) => promptCatalog().taskByRound[round];
+  const roundOfTask = (task) => promptCatalog().roundByTask[task];
+  const promptOf = (id) => promptCatalog().prompts.find((prompt) => prompt.id === id) ?? null;
+  const published = (round) => Object.hasOwn(promptCatalog().taskByRound, round);
   // The roster sorted by rid once: every "first work of a mid/task" lookup is deterministic.
-  const liveWorks = () => q.liveWorks.all().filter((row) => snapshot.roundByTask[row.task_id] && !snapshot.upToRid[row.id])
-    .map((row) => ({ ...row, modelName: row.model_id ? (deps.catalog.model(row.model_id)?.name ?? row.model_id) : row.model_other }));
+  const liveWorks = () => {
+    const { roundByTask } = promptCatalog();
+    return q.liveWorks.all().filter((row) => roundByTask[row.task_id] && !snapshot.upToRid[row.id])
+      .map((row) => ({ ...row, round: roundByTask[row.task_id],
+        modelName: row.model_id ? (deps.catalog.model(row.model_id)?.name ?? row.model_id) : row.model_other }));
+  };
   const workMap = () => Object.fromEntries([
     ...Object.entries(snapshot.workMap),
     ...liveWorks().map((row) => [row.id, { up: row.id, key: row.content_key, task: row.task_id,
-      round: snapshot.roundByTask[row.task_id], mid: row.model_id, modelName: row.modelName, title: row.title }]),
+      round: row.round, mid: row.model_id, modelName: row.modelName, title: row.title }]),
   ]);
   const roster = () => Object.entries(workMap()).sort(([a], [b]) => a.localeCompare(b));
   const workOf = (taskId, mid) => {
@@ -106,7 +138,7 @@ export function registerShow1Compat(router, deps) {
     const loserIdentity = JSON.parse(winnerIsA ? row.b_identity : row.a_identity);
     const winnerWork = winnerIsA ? row.a_work : row.b_work;
     const loserWork = winnerIsA ? row.b_work : row.a_work;
-    const promptId = snapshot.roundByTask[row.task_id] ?? row.task_id;
+    const promptId = roundOfTask(row.task_id) ?? row.task_id;
     const prompt = promptOf(promptId);
     const vote = {
       id: row.id,
@@ -143,12 +175,12 @@ export function registerShow1Compat(router, deps) {
 
   // ---- read-only snapshot -----------------------------------------------------
 
-  router.on('GET', '/api/prompts', () => ({ prompts: snapshot.prompts.map((prompt) => {
-    const row = q.arenaEditorial.get(snapshot.taskByRound[prompt.id] ?? '');
+  router.on('GET', '/api/prompts', () => ({ prompts: promptCatalog().prompts.map((prompt) => {
+    const row = q.arenaEditorial.get(taskOfRound(prompt.id) ?? '');
     return row ? { ...prompt, commentary: row.commentary, ...(row.weights_json ? { weights: JSON.parse(row.weights_json) } : {}) } : prompt;
   }) }));
   router.on('GET', '/api/works', () => ({ works: [...snapshot.works, ...liveWorks().map((row) => ({
-    id: row.id, promptId: snapshot.roundByTask[row.task_id], modelId: row.model_id,
+    id: row.id, promptId: row.round, modelId: row.model_id,
     modelName: row.modelName, title: row.title, isDemo: 0,
     content: JSON.stringify({ kind: 'html', src: `${deps.config.contentTemplate.replace('{token}', row.content_key)}/` }),
   }))] }));
@@ -221,7 +253,7 @@ export function registerShow1Compat(router, deps) {
     }
     if (q.voteById.get(id)) fail(409, '投票编号冲突，请重新提交', 'id');
 
-    const taskId = snapshot.taskByRound[promptId];
+    const taskId = taskOfRound(promptId);
     const now = Date.now();
     const editorial = q.arenaEditorial.get(taskId);
     const weights = editorial?.weights_json ? JSON.parse(editorial.weights_json) : promptOf(promptId)?.weights ?? null;
@@ -267,7 +299,7 @@ export function registerShow1Compat(router, deps) {
   router.on('GET', '/api/comments', (ctx) => {
     const round = String(ctx.url.searchParams.get('round') ?? '');
     if (!published(round)) fail(400, '题目不存在');
-    return { comments: q.commentsOfTask.all(snapshot.taskByRound[round]).map((row) => publicComment(row, round)) };
+    return { comments: q.commentsOfTask.all(taskOfRound(round)).map((row) => publicComment(row, round)) };
   });
 
   router.on('POST', '/api/comments', async (ctx) => {
@@ -280,7 +312,7 @@ export function registerShow1Compat(router, deps) {
     const text = String(body.body ?? '').trim();
     if (!UUID4.test(id) || !['a', 'b'].includes(side) || !text || text.length > 280) fail(400, '留言内容无效');
     if (!published(roundId)) fail(400, '题目不存在');
-    const taskId = snapshot.taskByRound[roundId];
+    const taskId = taskOfRound(roundId);
 
     // Same rule as the migration: the comment belongs to the work of the mid on the side
     // the commenter backed in their latest vote on this task; no vote → any work there.
@@ -331,7 +363,7 @@ export function registerShow1Compat(router, deps) {
   router.on('GET', '/api/reactions', (ctx) => {
     const promptId = String(ctx.url.searchParams.get('prompt') ?? '');
     if (!published(promptId)) fail(400, '题目不存在');
-    const taskId = snapshot.taskByRound[promptId];
+    const taskId = taskOfRound(promptId);
     const mine = {};
     if (ctx.user) {
       for (const row of q.myReactions.all(taskId, ctx.user.id)) {
@@ -351,7 +383,7 @@ export function registerShow1Compat(router, deps) {
     if (!UUID4.test(id)) fail(400, '表态编号无效');
     const promptId = String(body.promptId ?? '');
     if (!published(promptId)) fail(400, '题目不存在');
-    const taskId = snapshot.taskByRound[promptId];
+    const taskId = taskOfRound(promptId);
     const mid = trim64(body.mid);
     const work = mid ? workOf(taskId, mid) : null;
     if (!work) fail(400, '作品不存在');

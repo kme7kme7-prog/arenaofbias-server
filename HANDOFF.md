@@ -1,5 +1,12 @@
 # HANDOFF.md · 当前状态
 
+## 2026-09-30 · shared-question-intake（本地完成，未发布）
+
+- 正式题目由 arenaofbias-data 共用登记，兼容层读取稳定 arenaId/kind/category/promptVariants，并保留未迁移的历史题目、名称和权重。长短版使用同一 task ID，不拆题。
+- 本地数据包 20 道正式题映射为 Show1 的 25 道题（含 5 道仅历史题）。新增题目的已验证且开启 arena 展示的投稿可参与娱乐玩法；未更改审核/展示开关或历史票。
+- check 59 文件 0 错，npm test 127/127；真实 HTTP 核对编号和两组变体，前端浏览器原文切换通过。测试数据库位于 output/shared-question-intake-20260930，业务 .data/platform.db 未写入。
+- 当前 pin 保留，须在数据正式发布后配套部署；本轮仅本地提交，无 push/部署。归档见 docs/archive/2026-09-30-shared-question-intake-wsnxxxs.md。
+
 ## 2026-09-30 · anti-scraping（本地完成，未推送、未部署）
 
 - 为两个前端的共享后端增加按真实 IP 的 GET/HEAD 读取额度：API 180/min、整表/榜单共用 30/min、静态与所有作品域名共用 1200/min、作品 HTML 共用 60/min；换参数、Cookie 或域名不重置。超限带 429、Retry-After，可信 API Origin 保留 CORS；写操作沿用现有规则，收录导出保留独立令牌/IP 额度。

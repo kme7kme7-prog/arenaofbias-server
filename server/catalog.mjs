@@ -29,7 +29,10 @@ function readSnapshot(root) {
   const harnesses = new Map((data.harnesses ?? []).map((item) => [item.id, item]));
   const providers = new Map((data.providers ?? []).map((item) => [item.id, item]));
   const tasks = new Map(data.tasks.map((task) => [task.id, {
-    id: task.id, title: task.title, acceptsUploads: !task.promptPending,
+    id: task.id, title: task.title, summary: task.summary, prompt: task.prompt,
+    arenaId: task.arenaId ?? null, kind: task.kind ?? 'web', category: task.category ?? '',
+    promptVariants: task.promptVariants ?? [],
+    acceptsUploads: !task.promptPending,
     works: new Map(task.results.map((result) => {
       const model = models.get(result.model);
       return [result.id, {
@@ -38,6 +41,7 @@ function readSnapshot(root) {
         title: result.title, summary: result.summary ?? '', modelId: result.model,
         modelName: model?.name ?? result.model, vendor: model?.vendor ?? '',
         effort: result.effort ?? '', tool: result.sourceLabel ?? '', ownerId: null,
+        ...(result.promptVariant ? { promptVariant: result.promptVariant } : {}),
         harnessId: result.harness ?? null, harnessOther: '', harnessVersion: result.harnessVersion ?? '',
         providerId: result.provider ?? null, providerOther: '',
         ...generationOf(result),

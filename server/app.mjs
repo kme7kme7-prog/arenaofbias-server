@@ -6,6 +6,7 @@ import { createArena } from './arena.mjs';
 import { createAuth } from './auth.mjs';
 import { createEmailAuth } from './auth-email.mjs';
 import { createCapturer } from './capture.mjs';
+import { createModerator } from './moderation.mjs';
 import { createCatalog } from './catalog.mjs';
 import { createComments } from './comments.mjs';
 import { EFFORTS, EMOJIS } from './config.mjs';
@@ -24,7 +25,7 @@ import { registerShow1Compat } from './show1compat.mjs';
 import { registerShow1Guess } from './show1/guess.mjs';
 import { turnstileEnabled, turnstileSiteKey } from './turnstile.mjs';
 
-export function createPlatform({ config, limits }) {
+export function createPlatform({ config, limits, captureFactory = createCapturer }) {
   const serverVersion = process.env.SERVER_VERSION || (() => {
     try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: new URL('..', import.meta.url), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); }
     catch { /* 部署目录没有 .git：读部署时写入的版本文件 */ }
@@ -45,7 +46,12 @@ export function createPlatform({ config, limits }) {
   const curator = createCurator({ db, catalog, library, onTakeover: () => arena.invalidate() });
   catalog.onChange(curator.takeover);
   const comments = createComments(db, library);
-  const capturer = createCapturer({ config, library });
+  const capturer = captureFactory({ config, library });
+  const moderator = createModerator({ config, library, capturer, onChange: () => arena.invalidate() });
+  const queueWork = (work) => {
+    if (work.moderation.status === 'pending') moderator.enqueue(work);
+    else void capturer.enqueue(work);
+  };
   const limit = {
     auth: rateLimit(60e3, 10, '尝试次数太多，请一分钟后再试'),
     write: rateLimit(60e3, 120),
@@ -95,6 +101,7 @@ export function createPlatform({ config, limits }) {
         content: config.contentTemplate,
         cdn: config.cdn,
         capture: capturer.available,
+        contentModeration: moderator.enabled,
         efforts: EFFORTS,
         emojis: EMOJIS,
         limits: { uploadBytes: limits.uploadBytes, coverBytes: limits.coverBytes, pendingPerUser: limits.pendingPerUser, provisionalGames: limits.provisionalGames },
@@ -105,7 +112,7 @@ export function createPlatform({ config, limits }) {
       arena: Object.fromEntries(catalog.tasks().map((task) => [task.id, { ...arena.poolStats(task.id), uploads: task.acceptsUploads }])),
       totals: (await arena.leaderboard()).totals,
       me: user ? { votes: arena.votesBy(user.id), pending: library.pendingCount(user.id) } : null,
-      review: user?.role === 'admin' ? { unverified: uploads.filter((work) => work.status === 'unverified').length } : null,
+      review: user?.role === 'admin' ? { unverified: uploads.filter((work) => work.status === 'unverified' || !library.contentAllowed(work)).length } : null,
     };
   }
 
@@ -175,7 +182,7 @@ export function createPlatform({ config, limits }) {
     const body = await readJson(ctx.req, 6 * 1024 * 1024);
     checkDatapack(ctx, library.draftTask(String(body.draftId ?? '')));
     const work = library.submit(user, body);
-    capturer.enqueue(work);
+    queueWork(work);
     arena.invalidate();
     return { work: library.toPublic(work, user) };
   });
@@ -188,8 +195,24 @@ export function createPlatform({ config, limits }) {
     const admin = adminOnly(ctx);
     limit.write(admin.id);
     const work = library.review(admin, ctx.params.task, ctx.params.id, await readJson(ctx.req));
+    moderator.enqueue(work);
     arena.invalidate();
     return { work: library.toPublic(work, admin) };
+  });
+  router.on('POST', '/api/works/:task/:id/moderation', async (ctx) => {
+    const admin = adminOnly(ctx);
+    limit.write(admin.id);
+    const work = library.reviewContent(admin, ctx.params.task, ctx.params.id, await readJson(ctx.req));
+    arena.invalidate();
+    return { work: library.adminWork(work) };
+  });
+  router.on('POST', '/api/works/:task/:id/moderation/retry', (ctx) => {
+    const admin = adminOnly(ctx);
+    limit.write(admin.id);
+    const work = library.retryModeration(admin, ctx.params.task, ctx.params.id);
+    moderator.enqueue(work);
+    arena.invalidate();
+    return { work: library.adminWork(work) };
   });
   router.on('POST', '/api/works/:task/:id/reactions', async (ctx) => {
     const user = signedIn(ctx);
@@ -321,7 +344,7 @@ export function createPlatform({ config, limits }) {
     }
     const work = library.review(admin, task, submitted.id, { status: 'verified',
       show_gallery: gallery === null ? true : gallery === '1', show_arena: arenaFace === null ? false : arenaFace === '1' });
-    capturer.enqueue(work);
+    queueWork(work);
     arena.invalidate();
     return { work: library.adminWork(work) };
   });
@@ -342,7 +365,7 @@ export function createPlatform({ config, limits }) {
     const admin = adminOnly(ctx);
     limit.write(admin.id);
     const work = inbox.register(admin, await readJson(ctx.req));
-    capturer.enqueue(work);
+    queueWork(work);
     arena.invalidate();
     return { work: library.adminWork(work) };
   });
@@ -379,6 +402,7 @@ export function createPlatform({ config, limits }) {
     const admin = adminOnly(ctx);
     limit.write(admin.id);
     const work = library.setMeta(admin, ctx.params.task, ctx.params.id, await readJson(ctx.req));
+    moderator.enqueue(library.work(ctx.params.task, ctx.params.id));
     arena.invalidate();
     return { work };
   });
@@ -414,9 +438,11 @@ export function createPlatform({ config, limits }) {
   function serveSite(req, res, pathname) {
     const media = /^\/media\/(up-[a-z0-9]{8})\/(cover\.(?:png|jpg|webp)|first\.jpg|mobile\.jpg)$/.exec(pathname);
     if (pathname.startsWith('/media/')) {
+      const work = media && library.uploadById(media[1]);
+      if (!library.canRead(work, auth.userFrom(req))) return sendJson(res, 404, { error: '文件不存在' });
       const found = media && resolveInside(library.mediaDir, `/${media[1]}/${media[2]}`);
       if (!found) return sendJson(res, 404, { error: '文件不存在' });
-      return streamFile(req, res, found, { 'Cache-Control': 'public, max-age=300', 'Content-Security-Policy': "default-src 'none'" });
+      return streamFile(req, res, found, { 'Cache-Control': work.moderation.status === 'legacy' ? 'public, max-age=300' : 'no-store', 'Content-Security-Policy': "default-src 'none'" });
     }
     // Admin inbox previews stream straight from the staging directory; session-guarded
     // because these files are not published works yet.
@@ -504,11 +530,12 @@ export function createPlatform({ config, limits }) {
     auth,
     library,
     arena,
+    moderator,
     handleSite,
     handleContent: createContentHandler({ config, library, arena, siteOrigins: config.siteOrigins }),
     async close() {
       await emailAuth.drain();
-      await capturer.close();
+      await Promise.all([moderator.close(), capturer.close()]);
       db.close();
     },
   };

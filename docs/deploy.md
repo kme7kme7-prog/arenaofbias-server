@@ -245,3 +245,23 @@ Environment="TURNSTILE_SECRET_KEY=<secret-key>"
 ```
 
 写入后执行 `systemctl daemon-reload`、重启服务，并通过 `/api/auth/turnstile` 核对站点密钥。SMTP 仍由现有 `smtp.conf` 提供。
+
+## 6. Luna Flex 内容审查
+
+本轮只完成本地实现；不代表线上开关或截图环境已经启用。按本文版本门禁与备份流程先发布配套后端（启动追加 v19），再发布前端。密钥只放受限服务器环境文件，不写入仓库、前端构建变量或验收日志：
+
+```ini
+# /etc/systemd/system/arenaofbias-server.service.d/moderation.conf
+[Service]
+Environment="CONTENT_MODERATION=1"
+Environment="CAPTURE=1"
+Environment="MODERATION_BASE_URL=https://api.openai.com/v1"
+Environment="MODERATION_MODEL=gpt-6-luna"
+Environment="MODERATION_API_KEY=<server-only-key>"
+```
+
+截图仍需已有的 Playwright ≥ 1.48 与 Chrome，服务不新增 npm 依赖。先在隔离环境确认两档截图及 Responses API 的 Flex 结构化响应；真实调用会计费，本轮本地验证使用模拟接口。配置后 daemon-reload 并重启，在 bootstrap 核对 `site.contentModeration`；用测试投稿确认公开列表/原作品源/媒体均被限制，作者与管理员可预览，自动通过后公开，疑似与错误转人工。后台人工决定需填写理由。
+
+Flex 固定为唯一计费档，不自动改用标准档。密钥缺失、`CAPTURE=0`、浏览器不可用、容量不足或超时均会进入人工队列；不要以「上传成功」判断审查完成。旧作品标记 legacy，默认不批量重审。送审涵盖声明、页面文字、封面和两档首屏，不覆盖整包及全部交互。
+
+关闭 `CONTENT_MODERATION` 会停止自动队列，新作品走旧流程，已有待审/拒绝作品仍保持限制。退回不理解 v19 内容状态的旧代码会公开这些作品，不能直接只回滚代码；须先停写并按备份流程恢复兼容数据库及文件，或保留支持内容访问限制的版本。

@@ -65,6 +65,10 @@ npm start
 | `CONTENT_CDN_ALLOWLIST` | `cdn.jsdelivr.net,unpkg.com,cdnjs.cloudflare.com,esm.sh,fonts.googleapis.com,fonts.gstatic.com` | 作品允许加载脚本/样式/字体/数据的公共 CDN 白名单 |
 | `CAPTURE` | 开（`0` 关闭） | 投稿作品的无头截图（预配置 Playwright ≥ 1.48 + 本地 Chrome）；文档只访问当前作品源，资源只访问作品源和 HTTPS CDN 白名单，逐跳检查重定向，禁用 Service Worker / WebSocket |
 | `CAPTURE_BROWSER` | `chrome` | 截图所用浏览器通道 |
+| `CONTENT_MODERATION` | 关（`1` 开启） | 新投稿先保持私密，异步审查文字、封面及桌面/手机首屏；异常转人工 |
+| `MODERATION_API_KEY` / `OPENAI_API_KEY` | 未配置 | 服务器审核 API 密钥，前者优先；不下发至浏览器 |
+| `MODERATION_BASE_URL` | `https://api.openai.com/v1` | Responses API 根地址；生产使用 HTTPS |
+| `MODERATION_MODEL` | `gpt-6-luna` | 审核模型；请求固定 `service_tier: flex` |
 | `COOKIE_SECURE` | 关（`1` 开启） | session cookie 改名 `__Host-sp_session`，加 Secure 标记，Path=/ 且不带 Domain；本地未开启时仍为 `sp_session` |
 | `COOKIE_SAME_SITE` | `Lax` | `Lax` / `Strict` / `None`；跨站 HTTPS 部署用 `None`，并必须开启 `COOKIE_SECURE=1` |
 | `TRUST_PROXY` | 关（`1` 开启） | 仅信任本机单层反代的 `X-Forwarded-For` 最后一项有效 IP；非本机连接或无效头使用连接 IP。边缘代理须覆盖原头或追加真实客户端 IP |
@@ -80,6 +84,14 @@ npm start
 | `TURNSTILE_VERIFY_URL` | Cloudflare siteverify | 校验地址，本地测试可指向桩服务 |
 
 收录流程不需要数据仓库路径环境变量：管理员提名后，在 `arenaofbias-data` 中运行返回的命令；数据包发布并切换后，带 `sourceUpload` 的馆藏作品自动接管投稿。
+
+## 自动内容审查
+
+服务器设置 `CONTENT_MODERATION=1`，在服务器环境中配置 `MODERATION_API_KEY` 或 `OPENAI_API_KEY`，并启用已有截图环境（`CAPTURE=1`、预配置 Playwright 与 Chrome）。默认调用 OpenAI Responses API 的 GPT-6 Luna Flex；不新增 npm 依赖。缺少密钥、截图不完整、超时或 Flex 容量不足时保留私密状态，转人工复核；不自动改用标准档。
+
+内容状态独立于 `unverified / verified / questioned`：`pending` 等待自动审查，`approved` 可公开，`review` 等人工，`rejected` 不公开。公开门面开关仍生效；只有核验为 `verified` 的作品才能进盲评。作者和管理员响应中会发放有效一小时的随机预览地址，地址本身具有预览能力，不应转发；封面和截图仍校验作者/管理员会话。后台支持人工通过、拒绝和重新自动审查，并记录审计。修改送审文字后重新进入 `pending`，启动时恢复尚未处理的队列。
+
+送审材料是投稿声明、入口 HTML 的静态文字、实际桌面/手机页面文字、可选封面及两张首屏截图；没有遍历所有页面、滚动区域、交互后画面或资源包图片，也不证明模型声明真实。模型结论只是初筛，疑似内容转人工。升级已有作品标为 `legacy`，维持原发布行为；关闭自动审查后新作品也走原流程，已经待审/拒绝的作品仍受访问限制。页面无法读取、文字超过 10 万字符、入口 HTML 超过 5 MiB 或单张送审图超过 20 MiB 时转人工。
 
 ## API 概览（server/app.mjs）
 
@@ -102,6 +114,8 @@ npm start
 | POST | `/api/works` | 由草稿正式投稿，入审核队列并排队截图（需登录） |
 | DELETE | `/api/works/:task/:id` | 删除投稿（需登录，本人或管理员） |
 | POST | `/api/works/:task/:id/review` | 审核投稿（仅管理员） |
+| POST | `/api/works/:task/:id/moderation` | 人工内容通过/拒绝，需理由（仅管理员） |
+| POST | `/api/works/:task/:id/moderation/retry` | 重新排队自动内容审查（仅管理员） |
 | POST | `/api/works/:task/:id/reactions` | emoji 反应（需登录） |
 | GET | `/api/me` | 本人题目、投稿、投票、近 365 天活跃热图和收到的表情（需登录） |
 | PATCH | `/api/me` | 修改昵称，登录用户名不变（需登录） |

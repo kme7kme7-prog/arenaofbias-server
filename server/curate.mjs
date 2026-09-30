@@ -27,6 +27,7 @@ export function createCurator({ db, catalog, library, onTakeover = () => {} }) {
     const work = upload(task, id);
     if (work.curatedAs) fail(409, '作品已收录');
     if (work.status !== 'verified') fail(409, '请先审核通过');
+    if (!library.contentAllowed(work)) fail(409, '请先通过内容审查');
     if (!catalog.snapshot().task(task)) fail(409, '题目不在当前数据包');
     const token = randomBytes(32).toString('hex');
     const now = Date.now();
@@ -53,6 +54,7 @@ export function createCurator({ db, catalog, library, onTakeover = () => {} }) {
     if (!row) fail(404, '导出不存在', 'not_found');
     const work = upload(row.task_id, row.id);
     if (work.status !== 'verified') fail(404, '导出不存在', 'not_found');
+    if (!library.contentAllowed(work)) fail(404, '导出不存在', 'not_found');
     return work;
   }
 

@@ -15,6 +15,10 @@ const workId = () => `up-${[...randomBytes(8)].map((byte) => (byte % 36).toStrin
 const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
 const clip = (value, max) => String(value ?? '').normalize('NFKC').trim().slice(0, max);
 const plainObject = (value) => value && typeof value === 'object' && !Array.isArray(value);
+const contentAllowed = (work) => Boolean(work && (work.curated || ['legacy', 'approved'].includes(work.moderation?.status)));
+const pendingModeration = () => ({ status: 'pending', revision: token('r'), at: Date.now() });
+const moderationText = (work) => JSON.stringify([work.title, work.summary, work.modelName, work.effort, work.note,
+  work.harnessOther, work.harnessVersion, work.providerOther, ...GENERATION_FIELDS.map((key) => work[key])]);
 const noteWithVendor = (note, modelId, vendor) => {
   const name = modelId ? '' : clip(vendor, 40);
   const line = name ? `手填模型厂商：${name}` : '';
@@ -55,6 +59,17 @@ export function createLibrary({ db, catalog, config, limits }) {
   const dirs = { drafts: join(config.dataDir, 'drafts'), works: join(config.dataDir, 'works'), media: join(config.dataDir, 'media') };
   for (const dir of Object.values(dirs)) mkdirSync(dir, { recursive: true });
   const originOf = (key) => config.contentTemplate.replace('{token}', key);
+  // Short-lived bearer previews are only issued in owner/admin responses. Public
+  // work hosts never serve a held upload, even when its old URL is known.
+  const previews = new Map();
+  function previewKey(work) {
+    const now = Date.now();
+    for (const [key, value] of previews) if (value.expiresAt <= now) previews.delete(key);
+    for (const [key, value] of previews) if (value.id === work.id) return key;
+    const key = token('p');
+    previews.set(key, { id: work.id, task: work.taskId, expiresAt: now + 3600e3 });
+    return key;
+  }
 
   const WORK = `SELECT works.*, COALESCE(NULLIF(owner.nickname, ''), owner.name) AS owner_name,
     COALESCE(NULLIF(reviewer.nickname, ''), reviewer.name, review_audit.actor_name) AS reviewer_name FROM works
@@ -81,8 +96,8 @@ export function createLibrary({ db, catalog, config, limits }) {
     insertWork: db.prepare(`INSERT INTO works (id, task_id, owner_id, title, summary, model_id, model_other, effort,
       harness_id, harness_other, harness_version, provider_id, provider_other, note, content_key,
       source_name, root, entry, file_count, bytes, digest, checks, trial, cover, created_at, updated_at,
-      model_version, generation_mode, human_intervention, generated_on, evidence_url, show_gallery, show_arena)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`),
+      model_version, generation_mode, human_intervention, generated_on, evidence_url, moderation, show_gallery, show_arena)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`),
     deleteWork: db.prepare('DELETE FROM works WHERE id = ?'),
     deleteSubmitAudit: db.prepare("DELETE FROM audit WHERE action = 'submit' AND work_id = ?"),
     restoreDraft: db.prepare(`INSERT INTO drafts (id, owner_id, task_id, token, source_name, root, entry, file_count, bytes, digest, checks, created_at, expires_at)
@@ -93,6 +108,8 @@ export function createLibrary({ db, catalog, config, limits }) {
       show_gallery = ?, show_arena = ?, title = ?, summary = ?, note = ?, reviewed_at = ?, updated_at = ? WHERE id = ?`),
     remove: db.prepare('UPDATE works SET deleted_at = ?, updated_at = ? WHERE id = ?'),
     captures: db.prepare('UPDATE works SET captures = ? WHERE id = ?'),
+    moderation: db.prepare('UPDATE works SET moderation = ? WHERE id = ? AND deleted_at IS NULL'),
+    moderationResult: db.prepare('UPDATE works SET moderation = ? WHERE id = ? AND moderation = ? AND deleted_at IS NULL'),
     calibration: db.prepare('UPDATE works SET trial = ?, updated_at = ? WHERE id = ?'),
     arenaCalibration: db.prepare('UPDATE works SET calibration_arena = ?, updated_at = ? WHERE id = ?'),
     faceSettings: db.prepare('UPDATE works SET show_gallery = ?, show_arena = ?, updated_at = ? WHERE id = ?'),
@@ -126,6 +143,8 @@ export function createLibrary({ db, catalog, config, limits }) {
       id: row.id,
       curated: false,
       status: row.status,
+      moderation: JSON.parse(row.moderation),
+      moderationRaw: row.moderation,
       audience: row.show_gallery && row.show_arena ? 'both' : row.show_gallery ? 'show2' : row.show_arena ? 'show1' : 'hidden',
       showGallery: Boolean(row.show_gallery),
       showArena: Boolean(row.show_arena),
@@ -217,7 +236,7 @@ export function createLibrary({ db, catalog, config, limits }) {
     }
     return { show_gallery: work.showGallery, show_arena: work.showArena };
   };
-  const visibleTo = (work, site = 'show2') => Boolean(work && (site === 'show1' ? flagsOf(work).show_arena : flagsOf(work).show_gallery));
+  const visibleTo = (work, site = 'show2') => Boolean(contentAllowed(work) && (site === 'show1' ? flagsOf(work).show_arena : flagsOf(work).show_gallery));
   const isEligible = (work) => Boolean(work && work.status === 'verified' && work.dir && !work.curatedAs && visibleTo(work, 'show1'));
   const isInteractive = (work) => Boolean(work && work.status !== 'questioned' &&
     (visibleTo(work, 'show1') || visibleTo(work, 'show2')));
@@ -336,6 +355,20 @@ export function createLibrary({ db, catalog, config, limits }) {
     originOf,
     audit,
     mediaDir: dirs.media,
+    contentAllowed,
+    canRead(work, viewer) {
+      return Boolean(work && (contentAllowed(work) || viewer && (viewer.id === work.ownerId || viewer.role === 'admin')));
+    },
+    previewOrigin(work) { return originOf(previewKey(work)); },
+    previewByKey(key) {
+      const value = previews.get(key);
+      if (!value || value.expiresAt <= Date.now()) { previews.delete(key); return null; }
+      return upload(value.task, value.id);
+    },
+    uploadById(id) {
+      const row = q.work.get(id);
+      return row ? fromRow(row) : null;
+    },
 
     work(taskId, id, snapshot = null) {
       const archive = snapshot ?? catalog.snapshot();
@@ -377,13 +410,14 @@ export function createLibrary({ db, catalog, config, limits }) {
         ...publicProvenance(work),
         note: work.note,
         status: work.status,
+        ...(privileged ? { moderation: work.moderation } : {}),
         ...(privileged ? { audience: work.audience } : {}),
         reason: work.reason,
         owner: work.ownerName,
         mine: Boolean(viewer && viewer.id === work.ownerId),
         addedAt: iso(work.createdAt),
         reviewedAt: iso(work.reviewedAt),
-        scene: `${originOf(work.contentKey)}/`,
+        scene: `${!contentAllowed(work) && privileged ? originOf(previewKey(work)) : originOf(work.contentKey)}/`,
         captures: Object.fromEntries(Object.entries(work.captures).map(([id, file]) => [id, `media/${work.id}/${file}`])),
         cover: work.cover ? `media/${work.id}/${work.cover}` : null,
         files: work.files,
@@ -466,7 +500,7 @@ export function createLibrary({ db, catalog, config, limits }) {
 
     getCalibration(viewer, id) {
       const row = q.work.get(id);
-      if (!row || ((row.status !== 'verified' || !row.show_gallery) && viewer?.id !== row.owner_id && viewer?.role !== 'admin')) fail(404, '作品不存在');
+      if (!row || ((!contentAllowed(fromRow(row)) || row.status !== 'verified' || !row.show_gallery) && viewer?.id !== row.owner_id && viewer?.role !== 'admin')) fail(404, '作品不存在');
       return JSON.parse(row.trial).calibration ?? null;
     },
 
@@ -578,7 +612,7 @@ export function createLibrary({ db, catalog, config, limits }) {
             effortOf(body.effort), source.harnessId, source.harnessOther, source.harnessVersion, source.providerId,
             source.providerOther, noteWithVendor(clip(body.note, 1000), who.modelId, body.vendor), token('w'), draft.source_name, draft.root, draft.entry, draft.file_count,
             draft.bytes, draft.digest, draft.checks, JSON.stringify(sanitizeTrial(body.trial)), coverName, now, now,
-            ...GENERATION_FIELDS.map((key) => generation[key]));
+            ...GENERATION_FIELDS.map((key) => generation[key]), JSON.stringify(config.moderation?.enabled ? pendingModeration() : { status: 'legacy' }));
           q.deleteDraft.run(draft.id);
           q.audit.run(now, user.id, user.name, 'submit', draft.task_id, id, `${who.modelName}${effortOf(body.effort) ? ` · ${effortOf(body.effort)}` : ''}`);
         });
@@ -616,15 +650,47 @@ export function createLibrary({ db, catalog, config, limits }) {
       const effort = body.effort !== undefined ? effortOf(body.effort) : work.effort;
       const source = provenance(body, work);
       const generation = generationFrom(body, work);
-      q.meta.run(title, summary, who.modelId, who.modelId ? '' : who.modelName, effort,
-        source.harnessId, source.harnessOther, source.harnessVersion, source.providerId, source.providerOther,
-        ...GENERATION_FIELDS.map((key) => generation[key]), Date.now(), id);
-      audit(admin, 'meta', work, `编辑信息${generationAudit(work, generation)}`);
+      transaction(db, () => {
+        q.meta.run(title, summary, who.modelId, who.modelId ? '' : who.modelName, effort,
+          source.harnessId, source.harnessOther, source.harnessVersion, source.providerId, source.providerOther,
+          ...GENERATION_FIELDS.map((key) => generation[key]), Date.now(), id);
+        audit(admin, 'meta', work, `编辑信息${generationAudit(work, generation)}`);
+        const next = upload(taskId, id);
+        if (config.moderation?.enabled && moderationText(work) !== moderationText(next)) q.moderation.run(JSON.stringify(pendingModeration()), id);
+      });
       return this.adminWork(upload(taskId, id));
     },
 
     setCaptures(id, captures) {
       q.captures.run(JSON.stringify(captures), id);
+    },
+
+    finishModeration(work, result, actor = null) {
+      const next = { ...result, at: Date.now() };
+      return transaction(db, () => {
+        const updated = q.moderationResult.run(JSON.stringify(next), work.id, work.moderationRaw).changes;
+        if (updated) audit(actor, 'content-review', work, JSON.stringify(next));
+        return Boolean(updated);
+      });
+    },
+    reviewContent(admin, taskId, id, body) {
+      const work = upload(taskId, id);
+      if (!work) fail(404, '作品不存在');
+      if (!['approved', 'rejected'].includes(body.status)) fail(400, '内容审查结果无效');
+      const reason = clip(body.reason, 500);
+      if (!reason) fail(400, '请填写人工审查理由');
+      this.finishModeration(work, { status: body.status, reason, source: 'human', reviewer: admin.name }, admin);
+      return upload(taskId, id);
+    },
+    retryModeration(admin, taskId, id) {
+      if (!config.moderation?.enabled) fail(409, '自动内容审查未启用');
+      const work = upload(taskId, id);
+      if (!work) fail(404, '作品不存在');
+      transaction(db, () => {
+        q.moderation.run(JSON.stringify(pendingModeration()), id);
+        audit(admin, 'content-retry', work, '重新提交自动内容审查');
+      });
+      return upload(taskId, id);
     },
 
     // ---- review and removal -----------------------------------------------------------
@@ -659,6 +725,8 @@ export function createLibrary({ db, catalog, config, limits }) {
           ...GENERATION_FIELDS.map((key) => generation[key]), Number(gallery), Number(arena), title, summary,
           noteWithVendor(work.note, who.modelId, body.vendor), now, now, id);
         audit(admin, status, work, [labels[status], reason].filter(Boolean).join('：') + generationAudit(work, generation));
+        const next = upload(taskId, id);
+        if (config.moderation?.enabled && moderationText(work) !== moderationText(next)) q.moderation.run(JSON.stringify(pendingModeration()), id);
       });
       return upload(taskId, id);
     },

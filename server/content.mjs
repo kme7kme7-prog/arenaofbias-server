@@ -56,7 +56,7 @@ export function createContentHandler({ config, library, arena, siteOrigins }) {
       return res.end();
     }
     const key = String(req.headers.host ?? '').split('.')[0].toLowerCase();
-    if (!/^[wmd][0-9a-f]{32}$/.test(key)) return errorPage(res, 404, '作品地址无效', '请从展厅重新打开作品。');
+    if (!/^[wmdp][0-9a-f]{32}$/.test(key)) return errorPage(res, 404, '作品地址无效', '请从展厅重新打开作品。');
 
     let target = null;
     if (key[0] === 'd') {
@@ -65,18 +65,21 @@ export function createContentHandler({ config, library, arena, siteOrigins }) {
     } else if (key[0] === 'm') {
       const work = arena.workForToken(key);
       if (library.isEligible(work)) target = { dir: work.dir, entry: work.entry ?? 'index.html' };
+    } else if (key[0] === 'p') {
+      const work = library.previewByKey(key);
+      if (work) target = { dir: work.dir, entry: work.entry, private: true };
     } else {
       const work = library.byContentKey(key);
-      if (work) target = { dir: work.dir, entry: work.entry };
+      if (library.contentAllowed(work)) target = { dir: work.dir, entry: work.entry, private: work.moderation.status !== 'legacy' };
     }
-    if (!target) return errorPage(res, 410, '作品已不可用', key[0] === 'm' ? '这一组比较已经结束，请开始新的一组。' : '作品已被删除，或试加载已过期。');
+    if (!target) return errorPage(res, 410, '作品已不可用', key[0] === 'm' ? '这一组比较已经结束，请开始新的一组。' : '作品尚未公开、已被删除，或预览地址已过期。');
 
     const { pathname } = new URL(req.url, 'http://content.invalid');
     const headers = {
       'Content-Security-Policy': policy,
       'Referrer-Policy': 'no-referrer',
       'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=()',
-      'Cache-Control': target.draft || key[0] === 'm' ? 'no-store' : 'private, max-age=600',
+      'Cache-Control': target.draft || target.private || key[0] === 'm' ? 'no-store' : 'private, max-age=600',
     };
     const inject = target.draft ? SCRIPTS.draft : key[0] === 'm' ? SCRIPTS.match : null;
     if (inject && pathname === inject.path) {

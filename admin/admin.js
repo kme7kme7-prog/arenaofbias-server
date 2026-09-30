@@ -151,12 +151,27 @@ const statusBadge = (status, reason = '') => {
   return info ? `<span class="status status-${status}" title="${esc(reason || info.hint)}">${icon(info.icon)}${info.label}</span>` : '';
 };
 const ACTIONS = { submit: '提交作品', verified: '通过验证', questioned: '标记存疑', unverified: '退回未验证', delete: '删除作品', role: '调整角色',
+  'content-review': '内容审查', 'content-retry': '重新内容审查',
   'face-settings': '门面开关', meta: '编辑信息', curate: '收录为馆藏', nominate: '提名收录', 'withdraw-nomination': '撤回提名', 'inbox-upload': '收件箱上传', 'inbox-register': '登记入库', 'inbox-remove': '收件箱移除' };
 // Per-face review: the same work is approved separately for the gallery (display)
 // and the arena (blind test). `audience` carries both flags; adminWork rows also
 // carry explicit show_gallery/show_arena.
 const AUDIENCE_FACE = { gallery: ['show2', 'both'], arena: ['show1', 'both'] };
-const faceOn = (w, face = state.system) => Boolean(w[`show_${face}`] ?? AUDIENCE_FACE[face].includes(w.audience));
+const contentHeld = (w) => ['pending', 'review', 'rejected'].includes(w.moderation?.status);
+const faceOn = (w, face = state.system) => !contentHeld(w) && Boolean(w[`show_${face}`] ?? AUDIENCE_FACE[face].includes(w.audience));
+const CONTENT_STATUS = { pending: '内容审查中', approved: '内容审查通过', review: '内容需人工复核', rejected: '内容审查拒绝', legacy: '历史作品，未自动审查' };
+const contentBadge = (w) => w.moderation && w.moderation.status !== 'legacy' ? `<span class="badge">${esc(CONTENT_STATUS[w.moderation.status])}</span>` : '';
+function contentPanel(w) {
+  if (!w.moderation || w.moderation.status === 'legacy') return '';
+  return `<section class="content-review"><h4>${esc(CONTENT_STATUS[w.moderation.status])}</h4>
+    <p class="review-text">${esc(w.moderation.reason || '正在后台检查文字、封面和页面截图。完成前仅作者和管理员可预览。')}</p>
+    ${w.moderation.error ? `<p class="fine">自动审查未完成：${esc(w.moderation.error)}</p>` : ''}
+    <label class="field"><span class="field-label">人工内容审查理由</span><textarea class="input" data-content-reason rows="2" maxlength="500"></textarea></label>
+    <p class="fine">内容审查决定能否公开，作品核验仍决定是否进入盲测。</p><p class="form-error" data-content-error role="alert"></p>
+    <div class="actions"><button class="btn sm" data-content-decide="retry">重新自动审查</button>
+      <button class="btn sm danger ghost" data-content-decide="rejected">内容不通过</button>
+      <button class="btn sm primary" data-content-decide="approved">人工确认内容通过</button></div></section>`;
+}
 const FACE_LABEL = { gallery: '展览馆', arena: '竞技场' };
 const REVIEW_TABS = { pending: '待审', shown: '已展示', questioned: '存疑', log: '记录' };
 const skeleton = (count = 4, kind = 'row') => `<div class="skeleton-list" aria-label="正在载入" role="status">${Array.from({ length: count }, () => `<div class="skeleton skeleton-${kind}"></div>`).join('')}</div>`;
@@ -265,7 +280,7 @@ function thumb(w) {
 
 function workRow(w) {
   const face = state.system;
-  const quick = w.status === 'questioned' ? '' : faceOn(w, face)
+  const quick = w.status === 'questioned' || contentHeld(w) ? '' : faceOn(w, face)
     ? `<button class="btn sm" data-face-off="${esc(w.id)}" title="本面撤下，不影响另一面">${icon('close')}撤下</button>`
     : `<button class="btn sm primary" data-verify="${esc(w.id)}" title="${w.source === 'curated' ? '让这件馆藏作品' : '内容核验通过并'}${face === 'gallery' ? '上展览馆' : '进入正式盲测'}">${icon('check')}${face === 'gallery' ? '上展览馆' : '进盲测'}</button>`;
   const source = w.source === 'curated' ? ['精选馆藏', esc(provenanceText(w))] : [esc(provenanceText(w) || w.tool)];
@@ -274,7 +289,7 @@ function workRow(w) {
     ${thumb(w)}
     <div class="work-main">
       <p class="work-model"><b>${esc(w.modelName)}</b>${w.effort ? `<span class="badge">${esc(w.effort)}</span>` : ''}<span class="badge">${esc(FACE_LABEL[face])}·${faceOn(w, face) ? '已展示' : '待审'}</span>${statusBadge(w.status, w.reason)}${w.audience === 'hidden' ? '<span class="badge">未展示</span>' : ''}</p>
-      <h3>${esc(w.title)}</h3>
+      <h3>${esc(w.title)} ${contentBadge(w)}</h3>
       <p class="work-meta">${meta}</p>
       ${w.reason ? `<p class="work-reason">${icon('alert')}<span>${esc(w.reason)}</span></p>` : ''}
     </div>
@@ -479,6 +494,7 @@ function openReview(w) {
         </dl>
         ${w.summary ? `<p class="review-text">${esc(w.summary)}</p>` : ''}
         <h4>生成说明</h4><p class="review-text">${w.note ? esc(w.note) : '<span class="muted">投稿者没有填写。</span>'}</p>
+        ${contentPanel(w)}
         <h4>上传检查</h4><ul class="checks">${(w.checks ?? []).map((c) => `<li class="check is-${c.state}">${icon(c.state === 'ok' ? 'check' : c.state === 'info' ? 'guide' : 'alert')}<span><b>${esc(c.label)}</b>${esc(c.detail)}</span></li>`).join('')}</ul>
         <h4>作者浏览器中的试加载</h4><ul class="checks">${trialRows(w.trial)}</ul>
         <h4>试加载</h4><div class="trial-live"><iframe src="${esc(w.scene)}" title="试加载「${esc(w.title)}」" loading="lazy"></iframe></div>
@@ -514,13 +530,28 @@ function openReview(w) {
           <button type="button" class="btn" data-decide="questioned">${icon('alert')}标记存疑</button>
           ${faceOn(w)
             ? `<button type="button" class="btn" data-decide="hide">从${FACE_LABEL[face]}${face === 'gallery' ? '撤下' : '移出'}</button>`
-            : `<button type="button" class="btn primary" data-decide="show">${icon('check')}${face === 'gallery' ? '通过并上展览馆' : '通过并进盲测'}</button>`}
+            : `<button type="button" class="btn primary" data-decide="show">${icon('check')}${contentHeld(w) ? '保存核验，内容通过后展示' : face === 'gallery' ? '通过并上展览馆' : '通过并进盲测'}</button>`}
         </div>
       </form>
     </div>`,
   });
   const form = $('form', sheet.el);
   sheet.el.addEventListener('click', async (e) => {
+    const contentDecision = e.target.closest('[data-content-decide]');
+    if (contentDecision) {
+      const mode = contentDecision.dataset.contentDecide;
+      const panel = $('.content-review', sheet.el);
+      const reason = $('[data-content-reason]', panel).value.trim();
+      if (mode !== 'retry' && !reason) { $('[data-content-error]', panel).textContent = '请填写人工审查理由'; return; }
+      const done = busy(contentDecision, '正在保存…');
+      try {
+        await api(`works/${workKey(w)}/moderation${mode === 'retry' ? '/retry' : ''}`, { method: 'POST', ...(mode === 'retry' ? {} : { body: { status: mode, reason } }) });
+        sheet.close();
+        toast(mode === 'retry' ? '已重新提交内容审查' : '内容审查结果已保存');
+        await reload();
+      } catch (error) { $('[data-content-error]', panel).textContent = error.message; done(); }
+      return;
+    }
     const decide = e.target.closest('[data-decide]');
     if (e.target.closest('[data-remove]')) {
       sheet.close();

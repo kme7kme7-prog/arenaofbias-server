@@ -47,6 +47,7 @@ test('v18 preserves v16/v17 metadata, audit actors and frozen vote identities on
         assert.deepEqual({ ...row }, { ...retained,
           ...(version === 16 ? { model_version: '', generation_mode: '', human_intervention: '', generated_on: '', evidence_url: '' } : {}),
           model_other: row.model_id ? '' : model_name,
+          moderation: '{"status":"legacy"}',
           harness_other: row.harness_id ? '' : tool,
           note: row.model_id || !vendor ? retained.note : [retained.note, `手填模型厂商：${vendor}`].filter(Boolean).join('\n'),
         });
@@ -64,7 +65,7 @@ test('v18 preserves v16/v17 metadata, audit actors and frozen vote identities on
       MIGRATIONS[17](db);
       db.close();
       db = openDatabase(file);
-      assert.equal(db.prepare('PRAGMA user_version').get().user_version, 18);
+      assert.equal(db.prepare('PRAGMA user_version').get().user_version, MIGRATIONS.length);
       assert.deepEqual(db.prepare('SELECT * FROM works ORDER BY id').all(), works);
       assert.deepEqual(db.prepare('SELECT work_id, action, actor_id, at FROM audit ORDER BY work_id, action').all(), audits);
     } finally { db.close(); rmSync(root, { recursive: true, force: true }); }

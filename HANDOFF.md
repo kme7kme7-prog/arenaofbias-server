@@ -1,5 +1,14 @@
 # HANDOFF.md · 当前状态
 
+## 2026-09-30 · luna-flex-moderation（本地实现，未推送、未部署）
+
+- 用户选择 GPT-6 Luna Flex 自动审查文字/图片，疑似交人工；默认 OpenAI 官方 Responses API，可用环境变量配置网关。不新增 npm 依赖。`CONTENT_MODERATION=1` 启用，密钥只在服务器配置；要求已有 Playwright/Chrome 和 `CAPTURE=1`。无密钥、截图不足、容量错误、拒答、无效响应或超时转人工，不切换标准档。
+- 追加幂等 v19 `works.moderation` JSON，历史作品 legacy 保持原发布规则；新投稿、管理员上传、收件箱登记先 pending。内容状态独立于来源核验，未通过的作品从公开列表/Show1 动态池/盲评/互动/收录导出移除，原作品源及媒体受限。作者/管理员获一小时 bearer 预览源，预览地址不可公开转发。启动恢复 pending，送审文字变更重审，旧结果不能覆盖人工决定或较新声明。后台与前端均有人工决定/重试入口和审计。
+- 范围：声明、入口静态文字、两档实际页面文字、可选封面及桌面/手机首屏；没有扫描整包、所有页面、滚动区或交互后画面。自动通过也不验证模型来源；盲评仍需原核验通过。关闭开关不会放行已有待审/拒绝作品。
+- 验证：check 59 文件 0 错，完整测试 128/128。6 项内容审核 HTTP 回归涵盖持有与放行、权限、直传/收件箱、Flex 失败无降档、人工/编辑旧结果竞争、队列恢复、缺密钥/截图、迁移重跑；v16/v17 升级回归保持历史行、投票和审计。真实 Chrome / Playwright 1.63.0 完成 1440×900、390×844 截图并送到本地模拟接口；模拟 429 后正确转人工。实际浏览器验证后台人工通过、前端人工拒绝/重试、手机上传成功与状态，390px 无横向溢出。
+- 使用隔离 worktree `C:\Users\Ryan\.codex\worktrees\luna-flex-moderation\arenaofbias-server`，分支 `codex/luna-flex-moderation`，基线 `115ac342`；原工作区他人未提交文件未动。前端配套在 `luna-flex-gallery\same-prompt-gallery`，同名分支；不修改数据仓和 pin。本地证据/独立测试库在 `output/playwright/`，服务器 worktree `node_modules` 是指向既有前端依赖的测试 junction，不提交、不代表新增服务依赖。
+- 真实付费 API 未调用，缺正式密钥；未操作现有业务库或生产配置。部署先按 docs/deploy.md 备份、发布配套后端再前端。退回旧代码会忽略访问限制，不能只回滚代码。用户已授权一轮一条英文 commit，GitHub 身份核实为 wsnxxxs；不 push、不上线。详细记录见 `docs/archive/2026-09-30-luna-flex-moderation-wsnxxxs.md`。
+
 ## 2026-09-30 · security-fixes（本地修复，未推送、未部署）
 
 - 修复上一轮 SR-01～SR-04：API 数据包静态路由拒绝 HTML/HTM（含目录入口），其他资源附加无脚本 CSP sandbox；作品请求异常转为 400/404/500，避免退出共享进程；截图文档限当前作品源、资源限该源及 HTTPS CDN，逐跳验证重定向，禁用 Service Worker/WebSocket，浏览器其他连接经拒绝代理阻断；代理限流只使用本机单层反代尾部的有效 IP。

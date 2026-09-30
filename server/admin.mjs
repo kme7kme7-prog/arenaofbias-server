@@ -1,6 +1,8 @@
 // Admin-only catalog overlays and traffic summaries. The caller enforces the role.
 import { fail } from './http.mjs';
 import { transaction } from './db.mjs';
+import { effortKey } from './catalog.mjs';
+import { GENERATION_MODES, HUMAN_INTERVENTIONS } from './generation.mjs';
 
 const faceOf = (value) => ['gallery', 'arena'].includes(value) ? value : fail(400, '门面参数无效', 'invalid_face');
 const intParam = (value, fallback, max, label) => {
@@ -42,18 +44,32 @@ export function createAdmin({ db, catalog, library }) {
         return [field, value];
       }));
       const provenanceOf = (work, field) => work[field] ?? (work[`${field}Name`] ? 'other' : 'unset');
+      const model = query.get('model') || null;
+      if (model && model !== 'other' && !catalog.model(model)) fail(400, '模型筛选无效', 'invalid_query');
+      const effort = query.get('effort') || null;
+      if (effort && effort.length > 20) fail(400, '档位筛选无效', 'invalid_query');
+      const generation = Object.fromEntries([['generationMode', GENERATION_MODES], ['humanIntervention', HUMAN_INTERVENTIONS]].map(([key, choices]) => {
+        const value = query.get(key) || null;
+        if (value && value !== 'unset' && !choices.includes(value)) fail(400, '生成信息筛选无效', 'invalid_query');
+        return [key, value];
+      }));
       const page = intParam(query.get('page'), 1, 100000, '页码');
       const pageSize = intParam(query.get('pageSize'), 30, 100, '每页数量');
       const search = String(query.get('search') ?? '').trim().toLocaleLowerCase();
       const curated = catalog.tasks().flatMap((t) => [...t.works.values()]);
       const uploads = library.uploads();
-      const rows = [...curated, ...uploads].map((work) => library.adminWork(work)).filter((work) =>
+      const allWorks = [...curated, ...uploads].map((work) => library.adminWork(work));
+      const efforts = [...new Set(allWorks.map((work) => work.effort).filter(Boolean))].sort();
+      const rows = allWorks.filter((work) =>
         (!taskId || work.task === taskId) && (!status || work.status === status) &&
         (!source || work.source === source) && (!face || !show || Boolean(work[`show_${face}`]) === (show === 'on')) &&
         Object.entries(provenance).every(([field, value]) => !value || provenanceOf(work, field) === value) &&
-        (!search || `${work.title} ${work.modelName} ${work.task} ${work.harnessName ?? ''} ${work.providerName ?? ''}`.toLocaleLowerCase().includes(search)));
+        (!model || (model === 'other' ? !work.model : work.model === model)) &&
+        (!effort || (effort === 'unset' ? !work.effort : effortKey(work.effort) === effortKey(effort))) &&
+        Object.entries(generation).every(([key, value]) => !value || (value === 'unset' ? !work[key] : work[key] === value)) &&
+        (!search || `${work.title} ${work.modelName} ${work.vendor} ${work.modelVersion} ${work.task} ${work.harnessName ?? ''} ${work.providerName ?? ''}`.toLocaleLowerCase().includes(search)));
       rows.sort((a, b) => a.task.localeCompare(b.task) || a.title.localeCompare(b.title, 'zh-CN') || a.id.localeCompare(b.id));
-      return { works: rows.slice((page - 1) * pageSize, page * pageSize), total: rows.length, page, pageSize };
+      return { works: rows.slice((page - 1) * pageSize, page * pageSize), total: rows.length, page, pageSize, efforts };
     },
     getEditorial(id, rawFace) {
       task(id);

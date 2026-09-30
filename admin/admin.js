@@ -175,6 +175,7 @@ const state = { user: undefined, data: null, works: null, audit: [], users: null
   workCache: new Map(), workKey: '', workLoading: false, trafficLoading: false, requestId: 0,
   sidebarCollapsed: store.get('admin-sidebar-collapsed') === '1',
   workPage: 1, workTask: '', workStatus: '', workShow: '', workHarness: '', workProvider: '', workSearch: '', traffic: null,
+  workModel: '', workEffort: '', workGenerationMode: '', workHumanIntervention: '', workEfforts: [],
   inbox: null, inboxForms: {} };
 const taskTitle = (id) => [...(state.data?.tasks ?? []), ...(state.questions ?? [])].find((t) => t.id === id)?.title ?? id;
 
@@ -321,6 +322,33 @@ function suggestionHtml(type, choice, other) {
   return match ? `可能是 ${esc(match.name)}<button type="button" class="btn sm" data-pick-provenance="${type}" data-id="${esc(match.id)}">改选 ${esc(match.name)}</button>` : '';
 }
 
+const GENERATION_FIELDS = ['modelVersion', 'generationMode', 'humanIntervention', 'generatedOn', 'evidenceUrl'];
+const GENERATION_CHOICES = {
+  generationMode: { 'single-turn': '单轮生成', 'multi-turn': '多轮生成', agent: '智能体执行' },
+  humanIntervention: { none: '仅初始提示，未修改代码', 'prompt-guided': '人工提示与指导（未改代码）', 'code-edited': '人工修改了代码' },
+};
+const GENERATION_LABELS = { generationMode: '生成方式', humanIntervention: '人工介入程度' };
+function generationFields(work = {}) {
+  const select = (key) => `<label class="field"><span class="field-label">${GENERATION_LABELS[key]}</span><select class="input" name="${key}"><option value="">未注明</option>${Object.entries(GENERATION_CHOICES[key]).map(([value, label]) => `<option value="${value}"${work[key] === value ? ' selected' : ''}>${label}</option>`).join('')}</select></label>`;
+  return `<details class="generation-fields"${GENERATION_FIELDS.some((key) => work[key]) ? ' open' : ''}><summary>生成与证据信息（选填）</summary>
+    <div class="field-row"><label class="field"><span class="field-label">模型版本 / 快照<small>模型的具体版本，区别于 Harness 版本</small></span><input class="input" name="modelVersion" maxlength="60" value="${esc(work.modelVersion)}" placeholder="按原始记录填写"></label>
+      <label class="field"><span class="field-label">生成日期<small>区别于上传日期</small></span><input class="input" type="date" name="generatedOn" value="${esc(work.generatedOn)}"></label></div>
+    <div class="field-row">${select('generationMode')}${select('humanIntervention')}</div>
+    <label class="field"><span class="field-label">公开证据链接<small>对话分享、运行记录等；请勿填写私密链接</small></span><input class="input" type="url" name="evidenceUrl" maxlength="2000" value="${esc(work.evidenceUrl)}" placeholder="https://…"></label>
+    <p class="fine">只填写有记录支持的信息；未注明与没有人工介入是不同含义。</p></details>`;
+}
+const generationBody = (get, work = {}) => Object.fromEntries(GENERATION_FIELDS
+  .map((key) => [key, String(get(key) ?? '').trim()]).filter(([key, value]) => value !== (work[key] ?? '')));
+const generationFacts = (work) => `<div><dt>模型版本</dt><dd>${esc(work.modelVersion || '未注明')}</dd></div>
+  ${Object.keys(GENERATION_CHOICES).map((key) => `<div><dt>${GENERATION_LABELS[key]}</dt><dd>${esc(GENERATION_CHOICES[key][work[key]] || '未注明')}</dd></div>`).join('')}
+  <div><dt>生成日期</dt><dd>${esc(work.generatedOn || '未注明')}</dd></div>
+  <div><dt>公开证据</dt><dd>${/^https?:\/\//i.test(work.evidenceUrl ?? '') ? `<a href="${esc(work.evidenceUrl)}" target="_blank" rel="noopener noreferrer">查看记录</a>` : '未注明'}</dd></div>`;
+let effortInputId = 0;
+function effortField(value = '') {
+  const id = `admin-efforts-${++effortInputId}`;
+  return `<label class="field"><span class="field-label">推理档位<small>可选择常用值或手填；留空表示未注明</small></span><input class="input" name="effort" list="${id}" maxlength="20" value="${esc(value)}" placeholder="未注明"><datalist id="${id}">${['Default', 'Low', 'Medium', 'High', 'XHigh', 'Max'].map((effort) => `<option value="${effort}">${effort === 'Default' ? '默认档位（明确使用默认设置）' : effort}</option>`).join('')}</datalist></label>`;
+}
+
 function provenanceFields({ harness = { choice: '', other: '' }, provider = { choice: '', other: '' }, version = '' } = {}) {
   const field = (type, { choice, other }) => {
     const entries = registry(type).filter((entry) => entry.listed || entry.id === choice);
@@ -389,8 +417,9 @@ function openCuratedReview(w) {
         <div class="review-head">${thumb(w)}<div><h3>${esc(w.title)}</h3><p class="work-model"><span class="badge">精选馆藏</span><span>${esc(taskTitle(w.task))}</span></p></div></div>
         <dl class="facts">
           <div><dt>声明的模型</dt><dd>${esc(w.modelName)}${w.vendor ? ` · ${esc(w.vendor)}` : ''}</dd></div>
-          <div><dt>推理档位</dt><dd>${esc(w.effort || '默认 / 未设置')}</dd></div>
+          <div><dt>推理档位</dt><dd>${esc(w.effort || '未注明')}</dd></div>
           ${provenanceFacts(w)}
+          ${generationFacts(w)}
         </dl>
         <p class="fine">馆藏作品的标题与信息由仓库收录流程管理，这里只决定它在${esc(FACE_LABEL[face])}的展示。</p>
         <div class="face-decision">
@@ -441,8 +470,9 @@ function openReview(w) {
         <dl class="facts">
           <div><dt>投稿者</dt><dd>${esc(w.owner ?? '已注销的用户')} · ${formatTime(w.addedAt)}</dd></div>
           <div><dt>声明的模型</dt><dd>${esc(w.modelName)}${w.vendor ? ` · ${esc(w.vendor)}` : ''}${w.model ? '' : '（未登记）'}</dd></div>
-          <div><dt>推理档位</dt><dd>${esc(w.effort || '默认 / 未设置')}</dd></div>
+          <div><dt>推理档位</dt><dd>${esc(w.effort || '未注明')}</dd></div>
           ${provenanceFacts(w)}
+          ${generationFacts(w)}
           <div><dt>作者原始声明</dt><dd>${esc(w.tool || '未注明')}</dd></div>
           <div><dt>文件</dt><dd>${esc(w.sourceName ?? '')} · ${w.files} 个 · ${formatBytes(w.bytes)} · 入口 ${esc(w.root ? `${w.root}/` : '')}${esc(w.entry ?? '')}</dd></div>
           ${w.reviewer ? `<div><dt>上次核验</dt><dd>${esc(w.reviewer)} · ${formatTime(w.reviewedAt)}</dd></div>` : ''}
@@ -464,12 +494,13 @@ function openReview(w) {
         <p class="fine">清单只是提醒，不会随结果保存。</p>
         <div class="field-row">
           <label class="field"><span class="field-label">登记为模型<small>挂到模型档案，排行榜按模型记分</small></span><select class="input" name="modelId"><option value="">保持声明：${esc(w.modelName)}</option>${options}</select></label>
-          <label class="field"><span class="field-label">推理档位</span><input class="input" name="effort" maxlength="20" value="${esc(w.effort)}" placeholder="默认 / 未设置"></label>
+          ${effortField(w.effort)}
         </div>
         <label class="field"><span class="field-label">作品标题</span><input class="input" name="title" maxlength="40" value="${esc(w.title)}" required></label>
         <label class="field"><span class="field-label">模型名称<small>展签显示的名字</small></span><input class="input" name="modelName" maxlength="60" value="${esc(w.modelName)}" required></label>
         <label class="field"><span class="field-label">作品摘要</span><textarea class="input" name="summary" maxlength="200" rows="2">${esc(w.summary)}</textarea></label>
         ${provenanceFields({ harness: currentProvenance(w, 'harness'), provider: currentProvenance(w, 'provider'), version: w.harnessVersion ?? '' })}
+        ${generationFields(w)}
         <div class="face-decision">
           <p class="face-state">${faceOn(w) ? `${FACE_LABEL[face]}：已${face === 'gallery' ? '展示' : '进正式盲测池'}` : `${FACE_LABEL[face]}：未${face === 'gallery' ? '展示' : '进盲测'}`}</p>
           <p class="fine">本面动作只改${FACE_LABEL[face]}，另一面（${face === 'gallery' ? `盲测：${faceOn(w, 'arena') ? '已进正式盲测池' : '未进'}` : `展览馆：${faceOn(w, 'gallery') ? '已展示' : '未展示'}`}）保持不变。</p>
@@ -508,7 +539,7 @@ function openReview(w) {
     try { provenance = provenanceBody((name) => field(name)?.value, w); }
     catch (error) { $('.form-error', form).textContent = error.message; return; }
     const body = { status: mode === 'show' ? 'verified' : mode === 'hide' ? w.status : 'questioned',
-      reason: field('reason').value, effort: field('effort').value,
+      reason: field('reason').value, effort: field('effort').value, ...generationBody((name) => field(name)?.value, w),
       title: field('title').value, summary: field('summary').value,
       [`show_${face}`]: mode === 'show', ...provenance };
     if (field('modelId').value) body.modelId = field('modelId').value;
@@ -608,7 +639,8 @@ function inboxPanel() {
     const form = state.inboxForms[entry.id] ??= {
       task: store.get('admin-inbox-task') ?? '', title: entry.suggest.title, summary: '',
       modelId: '', modelName: entry.suggest.model, effort: '',
-      harnessChoice: '', harnessOther: '', harnessVersion: '', providerChoice: '', providerOther: '' };
+      harnessChoice: '', harnessOther: '', harnessVersion: '', providerChoice: '', providerOther: '',
+      ...Object.fromEntries(GENERATION_FIELDS.map((key) => [key, ''])) };
     const value = (name) => esc(String(form[name] ?? ''));
     return `<article class="inbox-card" data-inbox-id="${esc(entry.id)}">
       <div class="inbox-preview"><iframe src="${esc(entry.preview)}" sandbox="allow-scripts allow-pointer-lock" loading="lazy" title="预览「${esc(entry.name)}」"></iframe><a class="btn sm inbox-open" href="${esc(entry.preview)}" target="_blank" rel="noopener">新窗口打开 ${icon('arrow')}</a></div>
@@ -617,7 +649,7 @@ function inboxPanel() {
         <label class="field"><span class="field-label">题目</span><select class="input" name="task" required><option value="">选择题目</option>${taskOptions(form.task)}</select></label>
         <div class="field-row">
           <label class="field"><span class="field-label">登记为模型<small>挂到模型档案，排行榜按模型记分</small></span><select class="input" name="modelId"><option value="">不登记（用自由文本）</option>${modelOptions(form.modelId)}</select></label>
-          <label class="field"><span class="field-label">推理档位</span><input class="input" name="effort" maxlength="20" value="${value('effort')}" placeholder="默认 / 未设置"></label>
+          ${effortField(form.effort)}
         </div>
         <div class="field-row">
           <label class="field"><span class="field-label">作品标题</span><input class="input" name="title" maxlength="40" value="${value('title')}"></label>
@@ -625,6 +657,7 @@ function inboxPanel() {
         </div>
         <label class="field"><span class="field-label">摘要</span><input class="input" name="summary" maxlength="200" value="${value('summary')}"></label>
         ${provenanceFields({ harness: { choice: form.harnessChoice, other: form.harnessOther }, provider: { choice: form.providerChoice, other: form.providerOther }, version: form.harnessVersion })}
+        ${generationFields(form)}
         <p class="fine">登记只是入库，不决定展示：作品会同时出现在两边的审核队列——展览馆系统审「上不上展览馆」，竞技场系统审「进不进盲测」，两边各审一次。</p>
         <p class="form-error" role="alert"></p>
         <div class="actions"><button type="button" class="btn sm danger ghost" data-inbox-remove>${icon('trash')}移除</button><span class="spacer"></span><button class="btn sm primary" type="submit">${icon('check')}登记入库</button></div>
@@ -762,6 +795,12 @@ function systemWorksView() {
       <select class="input" name="task" aria-label="筛选题目"><option value="">全部题目</option>${options}</select>
       <select class="input" name="status" aria-label="筛选状态"><option value="">全部状态</option>${Object.entries(WORKS_FILTERS).filter(([id]) => id !== 'all').map(([id, label]) => `<option value="${id}" ${state.workStatus === id ? 'selected' : ''}>${label}</option>`).join('')}</select>
       <select class="input" name="show" aria-label="筛选开关"><option value="">全部开关</option><option value="on" ${state.workShow === 'on' ? 'selected' : ''}>已开启</option><option value="off" ${state.workShow === 'off' ? 'selected' : ''}>已关闭</option></select>
+      <select class="input" name="model" aria-label="筛选模型"><option value="">全部模型</option><option value="other"${state.workModel === 'other' ? ' selected' : ''}>未登记模型</option>${(state.data?.models ?? []).map((model) => `<option value="${esc(model.id)}"${state.workModel === model.id ? ' selected' : ''}>${esc(model.name)}</option>`).join('')}</select>
+      <select class="input" name="effort" aria-label="筛选推理档位"><option value="">全部档位</option><option value="unset"${state.workEffort === 'unset' ? ' selected' : ''}>未注明档位</option>${[...new Set(['Default', 'Low', 'Medium', 'High', 'XHigh', 'Max', ...state.workEfforts, state.workEffort].filter((value) => value && value !== 'unset'))].map((value) => `<option value="${esc(value)}"${state.workEffort === value ? ' selected' : ''}>${esc(value === 'Default' ? '默认档位' : value)}</option>`).join('')}</select>
+      ${Object.keys(GENERATION_CHOICES).map((key) => {
+        const current = state[`work${key[0].toUpperCase()}${key.slice(1)}`];
+        return `<select class="input" name="${key}" aria-label="筛选${GENERATION_LABELS[key]}"><option value="">全部${GENERATION_LABELS[key]}</option>${Object.entries({ unset: '未注明', ...GENERATION_CHOICES[key] }).map(([value, label]) => `<option value="${value}"${current === value ? ' selected' : ''}>${label}</option>`).join('')}</select>`;
+      }).join('')}
       ${['harness', 'provider'].map((type) => {
         const current = type === 'harness' ? state.workHarness : state.workProvider;
         const choices = [['unset', '未注明'], ['other', '其他（手填）'], ...registry(type).map((entry) => [entry.id, entry.name])];
@@ -800,11 +839,12 @@ function editDialog(w) {
     <label class="field"><span class="field-label">作品标题</span><input class="input" name="title" maxlength="40" value="${esc(w.title)}" required></label>
     <div class="field-row">
       <label class="field"><span class="field-label">模型名称</span><input class="input" name="modelName" maxlength="60" value="${esc(w.modelName)}" required></label>
-      <label class="field"><span class="field-label">推理档位</span><input class="input" name="effort" maxlength="20" value="${esc(w.effort)}" placeholder="默认 / 未设置"></label>
+      ${effortField(w.effort)}
     </div>
     <label class="field"><span class="field-label">登记为模型</span><select class="input" name="modelId"><option value="">不登记（保持自由文本）</option>${models.map((m) => `<option value="${esc(m.id)}"${m.id === w.model ? ' selected' : ''}>${esc(m.name)}</option>`).join('')}</select></label>
     <label class="field"><span class="field-label">作品摘要</span><textarea class="input" name="summary" maxlength="200" rows="2">${esc(w.summary)}</textarea></label>
     ${provenanceFields({ harness: currentProvenance(w, 'harness'), provider: currentProvenance(w, 'provider'), version: w.harnessVersion ?? '' })}
+    ${generationFields(w)}
     <p class="form-error" role="alert"></p><button class="btn primary" type="submit">保存</button></form>` });
   const form = $('form', sheet.el);
   form.addEventListener('submit', async (e) => {
@@ -815,7 +855,8 @@ function editDialog(w) {
     const done = busy($('button[type="submit"]', form), '正在保存…');
     try {
       await api(`admin/works/${workKey(w)}/meta`, { method: 'POST', body: { title: form.title.value, summary: form.summary.value,
-        modelName: form.modelName.value, modelId: form.modelId.value || undefined, effort: form.effort.value, ...provenance } });
+        modelName: form.modelName.value, modelId: form.modelId.value || undefined, effort: form.effort.value,
+        ...provenance, ...generationBody((name) => form.elements.namedItem(name)?.value, w) } });
       sheet.close();
       toast('信息已更新');
       await reload();
@@ -965,12 +1006,16 @@ function worksQuery() {
   if (state.workShow) query.set('show', state.workShow);
   if (state.workHarness) query.set('harness', state.workHarness);
   if (state.workProvider) query.set('provider', state.workProvider);
+  if (state.workModel) query.set('model', state.workModel);
+  if (state.workEffort) query.set('effort', state.workEffort);
+  if (state.workGenerationMode) query.set('generationMode', state.workGenerationMode);
+  if (state.workHumanIntervention) query.set('humanIntervention', state.workHumanIntervention);
   if (state.workSearch) query.set('search', state.workSearch);
   return query;
 }
 // Works filters live in the hash (#/works?task=…&status=…) so views can be shared as links.
 function syncWorksHash() {
-  const hash = `#/works${state.workPage > 1 || state.workTask || state.workStatus || state.workShow || state.workHarness || state.workProvider || state.workSearch ? `?${worksQuery()}` : ''}`;
+  const hash = `#/works${[state.workTask, state.workStatus, state.workShow, state.workHarness, state.workProvider, state.workModel, state.workEffort, state.workGenerationMode, state.workHumanIntervention, state.workSearch].some(Boolean) || state.workPage > 1 ? `?${worksQuery()}` : ''}`;
   history.replaceState(null, '', hash);
 }
 function applyWorksHash() {
@@ -982,6 +1027,10 @@ function applyWorksHash() {
   state.workShow = pick('show', state.workShow);
   state.workHarness = pick('harness', state.workHarness);
   state.workProvider = pick('provider', state.workProvider);
+  state.workModel = pick('model', state.workModel);
+  state.workEffort = pick('effort', state.workEffort);
+  state.workGenerationMode = pick('generationMode', state.workGenerationMode);
+  state.workHumanIntervention = pick('humanIntervention', state.workHumanIntervention);
   state.workSearch = pick('search', state.workSearch);
 }
 const rowSignatures = new Map();
@@ -1052,6 +1101,7 @@ async function reload({ navigation = false } = {}) {
       if (state.workCache.size > 24) state.workCache.delete(state.workCache.keys().next().value);
       state.adminWorks = data.works;
       state.workTotal = data.total;
+      state.workEfforts = data.efforts ?? [];
       state.workLoading = false;
     } else if (route === 'traffic') {
       state.traffic = await api('admin/traffic?days=30');
@@ -1407,7 +1457,7 @@ document.addEventListener('submit', async (e) => {
     try {
       const data = await api('admin/inbox/register', { method: 'POST', body: {
         id, task: stored.task, title: stored.title, summary: stored.summary, modelId: stored.modelId || undefined,
-        modelName: stored.modelName, effort: stored.effort, ...provenance } });
+        modelName: stored.modelName, effort: stored.effort, ...provenance, ...generationBody((name) => stored[name]) } });
       store.set('admin-inbox-task', stored.task);
       delete state.inboxForms[id];
       state.workCache.clear();
@@ -1426,6 +1476,10 @@ document.addEventListener('submit', async (e) => {
   state.workShow = form.elements.namedItem('show').value;
   state.workHarness = form.elements.namedItem('harness').value;
   state.workProvider = form.elements.namedItem('provider').value;
+  state.workModel = form.elements.namedItem('model').value;
+  state.workEffort = form.elements.namedItem('effort').value.trim();
+  state.workGenerationMode = form.elements.namedItem('generationMode').value;
+  state.workHumanIntervention = form.elements.namedItem('humanIntervention').value;
   state.workPage = 1;
   syncWorksHash();
   await reload({ navigation: true });

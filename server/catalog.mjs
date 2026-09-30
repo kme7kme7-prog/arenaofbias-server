@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fail } from './http.mjs';
+import { generationOf } from './generation.mjs';
 
 export const effortKey = (effort) => String(effort ?? '').normalize('NFKC').trim().toLowerCase();
 export const modelKey = (work) => work.modelId ?? `x:${work.modelName.normalize('NFKC').trim().toLowerCase()}`;
@@ -39,6 +40,7 @@ function readSnapshot(root) {
         effort: result.effort ?? '', tool: result.sourceLabel ?? '', ownerId: null,
         harnessId: result.harness ?? null, harnessOther: '', harnessVersion: result.harnessVersion ?? '',
         providerId: result.provider ?? null, providerOther: '',
+        ...generationOf(result),
         scene: result.scene, dir: result.scene ? join(root, result.scene) : null,
         cover: Object.values(result.captures ?? {})[0] ?? result.gallery?.[0]?.src ?? null,
       }];

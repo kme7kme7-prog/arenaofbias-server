@@ -14,6 +14,7 @@ import { effortKey, entityKey, modelKey } from './catalog.mjs';
 import { transaction } from './db.mjs';
 import { fail } from './http.mjs';
 import { rankEntries } from './ranking.mjs';
+import { generationOf } from './generation.mjs';
 
 const MATCH = { tierWidth: 150, sameTierRate: 0.9, blowoutGap: 400, rerolls: 2 };
 // The dense solver grows roughly cubically with entry count: 40 entries took
@@ -28,6 +29,7 @@ const identityOf = (work, digest = work.digest ?? null) => ({
   title: work.title, modelId: work.modelId, modelName: work.modelName,
   vendor: work.vendor, effort: work.effort, effortKey: effortKey(work.effort),
   harnessId: work.harnessId ?? null, harnessVersion: work.harnessVersion ?? '', providerId: work.providerId ?? null,
+  ...generationOf(work),
   modelKey: modelKey(work), configKey: entityKey(work), ownerId: work.ownerId,
 });
 const fromIdentity = (text) => text ? JSON.parse(text) : null;

@@ -3,6 +3,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fail, resolveInside } from './http.mjs';
 import { transaction } from './db.mjs';
+import { generationOf } from './generation.mjs';
 
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 
@@ -79,6 +80,7 @@ export function createCurator({ db, catalog, library, onTakeover = () => {} }) {
       effort: work.effort, tool: work.tool, note: work.note,
       harnessId: work.harnessId, harnessOther: work.harnessOther, harnessVersion: work.harnessVersion,
       providerId: work.providerId, providerOther: work.providerOther,
+      ...generationOf(work),
       createdAt: new Date(work.createdAt).toISOString(), root: work.root,
       entry: work.entry, digest: work.digest, files: files(work),
     };

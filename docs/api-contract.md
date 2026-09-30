@@ -98,6 +98,11 @@
 | `title` / `summary` / `note` | string | 标题（≤40 字）/ 简介（≤200 字）/ 备注（≤1000 字） |
 | `modelId` / `modelName` / `vendor` | string / null | 模型归属；`modelId` 命中数据包模型表时名称与厂商取自模型表 |
 | `effort` | string | 强度档位，大小写不敏感地归入 `Low / Medium / High / XHigh / Max`；未知值原样保留 |
+| `modelVersion` | string | 模型具体版本或快照，≤60 字；区别于模型注册 ID 与 Harness 版本 |
+| `generationMode` | string | `single-turn`（单轮）、`multi-turn`（多轮）、`agent`（智能体执行）；空串为未注明 |
+| `humanIntervention` | string | `none`（仅初始提示，未改代码）、`prompt-guided`（额外人工提示指导，未改代码）、`code-edited`（人工改代码）；空串为未注明 |
+| `generatedOn` | string | 实际生成日期，有效的 `YYYY-MM-DD`；不以上传日期代填 |
+| `evidenceUrl` | string | 公开对话或运行记录的 HTTP / HTTPS 链接，≤2000 字、不含账号密码；服务端不抓取链接内容 |
 | `tool` | string | 作者原始声明（兼容字段，≤40 字）；未提供时可由 Harness 名称或「其他」原文生成 |
 | `harnessId` / `harnessOther` | string / null、string | Harness 注册表 ID 或自填「其他」，两者互斥；旧作品分别为 null、空串。写入时 ID 传空串与 null 相同，表示未注明 |
 | `harnessVersion` | string | Harness 版本（≤40 字）；仅有 Harness 时可填写 |
@@ -687,6 +692,18 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 旧分享卡端点已移除，访问返回 `404`。兼容层的详细字段可参考 `test/fixtures/show1-golden/` 中的固定响应。
 
 ---
+
+### 3.22 生成信息与管理筛选（schema v17）
+
+`works` 追加 `model_version`、`generation_mode`、`human_intervention`、`generated_on`、`evidence_url` 五列；迁移只追加列，历史行默认为空串（未注明），不推断历史来源、日期或人工介入情况。
+
+上表中的五个 API 字段同时支持投稿、审核、管理员直接上传、收件箱登记与 `/api/admin/works/:task/:id/meta`。投稿、馆藏的公开作品视图、管理员视图与收录导出均返回它们；请求省略字段保持已有值，空串显式清空，非字符串或非法值返回 `400 invalid_generation`。字段属于作者或管理员声明；证据链接不表示平台已经核验链接中的内容。后台编辑和审核的 audit 保存变化前后值。
+
+`GET /api/admin/works` 新增 `model`（注册 ID 或 `other` 表示未登记模型）、`effort`（档位文本，大小写不敏感；`unset` 为未注明）、`generationMode` 和 `humanIntervention`（各自枚举值或 `unset`）。筛选可以组合，仍在分页前执行。搜索另外覆盖厂商和模型版本。响应追加 `efforts` 数组，取全部作品实际记录的非空档位，供后台选择自定义档位；其余分页字段不变。
+
+推理档位输入提供常用值与手填。空串只表示未注明，明确使用默认设置可填写 `Default`；历史空串不改写成 `Default`。新对局的身份快照保留五个生成字段，历史快照不回填，计分键仍为模型或模型+档位。
+
+数据仓收录将非空生成字段写入 manifest、task.json 和作品 README，构建 data.json 时透传。manifest 与 task.json 同时声明时必须一致；消费旧包时缺失字段仍按未注明处理。Show1 旧兼容端点的返回形状保持不变。
 
 ## 4. 数据包契约（`dist/data.json`）
 

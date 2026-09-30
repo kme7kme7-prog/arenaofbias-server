@@ -287,6 +287,16 @@ const MIGRATIONS = [
     db.exec(`CREATE INDEX IF NOT EXISTS works_harness ON works (harness_id) WHERE deleted_at IS NULL AND harness_id IS NOT NULL;
       CREATE INDEX IF NOT EXISTS works_provider ON works (provider_id) WHERE deleted_at IS NULL AND provider_id IS NOT NULL;`);
   },
+  (db) => {
+    const columns = new Set(db.prepare('PRAGMA table_info(works)').all().map((column) => column.name));
+    for (const [name, check] of Object.entries({
+      model_version: 'length(model_version) <= 60',
+      generation_mode: "generation_mode IN ('', 'single-turn', 'multi-turn', 'agent')",
+      human_intervention: "human_intervention IN ('', 'none', 'prompt-guided', 'code-edited')",
+      generated_on: "generated_on = '' OR (length(generated_on) = 10 AND generated_on GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]')",
+      evidence_url: 'length(evidence_url) <= 2000',
+    })) if (!columns.has(name)) db.exec(`ALTER TABLE works ADD COLUMN ${name} TEXT NOT NULL DEFAULT '' CHECK (${check})`);
+  },
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

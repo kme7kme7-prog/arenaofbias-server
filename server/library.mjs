@@ -8,6 +8,7 @@ import { EFFORTS, EMOJIS } from './config.mjs';
 import { transaction } from './db.mjs';
 import { fail } from './http.mjs';
 import { inspectUpload } from './inspect.mjs';
+import { GENERATION_FIELDS, generationFrom, generationOf, generationAudit } from './generation.mjs';
 
 const token = (prefix) => `${prefix}${randomBytes(16).toString('hex')}`;
 const workId = () => `up-${[...randomBytes(8)].map((byte) => (byte % 36).toString(36)).join('')}`;
@@ -71,14 +72,16 @@ export function createLibrary({ db, catalog, config, limits }) {
     pendingOf: db.prepare("SELECT COUNT(*) AS n FROM works WHERE owner_id = ? AND status = 'unverified' AND deleted_at IS NULL"),
     insertWork: db.prepare(`INSERT INTO works (id, task_id, owner_id, title, summary, model_id, model_name, vendor, effort, tool,
       harness_id, harness_other, harness_version, provider_id, provider_other, note, content_key,
-      source_name, root, entry, file_count, bytes, digest, checks, trial, cover, created_at, updated_at, show_gallery, show_arena)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`),
+      source_name, root, entry, file_count, bytes, digest, checks, trial, cover, created_at, updated_at,
+      model_version, generation_mode, human_intervention, generated_on, evidence_url, show_gallery, show_arena)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`),
     deleteWork: db.prepare('DELETE FROM works WHERE id = ?'),
     deleteSubmitAudit: db.prepare("DELETE FROM audit WHERE action = 'submit' AND work_id = ?"),
     restoreDraft: db.prepare(`INSERT INTO drafts (id, owner_id, task_id, token, source_name, root, entry, file_count, bytes, digest, checks, created_at, expires_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
     review: db.prepare(`UPDATE works SET status = ?, status_reason = ?, model_id = ?, model_name = ?, vendor = ?, effort = ?,
       harness_id = ?, harness_other = ?, harness_version = ?, provider_id = ?, provider_other = ?,
+      model_version = ?, generation_mode = ?, human_intervention = ?, generated_on = ?, evidence_url = ?,
       audience = ?, show_gallery = ?, show_arena = ?, title = ?, summary = ?, reviewed_by = ?, reviewed_at = ?, updated_at = ? WHERE id = ?`),
     remove: db.prepare('UPDATE works SET deleted_at = ?, deleted_by = ?, updated_at = ? WHERE id = ?'),
     captures: db.prepare('UPDATE works SET captures = ? WHERE id = ?'),
@@ -86,7 +89,8 @@ export function createLibrary({ db, catalog, config, limits }) {
     arenaCalibration: db.prepare('UPDATE works SET calibration_arena = ?, updated_at = ? WHERE id = ?'),
     faceSettings: db.prepare('UPDATE works SET show_gallery = ?, show_arena = ?, audience = ?, updated_at = ? WHERE id = ?'),
     meta: db.prepare(`UPDATE works SET title = ?, summary = ?, model_id = ?, model_name = ?, vendor = ?, effort = ?,
-      harness_id = ?, harness_other = ?, harness_version = ?, provider_id = ?, provider_other = ?, updated_at = ? WHERE id = ?`),
+      harness_id = ?, harness_other = ?, harness_version = ?, provider_id = ?, provider_other = ?,
+      model_version = ?, generation_mode = ?, human_intervention = ?, generated_on = ?, evidence_url = ?, updated_at = ? WHERE id = ?`),
     curatedAs: db.prepare('UPDATE works SET curated_as = ?, updated_at = ? WHERE id = ?'),
     votesOfWork: db.prepare('SELECT COUNT(*) AS n FROM votes WHERE task_id = ? AND (a_work = ? OR b_work = ?)'),
     override: db.prepare('SELECT * FROM work_overrides WHERE task_id = ? AND work_id = ?'),
@@ -132,6 +136,11 @@ export function createLibrary({ db, catalog, config, limits }) {
       harnessVersion: row.harness_version,
       providerId: row.provider_id,
       providerOther: row.provider_other,
+      modelVersion: row.model_version,
+      generationMode: row.generation_mode,
+      humanIntervention: row.human_intervention,
+      generatedOn: row.generated_on,
+      evidenceUrl: row.evidence_url,
       note: row.note,
       ownerId: row.owner_id,
       ownerName: row.owner_name ?? null,
@@ -296,6 +305,7 @@ export function createLibrary({ db, catalog, config, limits }) {
   }
 
   const publicProvenance = (work) => ({
+    ...generationOf(work),
     harness: work.harnessId ?? null,
     harnessName: work.harnessId ? (catalog.harness(work.harnessId)?.name ?? work.harnessId) : (work.harnessOther || null),
     harnessVersion: work.harnessVersion ?? '',
@@ -524,6 +534,7 @@ export function createLibrary({ db, catalog, config, limits }) {
       const title = clip(body.title, 40);
       if (!title) fail(400, '请填写作品标题');
       const source = provenance(body);
+      const generation = generationFrom(body);
       const tool = clip(body.tool, 40) || (source.harnessId ? catalog.harness(source.harnessId).name : source.harnessOther);
       if (user.role !== 'admin' && !tool && !source.harnessId && !source.harnessOther) fail(400, '请选择或填写 Harness');
       const who = identity(body);
@@ -554,7 +565,8 @@ export function createLibrary({ db, catalog, config, limits }) {
           q.insertWork.run(id, draft.task_id, user.id, title, clip(body.summary, 200), who.modelId, who.modelName, who.vendor,
             effortOf(body.effort), tool, source.harnessId, source.harnessOther, source.harnessVersion, source.providerId,
             source.providerOther, clip(body.note, 1000), token('w'), draft.source_name, draft.root, draft.entry, draft.file_count,
-            draft.bytes, draft.digest, draft.checks, JSON.stringify(sanitizeTrial(body.trial)), coverName, now, now);
+            draft.bytes, draft.digest, draft.checks, JSON.stringify(sanitizeTrial(body.trial)), coverName, now, now,
+            ...GENERATION_FIELDS.map((key) => generation[key]));
           q.deleteDraft.run(draft.id);
           q.audit.run(now, user.id, user.name, 'submit', draft.task_id, id, `${who.modelName}${effortOf(body.effort) ? ` · ${effortOf(body.effort)}` : ''}`);
         });
@@ -584,16 +596,18 @@ export function createLibrary({ db, catalog, config, limits }) {
       if (!work) fail(404, '作品不存在', 'not_found');
       if (!plainObject(body) || !Object.keys(body).length ||
         Object.keys(body).some((key) => !['title', 'summary', 'modelName', 'modelId', 'effort',
-          'harnessId', 'harnessOther', 'harnessVersion', 'providerId', 'providerOther'].includes(key))) fail(400, '没有可修改的内容');
+          'harnessId', 'harnessOther', 'harnessVersion', 'providerId', 'providerOther', ...GENERATION_FIELDS].includes(key))) fail(400, '没有可修改的内容');
       const title = body.title === undefined ? work.title : clip(body.title, 40);
       if (!title) fail(400, '请填写作品标题');
       const summary = body.summary === undefined ? work.summary : clip(body.summary, 200);
       const who = body.modelId !== undefined || body.modelName !== undefined ? identity(body) : work;
       const effort = body.effort !== undefined ? effortOf(body.effort) : work.effort;
       const source = provenance(body, work);
+      const generation = generationFrom(body, work);
       q.meta.run(title, summary, who.modelId, who.modelName, who.vendor, effort,
-        source.harnessId, source.harnessOther, source.harnessVersion, source.providerId, source.providerOther, Date.now(), id);
-      audit(admin, 'meta', work, '编辑信息');
+        source.harnessId, source.harnessOther, source.harnessVersion, source.providerId, source.providerOther,
+        ...GENERATION_FIELDS.map((key) => generation[key]), Date.now(), id);
+      audit(admin, 'meta', work, `编辑信息${generationAudit(work, generation)}`);
       return this.adminWork(upload(taskId, id));
     },
 
@@ -612,6 +626,7 @@ export function createLibrary({ db, catalog, config, limits }) {
       const who = body.modelId !== undefined || body.modelName !== undefined ? identity(body) : work;
       const effort = body.effort !== undefined ? effortOf(body.effort) : work.effort;
       const source = provenance(body, work);
+      const generation = generationFrom(body, work);
       const audience = body.audience === undefined ? work.audience : String(body.audience);
       if (!['hidden', 'show1', 'show2', 'both'].includes(audience)) fail(400, '展示站点无效');
       for (const key of ['show_gallery', 'show_arena']) if (body[key] !== undefined && typeof body[key] !== 'boolean') fail(400, '门面开关无效', 'invalid_face_settings');
@@ -627,10 +642,11 @@ export function createLibrary({ db, catalog, config, limits }) {
       const now = Date.now();
       q.review.run(status, status === 'verified' ? '' : reason, who.modelId, who.modelName, who.vendor, effort,
         source.harnessId, source.harnessOther, source.harnessVersion, source.providerId, source.providerOther,
+        ...GENERATION_FIELDS.map((key) => generation[key]),
         nextAudience, Number(gallery), Number(arena), title, summary, admin.id, now, now, id);
       const updated = upload(taskId, id);
       const labels = { verified: '通过验证', questioned: '标记存疑', unverified: '退回未验证' };
-      audit(admin, status, updated, [labels[status], reason].filter(Boolean).join('：'));
+      audit(admin, status, updated, [labels[status], reason].filter(Boolean).join('：') + generationAudit(work, generation));
       return updated;
     },
 

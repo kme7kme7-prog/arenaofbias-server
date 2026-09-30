@@ -124,7 +124,8 @@ export function createInbox({ library, config, limits }) {
           modelId: body.modelId || undefined,
           effort: body.effort || undefined,
           tool: body.tool ?? '',
-          ...Object.fromEntries(['harnessId', 'harnessOther', 'harnessVersion', 'providerId', 'providerOther']
+          ...Object.fromEntries(['harnessId', 'harnessOther', 'harnessVersion', 'providerId', 'providerOther',
+            'modelVersion', 'generationMode', 'humanIntervention', 'generatedOn', 'evidenceUrl']
             .filter((key) => Object.hasOwn(body, key)).map((key) => [key, body[key]])),
         });
       } catch (error) {

@@ -22,14 +22,15 @@ const pack = (root, registries = true) => {
     ...(registries ? { harnesses: [{ id: 'codex', name: 'Codex', listed: true }],
       providers: [{ id: 'official', name: '官方', listed: true }] } : {}),
     tasks: [{ id: 'one', title: 'One', results: [
-      { id: 'a1', model: 'm-a', effort: 'High', title: 'A1', scene: 'results/one/a1/', harness: 'codex', harnessVersion: '1', provider: 'official' },
+      { id: 'a1', model: 'm-a', effort: 'High', title: 'A1', scene: 'results/one/a1/', harness: 'codex', harnessVersion: '1', provider: 'official',
+        modelVersion: 'v1', generationMode: 'single-turn' },
       { id: 'b1', model: 'm-b', title: 'B1', scene: 'results/one/b1/' },
     ] }],
   }));
   return dist;
 };
 
-test('v15 upgrades to v16 without changing rows and v16 constraints remain idempotent', () => {
+test('v15 upgrades without changing legacy rows and metadata migrations remain idempotent', () => {
   const root = mkdtempSync(join(tmpdir(), 'provenance-migrate-'));
   const file = join(root, 'platform.db');
   const old = new DatabaseSync(file);
@@ -42,11 +43,13 @@ test('v15 upgrades to v16 without changing rows and v16 constraints remain idemp
   } finally { old.close(); }
   const db = openDatabase(file);
   try {
-    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 16);
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, MIGRATIONS.length);
     const before = db.prepare('SELECT * FROM works WHERE id = ?').get('up-old');
     assert.deepEqual([before.harness_id, before.harness_other, before.harness_version, before.provider_id, before.provider_other],
       [null, '', '', null, '']);
     MIGRATIONS[15](db);
+    MIGRATIONS[16](db);
+    assert.deepEqual([before.model_version, before.generation_mode, before.human_intervention, before.generated_on, before.evidence_url], ['', '', '', '', '']);
     assert.deepEqual(db.prepare('SELECT * FROM works WHERE id = ?').get('up-old'), before);
     for (const value of ['Claude Code', '', 'x'.repeat(41)])
       assert.throws(() => db.prepare('UPDATE works SET harness_id = ? WHERE id = ?').run(value, 'up-old'), /CHECK constraint failed/);
@@ -136,9 +139,18 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
       const response = await call('alice', 'POST', '/api/works', { ...baseBody, ...bad });
       assert.equal(response.status, 400, JSON.stringify(bad));
     }
-    const first = await call('alice', 'POST', '/api/works', { ...baseBody, harnessId: 'codex', harnessVersion: '2', providerId: 'official' });
+    const generation = { modelVersion: '2026-09-29', generationMode: 'agent', humanIntervention: 'prompt-guided',
+      generatedOn: '2026-09-29', evidenceUrl: 'https://example.test/shared/run' };
+    for (const invalid of [{ generationMode: 'anything' }, { humanIntervention: 'unknown' }, { generatedOn: '2026-02-30' },
+      { evidenceUrl: 'javascript:alert(1)' }, { modelVersion: 'x'.repeat(61) }]) {
+      const rejected = await call('alice', 'POST', '/api/works', { ...baseBody, harnessId: 'codex', ...invalid });
+      assert.equal(rejected.status, 400, JSON.stringify(invalid));
+      assert.equal(rejected.data.code, 'invalid_generation');
+    }
+    const first = await call('alice', 'POST', '/api/works', { ...baseBody, harnessId: 'codex', harnessVersion: '2', providerId: 'official', ...generation });
     assert.equal(first.status, 200);
     const id = first.data.work.id;
+    for (const [key, value] of Object.entries(generation)) assert.equal(first.data.work[key], value);
     assert.deepEqual([first.data.work.harness, first.data.work.harnessName, first.data.work.providerName, first.data.work.tool],
       ['codex', 'Codex', '官方', 'Codex']);
     const other = await call('alice', 'POST', '/api/works', { ...baseBody, draftId: await draft(), harnessOther: ' 自制工具 ', providerOther: ' 本地服务 ' });
@@ -151,6 +163,11 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
     assert.equal(blank.status, 200, 'an empty id means not stated');
     assert.deepEqual([blank.data.work.harness, blank.data.work.harnessName, blank.data.work.provider], [null, null, null]);
     const meta = `/api/admin/works/one/${id}/meta`;
+    const edited = await call('root', 'POST', meta, { modelVersion: 'snapshot-2', humanIntervention: 'code-edited' });
+    assert.equal(edited.data.work.modelVersion, 'snapshot-2');
+    assert.equal(edited.data.work.generatedOn, generation.generatedOn, 'patch preserves omitted fields');
+    assert.equal((await call('root', 'POST', meta, { generatedOn: '2026-02-30' })).status, 400);
+    assert.equal(platform.library.work('one', id).generatedOn, generation.generatedOn, 'failed patch leaves saved fields intact');
     assert.equal((await call('root', 'POST', meta, { harnessOther: '备用工具', providerOther: '其他服务' })).data.work.harnessName, '备用工具');
     const cleared = await call('root', 'POST', meta, { harnessId: null, providerId: null });
     assert.deepEqual([cleared.data.work.harness, cleared.data.work.harnessName, cleared.data.work.harnessVersion,
@@ -159,6 +176,7 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
       { status: 'verified', show_gallery: true, harnessId: 'codex', harnessVersion: '3', providerId: 'official' });
     assert.equal(reviewed.status, 200);
     assert.equal(platform.library.work('one', id).harnessVersion, '3');
+    assert.equal(platform.library.work('one', id).humanIntervention, 'code-edited', 'review preserves generation metadata');
     const listed = async (query) => {
       const response = await call('root', 'GET', `/api/admin/works?task=one&pageSize=100&${query}`);
       assert.equal(response.status, 200, query);
@@ -170,12 +188,23 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
     assert.deepEqual(await listed('provider=official&harness=codex'), ['a1', id].sort());
     assert.deepEqual(await listed('search=自制'), [other.data.work.id]);
     assert.equal((await call('root', 'GET', '/api/admin/works?harness=missing')).status, 400);
+    assert.deepEqual(await listed('model=m-a&generationMode=agent&humanIntervention=code-edited'), [id]);
+    assert.deepEqual(await listed('effort=hIgH'), ['a1']);
+    assert.deepEqual(await listed('model=m-b&generationMode=unset'), ['b1']);
+    assert.equal((await call('root', 'GET', '/api/admin/works?generationMode=missing')).status, 400);
+    const audit = platform.db.prepare("SELECT detail FROM audit WHERE work_id = ? AND action = 'meta' ORDER BY id LIMIT 1").get(id);
+    assert.match(audit.detail, /snapshot-2/);
     const nomination = await call('root', 'POST', `/api/admin/works/one/${id}/nominate`);
     assert.equal(nomination.status, 200);
     const exported = await call('alice', 'GET', new URL(nomination.data.exportUrl).pathname);
     assert.equal(exported.status, 200);
     assert.deepEqual([exported.data.harnessId, exported.data.harnessOther, exported.data.harnessVersion,
       exported.data.providerId, exported.data.providerOther], ['codex', '', '3', 'official', '']);
+    assert.equal(exported.data.modelVersion, 'snapshot-2');
+    assert.equal(exported.data.evidenceUrl, generation.evidenceUrl);
+    const clear = await call('root', 'POST', meta, { evidenceUrl: '' });
+    assert.equal(clear.data.work.evidenceUrl, '', 'empty text explicitly clears metadata');
+    assert.equal(clear.data.work.generationMode, 'agent');
     for (const work of ['a1', 'b1']) platform.db.prepare(`INSERT INTO work_overrides
       (task_id, work_id, show_gallery, show_arena, updated_by, updated_at) VALUES ('one', ?, 1, 1, 'root', 0)`).run(work);
     const alice = platform.auth.userFrom({ headers: { cookie: jars.get('alice') } });
@@ -185,6 +214,7 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
     assert.deepEqual([identity.harnessId, identity.harnessVersion, identity.providerId],
       identity.id === 'a1' ? ['codex', '1', 'official'] : [null, '', null]);
     assert.equal(identity.configKey, `${identity.modelKey}|${identity.effortKey}`);
+    assert.equal(identity.modelVersion, identity.id === 'a1' ? 'v1' : '');
     assert.equal(platform.arena.vote(alice, match.id, 'a').counted, true);
     const vote = platform.db.prepare('SELECT id FROM votes WHERE match_id = ?').get(match.id);
     const before = await platform.arena.leaderboard({ task: 'one' });

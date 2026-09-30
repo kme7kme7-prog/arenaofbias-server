@@ -1,5 +1,14 @@
 # HANDOFF.md · 当前状态
 
+## 2026-09-30 · work-generation-metadata（本地实现，未推送、未部署）
+
+- 用户授权由本轮决定适当字段范围；补作品生成信息与后台选项，用户/投票表保持现有结构。追加幂等 v17 迁移：模型版本、生成方式、人工介入、实际生成日期、公开证据链接共五列，旧行均为未注明，不回填。
+- 接通投稿、管理员上传/收件箱、编辑、审核、公开视图与收录导出；审核/编辑 audit 保存新字段前后值，新对局快照保存生成信息，计分键不变。后台提供常用档位和自由文本，区分默认档位与未注明；新增模型、档位、生成方式、人工介入筛选，保留自定义档位。
+- data 仓配套保留五字段至 manifest/task/README/data.json 并检查有效性及冲突。无数据包 pin 改动，无历史作品修改。用户 initial AGENTS 要求完成修改后英文简单句 commit；无需再次询问提交授权。
+- 验证：`npm run check` 55 文件 0 错；`npm test` 116/116，含迁移幂等、API 更新/清空/保留、非法值拒绝、筛选、审计、导出、身份快照与旧榜单兼容。隔离临时库启动成功；Browser 打开 localhost/127.0.0.1 均被客户端 `ERR_BLOCKED_BY_CLIENT` 拦截，实际表单交互及布局未验收，不能称为已完成浏览器验证。
+- 未操作现有本地业务库或生产数据库。上线前备份业务库，再使用本轮后端启动迁移至 v17；配套数据仓能力须随收录工具更新。详细归档见 `docs/archive/2026-09-30-work-generation-metadata-wsnxxxs.md`。
+- 本轮临时目录 `C:\Users\Ryan\AppData\Local\Temp\arenaofbias-work-metadata-review-20260930` 删除被自动审批以 `blocked by policy` 拒绝，保留待人工清理；临时服务已停止。
+
 ## 2026-09-30 · provenance-round4（待 PR 审阅，未部署）
 
 - 从 `origin/main@31651f3` 建立；线上已部署 `31651f3`、数据包 `e5ef61c`、数据库 v16（2026-09-30 01:00 CST，部署前备份 `/root/arenaofbias-predeploy-20260929T165446Z`）。本轮无迁移、无数据包变化。

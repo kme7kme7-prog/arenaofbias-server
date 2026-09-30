@@ -310,8 +310,9 @@ export function createPlatform({ config, limits }) {
     try {
       submitted = library.submit(admin, {
         draftId: draft.id, confirmed: true, title: params.get('title'), summary: params.get('summary'),
-        modelId: params.get('modelId'), modelName: params.get('modelName'), tool: params.get('tool') || '',
-        ...Object.fromEntries(['harnessId', 'harnessOther', 'harnessVersion', 'providerId', 'providerOther']
+        modelId: params.get('modelId'), modelName: params.get('modelName'), effort: params.get('effort'), tool: params.get('tool') || '',
+        ...Object.fromEntries(['harnessId', 'harnessOther', 'harnessVersion', 'providerId', 'providerOther',
+          'modelVersion', 'generationMode', 'humanIntervention', 'generatedOn', 'evidenceUrl']
           .filter((key) => params.has(key)).map((key) => [key, params.get(key)])),
       });
     } catch (error) {

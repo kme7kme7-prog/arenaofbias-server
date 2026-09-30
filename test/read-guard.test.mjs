@@ -20,7 +20,7 @@ async function withPlatform(readLimits, run) {
   const platform = createPlatform({ config: { dist, dataDir: join(root, 'data'),
     contentTemplate: 'http://{token}.localhost', siteOrigins: [origin], admins: [], cdn: [],
     capture: false, secureCookies: false, trustProxy: true, readLimits }, limits });
-  platform.library.byContentKey = () => ({ dir: dist, entry: 'index.html' });
+  platform.library.byContentKey = () => ({ dir: dist, entry: 'index.html', curated: true, moderation: { status: 'legacy' } });
   const site = createServer(platform.handleSite);
   const content = createServer(platform.handleContent);
   await Promise.all([site, content].map(server => new Promise(resolve => server.listen(0, '127.0.0.1', resolve))));

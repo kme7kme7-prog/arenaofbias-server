@@ -12,14 +12,14 @@
 
 ### 1.1 服务定位
 
-本服务是整个体系中**唯一的动态服务与唯一写库者**，负责账号、投票、排行榜、投稿审核与作品沙盒伺服。`same-prompt-gallery` 提供静态画廊前端与原作展示，`arenaofbias-server` 提供动态 API、数据库和投稿沙盒，`arenaofbias-data` 构建后端读取的馆藏数据包。两个前端各自部署并调用本服务；数据库（`DATA_DIR/platform.db`）由本服务独占，前端不直接读写。
+本服务是整个体系中**唯一的动态服务与唯一写库者**，负责账号、投票、排行榜、投稿审核与作品沙盒伺服。`ArenaGalleri` 提供静态画廊前端与原作展示，`arenaofbias` 提供主站，`arenaofbias-server` 提供动态 API、数据库、`/admin/` 管理页面和投稿沙盒，`arenaofbias-data` 构建后端读取的馆藏数据包。两个用户前端各自部署并调用本服务；数据库（`DATA_DIR/platform.db`）由本服务独占，前端不直接读写。旧 same-prompt-gallery 已归档。
 
 服务同时监听**两个端口**：
 
 | 端口 | 默认 | 职责 |
 | --- | --- | --- |
-| 站点 / API 端口 | 5173 | 全部 `/api/*` 接口、`/media/*` 投稿媒体、dist 静态文件 |
-| 作品内容端口 | 5180 | 按令牌子域伺服单个作品目录（沙盒隔离，见 3.10） |
+| 站点 / API 端口 | 5173 | 全部 `/api/*` 接口、`/admin/` 管理页面、`/media/*` 投稿媒体和数据包静态资源 |
+| 作品内容端口 | 5180 | 按令牌子域伺服单个作品目录（沙盒隔离，见 3.12） |
 
 ### 1.2 Base URL
 
@@ -27,7 +27,7 @@
 | --- | --- |
 | 代码默认 | `http://localhost:5173`（API 与媒体）；作品内容为 `http://{token}.localhost:5180`；启动仍需提供 `DIST_DIR` 数据包 |
 | 2026-09-28 本机联调 | 前端 `http://localhost:4175`；API 与媒体 `http://localhost:5190`；作品内容 `http://{token}.localhost:5191`。后端设 `PORT=5190`、`CONTENT_PORT=5191`、`SITE_ORIGINS=http://localhost:4175`、`DIST_DIR=<已构建数据包目录>`、`DATA_DIR=<隔离运行目录>`、`CAPTURE=0`；前端 API base URL 指向 `http://localhost:5190/` |
-| 生产环境 | 共享后端已在 `arenaofbias.icu/api` 和 `api.arenaofbias.icu` 运行；当前已核实线上部署 `a1564ff`、数据包 `574b17e…`，由 systemd `arenaofbias-server` 管理，API 监听 `127.0.0.1:5273`、作品监听 `5180`。作品域名仍待迁至独立的可注册主域。 |
+| 生产环境 | 正式 API 为 `https://api.arenaofbias.icu`，由 systemd `arenaofbias-server` 管理，API 监听 `127.0.0.1:5273`、作品监听 `127.0.0.1:5180`；作品源为 `*.w.arenaofbias.icu`。最近已记录发布版本见 [HANDOFF](../HANDOFF.md)，每次部署仍须现场核对。作品迁至独立可注册主域仍是已知运维项。 |
 
 作品内容 URL 不写在各端点文档里逐个列出，而是由响应字段（`bootstrap.site.content`、作品对象的 `scene`、对战对象的 `a`/`b`）以完整 URL 形式下发，前端直接消费，不自行拼接。投稿 `captures` / `cover` 返回相对路径 `media/...`，前端以 API 站点根解析；馆藏 `scene` 路径取自画廊所用数据包。
 
@@ -84,7 +84,7 @@
 
 `/api/curate/export/:token` 及其 `/file` 由 export 桶单独计数，不受新的通用 API/边缘资源桶限制，保持批量收录所需额度。导出令牌的校验、失效及每 IP 兜底不变。
 
-API 域静态 `/data.json`（含等价编码路径）仅管理员登录后返回；其他访问返回 404。`.datapack-source.json` 对所有人返回 404。管理员页面无需改请求方式；画廊使用自己部署的展示目录。Show1 的逐票接口仍用于客户端榜单重放，数据形状及评分不变。VPS 的两个静态前端需安装 Nginx 读取限制，详见 [部署说明](deploy.md#公开读取与反爬配置)。
+API 域静态 `/data.json`（含等价编码路径）仅管理员登录后返回；其他访问返回 404。`.datapack-source.json` 对所有人返回 404。管理员页面无需改请求方式；画廊使用自己部署的展示目录。Show1 榜单与配对分由后端聚合，逐票兼容接口保留，详见 3.21。VPS 的两个静态前端需安装 Nginx 读取限制，详见 [部署说明](deploy.md#公开读取与反爬配置)。
 
 `TRUST_PROXY=1` 仅适用于本机单层反代：连接来源必须为环回地址，IP 取 `X-Forwarded-For` 最后一项有效 IP；其他连接或无效头回退到连接 IP。边缘代理必须覆盖原头或在尾部追加真实客户端 IP，多层代理部署须另行明确解析链路。限流为单机内存计数，进程重启即清零，多实例部署不共享。
 
@@ -689,7 +689,7 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 
 ### 3.21 Show1 兼容层
 
-这些端点延续 Show1 的请求与响应形状。写请求遵循本服务 Origin、鉴权与限流规则。只读题库和作品来自迁入快照；符合 `show_arena=1` 的已验证新投稿增量进入作品列表。旧快照票不再参与读取、计分或配对；Show1 的新票不进入画廊 Bradley–Terry 榜单。现有数据库中的旧票须通过停机维护命令显式清零，启动和迁移不会自动删票。
+这些端点延续 Show1 的请求与响应形状。写请求遵循本服务 Origin、鉴权与限流规则。只读题库合并共用数据包与迁入快照，作品保留迁入快照；符合 `show_arena=1` 且允许公开的已验证新投稿增量进入作品列表。旧快照票不再参与读取、计分或配对；Show1 的新票不进入画廊 Bradley–Terry 榜单。现有数据库中的旧票须通过停机维护命令显式清零，启动和迁移不会自动删票。
 
 | 方法与路径 | 请求与响应 |
 | --- | --- |

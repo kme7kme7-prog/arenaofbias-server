@@ -1,8 +1,8 @@
 # arenaofbias-server
 
-生产部署、差异数据包和回滚步骤见 [部署文档](docs/deploy.md)。
+当前状态和历史索引见 [HANDOFF](HANDOFF.md)，接口字段见 [API 契约](docs/api-contract.md)，生产部署、差异数据包和回滚步骤见 [部署文档](docs/deploy.md)。
 
-Show1×Show2 融合工程的**共享后端**：整个体系中唯一的动态服务，独占数据库，负责账号、投票、排行榜、投稿审核与作品沙盒伺服。两个前端（画廊/平台 UI）各自独立部署，全部通过本服务的 HTTP API 读写数据。本仓库**不含任何前端页面**。
+Show1×Show2 融合工程的**共享后端**：整个体系中唯一的动态服务，独占数据库，负责账号、投票、排行榜、投稿审核与作品沙盒伺服。两个用户前端（arenaofbias / ArenaGalleri）各自独立部署，全部通过本服务的 HTTP API 读写数据。本仓库包含 `admin/` 管理页面，由 API 端口的 `/admin/` 提供。
 
 - 纯 Node.js（>= 22.13），**零依赖**（无 dependencies / devDependencies，无需 `npm install`）。
 - 数据库为 `DATA_DIR/platform.db`（默认 `.data/platform.db`），首次启动自动创建，不进 git。
@@ -23,10 +23,10 @@ npm test         # node --test test/*.test.mjs
 
 管理员账号只能通过 CLI 新建，或将已有普通账号提权；提权可由获授权的管理员或 CLI 执行。`--create` 在交互终端输入密码时不回显，也可从标准输入读取；不接受命令行密码参数。公开注册对 `ADMIN_USERNAMES` 保留名与已占用用户名统一返回 `409`。
 
-- `ArenaGalleri` 负责静态画廊前端与原作展示；`arenaofbias-server` 独占 API、账号/投票/投稿数据库和投稿沙盒；独立私有数据仓库负责生成供后端读取的馆藏数据包。后端不复制前端源码，也不提供画廊入口页面。
+- [ArenaGalleri](https://github.com/wsnxxxs/ArenaGalleri) 负责静态画廊前端与原作展示，`arenaofbias` 负责主站；`arenaofbias-server` 独占 API、账号/投票/投稿数据库和投稿沙盒；私有 `arenaofbias-data` 生成供后端读取的馆藏数据包。旧 same-prompt-gallery 已归档。后端不复制两个用户前端的源码，也不提供画廊入口页面。
 - 本地与生产均需先取得数据仓库构建产物，将 `DIST_DIR` 指向它的根目录。若前端与后端各自持有数据包副本，部署时应确保两者版本一致。
 
-例如本轮本机联调（PowerShell；先将首行替换为实际已构建数据包的绝对路径）：
+本机联调示例（PowerShell；先将首行替换为实际已构建数据包的绝对路径）：
 
 ```powershell
 $env:DIST_DIR = 'C:\path\to\built-datapack'
@@ -59,6 +59,7 @@ npm start
 | `CONTENT_PORT` | `5180` | 作品沙盒内容端口 |
 | `DIST_DIR` | `.datapack/current`，不存在时 `./dist` | 当前数据包链接或不可变目录 |
 | `DATA_DIR` | `./.data` | 数据库与运行数据目录 |
+| `ADMIN_DIR` | `./admin` | `/admin/` 管理页面目录 |
 | `CONTENT_ORIGIN_TEMPLATE` | `http://{token}.localhost:<CONTENT_PORT>` | 作品 origin 模板，默认端口 5180；`{token}` 必须占满一个 host label，生产需独立泛域名 |
 | `SITE_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | 可信前端 origin（逗号分隔，含协议与端口），同时允许凭据 CORS、API 写操作和 iframe 嵌入作品 |
 | `ADMIN_USERNAMES` | 空 | 始终持有管理员角色的用户名（逗号分隔） |
@@ -67,7 +68,7 @@ npm start
 | `CAPTURE_BROWSER` | `chrome` | 截图所用浏览器通道 |
 | `CONTENT_MODERATION` | 关（`1` 开启） | 新投稿先保持私密，异步审查文字、封面及桌面/手机首屏；异常转人工 |
 | `MODERATION_API_KEY` / `OPENAI_API_KEY` | 未配置 | 服务器审核 API 密钥，前者优先；不下发至浏览器 |
-| `MODERATION_BASE_URL` | `https://api.openai.com/v1` | Responses API 根地址；生产使用 HTTPS |
+| `MODERATION_BASE_URL` | `https://api.openai.com/v1` | Responses API 根地址；SSH relay 部署见部署文档 6.1，密钥只配置在服务器 |
 | `MODERATION_MODEL` | `gpt-6-luna` | 审核模型；请求固定 `service_tier: flex` |
 | `COOKIE_SECURE` | 关（`1` 开启） | session cookie 改名 `__Host-sp_session`，加 Secure 标记，Path=/ 且不带 Domain；本地未开启时仍为 `sp_session` |
 | `COOKIE_SAME_SITE` | `Lax` | `Lax` / `Strict` / `None`；跨站 HTTPS 部署用 `None`，并必须开启 `COOKIE_SECURE=1` |
@@ -104,6 +105,7 @@ npm start
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/bootstrap` | 首屏聚合：当前用户、站点配置、作品列表、反应汇总、各题对战池、排行榜总计、我的投票/待审数、管理员待审计数 |
+| GET | `/api/prompts` | Show1 共用与历史题库，长短原文通过同题 `promptVariants` 返回 |
 | POST | `/api/auth/register` | 注册并建立会话（限流） |
 | POST | `/api/auth/login` | 登录（限流） |
 | POST | `/api/auth/logout` | 登出 |
@@ -155,4 +157,4 @@ npm run check
 npm test    # API、迁移、版本切换、投票快照、更正审计及清理保留规则
 ```
 
-后端功能提交为本地 `51eb3cb`（`gallery-integration`），配套画廊前端功能提交为 `1ee5dae`（`backend-datapack-integration`）。功能提交前 19 项测试通过；跨端口真实浏览器联调也已覆盖登录/刷新、题目、昵称、HTML 投稿、审核、盲评、榜单及个人统计。公网 HTTPS、跨站 Cookie、自动截图、真机和全部原作交互尚未验证；这不等同于全站交互验证。上述分支均未 push。
+测试使用隔离临时数据库，不操作现有业务库。各轮测试数量、浏览器验收范围和部署证据见 [历史归档](docs/archive/)；最新已记录发布与本轮整理验证见 [HANDOFF](HANDOFF.md)。文档整理不代表重新部署或完成全站 UI 验收。

@@ -1,8 +1,8 @@
 # 站点与共享后端部署、回滚
 
-本页记录已核实的部署布局和操作步骤，**不代表此刻的线上版本**。2026-09-29 的一次历史记录为服务代码 `a1564ff`、数据包 `574b17e006ef2955b8b4a267192828e2aa63d7f8`、数据库 v14；此后可能已经变化。曾有 `5650315` 只在 PR 中、尚未合并到 main，却差点被后续部署覆盖的情况。每次部署必须先按下节核实现场，不能把这些历史值当作当前值。
+本页记录部署布局和操作步骤，**不代表此刻的线上版本**。最近已记录的发布为 2026-09-30 共用题库发布：后端 `f4685c9`、数据包 `4c926d5`、数据库 v19，详见 [HANDOFF](../HANDOFF.md) 和 [发布归档](archive/2026-09-30-shared-question-release-wsnxxxs.md)。历史上曾有 `5650315` 只在 PR 中、未合并 main，却差点被后续部署覆盖；每次部署仍须先按下节核实现场，不能把记录或本地 main 当作线上版本。
 
-后端正式目录 `/www/wwwroot/arenaofbias-server` 不是 Git 仓库，代码版本写在 `.server-version`。systemd 服务 `arenaofbias-server` 监听 `127.0.0.1:5273`（API/管理端）和 `127.0.0.1:5180`（作品沙盒内容）。当时 `COOKIE_SECURE=1`、`TRUST_PROXY=1`、`CAPTURE=0`，SMTP 由 systemd drop-in 配置；这些开关也应在部署前重新确认。每日 03:30 的 cron 运行 `/root/archive-backup.sh`，使用 restic 加密归档。证书续期由 `/root/.acme.sh` 的 cron 处理。不要把凭据、私钥或 drop-in 的实际密钥值写入本文或仓库。
+后端正式目录 `/www/wwwroot/arenaofbias-server` 不是 Git 仓库，代码版本写在 `.server-version`。systemd 服务 `arenaofbias-server` 监听 `127.0.0.1:5273`（API/管理端）和 `127.0.0.1:5180`（作品沙盒内容）。Cookie、真实 IP、SMTP、截图和审核由服务器环境或 systemd drop-in 配置；最近一次审核接通记录为 `CAPTURE=1`、`CONTENT_MODERATION=1`，通过专用 SSH tunnel 使用第 6.1 节 relay，仍应在部署前重新确认。已记录每日 03:30 的 cron 运行 `/root/archive-backup.sh`，使用 restic 加密归档；证书续期由 `/root/.acme.sh` 的 cron 处理。不要把凭据、私钥或 drop-in 的实际密钥值写入本文或仓库。
 
 ## 0. 现场版本与合并门禁
 
@@ -40,7 +40,7 @@ cp -a "$conf" "$conf.bak-$(date -u +%Y%m%dT%H%M%SZ)"
 
 ## 公开读取与反爬配置
 
-2026-09-30 已在四个正式 HTTPS vhost 安装并验收本节规则，详见 HANDOFF 的 gallery-protection-deploy 及对应归档。提交配置文件本身不代表部署；后续操作仍先完成第 0 节现场核对，再备份 Nginx 主配置与四个 vhost。
+2026-09-30 已记录在四个正式 HTTPS vhost 安装并验收本节规则，详见 [gallery-protection-deploy 归档](archive/2026-09-30-gallery-protection-deploy-wsnxxxs.md)。提交配置文件本身不代表部署；后续操作仍先完成第 0 节现场核对，再备份 Nginx 主配置与四个 vhost。
 
 1. 将 `deploy/nginx/read-zones.conf`、`read-server.conf` 放到正式服务目录；在 Nginx 主配置的 `http {}` 中、vhost include 之前加入 `include /www/wwwroot/arenaofbias-server/deploy/nginx/read-zones.conf;`，仅加载一次。
 2. 在 Show1、Gallery、API、作品泛域名四个 `server {}` 中分别加入 `include /www/wwwroot/arenaofbias-server/deploy/nginx/read-server.conf;`。保留现有 root、proxy、缓存、TLS 和 SPA 路由。如果某个 location 已有 `limit_req` / `limit_conn`，server 层配置不会自动继承，须合并这些限制到该 location。已有 429 error_page 也需核对冲突。

@@ -113,12 +113,26 @@ npm start
 | POST | `/api/arena/matches` | 创建一场盲投对战（限流） |
 | POST | `/api/arena/matches/:id/vote` | 对一场对战投票（限流） |
 | GET | `/api/leaderboard?task=&by=` | 排行榜，`by=config|model`，`task` 可选 |
+| GET | `/api/show1/leaderboard?scope=entertainment&category=all` | 主站 Elo 榜单、比较统计、六维画像；`scope=entertainment|formal`，`category=all|text|web` |
 | GET | `/media/up-xxxxxxxx/(cover.png|cover.jpg|cover.webp|first.jpg|mobile.jpg)` | 投稿的封面/截图（CSP: default-src 'none'） |
 | GET | `/*` | `DIST_DIR` 内的静态数据包资源；HTML/HTM（含目录入口）返回 404，其余响应使用无脚本 CSP sandbox；作品只从内容源运行 |
 
 内容端口（默认 5180）：按 `CONTENT_ORIGIN_TEMPLATE` 的 `{token}` 子域伺服单个作品目录，施加沙盒 CSP 与 CDN 白名单（见 `server/content.mjs`）。
 
 前端独立部署时，`SITE_ORIGINS` 填前端真实 origin（不含路径或末尾 `/`），所有 fetch/XHR 携带会话凭据（`credentials: 'include'` / `withCredentials = true`）。可信来源支持 API 的 OPTIONS 预检及 `Content-Type` 请求头；不使用通配 CORS。`captures` / `cover` 的 `media/...` 路径按后端站点根解析，不能按前端路径解析。跨站 Cookie 还受浏览器第三方 Cookie 设置限制；优先采用同站域名的前端和 API 部署。
+
+## 投票清零
+
+主站榜单和配对分只读取数据库中的 Show1 票，不再重放迁入的旧快照票；作品和题库快照继续用于展示。画廊的 Bradley–Terry 榜单仍独立计入 `source=arena` 的票。
+
+两站全部清零使用显式维护命令。先检查数量；正式执行时停服务，指定一个不存在的备份文件和操作者，再重启本轮后端：
+
+```bash
+npm run reset:votes -- --db /absolute/path/platform.db
+npm run reset:votes -- --db /absolute/path/platform.db --apply --backup /absolute/path/before-reset.db --actor <name>
+```
+
+执行前通过 SQLite `VACUUM INTO` 备份（包含 WAL 中已提交的内容），然后同一事务删除全部票和对局、写入审计。账号、作品、评论、表情和猜模型成绩不清除。新对局和投票需重新创建；前端应在新后端与清零完成后发布。只回滚旧代码会重新展示旧快照票，恢复旧状态需同时恢复数据库备份和旧代码。
 
 ## 测试
 

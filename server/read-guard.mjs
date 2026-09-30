@@ -3,7 +3,7 @@ import { clientIp, rateLimit } from './http.mjs';
 
 const catalogPaths = new Set([
   '/api/bootstrap', '/api/show1/works', '/api/works', '/api/prompts',
-  '/api/votes', '/api/ratings', '/api/leaderboard', '/api/guess/today',
+  '/api/votes', '/api/ratings', '/api/leaderboard', '/api/show1/leaderboard', '/api/guess/today',
 ]);
 
 export function createReadGuard(config) {

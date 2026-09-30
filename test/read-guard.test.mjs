@@ -66,6 +66,7 @@ test('catalog reads share an IP budget across endpoints, query strings, HEAD and
     assert.equal((await request('/api/bootstrap', { headers: { cookie: session } })).status, 200);
     const denied = await request('/api/votes?scope=formal', { ip: '203.0.113.2, 198.51.100.10' });
     assert.equal(denied.status, 429);
+    assert.equal((await request('/api/show1/leaderboard?scope=entertainment&category=web')).status, 429);
     assert.ok(Number(denied.headers.get('retry-after')) > 0);
     assert.equal(denied.headers.get('access-control-allow-origin'), origin);
     assert.equal((await request('/api/auth/me')).status, 200, 'small reads have a separate budget');

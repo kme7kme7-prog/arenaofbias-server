@@ -687,15 +687,16 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 
 ### 3.21 Show1 兼容层
 
-这些端点延续 Show1 的请求与响应形状。写请求遵循本服务 Origin、鉴权与限流规则。只读基础数据来自迁入快照；符合 `show_arena=1` 的已验证新投稿增量进入作品列表。历史娱乐票和新票不进入正式竞技场 Bradley–Terry 榜单。
+这些端点延续 Show1 的请求与响应形状。写请求遵循本服务 Origin、鉴权与限流规则。只读题库和作品来自迁入快照；符合 `show_arena=1` 的已验证新投稿增量进入作品列表。旧快照票不再参与读取、计分或配对；Show1 的新票不进入画廊 Bradley–Terry 榜单。现有数据库中的旧票须通过停机维护命令显式清零，启动和迁移不会自动删票。
 
 | 方法与路径 | 请求与响应 |
 | --- | --- |
 | `GET /api/prompts` | `{ prompts: [...] }`；竞技场 editorial 覆盖对应题目的 `commentary`、`weights`。 |
 | `GET /api/works` | `{ works: [...] }`；快照作品加符合条件的 live 投稿。 |
-| `GET /api/votes?scope=entertainment\|formal` | `{ votes: [...] }`；按时间和 ID 合并历史与 live 票，默认娱乐范围。 |
+| `GET /api/votes?scope=entertainment\|formal` | `{ votes: [...] }`；只读库内 `source=show1` 的票，按时间和 ID 排序，不合入旧快照。scope 必填，非法或缺失为 400。 |
 | `POST /api/votes` | 登录必需；提交 `id`、`promptId`、`winnerRid/Mid`、`loserRid/Mid`、`mode`、`outcome`，成功 `201 { vote }`；同 ID 同票幂等重放，已投同一对返回 `409 pair`；`formal` 仅管理员。 |
-| `GET /api/ratings?scope=entertainment\|formal` | `{ ratings: { [modelId]: number }, games: { [modelId]: number } }`；按兼容票回放 Elo。 |
+| `GET /api/ratings?scope=entertainment\|formal` | `{ ratings: { [modelId]: number }, games: { [modelId]: number } }`；按库内票回放未取整 Elo，供配对，复用聚合缓存。scope 必填。 |
+| `GET /api/show1/leaderboard?scope=entertainment\|formal&category=all\|text\|web` | 主站聚合榜单，scope 必填，category 缺省 all；非法参数 400。见下方。 |
 | `GET /api/comments?round=<题目编号>` | `{ comments: [...] }`；无效题目 `400`。 |
 | `POST /api/comments` | 登录必需；请求 `id`、`roundId`、`side`、`body`，成功 `201 { comment }`。 |
 | `GET /api/reactions?prompt=<题目编号>` | `{ counts, mine }`；无效题目 `400`。 |
@@ -703,6 +704,14 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 | `POST /api/track` | 最佳努力记录 `path` 浏览量，成功 `204`。 |
 
 旧分享卡端点已移除，访问返回 `404`。兼容层的详细字段可参考 `test/fixtures/show1-golden/` 中的固定响应。
+
+主站榜单响应：`{ scope, category, board, allBoard, radar, scopedPromptCount }`。`board`、`allBoard` 为 `{ rows, totalVotes, modelCount, promptCount }`，后者固定综合赛道，供页头统计；`scopedPromptCount` 是当前赛道实际投过票的题数。每行包含 `modelId`、`name`、`sigil`、`retired`、`rating`、`games`、`wins`、`losses`、`draws`、`winrate`、`topics`、`trial`。`radar` 为 `{ profiles: { [modelId]: [六维分] }, average: [六维均值] }`。空榜为零票、空 rows/profiles、画像均值六个 50；不返回逐票数据。
+
+- 主站保持顺序 Elo：基准 1200、K=32，`P(A)=1/(1+10^((R_B-R_A)/400))`，胜／负／平分别使用 1／0／0.5；按服务端保存时间和 ID 重放，内部不取整，展示 rating 才取整。Elo 对顺序敏感，这与画廊使用的 Bradley–Terry 是两种独立口径。
+- 娱乐包括 blind/party，正式只含 formal，互不混入。平局增加双方 games/draws，胜率为 wins/games；少于 30 次比较标记暂定。当前已发布作品仅覆盖 1 题的模型继续不进榜，发布第 2 题后进入；无当前作品但有本轮票的模型保留为历史阵容。
+- 六维使用相同过滤和次序，各维 Elo 步长为 `32 × 投票保存权重`；零权重不变，缺少快照权重时使用当前题目权重，再缺失则六维均分。展示映射为 `clamp(50+(R-1200)/4,0,100)`，它表达按题目权重分配的偏好画像。
+- 两个范围的三赛道结果与配对参考分缓存在 server，数据库写入或数据包版本变化后重建。重复提交同 UUID 同票返回原结果、不增票；同 UUID 改模式或改结果返回 `409 id`。清零命令先备份，再同事务清除全部 votes/matches 并记录审计；重启后两站都从零票开始。
+- 身份更正优先于原始身份快照用于读取和计分，原始快照不覆盖；更正后双方同模型的比较不计入榜单、画像或配对分，原票仍保留在流水和数据库。
 
 ---
 

@@ -1,6 +1,7 @@
 // Show1 compatibility layer (fusion/show1-adapter/DESIGN.md): the old Show1 endpoints,
-// same paths and shapes, backed by the read-only snapshot (server/show1/compat-data.json)
-// merged with live rows in the shared database. Response shapes follow the goldens in
+// same paths and shapes, backed by the read-only roster (server/show1/compat-data.json)
+// and live ballots in the shared database. Retired snapshot ballots are never replayed.
+// Roster response shapes follow the goldens in
 // fusion/show1-adapter/golden/.
 //
 // Wiring (done by the app, not here): the snapshot is injected so tests can substitute
@@ -19,17 +20,17 @@
 //     response's writeHead via withStatus() and return their body normally.
 //   - Compat votes are written with source='show1' (never counted by Bradley–Terry) and
 //     a pair_key namespaced `show1:<formal 0|1>:<rid>+<rid>` so they cannot collide with
-//     arena keys; migrated old-site votes keep source='legacy' and stay snapshot-only
-//     data for these endpoints (they already live inside the snapshot file).
+//     arena keys; migrated old-site votes keep source='legacy' and are excluded from
+//     these reads and scores. The reset command removes their old deduplication rows.
 import { createHash, randomBytes } from 'node:crypto';
 import { transaction } from './db.mjs';
 import { fail, rateLimit, readJson } from './http.mjs';
+import { buildShow1Boards, replayShow1Ratings } from './show1-ranking.mjs';
 
 const REACTION_EMOJI = { up: '👍', down: '👀', laugh: '🤯' };
 const EMOJI_KIND = { '👍': 'up', '👀': 'down', '🤯': 'laugh' };
 const MAPPED_EMOJIS = Object.keys(EMOJI_KIND);
 const UUID4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const ELO = { K: 32, BASE: 1200 };
 
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 const trim64 = (value) => String(value ?? '').trim().slice(0, 64);
@@ -48,6 +49,8 @@ export function registerShow1Compat(router, deps) {
   const track = limit.track ?? rateLimit(60e3, 600);
 
   const q = {
+    changes: db.prepare('SELECT total_changes() AS n'),
+    dataVersion: db.prepare('PRAGMA data_version'),
     liveFormal: db.prepare("SELECT * FROM votes WHERE source = 'show1' AND compat_mode = 'formal' ORDER BY created_at, id"),
     liveEntertainment: db.prepare("SELECT * FROM votes WHERE source = 'show1' AND (compat_mode IS NULL OR compat_mode <> 'formal') ORDER BY created_at, id"),
     voteByPair: db.prepare('SELECT * FROM votes WHERE user_id = ? AND pair_key = ?'),
@@ -102,8 +105,10 @@ export function registerShow1Compat(router, deps) {
   // report side a as the "winner" with outcome 'draw', exactly like the old server.
   function oldShape(row) {
     const winnerIsA = row.choice !== 'b';
-    const winnerIdentity = JSON.parse(winnerIsA ? row.a_identity : row.b_identity);
-    const loserIdentity = JSON.parse(winnerIsA ? row.b_identity : row.a_identity);
+    const aIdentity = JSON.parse(row.a_correction ?? row.a_identity);
+    const bIdentity = JSON.parse(row.b_correction ?? row.b_identity);
+    const winnerIdentity = winnerIsA ? aIdentity : bIdentity;
+    const loserIdentity = winnerIsA ? bIdentity : aIdentity;
     const winnerWork = winnerIsA ? row.a_work : row.b_work;
     const loserWork = winnerIsA ? row.b_work : row.a_work;
     const promptId = snapshot.roundByTask[row.task_id] ?? row.task_id;
@@ -130,9 +135,8 @@ export function registerShow1Compat(router, deps) {
 
   const byTimeThenId = (a, b) => (a.ts - b.ts) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
-  function mergedVotes(scope) {
-    const live = (scope === 'formal' ? q.liveFormal : q.liveEntertainment).all().map(oldShape);
-    return [...snapshot.votes[scope], ...live].sort(byTimeThenId);
+  function currentVotes(scope) {
+    return (scope === 'formal' ? q.liveFormal : q.liveEntertainment).all().map(oldShape).sort(byTimeThenId);
   }
 
   const scopeOf = (ctx) => {
@@ -141,35 +145,46 @@ export function registerShow1Compat(router, deps) {
     return scope;
   };
 
-  // ---- read-only snapshot -----------------------------------------------------
-
-  router.on('GET', '/api/prompts', () => ({ prompts: snapshot.prompts.map((prompt) => {
+  const promptsOf = () => snapshot.prompts.map((prompt) => {
     const row = q.arenaEditorial.get(snapshot.taskByRound[prompt.id] ?? '');
     return row ? { ...prompt, commentary: row.commentary, ...(row.weights_json ? { weights: JSON.parse(row.weights_json) } : {}) } : prompt;
-  }) }));
-  router.on('GET', '/api/works', () => ({ works: [...snapshot.works, ...liveWorks().map((row) => ({
+  });
+  const worksOf = () => [...snapshot.works, ...liveWorks().map((row) => ({
     id: row.id, promptId: snapshot.roundByTask[row.task_id], modelId: row.model_id,
     modelName: row.modelName, title: row.title, isDemo: 0,
     content: JSON.stringify({ kind: 'html', src: `${deps.config.contentTemplate.replace('{token}', row.content_key)}/` }),
-  }))] }));
+  }))];
 
-  router.on('GET', '/api/votes', (ctx) => ({ votes: mergedVotes(scopeOf(ctx)) }));
-
-  router.on('GET', '/api/ratings', (ctx) => {
-    const votes = mergedVotes(scopeOf(ctx));
-    const ratings = {};
-    const games = {};
-    for (const vote of votes) {
-      const a = ratings[vote.winnerMid] ?? ELO.BASE;
-      const b = ratings[vote.loserMid] ?? ELO.BASE;
-      const expected = 1 / (1 + 10 ** ((b - a) / 400));
-      const score = vote.outcome === 'draw' ? 0.5 : 1;
-      ratings[vote.winnerMid] = a + ELO.K * (score - expected);
-      ratings[vote.loserMid] = b + ELO.K * ((1 - score) - (1 - expected));
-      games[vote.winnerMid] = (games[vote.winnerMid] ?? 0) + 1;
-      games[vote.loserMid] = (games[vote.loserMid] ?? 0) + 1;
+  // SQLite revisions cover writes through this connection and maintenance writes
+  // through another connection. Catalog changes can rename live roster models.
+  // Cache at most the two scopes; every category and matching ratings share it.
+  let revision = '';
+  const cache = new Map();
+  const aggregates = (scope) => {
+    const next = `${q.changes.get().n}|${q.dataVersion.get().data_version}|${deps.catalog.version ?? ''}`;
+    if (revision !== next) { revision = next; cache.clear(); }
+    if (!cache.has(scope)) {
+      const votes = currentVotes(scope);
+      cache.set(scope, { ratings: replayShow1Ratings(votes), boards: buildShow1Boards(votes, worksOf(), promptsOf()) });
     }
-    return { ratings, games };
+    return cache.get(scope);
+  };
+
+  // ---- read-only snapshot -----------------------------------------------------
+
+  router.on('GET', '/api/prompts', () => ({ prompts: promptsOf() }));
+  router.on('GET', '/api/works', () => ({ works: worksOf() }));
+
+  router.on('GET', '/api/votes', (ctx) => ({ votes: currentVotes(scopeOf(ctx)) }));
+
+  router.on('GET', '/api/ratings', (ctx) => aggregates(scopeOf(ctx)).ratings);
+
+  router.on('GET', '/api/show1/leaderboard', (ctx) => {
+    const scope = scopeOf(ctx);
+    const category = ctx.url.searchParams.get('category') ?? 'all';
+    if (!['all', 'text', 'web'].includes(category)) fail(400, '榜单赛道无效');
+    const { boards } = aggregates(scope);
+    return { scope, category, ...boards[category], allBoard: boards.all.board };
   });
 
   // ---- votes -------------------------------------------------------------------
@@ -216,7 +231,8 @@ export function registerShow1Compat(router, deps) {
     const existing = q.voteByPair.get(user.id, pairKey) ?? q.voteByPair.get(user.id, legacyKey);
     if (existing) {
       if (existing.id !== id || existing.source === 'legacy') fail(409, '这一对作品你已经投过票了。', 'pair');
-      if (existing.choice !== choice || existing.a_work !== a.up || existing.b_work !== b.up) fail(409, '投票编号冲突，请重新提交', 'id');
+      if (existing.choice !== choice || existing.a_work !== a.up || existing.b_work !== b.up
+        || existing.compat_mode !== mode) fail(409, '投票编号冲突，请重新提交', 'id');
       return { vote: oldShape(existing) }; // Idempotent replay of the stored ballot.
     }
     if (q.voteById.get(id)) fail(409, '投票编号冲突，请重新提交', 'id');

@@ -15,6 +15,7 @@ import { limits as defaultLimits } from '../server/config.mjs';
 import { MIGRATIONS, openDatabase } from '../server/db.mjs';
 import { HttpError, createRouter, fail, sendJson } from '../server/http.mjs';
 import { registerShow1Compat } from '../server/show1compat.mjs';
+import { resetVotes } from '../server/vote-reset.mjs';
 
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 const loadJson = (url) => JSON.parse(readFileSync(url, 'utf8'));
@@ -229,22 +230,20 @@ describe('show1 compat endpoints', () => {
     assert.deepEqual((await call(base, 'GET', '/api/works')).data, before.data);
   }));
 
-test('snapshot vote weights stay fixed after editorial changes', () => withServer({
+test('retired snapshot ballots never enter live vote or rating responses', () => withServer({
     snapshot: fixtureSnapshot({ entertainment: [
       { id: 'sv1', promptId: '001', winnerRid: '001-a', winnerMid: 'model-a', loserRid: '001-b', loserMid: 'model-b', mode: 'blind', ts: 1, outcome: 'win', winnerName: 'Model A', loserName: 'Model B', promptKind: 'web', promptWeights: [0.3, 0, 0.6, 0, 0, 0.1] },
     ], formal: [] }),
   }, async ({ db, base }) => {
-    const before = (await call(base, 'GET', '/api/votes?scope=entertainment')).data.votes[0];
-    assert.deepEqual(before.promptWeights, [0.3, 0, 0.6, 0, 0, 0.1]);
+    assert.deepEqual((await call(base, 'GET', '/api/votes?scope=entertainment')).data.votes, []);
     db.prepare(`INSERT INTO task_editorial (task_id, face, commentary, weights_json, updated_by, updated_at)
       VALUES (?, 'arena', ?, ?, 'admin', ?)`).run('show1-001', '', JSON.stringify([0, 0, 0, 0.5, 0.5, 0]), Date.now());
-    const after = (await call(base, 'GET', '/api/votes?scope=entertainment')).data.votes[0];
-    assert.deepEqual(after.promptWeights, [0.3, 0, 0.6, 0, 0, 0.1]);
+    assert.deepEqual((await call(base, 'GET', '/api/votes?scope=entertainment')).data.votes, []);
     // 另一道题没有覆盖，权重保持快照值
     db.prepare(`INSERT INTO task_editorial (task_id, face, commentary, weights_json, updated_by, updated_at)
       VALUES (?, 'arena', ?, ?, 'admin', ?)`).run('chinese-architecture', '', JSON.stringify([1, 0, 0, 0, 0, 0]), Date.now());
-    const still = (await call(base, 'GET', '/api/votes?scope=entertainment')).data.votes[0];
-    assert.deepEqual(still.promptWeights, [0.3, 0, 0.6, 0, 0, 0.1]);
+    assert.deepEqual((await call(base, 'GET', '/api/ratings?scope=entertainment')).data, { ratings: {}, games: {} });
+    assert.equal((await call(base, 'GET', '/api/show1/leaderboard?scope=entertainment')).data.board.totalVotes, 0);
   }));
 
   test('a verified arena upload joins the Show1 list and entertainment votes', () => withServer({}, async ({ db, auth, base }) => {
@@ -344,6 +343,9 @@ test('snapshot vote weights stay fixed after editorial changes', () => withServe
     assert.equal(idConflict.status, 409);
     assert.equal(idConflict.data.code, 'id');
     assert.equal(idConflict.data.error, '投票编号冲突，请重新提交');
+    const modeConflict = await vote(voter, { id, ...BALLOT, mode: 'party' });
+    assert.equal(modeConflict.status, 409);
+    assert.equal(modeConflict.data.code, 'id', 'a UUID cannot silently change the ballot mode');
     const pairConflict = await vote(voter, { id: randomUUID(), ...BALLOT });
     assert.equal(pairConflict.status, 409);
     assert.equal(pairConflict.data.code, 'pair');
@@ -395,7 +397,7 @@ test('snapshot vote weights stay fixed after editorial changes', () => withServe
     assert.equal(ok.status, 201);
   }));
 
-  test('GET /api/votes merges snapshot and live rows in (ts, id) order with old shapes', () => withServer({
+  test('GET /api/votes returns only live ballots with separate scopes', () => withServer({
     snapshot: fixtureSnapshot({
       entertainment: [
         { id: 'snap-2', promptId: '001', winnerRid: '001-b', winnerMid: 'model-b', loserRid: '001-a', loserMid: 'model-a', mode: 'blind', ts: 2000, outcome: 'win', winnerName: 'Model B', loserName: 'Model A', promptKind: 'web', promptWeights: [0.3, 0, 0.6, 0, 0, 0.1] },
@@ -417,9 +419,9 @@ test('snapshot vote weights stay fixed after editorial changes', () => withServe
 
     const merged = await call(base, 'GET', '/api/votes?scope=entertainment');
     assert.equal(merged.status, 200);
-    assert.deepEqual(merged.data.votes.map((row) => row.id), ['snap-1', 'snap-2', liveId]);
+    assert.deepEqual(merged.data.votes.map((row) => row.id), [liveId]);
     assert.deepEqual(Object.keys(merged.data.votes[0]), VOTE_KEYS);
-    const live = merged.data.votes[2];
+    const live = merged.data.votes[0];
     assert.equal(live.winnerRid, '001-a');
     assert.equal(live.winnerName, 'Model A');
     assert.equal(live.promptKind, 'web');
@@ -427,8 +429,8 @@ test('snapshot vote weights stay fixed after editorial changes', () => withServe
     assert.ok(!merged.data.votes.some((row) => row.id === liveFormal), 'formal votes stay out of the entertainment scope');
 
     const formal = await call(base, 'GET', '/api/votes?scope=formal');
-    assert.deepEqual(formal.data.votes.map((row) => row.id), ['snap-f', liveFormal]);
-    assert.equal(formal.data.votes[1].mode, 'formal');
+    assert.deepEqual(formal.data.votes.map((row) => row.id), [liveFormal]);
+    assert.equal(formal.data.votes[0].mode, 'formal');
 
     // A prompt without weights omits promptWeights (parseWeightsColumn semantics).
     const noWeights = randomUUID();
@@ -440,7 +442,7 @@ test('snapshot vote weights stay fixed after editorial changes', () => withServe
     assert.ok(!('promptWeights' in live004));
   }));
 
-  test('GET /api/ratings replays old Elo over the merged list', () => withServer({
+  test('GET /api/ratings starts from zero instead of replaying snapshot Elo', () => withServer({
     snapshot: fixtureSnapshot({
       entertainment: [
         { id: 'r1', promptId: '001', winnerRid: '001-a', winnerMid: 'model-a', loserRid: '001-b', loserMid: 'model-b', mode: 'blind', ts: 1000, outcome: 'win', winnerName: 'Model A', loserName: 'Model B', promptKind: 'web', promptWeights: [0.3, 0, 0.6, 0, 0, 0.1] },
@@ -453,11 +455,91 @@ test('snapshot vote weights stay fixed after editorial changes', () => withServe
     assert.equal((await call(base, 'GET', '/api/ratings?scope=nope')).status, 400);
     const { status, data } = await call(base, 'GET', '/api/ratings?scope=entertainment');
     assert.equal(status, 200);
-    // Hand-computed: 1200 base, K=32 — a beats b, b beats c, a draws c.
-    assert.equal(data.ratings['model-a'], 1214.4968829087939);
-    assert.equal(data.ratings['model-b'], 1200.736306793522);
-    assert.equal(data.ratings['model-c'], 1184.766810297684);
-    assert.deepEqual(data.games, { 'model-a': 2, 'model-b': 2, 'model-c': 2 });
+    assert.deepEqual(data, { ratings: {}, games: {} });
+  }));
+
+  test('server boards count live wins and draws, separate scopes and refresh after writes', () => withServer({}, async ({ db, auth, base }) => {
+    // Give the first pair two published topics so its models qualify for the board.
+    seedWorks(db);
+    // Live uploads must use distinct IDs from snapshot works to join the roster.
+    const columns = db.prepare('PRAGMA table_info(works)').all().map((column) => column.name);
+    for (const [id, key, model] of [['up-newa', 'wnewa', 'model-a'], ['up-newb', 'wnewb', 'model-b']]) {
+      const replacements = { id, content_key: key, digest: id, model_id: model };
+      const values = [];
+      const selection = columns.map((name) => {
+        if (!Object.hasOwn(replacements, name)) return name;
+        values.push(replacements[name]);
+        return '?';
+      });
+      db.prepare(`INSERT INTO works (${columns.join(', ')}) SELECT ${selection.join(', ')}
+        FROM works WHERE id = 'up-cccc0003'`).run(...values);
+    }
+
+    const path = '/api/show1/leaderboard?scope=entertainment&category=web';
+    const empty = (await call(base, 'GET', path)).data;
+    assert.equal(empty.board.totalVotes, 0);
+    assert.deepEqual(empty.radar.average, Array(6).fill(50));
+    assert.equal((await call(base, 'GET', path.replace('category=web', 'category=bad'))).status, 400);
+    assert.equal((await call(base, 'GET', path.replace('entertainment', 'bad'))).status, 400);
+
+    const voter = await signIn(auth, 'boardvoter');
+    const firstId = randomUUID();
+    const first = await call(base, 'POST', '/api/votes', { cookie: voter.cookie, body: { id: firstId, ...BALLOT } });
+    assert.equal(first.status, 201, first.text);
+    const win = (await call(base, 'GET', path)).data;
+    assert.equal(win.board.totalVotes, 1);
+    assert.equal(win.board.rows.length, 2);
+    assert.deepEqual(win.board.rows.map((row) => row.rating), [1216, 1184]);
+    assert.equal(win.scopedPromptCount, 1);
+    [51.2, 50, 52.4, 50, 50, 50.4].forEach((value, i) =>
+      assert.ok(Math.abs(win.radar.profiles['model-a'][i] - value) < 1e-12));
+    assert.deepEqual((await call(base, 'GET', path)).data, win, 'cached response is stable');
+    assert.equal((await call(base, 'GET', path.replace('category=web', 'category=text'))).data.board.totalVotes, 0);
+    assert.equal((await call(base, 'GET', path.replace('entertainment', 'formal'))).data.board.totalVotes, 0);
+    assert.equal((await call(base, 'POST', '/api/votes', { cookie: voter.cookie, body: { id: firstId, ...BALLOT } })).status, 200);
+    assert.deepEqual((await call(base, 'GET', path)).data, win, 'idempotent replay adds no vote');
+
+    const second = await signIn(auth, 'drawvoter');
+    assert.equal((await call(base, 'POST', '/api/votes', { cookie: second.cookie, body: { id: randomUUID(), ...BALLOT, outcome: 'draw' } })).status, 201);
+    const draw = (await call(base, 'GET', path)).data;
+    assert.equal(draw.board.totalVotes, 2);
+    assert.equal(draw.board.rows[0].draws, 1);
+    assert.equal(draw.board.rows[0].games, 2);
+    assert.equal(draw.board.rows[0].winrate, 0.5);
+    const admin = await signIn(auth, 'root');
+    assert.equal((await call(base, 'POST', '/api/votes', { cookie: admin.cookie, body: { id: randomUUID(), ...BALLOT, mode: 'formal' } })).status, 201);
+    assert.equal((await call(base, 'GET', path.replace('entertainment', 'formal'))).data.board.totalVotes, 1);
+    assert.equal((await call(base, 'GET', path)).data.board.totalVotes, 2);
+    assert.equal((await call(base, 'GET', '/api/ratings?scope=entertainment')).data.games['model-a'], 2);
+    // A maintenance reset invalidates the warmed cache and releases pair deduplication.
+    resetVotes(db, 'owner', 'test-backup');
+    assert.equal((await call(base, 'GET', path)).data.board.totalVotes, 0);
+    assert.equal((await call(base, 'GET', path.replace('entertainment', 'formal'))).data.board.totalVotes, 0);
+    assert.deepEqual((await call(base, 'GET', '/api/ratings?scope=entertainment')).data, { ratings: {}, games: {} });
+    assert.equal((await call(base, 'POST', '/api/votes', { cookie: voter.cookie, body: { id: randomUUID(), ...BALLOT } })).status, 201);
+    assert.equal((await call(base, 'GET', path)).data.board.totalVotes, 1);
+  }));
+
+  test('identity corrections change cached Show1 scores and same-model comparisons are excluded', () => withServer({}, async ({ db, auth, base }) => {
+    const voter = await signIn(auth, 'correctedvoter');
+    const id = randomUUID();
+    assert.equal((await call(base, 'POST', '/api/votes', { cookie: voter.cookie, body: { id, ...BALLOT } })).status, 201);
+    assert.equal((await call(base, 'GET', '/api/ratings?scope=entertainment')).data.ratings['model-a'], 1216);
+    const original = db.prepare('SELECT a_identity FROM votes WHERE id = ?').get(id).a_identity;
+    const identity = JSON.parse(original);
+    db.prepare('UPDATE votes SET a_correction = ? WHERE id = ?').run(JSON.stringify({ ...identity, modelId: 'model-e', modelName: 'Model E' }), id);
+    const corrected = (await call(base, 'GET', '/api/votes?scope=entertainment')).data.votes[0];
+    assert.equal(corrected.winnerMid, 'model-e');
+    const ratings = (await call(base, 'GET', '/api/ratings?scope=entertainment')).data;
+    assert.equal(ratings.ratings['model-e'], 1216);
+    assert.equal(ratings.ratings['model-a'], undefined);
+    const board = (await call(base, 'GET', '/api/show1/leaderboard?scope=entertainment')).data.board;
+    assert.equal(board.rows[0].modelId, 'model-e');
+    assert.equal(board.rows[0].name, 'Model E');
+    db.prepare('UPDATE votes SET a_correction = ? WHERE id = ?').run(JSON.stringify({ ...identity, modelId: 'model-b' }), id);
+    assert.deepEqual((await call(base, 'GET', '/api/ratings?scope=entertainment')).data, { ratings: {}, games: {} });
+    assert.equal((await call(base, 'GET', '/api/show1/leaderboard?scope=entertainment')).data.board.totalVotes, 0);
+    assert.equal(db.prepare('SELECT a_identity FROM votes WHERE id = ?').get(id).a_identity, original);
   }));
 
   test('GET /api/comments maps rounds to tasks; POST resolves the backed side work', () => withServer({}, async ({ db, auth, base }) => {
@@ -673,7 +755,6 @@ describe('auth dual shape', () => {
 
 describe('real compat snapshot', () => {
   const snapshot = loadJson(new URL('../server/show1/compat-data.json', import.meta.url));
-  const golden = (name) => loadJson(new URL(`./fixtures/show1-golden/${name}`, import.meta.url));
 
   test('structure and referential integrity hold', () => {
     assert.equal(snapshot.prompts.length, 8);
@@ -702,19 +783,14 @@ describe('real compat snapshot', () => {
     assert.equal(snapshot.commentsBackfill.length, 16);
   });
 
-  test('endpoints reproduce the goldens from the snapshot alone', () => withServer({ snapshot }, async ({ base }) => {
+  test('roster remains available while retired snapshot votes stay excluded', () => withServer({ snapshot }, async ({ base }) => {
     assert.equal((await call(base, 'GET', '/api/prompts')).data.prompts.length, 8);
     assert.equal((await call(base, 'GET', '/api/works')).data.works.length, 262);
     for (const scope of ['entertainment', 'formal']) {
-      const votes = golden(`votes_${scope}.json`).votes;
       const response = await call(base, 'GET', `/api/votes?scope=${scope}`);
-      assert.equal(response.data.votes.length, votes.length, scope);
-      assert.deepEqual(response.data.votes[0], votes[0], `${scope} first vote`);
-      assert.deepEqual(response.data.votes.at(-1), votes.at(-1), `${scope} last vote`);
+      assert.deepEqual(response.data.votes, [], scope);
       const ratings = await call(base, 'GET', `/api/ratings?scope=${scope}`);
-      const expected = golden(`ratings_scope_${scope}.json`);
-      assert.deepEqual(ratings.data.ratings, expected.ratings, `${scope} Elo replay`);
-      assert.deepEqual(ratings.data.games, expected.games, `${scope} appearance counts`);
+      assert.deepEqual(ratings.data, { ratings: {}, games: {} }, scope);
     }
     const comments = await call(base, 'GET', '/api/comments?round=001');
     assert.equal(comments.status, 200);

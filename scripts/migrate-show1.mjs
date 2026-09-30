@@ -202,7 +202,7 @@ function planMigration(source, target, options) {
   const taskMap = new Map();
   const targetUserById = target.prepare('SELECT id, name_key FROM users WHERE id = ?');
   const targetUserByKey = target.prepare('SELECT id FROM users WHERE name_key = ?');
-  const targetWorkById = target.prepare('SELECT id, task_id, model_id, title, digest, content_key, audience FROM works WHERE id = ?');
+  const targetWorkById = target.prepare('SELECT id, task_id, model_id, title, digest, content_key FROM works WHERE id = ?');
   const targetWorkByKey = target.prepare('SELECT id FROM works WHERE content_key = ?');
   const targetReaction = target.prepare('SELECT 1 FROM reactions WHERE task_id = ? AND work_id = ? AND user_id = ? AND emoji = ?');
   const targetMatchById = target.prepare('SELECT id FROM matches WHERE id = ?');
@@ -282,9 +282,9 @@ function planMigration(source, target, options) {
     }
     if (row.published !== 1) addIssue(report, 'works', row.id, '旧作品在 Show1 未发布，仍随迁移 verified 上架', { promptId: row.prompt_id });
     // Unresolvable models (e.g. mimo-x-flash) keep the work: model_id is stored NULL,
-    // model_name keeps the source text, and the row is flagged 待确认 in the report.
+    // model_other keeps the source text, and the row is flagged 待确认 in the report.
     const model = resolveModel(row.model_id, row.model_name);
-    if (!model) addIssue(report, 'works', row.id, '模型无法按终版映射唯一归一，待确认：model_id 置空、model_name 保留原值', { modelId: row.model_id, modelName: row.model_name });
+    if (!model) addIssue(report, 'works', row.id, '模型无法按终版映射唯一归一，待确认：model_id 置空、model_other 保留原值', { modelId: row.model_id, modelName: row.model_name });
     const modelId = model?.id ?? null;
     let content, payload;
     try {
@@ -364,7 +364,7 @@ function planMigration(source, target, options) {
   // a/b sides are the winner/loser ordered by the pair_key convention (lexicographically
   // smaller round id on side a), so the choice follows from which side won. Works are not
   // resolved: a_work/b_work stay `legacy:<mid>` and the vote carries the raw mids in
-  // a_identity/b_identity with identity_source='legacy'.
+  // a_identity/b_identity with source='legacy'.
   const plannedPairs = new Set();
   const skipVote = (row, reason, detail = {}, blocking = false) => {
     report.tables.votes.skipped++;
@@ -550,15 +550,15 @@ function applyPlan(target, options, plan) {
     try {
       const addUser = target.prepare(`INSERT INTO users (id, name, name_key, role, salt, hash, created_at, hash_params)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
-      const addWork = target.prepare(`INSERT INTO works (id, task_id, owner_id, title, summary, model_id, model_name, vendor,
-        effort, tool, note, status, content_key, source_name, root, entry, file_count, bytes, digest,
-        checks, trial, created_at, updated_at, audience)
-        VALUES (?, ?, NULL, ?, '', ?, ?, ?, '', '', ?, 'verified', ?, ?, '', 'index.html', ?, ?, ?, ?, ?, ?, ?, 'both')`);
+      const addWork = target.prepare(`INSERT INTO works (id, task_id, owner_id, title, summary, model_id, model_other,
+        effort, note, status, content_key, source_name, root, entry, file_count, bytes, digest,
+        checks, trial, created_at, updated_at, show_gallery, show_arena)
+        VALUES (?, ?, NULL, ?, '', ?, ?, '', ?, 'verified', ?, ?, '', 'index.html', ?, ?, ?, ?, ?, ?, ?, 1, 1)`);
       const addReaction = target.prepare(`INSERT INTO reactions (task_id, work_id, user_id, emoji, created_at) VALUES (?, ?, ?, ?, ?)`);
       const addMatch = target.prepare(`INSERT INTO matches (id, user_id, task_id, a_work, b_work, a_token, b_token, created_at,
         expires_at, choice, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
       const addVote = target.prepare(`INSERT INTO votes (id, match_id, user_id, task_id, a_work, b_work, pair_key, choice,
-        created_at, a_identity, b_identity, identity_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'legacy')`);
+        created_at, a_identity, b_identity, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'legacy')`);
       const addComment = target.prepare(`INSERT INTO comments (id, task_id, work_id, user_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?)`);
       for (const user of plan.users) addUser.run(user.id, user.name, user.nameKey, user.role, user.salt, user.hash, user.createdAt, HASH_PARAMS);
       for (const work of plan.works) {
@@ -566,7 +566,7 @@ function applyPlan(target, options, plan) {
         moved.push(join(worksRoot, work.id));
         const checks = [{ id: 'legacy', state: 'info', label: 'Show1 历史作品', detail: 'Show1 线上审核过的作品，随迁移直接 verified 上架' }];
         if (work.manualFile) checks.push({ id: 'legacy-template', state: 'warn', label: '旧 React 模板', detail: '当前是占位页，须补齐独立作品文件后替换' });
-        addWork.run(work.id, work.taskId, work.title, work.modelId, work.modelName, work.vendor,
+        addWork.run(work.id, work.taskId, work.title, work.modelId, work.modelId ? '' : work.modelName,
           'Show1 历史迁入', work.key, `show1-${work.id}.html`, work.payload.files.length,
           work.payload.bytes, work.payload.digest, JSON.stringify(checks), JSON.stringify(work.trial), work.createdAt, work.createdAt);
       }

@@ -71,7 +71,7 @@ describe('nomination and export', () => {
     assert.equal(meta.status, 200);
     assert.equal(meta.data.id, id);
     assert.deepEqual([meta.data.harnessId, meta.data.harnessOther, meta.data.harnessVersion,
-      meta.data.providerId, meta.data.providerOther], [null, '', '', null, '']);
+      meta.data.providerId, meta.data.providerOther], [null, 'CLI', '', null, '']);
     assert.equal(meta.data.files.length, 1);
     const response = await fetch(base + exportPath + '/file?path=index.html');
     assert.equal(response.status, 200);

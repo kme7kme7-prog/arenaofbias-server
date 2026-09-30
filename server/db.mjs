@@ -297,6 +297,33 @@ const MIGRATIONS = [
       evidence_url: 'length(evidence_url) <= 2000',
     })) if (!columns.has(name)) db.exec(`ALTER TABLE works ADD COLUMN ${name} TEXT NOT NULL DEFAULT '' CHECK (${check})`);
   },
+  (db) => {
+    const columns = new Set(db.prepare('PRAGMA table_info(works)').all().map((column) => column.name));
+    if (columns.has('tool')) db.exec(`UPDATE works SET harness_other = tool
+      WHERE tool <> '' AND harness_id IS NULL AND harness_other = '';`);
+    // Preserve actors from old rows that have no corresponding audit entry.
+    for (const [actor, at, actions, fallback] of [
+      ['reviewed_by', 'reviewed_at', "'verified', 'questioned', 'unverified'", 'status'],
+      ['deleted_by', 'deleted_at', "'delete'", "'delete'"],
+    ]) if (columns.has(actor)) db.exec(`INSERT INTO audit (at, actor_id, actor_name, action, task_id, work_id, detail)
+      SELECT COALESCE(works.${at}, works.updated_at), works.${actor}, COALESCE(users.name, works.${actor}),
+        ${fallback}, works.task_id, works.id, 'Migrated from works.${actor}'
+      FROM works LEFT JOIN users ON users.id = works.${actor}
+      WHERE works.${actor} IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM audit WHERE work_id = works.id AND action IN (${actions})
+          AND actor_id = works.${actor} AND at >= COALESCE(works.${at}, works.updated_at)
+      );`);
+    if (columns.has('model_name')) db.exec('ALTER TABLE works RENAME COLUMN model_name TO model_other');
+    if (columns.has('model_name') || columns.has('model_other')) db.exec("UPDATE works SET model_other = '' WHERE model_id IS NOT NULL");
+    db.exec('DROP INDEX IF EXISTS works_audience');
+    for (const name of ['audience', 'tool', 'vendor', 'reviewed_by', 'deleted_by']) {
+      if (columns.has(name)) db.exec(`ALTER TABLE works DROP COLUMN ${name}`);
+    }
+    db.exec(`CREATE INDEX IF NOT EXISTS audit_work_review ON audit(work_id, id DESC)
+      WHERE action IN ('verified', 'questioned', 'unverified');`);
+    const voteColumns = new Set(db.prepare('PRAGMA table_info(votes)').all().map((column) => column.name));
+    if (voteColumns.has('identity_source')) db.exec('ALTER TABLE votes DROP COLUMN identity_source');
+  },
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

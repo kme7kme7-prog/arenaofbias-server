@@ -55,8 +55,8 @@ export function registerShow1Compat(router, deps) {
     insertMatch: db.prepare(`INSERT INTO matches (id, user_id, task_id, a_work, b_work, a_token, b_token, created_at,
       expires_at, choice, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
     insertVote: db.prepare(`INSERT INTO votes (id, match_id, user_id, task_id, a_work, b_work, pair_key, choice,
-      created_at, a_identity, b_identity, identity_source, source, compat_mode, compat_weights_json, compat_weight_source)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'snapshot', 'show1', ?, ?, 'cast')`),
+      created_at, a_identity, b_identity, source, compat_mode, compat_weights_json, compat_weight_source)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'show1', ?, ?, 'cast')`),
     commentsOfTask: db.prepare(`SELECT comments.id, comments.side, comments.body, comments.created_at, users.name AS username
       FROM comments JOIN works ON works.id = comments.work_id LEFT JOIN users ON users.id = comments.user_id
       WHERE works.task_id = ? AND comments.deleted_at IS NULL
@@ -71,17 +71,18 @@ export function registerShow1Compat(router, deps) {
     addReaction: db.prepare('INSERT OR IGNORE INTO reactions (task_id, work_id, user_id, emoji, created_at) VALUES (?, ?, ?, ?, ?)'),
     pageView: db.prepare('INSERT INTO page_views (day, path, ip_hash, created_at) VALUES (?, ?, ?, ?)'),
     arenaEditorial: db.prepare("SELECT commentary, weights_json FROM task_editorial WHERE task_id = ? AND face = 'arena'"),
-    liveWorks: db.prepare("SELECT id, task_id, model_id, model_name, title, content_key FROM works WHERE status = 'verified' AND show_arena = 1 AND curated_as IS NULL AND deleted_at IS NULL ORDER BY created_at, id"),
+    liveWorks: db.prepare("SELECT id, task_id, model_id, model_other, title, content_key FROM works WHERE status = 'verified' AND show_arena = 1 AND curated_as IS NULL AND deleted_at IS NULL ORDER BY created_at, id"),
   };
 
   const promptOf = (id) => snapshot.prompts.find((prompt) => prompt.id === id) ?? null;
   const published = (round) => Object.hasOwn(snapshot.taskByRound, round);
   // The roster sorted by rid once: every "first work of a mid/task" lookup is deterministic.
-  const liveWorks = () => q.liveWorks.all().filter((row) => snapshot.roundByTask[row.task_id] && !snapshot.upToRid[row.id]);
+  const liveWorks = () => q.liveWorks.all().filter((row) => snapshot.roundByTask[row.task_id] && !snapshot.upToRid[row.id])
+    .map((row) => ({ ...row, modelName: row.model_id ? (deps.catalog.model(row.model_id)?.name ?? row.model_id) : row.model_other }));
   const workMap = () => Object.fromEntries([
     ...Object.entries(snapshot.workMap),
     ...liveWorks().map((row) => [row.id, { up: row.id, key: row.content_key, task: row.task_id,
-      round: snapshot.roundByTask[row.task_id], mid: row.model_id, modelName: row.model_name, title: row.title }]),
+      round: snapshot.roundByTask[row.task_id], mid: row.model_id, modelName: row.modelName, title: row.title }]),
   ]);
   const roster = () => Object.entries(workMap()).sort(([a], [b]) => a.localeCompare(b));
   const workOf = (taskId, mid) => {
@@ -148,7 +149,7 @@ export function registerShow1Compat(router, deps) {
   }) }));
   router.on('GET', '/api/works', () => ({ works: [...snapshot.works, ...liveWorks().map((row) => ({
     id: row.id, promptId: snapshot.roundByTask[row.task_id], modelId: row.model_id,
-    modelName: row.model_name, title: row.title, isDemo: 0,
+    modelName: row.modelName, title: row.title, isDemo: 0,
     content: JSON.stringify({ kind: 'html', src: `${deps.config.contentTemplate.replace('{token}', row.content_key)}/` }),
   }))] }));
 

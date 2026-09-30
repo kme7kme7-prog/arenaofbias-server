@@ -54,7 +54,7 @@ function createFixture({ snapshot = fixtureSnapshot(), admins = ['root'] } = {})
   const db = openDatabase(':memory:');
   const auth = createAuth(db, { admins, secureCookies: false, sessionTtl: 60000 });
   const router = createRouter();
-  registerShow1Compat(router, { db, snapshot, config: { contentTemplate: 'https://{token}.works.test' }, limit: {} });
+  registerShow1Compat(router, { db, catalog: { model: (id) => ({ name: `Model ${id.at(-1).toUpperCase()}` }) }, snapshot, config: { contentTemplate: 'https://{token}.works.test' }, limit: {} });
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://test.invalid');
@@ -117,13 +117,13 @@ const BALLOT = { promptId: '001', winnerRid: '001-a', winnerMid: 'model-a', lose
 const VOTE_KEYS = ['id', 'promptId', 'winnerRid', 'winnerMid', 'loserRid', 'loserMid', 'mode', 'ts', 'outcome', 'winnerName', 'loserName', 'promptKind', 'promptWeights'];
 
 function seedWorks(db) {
-  const insert = db.prepare(`INSERT INTO works (id, task_id, owner_id, title, summary, model_id, model_name, vendor,
-    effort, tool, note, status, content_key, source_name, root, entry, file_count, bytes, digest,
-    checks, trial, created_at, updated_at, audience)
-    VALUES (?, ?, NULL, ?, '', ?, ?, '', '', '', '', 'verified', ?, '', '', 'index.html', 1, 10, ?, '[]', '{}', 1, 1, 'both')`);
-  insert.run('up-aaaa0001', 'show1-001', 'A 作品', 'model-a', 'Model A', 'wa', 'da');
-  insert.run('up-bbbb0002', 'show1-001', 'B 作品', 'model-b', 'Model B', 'wb', 'db');
-  insert.run('up-cccc0003', 'chinese-architecture', 'C 作品', 'model-c', 'Model C', 'wc', 'dc');
+  const insert = db.prepare(`INSERT INTO works (id, task_id, owner_id, title, summary, model_id, model_other,
+    effort, note, status, content_key, source_name, root, entry, file_count, bytes, digest,
+    checks, trial, created_at, updated_at, show_gallery, show_arena)
+    VALUES (?, ?, NULL, ?, '', ?, ?, '', '', 'verified', ?, '', '', 'index.html', 1, 10, ?, '[]', '{}', 1, 1, 1, 1)`);
+  insert.run('up-aaaa0001', 'show1-001', 'A 作品', 'model-a', '', 'wa', 'da');
+  insert.run('up-bbbb0002', 'show1-001', 'B 作品', 'model-b', '', 'wb', 'db');
+  insert.run('up-cccc0003', 'chinese-architecture', 'C 作品', 'model-c', '', 'wc', 'dc');
 }
 
 test('v8 migrates a v7 database: vote sources, comment sides and the new tables', () => {
@@ -198,10 +198,10 @@ test('countedVotes only feeds source=arena votes to Bradley–Terry', async () =
     db.prepare("INSERT INTO users (id, name, name_key, role, salt, hash, created_at) VALUES ('u1', 'u1', 'u1', 'member', 's', 'h', 1)").run();
     const identity = (mid) => JSON.stringify({ taskId: 'one', id: mid, curated: false, title: mid, modelId: mid, modelName: mid, vendor: '', effort: '', effortKey: '', modelKey: mid, configKey: mid, ownerId: null });
     const add = db.prepare(`INSERT INTO votes (id, match_id, user_id, task_id, a_work, b_work, pair_key, choice,
-      created_at, a_identity, b_identity, identity_source, source, compat_mode) VALUES (?, ?, 'u1', 'one', 'w1', 'w2', ?, 'a', 1, ?, ?, ?, ?, ?)`);
-    add.run('v-arena', 'ma', 'one:w1+w2', identity('w1'), identity('w2'), 'snapshot', 'arena', null);
-    add.run('v-legacy', 'mb', 'one:w1+w2x', identity('w1'), identity('w2'), 'legacy', 'legacy', null);
-    add.run('v-show1', 'mc', 'show1:0:w1+w2', identity('w1'), identity('w2'), 'snapshot', 'show1', 'blind');
+      created_at, a_identity, b_identity, source, compat_mode) VALUES (?, ?, 'u1', 'one', 'w1', 'w2', ?, 'a', 1, ?, ?, ?, ?)`);
+    add.run('v-arena', 'ma', 'one:w1+w2', identity('w1'), identity('w2'), 'arena', null);
+    add.run('v-legacy', 'mb', 'one:w1+w2x', identity('w1'), identity('w2'), 'legacy', null);
+    add.run('v-show1', 'mc', 'show1:0:w1+w2', identity('w1'), identity('w2'), 'show1', 'blind');
     const board = await arena.leaderboard({ task: 'one' });
     assert.equal(board.totals.votes, 1, 'legacy and show1 votes never enter Bradley–Terry');
   } finally { db.close(); }
@@ -318,7 +318,6 @@ test('snapshot vote weights stay fixed after editorial changes', () => withServe
     const row = db.prepare('SELECT * FROM votes WHERE id = ?').get(id);
     assert.equal(row.source, 'show1');
     assert.equal(row.compat_mode, 'blind');
-    assert.equal(row.identity_source, 'snapshot');
     assert.equal(row.pair_key, 'show1:0:001-a+001-b');
     assert.equal(row.choice, 'a');
     assert.equal(row.a_work, 'up-aaaa0001');
@@ -383,7 +382,7 @@ test('snapshot vote weights stay fixed after editorial changes', () => withServe
   test('a migrated legacy vote (bare pair_key) still blocks re-voting the same pair', () => withServer({}, async ({ db, auth, base }) => {
     const voter = await signIn(auth, 'legacyvoter');
     db.prepare(`INSERT INTO votes (id, match_id, user_id, task_id, a_work, b_work, pair_key, choice,
-      created_at, a_identity, b_identity, identity_source) VALUES ('old-vote', 'old-match', ?, 'show1-001',
+      created_at, a_identity, b_identity, source) VALUES ('old-vote', 'old-match', ?, 'show1-001',
       'legacy:model-a', 'legacy:model-b', '001-a+001-b', 'a', 1, 'model-a', 'model-b', 'legacy')`).run(voter.user.id);
     const blocked = await call(base, 'POST', '/api/votes', { body: { id: randomUUID(), ...BALLOT }, cookie: voter.cookie });
     assert.equal(blocked.status, 409);
@@ -523,8 +522,8 @@ test('snapshot vote weights stay fixed after editorial changes', () => withServe
     // A legacy migrated vote resolves its mid from the legacy:<mid> work reference.
     const legacy = await signIn(auth, 'legacyvoter');
     db.prepare(`INSERT INTO votes (id, match_id, user_id, task_id, a_work, b_work, pair_key, choice, created_at,
-      a_identity, b_identity, identity_source, source) VALUES ('lv1', 'lm1', ?, 'show1-001', 'legacy:model-b', 'legacy:model-a',
-      '001-a+001-b', 'a', 50, 'model-b', 'model-a', 'legacy', 'legacy')`).run(legacy.user.id);
+      a_identity, b_identity, source) VALUES ('lv1', 'lm1', ?, 'show1-001', 'legacy:model-b', 'legacy:model-a',
+      '001-a+001-b', 'a', 50, 'model-b', 'model-a', 'legacy')`).run(legacy.user.id);
     const legacyCommentId = randomUUID();
     assert.equal((await comment(legacy, { id: legacyCommentId, roundId: '001', side: 'a', body: '旧票定位' })).status, 201);
     assert.equal(db.prepare('SELECT work_id FROM comments WHERE id = ?').get(legacyCommentId).work_id, 'up-bbbb0002');

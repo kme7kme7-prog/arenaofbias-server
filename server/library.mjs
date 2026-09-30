@@ -52,8 +52,11 @@ export function createLibrary({ db, catalog, config, limits }) {
   const originOf = (key) => config.contentTemplate.replace('{token}', key);
 
   const WORK = `SELECT works.*, COALESCE(NULLIF(owner.nickname, ''), owner.name) AS owner_name,
-    COALESCE(NULLIF(reviewer.nickname, ''), reviewer.name) AS reviewer_name FROM works
-    LEFT JOIN users owner ON owner.id = works.owner_id LEFT JOIN users reviewer ON reviewer.id = works.reviewed_by`;
+    COALESCE(NULLIF(reviewer.nickname, ''), reviewer.name, review_audit.actor_name) AS reviewer_name FROM works
+    LEFT JOIN users owner ON owner.id = works.owner_id
+    LEFT JOIN audit review_audit ON review_audit.id = (
+      SELECT id FROM audit WHERE work_id = works.id AND action IN ('verified', 'questioned', 'unverified') ORDER BY id DESC LIMIT 1)
+    LEFT JOIN users reviewer ON reviewer.id = review_audit.actor_id`;
   const q = {
     draft: db.prepare('SELECT * FROM drafts WHERE id = ?'),
     draftByToken: db.prepare('SELECT * FROM drafts WHERE token = ? AND expires_at > ?'),
@@ -70,25 +73,25 @@ export function createLibrary({ db, catalog, config, limits }) {
     worksOfTask: db.prepare(`${WORK} WHERE works.task_id = ? AND works.deleted_at IS NULL`),
     worksOfOwner: db.prepare(`${WORK} WHERE works.owner_id = ? AND works.deleted_at IS NULL ORDER BY works.created_at DESC`),
     pendingOf: db.prepare("SELECT COUNT(*) AS n FROM works WHERE owner_id = ? AND status = 'unverified' AND deleted_at IS NULL"),
-    insertWork: db.prepare(`INSERT INTO works (id, task_id, owner_id, title, summary, model_id, model_name, vendor, effort, tool,
+    insertWork: db.prepare(`INSERT INTO works (id, task_id, owner_id, title, summary, model_id, model_other, effort,
       harness_id, harness_other, harness_version, provider_id, provider_other, note, content_key,
       source_name, root, entry, file_count, bytes, digest, checks, trial, cover, created_at, updated_at,
       model_version, generation_mode, human_intervention, generated_on, evidence_url, show_gallery, show_arena)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`),
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`),
     deleteWork: db.prepare('DELETE FROM works WHERE id = ?'),
     deleteSubmitAudit: db.prepare("DELETE FROM audit WHERE action = 'submit' AND work_id = ?"),
     restoreDraft: db.prepare(`INSERT INTO drafts (id, owner_id, task_id, token, source_name, root, entry, file_count, bytes, digest, checks, created_at, expires_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-    review: db.prepare(`UPDATE works SET status = ?, status_reason = ?, model_id = ?, model_name = ?, vendor = ?, effort = ?,
+    review: db.prepare(`UPDATE works SET status = ?, status_reason = ?, model_id = ?, model_other = ?, effort = ?,
       harness_id = ?, harness_other = ?, harness_version = ?, provider_id = ?, provider_other = ?,
       model_version = ?, generation_mode = ?, human_intervention = ?, generated_on = ?, evidence_url = ?,
-      audience = ?, show_gallery = ?, show_arena = ?, title = ?, summary = ?, reviewed_by = ?, reviewed_at = ?, updated_at = ? WHERE id = ?`),
-    remove: db.prepare('UPDATE works SET deleted_at = ?, deleted_by = ?, updated_at = ? WHERE id = ?'),
+      show_gallery = ?, show_arena = ?, title = ?, summary = ?, reviewed_at = ?, updated_at = ? WHERE id = ?`),
+    remove: db.prepare('UPDATE works SET deleted_at = ?, updated_at = ? WHERE id = ?'),
     captures: db.prepare('UPDATE works SET captures = ? WHERE id = ?'),
     calibration: db.prepare('UPDATE works SET trial = ?, updated_at = ? WHERE id = ?'),
     arenaCalibration: db.prepare('UPDATE works SET calibration_arena = ?, updated_at = ? WHERE id = ?'),
-    faceSettings: db.prepare('UPDATE works SET show_gallery = ?, show_arena = ?, audience = ?, updated_at = ? WHERE id = ?'),
-    meta: db.prepare(`UPDATE works SET title = ?, summary = ?, model_id = ?, model_name = ?, vendor = ?, effort = ?,
+    faceSettings: db.prepare('UPDATE works SET show_gallery = ?, show_arena = ?, updated_at = ? WHERE id = ?'),
+    meta: db.prepare(`UPDATE works SET title = ?, summary = ?, model_id = ?, model_other = ?, effort = ?,
       harness_id = ?, harness_other = ?, harness_version = ?, provider_id = ?, provider_other = ?,
       model_version = ?, generation_mode = ?, human_intervention = ?, generated_on = ?, evidence_url = ?, updated_at = ? WHERE id = ?`),
     curatedAs: db.prepare('UPDATE works SET curated_as = ?, updated_at = ? WHERE id = ?'),
@@ -111,13 +114,14 @@ export function createLibrary({ db, catalog, config, limits }) {
     auditLog: db.prepare('SELECT * FROM audit ORDER BY id DESC LIMIT ?'),
   };
 
-  function fromRow(row) {
+  function fromRow(row, archive = catalog) {
+    const model = row.model_id ? archive.model(row.model_id) : null;
     return {
       taskId: row.task_id,
       id: row.id,
       curated: false,
       status: row.status,
-      audience: row.audience,
+      audience: row.show_gallery && row.show_arena ? 'both' : row.show_gallery ? 'show2' : row.show_arena ? 'show1' : 'hidden',
       showGallery: Boolean(row.show_gallery),
       showArena: Boolean(row.show_arena),
       curatedAs: row.curated_as ?? null,
@@ -127,10 +131,10 @@ export function createLibrary({ db, catalog, config, limits }) {
       title: row.title,
       summary: row.summary,
       modelId: row.model_id,
-      modelName: row.model_name,
-      vendor: row.vendor,
+      modelName: row.model_id ? (model?.name ?? row.model_id) : row.model_other,
+      vendor: model?.vendor ?? '',
       effort: row.effort,
-      tool: row.tool,
+      tool: row.harness_id ? (archive.harness(row.harness_id)?.name ?? row.harness_id) : row.harness_other,
       harnessId: row.harness_id,
       harnessOther: row.harness_other,
       harnessVersion: row.harness_version,
@@ -166,9 +170,9 @@ export function createLibrary({ db, catalog, config, limits }) {
     q.audit.run(Date.now(), actor?.id ?? null, actor?.name ?? '系统', action, work?.taskId ?? null, work?.id ?? null, detail);
   }
 
-  function upload(taskId, id) {
+  function upload(taskId, id, archive = catalog) {
     const row = q.work.get(id);
-    return row && row.task_id === taskId ? fromRow(row) : null;
+    return row && row.task_id === taskId ? fromRow(row, archive) : null;
   }
 
   function purgeDrafts() {
@@ -269,7 +273,7 @@ export function createLibrary({ db, catalog, config, limits }) {
     }
     const modelName = clip(body.modelName, 60);
     if (!modelName) fail(400, '请填写模型名称');
-    return { modelId: null, modelName, vendor: clip(body.vendor, 40) };
+    return { modelId: null, modelName, vendor: '' };
   }
 
   function provenance(body, current = {}) {
@@ -329,7 +333,8 @@ export function createLibrary({ db, catalog, config, limits }) {
     mediaDir: dirs.media,
 
     work(taskId, id, snapshot = null) {
-      return (snapshot ?? catalog.snapshot()).work(taskId, id) ?? upload(taskId, id);
+      const archive = snapshot ?? catalog.snapshot();
+      return archive.work(taskId, id) ?? upload(taskId, id, archive);
     },
     byContentKey(key) {
       const row = q.workByKey.get(key);
@@ -337,16 +342,17 @@ export function createLibrary({ db, catalog, config, limits }) {
     },
     // Curated works plus verified uploads: the pool blind comparisons draw from.
     eligible(taskId, snapshot = null) {
-      return [...(snapshot ?? catalog.snapshot()).works(taskId), ...q.worksOfTask.all(taskId).map(fromRow)].filter(isEligible);
+      const archive = snapshot ?? catalog.snapshot();
+      return [...archive.works(taskId), ...q.worksOfTask.all(taskId).map((row) => fromRow(row, archive))].filter(isEligible);
     },
     uploads() {
-      return q.works.all().map(fromRow);
+      return q.works.all().map((row) => fromRow(row));
     },
     published(site) {
-      return q.works.all().map(fromRow).filter((work) => !work.curatedAs && work.status === 'verified' && visibleTo(work, site));
+      return q.works.all().map((row) => fromRow(row)).filter((work) => !work.curatedAs && work.status === 'verified' && visibleTo(work, site));
     },
     uploadsOf(userId) {
-      return q.worksOfOwner.all(userId).map(fromRow);
+      return q.worksOfOwner.all(userId).map((row) => fromRow(row));
     },
 
     toPublic(work, viewer) {
@@ -406,7 +412,7 @@ export function createLibrary({ db, catalog, config, limits }) {
       const arena = body.show_arena ?? current.show_arena;
       const apply = () => {
         if (work.curated) q.setOverride.run(taskId, id, Number(gallery), Number(arena), admin.id, Date.now());
-        else q.faceSettings.run(Number(gallery), Number(arena), gallery && arena ? 'both' : gallery ? 'show2' : arena ? 'show1' : 'hidden', Date.now(), id);
+        else q.faceSettings.run(Number(gallery), Number(arena), Date.now(), id);
         audit(admin, 'face-settings', work, JSON.stringify({ show_gallery: gallery, show_arena: arena }));
       };
       if (withinTransaction) apply();
@@ -533,10 +539,11 @@ export function createLibrary({ db, catalog, config, limits }) {
       if (body.confirmed !== true) fail(400, '请先确认作品在试加载中运行正常');
       const title = clip(body.title, 40);
       if (!title) fail(400, '请填写作品标题');
-      const source = provenance(body);
+      // Old clients submit only tool; store it in the one free-text Harness field.
+      const source = provenance(!body.harnessId && !body.harnessOther && body.tool
+        ? { ...body, harnessOther: clip(body.tool, 40) } : body);
       const generation = generationFrom(body);
-      const tool = clip(body.tool, 40) || (source.harnessId ? catalog.harness(source.harnessId).name : source.harnessOther);
-      if (user.role !== 'admin' && !tool && !source.harnessId && !source.harnessOther) fail(400, '请选择或填写 Harness');
+      if (user.role !== 'admin' && !source.harnessId && !source.harnessOther) fail(400, '请选择或填写 Harness');
       const who = identity(body);
       const cover = coverFrom(body.cover);
       // Admins stage inbox registrations as unverified works in bulk; the per-user
@@ -562,8 +569,8 @@ export function createLibrary({ db, catalog, config, limits }) {
         renameSync(staged, stored);
         moved = true;
         transaction(db, () => {
-          q.insertWork.run(id, draft.task_id, user.id, title, clip(body.summary, 200), who.modelId, who.modelName, who.vendor,
-            effortOf(body.effort), tool, source.harnessId, source.harnessOther, source.harnessVersion, source.providerId,
+          q.insertWork.run(id, draft.task_id, user.id, title, clip(body.summary, 200), who.modelId, who.modelId ? '' : who.modelName,
+            effortOf(body.effort), source.harnessId, source.harnessOther, source.harnessVersion, source.providerId,
             source.providerOther, clip(body.note, 1000), token('w'), draft.source_name, draft.root, draft.entry, draft.file_count,
             draft.bytes, draft.digest, draft.checks, JSON.stringify(sanitizeTrial(body.trial)), coverName, now, now,
             ...GENERATION_FIELDS.map((key) => generation[key]));
@@ -604,7 +611,7 @@ export function createLibrary({ db, catalog, config, limits }) {
       const effort = body.effort !== undefined ? effortOf(body.effort) : work.effort;
       const source = provenance(body, work);
       const generation = generationFrom(body, work);
-      q.meta.run(title, summary, who.modelId, who.modelName, who.vendor, effort,
+      q.meta.run(title, summary, who.modelId, who.modelId ? '' : who.modelName, effort,
         source.harnessId, source.harnessOther, source.harnessVersion, source.providerId, source.providerOther,
         ...GENERATION_FIELDS.map((key) => generation[key]), Date.now(), id);
       audit(admin, 'meta', work, `编辑信息${generationAudit(work, generation)}`);
@@ -640,14 +647,14 @@ export function createLibrary({ db, catalog, config, limits }) {
       if (!title) fail(400, '请填写作品标题');
       const summary = body.summary === undefined ? work.summary : clip(body.summary, 200);
       const now = Date.now();
-      q.review.run(status, status === 'verified' ? '' : reason, who.modelId, who.modelName, who.vendor, effort,
-        source.harnessId, source.harnessOther, source.harnessVersion, source.providerId, source.providerOther,
-        ...GENERATION_FIELDS.map((key) => generation[key]),
-        nextAudience, Number(gallery), Number(arena), title, summary, admin.id, now, now, id);
-      const updated = upload(taskId, id);
       const labels = { verified: '通过验证', questioned: '标记存疑', unverified: '退回未验证' };
-      audit(admin, status, updated, [labels[status], reason].filter(Boolean).join('：') + generationAudit(work, generation));
-      return updated;
+      transaction(db, () => {
+        q.review.run(status, status === 'verified' ? '' : reason, who.modelId, who.modelId ? '' : who.modelName, effort,
+          source.harnessId, source.harnessOther, source.harnessVersion, source.providerId, source.providerOther,
+          ...GENERATION_FIELDS.map((key) => generation[key]), Number(gallery), Number(arena), title, summary, now, now, id);
+        audit(admin, status, work, [labels[status], reason].filter(Boolean).join('：') + generationAudit(work, generation));
+      });
+      return upload(taskId, id);
     },
 
     remove(user, taskId, id) {
@@ -658,10 +665,12 @@ export function createLibrary({ db, catalog, config, limits }) {
       const votes = q.votesOfWork.get(taskId, id, id).n;
       if (votes > 0) fail(409, `这件作品已有 ${votes} 票对局记录，删除会破坏历史。请用「标记存疑」让它下线`);
       const now = Date.now();
-      q.remove.run(now, user.id, now, id);
+      transaction(db, () => {
+        q.remove.run(now, now, id);
+        audit(user, 'delete', work, user.id === work.ownerId ? '作者删除' : '管理员删除');
+      });
       rmSync(join(dirs.works, id), { recursive: true, force: true });
       rmSync(join(dirs.media, id), { recursive: true, force: true });
-      audit(user, 'delete', work, user.id === work.ownerId ? '作者删除' : '管理员删除');
     },
 
     // ---- reactions -------------------------------------------------------------------------

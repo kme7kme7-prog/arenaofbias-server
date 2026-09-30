@@ -42,7 +42,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     matchByToken: db.prepare('SELECT * FROM matches WHERE (a_token = ? OR b_token = ?) AND expires_at > ?'),
     decide: db.prepare('UPDATE matches SET choice = ?, decided_at = ? WHERE id = ? AND choice IS NULL'),
     purge: db.prepare('DELETE FROM matches WHERE expires_at < ? AND id NOT IN (SELECT match_id FROM votes)'),
-    insertVote: db.prepare("INSERT INTO votes (id, match_id, user_id, task_id, a_work, b_work, pair_key, choice, created_at, a_identity, b_identity, identity_source, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'arena')"),
+    insertVote: db.prepare("INSERT INTO votes (id, match_id, user_id, task_id, a_work, b_work, pair_key, choice, created_at, a_identity, b_identity, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'arena')"),
     votedPair: db.prepare('SELECT 1 FROM votes WHERE user_id = ? AND pair_key = ?'),
     votedPairs: db.prepare('SELECT pair_key, a_work, b_work FROM votes WHERE user_id = ? AND task_id = ?'),
     votes: db.prepare("SELECT id, user_id, task_id, a_work, b_work, choice, a_identity, b_identity, a_correction, b_correction FROM votes WHERE source = 'arena' ORDER BY created_at"),
@@ -298,7 +298,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
         const key = pairKey(match.task_id, match.a_work, match.b_work);
         if (q.votedPair.get(user.id, key)) { reason = 'duplicate'; return; }
         q.insertVote.run(randomBytes(12).toString('hex'), match.id, user.id, match.task_id, match.a_work, match.b_work, key, choice, Date.now(),
-          match.a_identity, match.b_identity, 'snapshot');
+          match.a_identity, match.b_identity);
         counted = true;
       });
       if (counted) invalidate();

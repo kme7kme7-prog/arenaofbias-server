@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -30,7 +30,7 @@ const pack = (root, registries = true) => {
   return dist;
 };
 
-test('v15 upgrades without changing legacy rows and metadata migrations remain idempotent', () => {
+test('v15 upgrades preserve legacy metadata and metadata migrations remain idempotent', () => {
   const root = mkdtempSync(join(tmpdir(), 'provenance-migrate-'));
   const file = join(root, 'platform.db');
   const old = new DatabaseSync(file);
@@ -46,7 +46,7 @@ test('v15 upgrades without changing legacy rows and metadata migrations remain i
     assert.equal(db.prepare('PRAGMA user_version').get().user_version, MIGRATIONS.length);
     const before = db.prepare('SELECT * FROM works WHERE id = ?').get('up-old');
     assert.deepEqual([before.harness_id, before.harness_other, before.harness_version, before.provider_id, before.provider_other],
-      [null, '', '', null, '']);
+      [null, 'Codex', '', null, '']);
     MIGRATIONS[15](db);
     MIGRATIONS[16](db);
     assert.deepEqual([before.model_version, before.generation_mode, before.human_intervention, before.generated_on, before.evidence_url], ['', '', '', '', '']);
@@ -150,6 +150,7 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
     const first = await call('alice', 'POST', '/api/works', { ...baseBody, harnessId: 'codex', harnessVersion: '2', providerId: 'official', ...generation });
     assert.equal(first.status, 200);
     const id = first.data.work.id;
+    assert.equal(platform.db.prepare('SELECT model_other FROM works WHERE id = ?').get(id).model_other, '');
     for (const [key, value] of Object.entries(generation)) assert.equal(first.data.work[key], value);
     assert.deepEqual([first.data.work.harness, first.data.work.harnessName, first.data.work.providerName, first.data.work.tool],
       ['codex', 'Codex', '官方', 'Codex']);
@@ -159,9 +160,10 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
     const legacy = await call('alice', 'POST', '/api/works', { ...baseBody, draftId: await draft(), tool: '原始工具' });
     assert.equal(legacy.status, 200);
     assert.equal(legacy.data.work.harness, null);
+    assert.equal(legacy.data.work.harnessName, '原始工具');
     const blank = await call('alice', 'POST', '/api/works', { ...baseBody, draftId: await draft(), tool: 'CLI', harnessId: '', providerId: '' });
     assert.equal(blank.status, 200, 'an empty id means not stated');
-    assert.deepEqual([blank.data.work.harness, blank.data.work.harnessName, blank.data.work.provider], [null, null, null]);
+    assert.deepEqual([blank.data.work.harness, blank.data.work.harnessName, blank.data.work.provider], [null, 'CLI', null]);
     const meta = `/api/admin/works/one/${id}/meta`;
     const edited = await call('root', 'POST', meta, { modelVersion: 'snapshot-2', humanIntervention: 'code-edited' });
     assert.equal(edited.data.work.modelVersion, 'snapshot-2');
@@ -175,6 +177,7 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
     const reviewed = await call('root', 'POST', `/api/works/one/${id}/review`,
       { status: 'verified', show_gallery: true, harnessId: 'codex', harnessVersion: '3', providerId: 'official' });
     assert.equal(reviewed.status, 200);
+    assert.equal(reviewed.data.work.reviewer, 'root');
     assert.equal(platform.library.work('one', id).harnessVersion, '3');
     assert.equal(platform.library.work('one', id).humanIntervention, 'code-edited', 'review preserves generation metadata');
     const listed = async (query) => {
@@ -183,8 +186,8 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
       return response.data.works.map((work) => work.id).sort();
     };
     assert.deepEqual(await listed('harness=codex'), ['a1', id].sort());
-    assert.deepEqual(await listed('harness=other'), [other.data.work.id]);
-    assert.deepEqual(await listed('harness=unset'), ['b1', legacy.data.work.id, blank.data.work.id].sort());
+    assert.deepEqual(await listed('harness=other'), [other.data.work.id, legacy.data.work.id, blank.data.work.id].sort());
+    assert.deepEqual(await listed('harness=unset'), ['b1']);
     assert.deepEqual(await listed('provider=official&harness=codex'), ['a1', id].sort());
     assert.deepEqual(await listed('search=自制'), [other.data.work.id]);
     assert.equal((await call('root', 'GET', '/api/admin/works?harness=missing')).status, 400);
@@ -239,6 +242,18 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
     assert.deepEqual([codex.totals.votes, codex.filters], [1, { harness: 'codex', provider: 'official' }]);
     assert.equal((await board('provider=unset')).data.totals.votes, 0);
     assert.equal((await board('harness=missing')).status, 400);
+    const frozenVotes = platform.db.prepare('SELECT a_identity, b_identity, a_correction, b_correction FROM votes ORDER BY id').all();
+    const archive = createCatalog(dist).snapshot();
+    const data = JSON.parse(readFileSync(join(dist, 'data.json'), 'utf8'));
+    data.models[0].name = 'Renamed Model A';
+    data.models[0].vendor = 'Renamed vendor';
+    data.harnesses[0].name = 'Renamed Codex';
+    writeFileSync(join(dist, 'data.json'), JSON.stringify(data));
+    const current = platform.library.work('one', id);
+    assert.deepEqual([current.modelName, current.vendor, current.tool], ['Renamed Model A', 'Renamed vendor', 'Renamed Codex']);
+    assert.equal(platform.library.work('one', id, archive).modelName, 'Model A');
+    assert.deepEqual(platform.db.prepare('SELECT a_identity, b_identity, a_correction, b_correction FROM votes ORDER BY id').all(), frozenVotes);
+    assert.deepEqual((await board('harness=codex&provider=official')).data.rows, codex.rows);
   } finally {
     await new Promise((resolve) => site.close(resolve));
     await platform.close();

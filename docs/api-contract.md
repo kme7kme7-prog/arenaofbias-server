@@ -103,14 +103,14 @@
 | `humanIntervention` | string | `none`（仅初始提示，未改代码）、`prompt-guided`（额外人工提示指导，未改代码）、`code-edited`（人工改代码）；空串为未注明 |
 | `generatedOn` | string | 实际生成日期，有效的 `YYYY-MM-DD`；不以上传日期代填 |
 | `evidenceUrl` | string | 公开对话或运行记录的 HTTP / HTTPS 链接，≤2000 字、不含账号密码；服务端不抓取链接内容 |
-| `tool` | string | 作者原始声明（兼容字段，≤40 字）；未提供时可由 Harness 名称或「其他」原文生成 |
+| `tool` | string | 兼容输出，由 Harness 注册表名称或「其他」原文生成，不再独立存储 |
 | `harnessId` / `harnessOther` | string / null、string | Harness 注册表 ID 或自填「其他」，两者互斥；旧作品分别为 null、空串。写入时 ID 传空串与 null 相同，表示未注明 |
 | `harnessVersion` | string | Harness 版本（≤40 字）；仅有 Harness 时可填写 |
 | `providerId` / `providerOther` | string / null、string | 服务商注册表 ID 或自填「其他」，两者互斥；旧作品分别为 null、空串。写入时 ID 传空串与 null 相同，表示未注明 |
 | `status` | `unverified` \| `verified` \| `questioned` | 审核状态，默认 `unverified` |
-| `audience` | `hidden` \| `show1` \| `show2` \| `both` | 展示站点，v7 新增；普通作品默认 `show2`，历史迁入作品为 `hidden` |
+| `audience` | `hidden` \| `show1` \| `show2` \| `both` | 兼容输出，由两个展示开关计算；v18 删除数据库列 |
 | `reason` | string | 审核理由；`verified` 时恒为空串 |
-| `reviewerName` / `reviewedAt` | string / null | 审核人与审核时间 |
+| `reviewerName` / `reviewedAt` | string / null | 审核人从最近一次审核 audit 解析；审核时间保留在作品行 |
 | `contentKey` | string | 作品永久内容令牌（`w` + 32 位十六进制），作品 origin 的子域名 |
 | `checks` / `trial` | object | 上传检查报告 / 试加载探针数据（仅作者与管理员可见） |
 | `trial.calibration` | object / null | Show1 逐作品展示设置，含可选的 `framing`（画布）与 `camera`（3D 视角）；没有时缺省 |
@@ -165,7 +165,7 @@
 
 ### 2.3 模型（model）
 
-由数据包 `models` 数组定义：`{ id, name, vendor, logo, brandUrl, brandName }`。投稿时若给出 `modelId` 且命中模型表，服务端以表内 `name` / `vendor` 为准；否则按作者自填的 `modelName`（≤60 字）与 `vendor`（≤40 字）记录，`modelId` 置 null（排行键退化为 `x:<小写模型名>`）。
+由数据包 `models` 数组定义：`{ id, name, vendor, logo, brandUrl, brandName }`。投稿时若给出 `modelId` 且命中模型表，服务端以表内 `name` / `vendor` 为准；未登记模型只记录作者自填的 `modelName`（≤60 字，存为 `model_other`），`vendor` 返回空串，`modelId` 置 null（排行键退化为 `x:<小写模型名>`）。
 
 ### 2.4 用户（user）
 
@@ -187,7 +187,7 @@ HTTP 公开视图恒为：
 
 ### 2.6 投票（vote）
 
-数据库字段：`id`、`match_id`（唯一）、`user_id`、`task_id`、`a_work` / `b_work`、`pair_key`（`题目:作品A+作品B`，ID 排序后拼接）、`choice`（`a` / `b` / `tie`，`skip` 不产生投票行）、`created_at`，以及 `a_identity` / `b_identity` JSON 原始快照、`a_correction` / `b_correction` JSON 显式更正和 `identity_source`（`snapshot` / `legacy`）。快照含当时模型 ID、名称、厂商、档位、归一化档位、model/config 计分 key、内容摘要 `digest`，以及 `harnessId`、`harnessVersion`、`providerId`。后三项不参与 `configKey` 或 `digest` 计算。馆藏摘要为入口页 SHA-256，投稿为全包 SHA-256。v8 迁移前的 legacy 票在 `a_identity` / `b_identity` 中存的是裸的旧模型 ID，并非 JSON；这类票不参与计分，也不能按推测更正。迁移前没有身份快照的对局不能再投票。新票按持久快照或显式更正计分，原始快照保持不变。约束：`UNIQUE(user_id, pair_key)`——**同一用户对同一作品组合只计一票**。
+数据库字段：`id`、`match_id`（唯一）、`user_id`、`task_id`、`a_work` / `b_work`、`pair_key`（`题目:作品A+作品B`，ID 排序后拼接）、`choice`（`a` / `b` / `tie`，`skip` 不产生投票行）、`created_at`，以及 `a_identity` / `b_identity` JSON 原始快照、`a_correction` / `b_correction` JSON 显式更正和 `source`（`arena` / `show1` / `legacy`，v18 删除冗余的 `identity_source`）。快照含当时模型 ID、名称、厂商、档位、归一化档位、model/config 计分 key、内容摘要 `digest`，以及 `harnessId`、`harnessVersion`、`providerId`。后三项不参与 `configKey` 或 `digest` 计算。馆藏摘要为入口页 SHA-256，投稿为全包 SHA-256。v8 迁移前的 legacy 票在 `a_identity` / `b_identity` 中存的是裸的旧模型 ID，并非 JSON；这类票不参与计分，也不能按推测更正。迁移前没有身份快照的对局不能再投票。新票按持久快照或显式更正计分，原始快照保持不变。约束：`UNIQUE(user_id, pair_key)`——**同一用户对同一作品组合只计一票**。
 
 计入排行的投票需同时满足：投票时已登录、双方作品当前均为 `verified` 且存在、非本人作品、未评过该组合。作品被标记存疑或删除后，其相关投票即时退出排行；恢复后重新计入（见 3.9）。审核只影响是否计入，不会改写新票的计分归属。需要改正归属时由管理员明确更正单票，审计记录包含更正前有效值、更正后值、理由和操作者；缺少原始双侧快照的 legacy 票不可按推测更正。
 
@@ -351,7 +351,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
   "title": "体素小城",
   "summary": "……", "note": "……",
   "modelId": "grok-4.6",
-  "modelName": "（无 modelId 时必填）", "vendor": "（选填）",
+  "modelName": "（无 modelId 时必填）",
   "effort": "High",
   "tool": "CLI",
   "harnessId": "claude-code", "harnessVersion": "1.0", "providerId": "official",
@@ -365,7 +365,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 - `trial` 为试加载探针回传数据，服务端逐字段消毒（数值截断、字符串截长、样例限条数）。
 - `cover` 仅接受 PNG / JPEG / WebP（魔数校验），≤3 MB。
 - `harnessId` / `providerId` 须存在于当前数据包注册表，停用的 `listed: false` 条目仍可引用；也可分别填写 `harnessOther` / `providerOther`。同一维度的 ID 与「其他」不能同时非空；设置一边会清空另一边。两个「其他」及 `harnessVersion` 经 NFKC 归一化并去首尾空白后最多 40 字。版本只能随 Harness 填写，清空 Harness 会清空版本。字段未出现时保持原值，旧数据包没有注册表时可填「其他」。
-- 普通用户须填写 Harness ID、「其他」或兼容字段 `tool` 中至少一项；过渡期旧前端只传 `tool` 仍可投稿。管理员可留空。`tool` 为空时由 Harness 注册表名称或「其他」原文填充；不自动猜测 ID。
+- 普通用户须填写 Harness ID、「其他」或兼容字段 `tool` 中至少一项；过渡期旧前端只传 `tool` 仍可投稿。管理员可留空。仅传 `tool`（或 Harness 两项均空）时将其存入 `harness_other`；有非空 Harness 声明时以声明为准。输出 `tool` 从 Harness 派生，不自动猜测 ID。
 
 成功 `200`：`{ "work": <作品公开视图> }`。作品初始状态 `unverified`，并自动排队无头截图（1440×900 与 390×844 两档，写回 `captures`；截图能力可用性见 `bootstrap.site.capture`）。
 
@@ -385,14 +385,14 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 ```json
 { "status": "verified", "reason": "（questioned 时必填，≤500 字）",
-  "modelId": "（选填：审核时顺带纠正模型归属）", "modelName": "…", "vendor": "…", "effort": "…",
+  "modelId": "（选填：审核时顺带纠正模型归属）", "modelName": "…", "effort": "…",
   "title": "作品标题", "summary": "摘要", "show_gallery": true, "show_arena": true,
   "harnessId": "claude-code", "harnessVersion": "1.0", "providerId": "official" }
 ```
 
 - `status` 取值 `verified` / `questioned` / `unverified`；`questioned` 必须给 `reason`（`400` 否则）；置为 `verified` 会清空理由。
 - 仅当请求体出现 `modelId` / `modelName` 键时才重取模型身份，否则保持原值；`effort` 同理。
-- `title`、`summary` 与两个布尔门面开关均可选；审核通过时可同时修改。兼容旧的 `audience` 参数，并按最终开关同步该列。所有审核写入 audit。
+- `title`、`summary` 与两个布尔门面开关均可选；审核通过时可同时修改。兼容旧的 `audience` 参数，将其换算为两个开关；响应中的 `audience` 由最终开关计算。审核状态和 audit 在同一事务写入。
 - 审核可选 `harnessId`、`harnessOther`、`harnessVersion`、`providerId`、`providerOther`；按 3.6 节的互斥、40 字及版本规则校验，只更新请求中出现的维度。
 
 成功 `200`：`{ "work": <作品公开视图（管理员视角，含特权字段）> }`。错误：`401` / `403 仅管理员可以操作`；`404`；`400 审核结果无效`。
@@ -608,7 +608,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 ### 3.17 Show1 历史作品的审核与站点展示（schema v7）
 
-`works.audience` 为 `hidden` / `show1` / `show2` / `both`，保留作兼容字段。v9 起实际可见性由 `show_gallery`、`show_arena` 决定；v8 旧数据升级时按 `audience` 回填。新投稿和管理员代传默认展览馆开启、竞技场关闭；Show1 历史待审作品升级后两个开关关闭。管理员审核通过时可指定门面。后台审核视图可取得随机作品内容令牌用于私密试加载；令牌本身具有预览能力，不应公开转发。
+`audience` 为 `hidden` / `show1` / `show2` / `both`，API 保留兼容输出，v18 删除 `works.audience` 及其索引。实际可见性只由 `show_gallery`、`show_arena` 决定；早期迁移仍按当时的 `audience` 回填开关。新投稿和管理员代传默认展览馆开启、竞技场关闭；Show1 历史待审作品升级后两个开关关闭。管理员审核通过时可指定门面。后台审核视图可取得随机作品内容令牌用于私密试加载；令牌本身具有预览能力，不应公开转发。
 
 **`GET /api/show1/works`** —— Show1 公开作品列表，不需要登录、无限流。成功 `200`：`{ "works": [<作品公开视图>], "reactions": { "counts": {}, "mine": {} } }`。只返回 `verified` 且 `show_arena=1` 的 SQLite 作品；`/api/bootstrap.works` 只看 `show_gallery`。竞技场盲评池同样使用 `show_arena`。Show1 题目定义仍由数据包负责，此接口不创建题目。
 
@@ -630,7 +630,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 作品对象还含原有管理员作品视图字段。精选开关和取景先读 `work_overrides`，缺失时展览馆开关默认开启、竞技场开关默认关闭。查询错误：`400 invalid_query`、`404 not_found`（题目不存在）。
 
-**`POST /api/admin/works/:task/:id/face-settings`** 请求 `{ "show_gallery": false, "show_arena": true }`，可只给其中一个布尔键。投稿写 `works` 并同步兼容 `audience`；精选 upsert `work_overrides`，不修改数据包。响应 `{ "work": <合并管理员作品视图> }`。错误：`400 invalid_face_settings`、`404 not_found`、`429`。
+**`POST /api/admin/works/:task/:id/face-settings`** 请求 `{ "show_gallery": false, "show_arena": true }`，可只给其中一个布尔键。投稿只更新 `works` 两个开关；精选 upsert `work_overrides`，不修改数据包。响应 `{ "work": <合并管理员作品视图> }`。错误：`400 invalid_face_settings`、`404 not_found`、`429`。
 
 **`POST /api/admin/works/batch-face-settings`** 仅管理员可用，使用 write 限流。请求 `{ "works": [{ "task": "题目 ID", "id": "作品 ID" }], "show_gallery": false, "show_arena": true }`，两个开关至少给一个，且只能为布尔值；一次须选 1–200 件。复用单件开关逻辑，在同一个数据库事务内更新所有作品并为每件写一条 `face-settings` audit；任一作品不存在或参数无效时整批回滚。成功 `200`：`{ "works": [<合并管理员作品视图>, …] }`，顺序与请求一致。错误：`401` / `403`、`400 invalid_work_list|invalid_face_settings`、`404 not_found`、`429`。
 
@@ -704,6 +704,12 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 推理档位输入提供常用值与手填。空串只表示未注明，明确使用默认设置可填写 `Default`；历史空串不改写成 `Default`。新对局的身份快照保留五个生成字段，历史快照不回填，计分键仍为模型或模型+档位。
 
 数据仓收录将非空生成字段写入 manifest、task.json 和作品 README，构建 data.json 时透传。manifest 与 task.json 同时声明时必须一致；消费旧包时缺失字段仍按未注明处理。Show1 旧兼容端点的返回形状保持不变。
+
+### 3.23 冗余字段清理（schema v18）
+
+追加迁移删除 `works.audience`、`tool`、`vendor`、`reviewed_by`、`deleted_by` 和 `votes.identity_source`。`model_name` 改名为 `model_other`：仅保留未登记模型的手填名称，登记模型的名称和厂商读取当前数据包字典；字典缺少该 ID 时名称返回 ID、厂商为空。模型版本 `model_version` 保持不变。
+
+旧 `tool` 只在没有 Harness ID 且「其他」为空时回填 `harness_other`。缺失的审核、删除 audit 从旧操作人列补存，审核人通过最近一次审核记录读取。展示开关保留原值；所有历史对局、投票身份快照及更正值原样保留。旧客户端仍可提交 `tool`、`audience`，API 和收录导出的兼容字段由保留字段生成。升级前须备份数据库，退回 v17 或更早的代码须同时恢复兼容的数据库备份。
 
 ## 4. 数据包契约（`dist/data.json`）
 

@@ -90,7 +90,7 @@ test('a match keeps its original package and vote identity across a same-mtime s
     assert.match((await contentGet(new URL('/app.js', match.a))).body, /'a'/);
     assert.equal(platform.arena.vote(user, match.id, 'a').counted, true);
     const vote = platform.db.prepare('SELECT * FROM votes WHERE match_id = ?').get(match.id);
-    assert.equal(vote.identity_source, 'snapshot');
+    assert.equal(vote.source, 'arena');
     const identities = [JSON.parse(vote.a_identity), JSON.parse(vote.b_identity)];
     assert.equal(identities.find((side) => side.id === 'a1').configKey, 'm-a|');
     assert.ok(identities.every((side) => /^[0-9a-f]{64}$/.test(side.digest)));
@@ -125,8 +125,8 @@ test('a match keeps its original package and vote identity across a same-mtime s
     const originalIdentity = platform.db.prepare('SELECT a_identity FROM votes WHERE id = ?').get(vote.id).a_identity;
     const corrected = platform.arena.correctVote(admin, vote.id, 'a', { modelId: 'fixed', modelName: 'Corrected' }, 'source record corrected');
     assert.equal(corrected.modelKey, 'fixed');
-    const correctedRow = platform.db.prepare('SELECT identity_source, a_identity, a_correction FROM votes WHERE id = ?').get(vote.id);
-    assert.equal(correctedRow.identity_source, 'snapshot');
+    const correctedRow = platform.db.prepare('SELECT source, a_identity, a_correction FROM votes WHERE id = ?').get(vote.id);
+    assert.equal(correctedRow.source, 'arena');
     assert.equal(correctedRow.a_identity, originalIdentity);
     assert.equal(JSON.parse(correctedRow.a_correction).modelKey, 'fixed');
     const audit = platform.db.prepare("SELECT detail FROM audit WHERE action = 'vote-identity-correction'").get();
@@ -154,6 +154,7 @@ test('an old database migrates votes as legacy without inventing identity snapsh
       CREATE TABLE works (id TEXT PRIMARY KEY, status TEXT NOT NULL, task_id TEXT NOT NULL, deleted_at INTEGER);
       INSERT INTO matches VALUES ('old', NULL, 'one', 'a1', 'b1', 'ma', 'mb', 1, 9999999999999, 'a', 2);
       INSERT INTO votes VALUES ('old-vote', 'old', NULL, 'one', 'a1', 'b1', 'one:a1+b1', 'a', 2);
+      CREATE TABLE audit (id INTEGER PRIMARY KEY, at INTEGER, actor_id TEXT, actor_name TEXT, action TEXT, task_id TEXT, work_id TEXT, detail TEXT);
       PRAGMA user_version = 3;`);
   } finally { old.close(); }
   const db = openDatabase(file);
@@ -162,7 +163,6 @@ test('an old database migrates votes as legacy without inventing identity snapsh
     const vote = db.prepare("SELECT * FROM votes WHERE id = 'old-vote'").get();
     assert.equal(match.datapack_root, null);
     assert.equal(match.a_identity, null);
-    assert.equal(vote.identity_source, 'legacy');
     assert.equal(vote.a_identity, null);
     assert.equal(vote.a_correction, null);
     assert.equal(vote.source, 'legacy', 'pre-v8 votes stay out of Bradley–Terry');

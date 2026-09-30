@@ -408,7 +408,7 @@ export function createPlatform({ config, limits }) {
 
   // Show1 娱乐面兼容层（fusion/show1-adapter/DESIGN.md）：快照 + live 合并的同形状端点。
   const show1Snapshot = JSON.parse(readFileSync(new URL('./show1/compat-data.json', import.meta.url), 'utf8'));
-  registerShow1Compat(router, { db, snapshot: show1Snapshot, config, limit });
+  registerShow1Compat(router, { db, catalog, snapshot: show1Snapshot, config, limit });
   registerShow1Guess(router, { db, limit });
 
   function serveSite(req, res, pathname) {

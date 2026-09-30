@@ -167,6 +167,7 @@ test('v6 migrates legacy password hashes on first successful login', async () =>
       created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
     CREATE TABLE works (id TEXT PRIMARY KEY, status TEXT NOT NULL, task_id TEXT NOT NULL, deleted_at INTEGER);
     CREATE TABLE votes (id TEXT PRIMARY KEY, identity_source TEXT NOT NULL DEFAULT 'legacy');
+    CREATE TABLE audit (id INTEGER PRIMARY KEY, at INTEGER, actor_id TEXT, actor_name TEXT, action TEXT, task_id TEXT, work_id TEXT, detail TEXT);
     PRAGMA user_version = 5;`);
   legacy.prepare('INSERT INTO users (id, name, name_key, role, salt, hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
     .run('legacy-user', 'olduser', 'olduser', 'member', salt, oldHash, Date.now());
@@ -203,6 +204,7 @@ test('malformed legacy hash_params are treated as a wrong password, never a 500'
       created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
     CREATE TABLE works (id TEXT PRIMARY KEY, status TEXT NOT NULL, task_id TEXT NOT NULL, deleted_at INTEGER);
     CREATE TABLE votes (id TEXT PRIMARY KEY, identity_source TEXT NOT NULL DEFAULT 'legacy');
+    CREATE TABLE audit (id INTEGER PRIMARY KEY, at INTEGER, actor_id TEXT, actor_name TEXT, action TEXT, task_id TEXT, work_id TEXT, detail TEXT);
     PRAGMA user_version = 5;`);
   setup.close();
   const db = openDatabase(file);
@@ -417,6 +419,9 @@ describe('platform lifecycle', () => {
     const submitted = await call('alice', 'POST', '/api/works', { ...form, confirmed: true });
     assert.equal(submitted.status, 200);
     upload = submitted.data.work;
+    assert.equal(upload.modelName, 'Model X');
+    assert.equal(upload.vendor, '');
+    assert.equal(platform.db.prepare('SELECT model_other FROM works WHERE id = ?').get(upload.id).model_other, 'Model X');
     assert.equal(upload.status, 'unverified');
     assert.deepEqual([...Object.values(platform.db.prepare('SELECT show_gallery, show_arena FROM works WHERE id = ?').get(upload.id))], [1, 0], '新投稿默认展览馆开、竞技场关');
     assert.equal(upload.effort, 'High');
@@ -704,7 +709,7 @@ describe('platform lifecycle', () => {
     const submitted = await call('alice', 'POST', '/api/works', { draftId: staged.data.draft.id, confirmed: true, title: 'Legacy', modelId: 'm-a', tool: 'CLI' });
     assert.equal(submitted.status, 200, JSON.stringify(submitted.data));
     const id = submitted.data.work.id;
-    platform.db.prepare("UPDATE works SET audience = 'hidden', show_gallery = 0, show_arena = 0 WHERE id = ?").run(id);
+    platform.db.prepare("UPDATE works SET show_gallery = 0, show_arena = 0 WHERE id = ?").run(id);
     const path = `/api/works/one/${id}`;
     assert.ok(!(await call('guest', 'GET', '/api/bootstrap')).data.works.some((work) => work.id === id));
     assert.ok(!(await call('guest', 'GET', '/api/show1/works')).data.works.some((work) => work.id === id));

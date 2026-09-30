@@ -89,13 +89,14 @@ test('Show1 import dry-run is read-only; apply publishes verified works and is i
     assert.equal(works.length, 2);
     for (const row of works) {
       assert.equal(row.status, 'verified');
-      assert.equal(row.audience, 'both');
+      assert.deepEqual([row.show_gallery, row.show_arena], [1, 1]);
     }
-    const work = works.find((row) => row.model_name === 'Model A');
+    const work = works.find((row) => row.model_id === 'model-a');
     assert.deepEqual(JSON.parse(work.trial).calibration.framing, { zoom: 1 });
-    const mimo = works.find((row) => row.model_name === 'MiMo X Flash');
+    const mimo = works.find((row) => row.model_other === 'MiMo X Flash');
     assert.equal(mimo.model_id, null);
-    assert.ok(mimo.model_name, 'model_name keeps the source text');
+    assert.ok(mimo.model_other, 'model_other keeps the source text');
+    assert.equal(work.model_other, '');
     assert.equal(target.prepare('SELECT name_key FROM users').get().name_key, 'alice');
     assert.equal(target.prepare('SELECT hash_params FROM users').get().hash_params, '{"N":32768,"r":8,"p":1,"keylen":64}');
     assert.equal(target.prepare('SELECT emoji FROM reactions').get().emoji, '👍');
@@ -113,7 +114,7 @@ test('Show1 import dry-run is read-only; apply publishes verified works and is i
     assert.equal(winVote.b_work, 'legacy:model-b');
     assert.equal(winVote.a_identity, 'model-a');
     assert.equal(winVote.b_identity, 'model-b');
-    assert.equal(winVote.identity_source, 'legacy');
+    assert.equal(winVote.source, 'legacy');
     const winMatch = matchRows.find((row) => row.id === winVote.match_id);
     assert.equal(winMatch.choice, 'a');
     assert.equal(winMatch.created_at, 25);

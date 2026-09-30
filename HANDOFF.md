@@ -4,6 +4,7 @@
 
 - 用户已确认四个仓库同属本轮，授权提交、推送、部署 Show1、Gallery、共享后端和新增 38 件作品；此前将 Show1 / 新数据排除的发布范围已撤回。下面早期归档中的两仓范围仅为当时状态。
 - 现场于 2026-09-30T17:19:05Z（Brisbane 2026-10-01 03:19:05）切换：后端 `566782e54a403c79a5ca4257a34a4beb6caa8d54`、Gallery `a68c94cb4c050202f240a64a9b3e5c69d0025d6e`、Show1 `79266513b295fb6ce8892f0afd08fbd32f61ab09`。功能与此前本地提交均已推送 main；Show1 上游与 fork 同步。后续文档提交不代表重新部署。
+- 用户随后确认将并行会话首页精简一并推送、补充部署：2026-09-30T17:40:14Z（Brisbane 03:40:14），Gallery 当前源码更新为 `4717910e115413941586f170e808a32a05c1d258`，只替换 4 文件 / 0 删除，1555 文件完整校验通过；内容 pin、后端和 Show1 不变。干净源码 check 41 / 0、test 14/14、npm ci / build / intake 通过，公网精简文案与 121 件统计正确，桌面无横向溢出、console error 0。
 - 数据源码 `638937a58d6aec02644106d76e2b84d51fbf9fe9` 已合并 PR #5，CI 36731686651 成功；实际消费不可变产物 `39a2fa43b25488b09069644fdcd6df50adc06dc0`，schema 1、sourceDirty false、20 题 / 121 件。后端与 Gallery pin、catalogDigest 一致；Show1 公开 25 题（20 共用 + 5 历史）。数据完整树及 Gallery 1555 文件、Show1 802 文件逐项 SHA-256 / 精确文件集合核验通过，旧版本保留。
 - 后端本地与 VPS Node 22.23.2 均 check 69 文件 / 0 错、test 154/154；Gallery check 41 / 0、test 14/14、干净源码 build 121 件 / 55 个 site 文件；数据 check 28 / 0、test 16/16、intake 121 件 / 0 错 / 4 已知提示。Show1 干净源码 typecheck / lint / build 通过，但 npm ci 因锁文件缺两个 @emnapi 可选依赖失败，使用已验证 checkout 的 node_modules 构建，未修改依赖；此例外未隐瞒。
 - 备份目录 `/root/arenaofbias-question-review-release-20260930T171825Z/`：部署前一致性 v19 `platform.db`、旧代码 `code.tar.gz`、版本/pin 记录，以及清理前 v22 `platform-before-question-delete-v22.db`；两份快照 integrity_check 均 ok。2026-09-30T17:19:52.309Z，执行人 wsnxxxs 逐题核对 kme7 的四道指定测试题零作品 / 零票后，以管理员 kme7 的短期会话通过 DELETE API 全部软删除，四条 question-delete 审计完整，会话随后撤销。结果见同目录 `question-cleanup.json`、`verification.json`。
@@ -76,7 +77,7 @@
 
 ## 回滚入口
 
-- 最新备份在 VPS `/root/arenaofbias-question-review-release-20260930T171825Z/`；`gallery.prev` 对应 `ccfd11d`，`show1-dist.prev` 对应 `9805416`。原有 prev 另存为 `.prev.bak-20260930T171905Z`。代码和数据回退先核对 v22 及上线后写入；不得直接覆盖恢复旧 v19 库或撤销本次授权清理。步骤见 [四仓发布归档](docs/archive/2026-10-01-four-repository-release-wsnxxxs.md)，更早证据见 [shared-question-release](docs/archive/2026-09-30-shared-question-release-wsnxxxs.md)。
+- 四仓与数据库备份在 VPS `/root/arenaofbias-question-review-release-20260930T171825Z/`；首页补充发布证据在 `/root/arenaofbias-gallery-hero-release-20260930T174014Z/`，当前 `gallery.prev` 为 `a68c94c`，旧 `ccfd11d` 保留于 `gallery.prev.bak-20260930T174014Z`；`show1-dist.prev` 仍为 `9805416`，更早 prev 另存 `.prev.bak-20260930T171905Z`。代码和数据回退先核对 v22 及上线后写入；不得直接覆盖恢复旧 v19 库或撤销授权清理。步骤见 [四仓发布归档](docs/archive/2026-10-01-four-repository-release-wsnxxxs.md)，更早证据见 [shared-question-release](docs/archive/2026-09-30-shared-question-release-wsnxxxs.md)。
 - Nginx 防护备份见 [gallery-protection-deploy](docs/archive/2026-09-30-gallery-protection-deploy-wsnxxxs.md)；审核配置和 tunnel/relay 回退见 [luna-flex-relay](docs/archive/2026-09-30-luna-flex-relay-wsnxxxs.md) 与部署文档 6.1，不触碰 Xray 或业务库。
 - 投票清零前备份在 `/root/arenaofbias-vote-release-20260930-c0ab6ac/`。退回旧投票代码可能重新读取冻结票快照；不得为新题库或 Nginx 回退误用清零前库。确需恢复旧票时先核对全部后续写入并按 [vote-release](docs/archive/2026-09-30-vote-release-wsnxxxs.md) 执行配套数据库/代码恢复。
 

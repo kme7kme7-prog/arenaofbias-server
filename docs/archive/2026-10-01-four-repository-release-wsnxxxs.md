@@ -55,3 +55,11 @@
 ## 下一步建议
 
 Gallery 过时 PR #1 的关闭/删分支等待用户确认。另行维护 Show1 锁文件可选依赖、间歇 moderation mock、真实新投稿审核/截图、Gallery 窄屏及完整作品交互；这些不是本轮未完成部署。未来部署继续按 docs/deploy.md 门禁现场核对版本并备份。
+
+## 首页补充发布（2026-10-01，追加）
+
+- 收尾发现并行会话提交 4717910 的首页精简，其归档原约定只提交不推送；本轮询问后用户明确确认一并推送、部署，没有擅自包含。未跟踪 .claude/ 保留。
+- 4717910e115413941586f170e808a32a05c1d258 已推送 origin/main；干净 LF git archive export 上 npm ci、check 41 / 0、test 14/14、build 121 件 / 55 站点文件、intake 0 错 / 4 已知提示全部通过。
+- 只更新 data.json、home.js、index.html、studio.css，4 变化 / 0 删除；差异包 SHA-256 4a7d5a288e723b60f889afd61e792e2f2662e288ee039f833d158504901ee97d，待切换 1555 文件清单完整匹配。数据 pin / digest、后端、Show1 均不变。
+- 2026-09-30T17:40:14Z（Brisbane 03:40:14）切换完成。备份 /root/arenaofbias-gallery-hero-release-20260930T174014Z/ 保存 changed-before.tar.gz、data-before.json、data-after.json、manifest-after.sha256、switched-at；未再操作业务数据库。
+- 当前 gallery.prev 为 a68c94c，ccfd11d 已保存到 gallery.prev.bak-20260930T174014Z；更早 prev 仍保留。Nginx -t 通过且未改配置。公网返回新源码 SHA、121 件 / 原固定包，首屏无眉标、说明与统计精简正确；1280px 截图目检正常，scrollWidth 1270、innerWidth 1280，console error 0。本轮 Gallery 窄屏未完成的边界不变。

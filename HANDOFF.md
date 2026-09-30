@@ -1,5 +1,13 @@
 # HANDOFF.md · 当前状态
 
+## 2026-09-30 · luna-flex-enable（密钥与开关已配置，VPS 官方接口连接未通）
+
+- 用户授权代填 Key 并启用。密钥经隐藏输入写入服务器 moderation.conf（root，0600），不入库、不写本地文件或日志；保留原禁用配置于 `/root/arenaofbias-luna-enable-20260930/moderation-before.conf`。daemon-reload、重启后服务 active，运行进程确认 Key 存在，CONTENT_MODERATION=1、CAPTURE=1、gpt-6-luna、官方 base URL；公网 bootstrap 的 site.contentModeration=true。运行源码仍 d69919e，未重新部署代码。
+- VPS 用实际生产截图/审核模块验证隔离正常页面，两档截图生成成功，但连接官方 API 失败，结果进入 review/request_failed；未收到 OpenAI HTTP 响应。独立探测连接超时 ETIMEDOUT，系统 DNS 将 api.openai.com 解析为 179.60.193.16 与 2a03:2880:f129:83:face:b00c:0:25de；无相关 hosts 项、无既有代理环境变量，Cloudflare DoH 探测 ECONNRESET。未更改系统 DNS、hosts 或设置转发代理。
+- 本机用隐藏输入进行一次真实文字+两张生成纯色图片的调用：HTTP 200、completed、model=gpt-6-luna、service_tier=flex、approved；176 输入/53 输出，共 229 tokens。因此 Key 和目标模型在本机已验证，不能把该结果称为 VPS 自动审核已跑通。
+- 重启前后均 267 件作品、27 用户，全部 legacy，库 v19 quick_check=ok；无生产测试投稿或旧作品重审。新的自动审核任务当前会因接口连接失败转人工，不自动放行或降至标准档。证据在远端 `/root/arenaofbias-luna-enable-20260930/` 与本地 `output/release-luna-enable/`。
+- 用户询问第二台服务器用途，已解释可由支持地区的审核服务接收文字/截图、调用 OpenAI、返回结果，网站与数据库可留在当前 VPS；尚无现成服务器连接信息，未购买、迁移或搭建远端审核服务。详见 `docs/archive/2026-09-30-luna-flex-enable-wsnxxxs.md`。
+
 ## 2026-09-30 · luna-flex-release（已部署，自动审核待配置密钥）
 
 - 用户明确授权先部署。server `d69919eedb0731c1edeb834763a4c018d69a8568` 与配套 gallery `50c0893c07806bb05c746dca5e6d71c41260b0a0` 已普通快进推送到各仓 main 并上线；包含内容审核所需的先前安全修复。线上后端跟踪文件逐字节匹配 d69919e，服务 active；本轮收尾文档提交不重新部署，公网版本继续指向实际代码 d69919e。

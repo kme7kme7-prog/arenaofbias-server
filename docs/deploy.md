@@ -56,6 +56,14 @@ API 域完整 `data.json` 仅供管理员获取，匿名请求返回 404，`.dat
 
 回滚时恢复四个 vhost 和主配置备份，`nginx -t` 后 reload；仅调后端 `READ_*` 环境变量不会撤销 Nginx 限制。若仍保留私有文件防护，只移除共享限流 include；先确认所有旧内部文件已删除，再考虑撤下私有文件规则。关闭的 Pages 不自动恢复。此次数据 pin 更新不含数据库迁移，回退本轮代码/数据时应保留当前 v19 数据库与新写入，不恢复上一轮投票清零前的库。
 
+## 共用题库发布
+
+2026-09-30 已完成新版共用题库切入和 Gallery 版本切换发布，详见 `docs/archive/2026-09-30-shared-question-release-wsnxxxs.md`。Show1 通过既有 API 读取 20 道共用题与 5 道历史题，静态站无需重新构建；Gallery 需要同时更新消费 pin 和前端。不能把数据源发布或消费端本地构建称为正式上线。
+
+数据包变体的来源字段不用于公开展示，`/api/prompts` 与 Gallery 仅输出版本 id、标签和原文。题库卡片只对有解答的题读取榜单，避免空题并发消耗共享读取额度。新增作品应声明实际使用的 promptVariant，不拆题或改作品 ID。
+
+本次没有数据库迁移，完整回退应一起恢复旧后端 pin、数据版本和 Gallery，保留当前 v19 数据库与后续写入；Nginx、Show1 和审核配置保持。不可变数据版本按消费方显式 pin 管理，不自动追随数据仓文档提交产生的新产物。
+
 ## 静态站差异部署（Show1 / Gallery）
 
 Show1 发布目录是 `/www/wwwroot/show1-dist`，Gallery 是 `/www/wwwroot/gallery`；对应的上一版目录为 `show1-dist.prev`、`gallery.prev`。另有 `/www/wwwroot/show1-dist-backups/` 保存 Show1 历史备份。先执行第 0 节门禁，再在**各自前端仓库**确认目标 SHA 已进入上游 main。不要从工作树或 PR 分支直接构建上线。

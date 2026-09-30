@@ -1,11 +1,15 @@
 # HANDOFF.md · 当前状态
 
-## 2026-09-30 · shared-question-release（数据消费版本更新准备）
+## 2026-09-30 · shared-question-release（题库与 Gallery 已上线）
 
-- 用户要求检查并继续完成新版题库与 Gallery 版本切换上线。实查生产后端为本人上一轮 `9ebf472`，消费 1fb 海报包；Gallery 仍只有 5 道题，没有长短版。读取现场版本后，准备更新为数据源 main@27f9a68 的不可变产物 `4c926d5f8a3c240ff769de360a9168abbe4e9dfc`，发布 CI 36699883762 成功。
-- 新包包含已经发布的 20 道正式题和两组长短原文，保留既有 83 件作品。配套 Gallery 功能分支合入新仓主线；arena 与后端共用题库代码已在生产，不重新实现或合并不同前端。保持刚部署的 Nginx、防护、投票、审核、relay 与业务库。
-- 本条是部署准备；目标 pin 提交、文件/数据校验、备份与上线结果完成后另记，不能把本地配置更新称为已切入生产。
-- 新包的 promptVariants 含私有提示词链接；catalog 读取只保留 id/label/prompt，避免 `/api/prompts` 重新暴露来源字段。既有数据包回归补入合成私有字段断言；原始包和原文不修改。
+- 实查确认用户引用的结论仍有待办：生产后端 `9ebf472` 消费海报包 `1fb62c1`，Gallery 只有 5 道题、无长短版。本轮已推进完成；收尾提交只更新交接，不重新部署。
+- 后端 `f4685c9345fa26688ae337555e5a842aba08093c` 已普通推送 main 并上线，pin 为数据源 main@27f9a68 的不可变产物 `4c926d5f8a3c240ff769de360a9168abbe4e9dfc`。原生差分仅 4 文件、136539 字节，完整安装树哈希通过；20 道正式题、83 件既有作品、完整模型池与所有作品元信息保留。新包未改数据库结构。
+- Gallery 功能分支已合入新仓 ArenaGalleri main，最终前端 `ccfd11d11e407af3c75c2e5482cc773a74996c2a` 已独立归档、构建及部署，完整 1178 文件校验通过。版本切换、同模型分组和两栏独立切换代码上线；未合入 arena 或后端源码。验收发现空题也请求榜单触发 429，改为仅有解答的题取榜单，当前首页从 20 次减为 5 次，不放宽额度。
+- 新包的 promptVariants 含私有提示词链接；catalog 只输出 id/label/prompt，既有数据包回归补入合成来源字段断言。公网 `/api/prompts` 不含 promptUrl；展示目录无内部字段，原文与原始包逐字一致。前后端包版本与目录摘要一致。
+- Show1 静态仍为 `9805416`，786 文件完整 manifest 不变；API 与正式页面现在均为 25 题（20 共用 + 5 历史）。浏览器实际核对 SupernovAI（014）、云山巨城（016）的长短切换，以及 Gallery 当前短版复制成功；最终首页→题库→两题导航无 console error / 429。这两题目前各 0 件作品，实际作品版本配对尚无生产样本，分组由合成测试覆盖。
+- 本机与 VPS 后端 check 68 文件、141/141 测试通过；Gallery check 39 文件、14/14、两次完整构建与 CI=1 intake 通过（83 件、0 错、3 条既有 warning）。数据发布 CI 36699883762、后端 CI 36708375644、Gallery 最终 CI 36709276011 成功；正式 HTTP 验收变化资产 SHA 一致、私有文件均 404、20/25 题原文与变体白名单通过。
+- 切换时停写备份并逐行哈希核对 7 张业务表：27 用户、267 作品、0 票/0 对局、16 评论、56 表情、6 猜题成绩保留，库仍 v19，quick_check 与外键通过。Nginx、主站静态、SMTP/Turnstile/审核配置哈希保持；服务与 moderation tunnel active。未创建生产测试票、账号、投稿或付费审核，未重新验收手机或全部原作。
+- 备份、差分、完整 manifest、停写库和证据在 VPS `/root/arenaofbias-questions-release-20260930-8132028b/`；`gallery.prev` 保留本轮前的 `307df34`，中间版另存 `gallery.before-read-fix-8132028b`。回退本轮代码/数据/Gallery 应保留 v19 当前库与上线后写入，不恢复投票清零前备份。本机生成物在忽略的 `output/questions-release-20260930-8132028b/`，凭据不入库。详见 `docs/archive/2026-09-30-shared-question-release-wsnxxxs.md`。
 
 ## 2026-09-30 · gallery-protection-deploy（正式站与 Nginx 已部署）
 

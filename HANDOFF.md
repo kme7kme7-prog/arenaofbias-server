@@ -1,5 +1,12 @@
 # HANDOFF.md · 当前状态
 
+## 服务商二值联调与推送收尾（2026-10-01 Brisbane，未部署）
+
+- 用户授权完成 Gallery 前端提交、隔离联调、文档与三个仓库的推送。保留后端功能提交 bd7744e 和数据仓功能提交 0f68eca，本轮后端仅补交接与归档，使用 wsnxxxs 的 GitHub noreply 身份提交并推送 origin/main；最终提交号与 Node 22 CI 结果见 Git / Actions。
+- 当前后端代码在独立数据库（v25）与 Gallery 浏览器联调通过：非官方上传；作者编辑为官方、清空、非官方；管理员把官方改非官方并通过审核。五次写请求均 200，仅 providerId，无 providerOther/providerName；公开 bootstrap 两项 providers、作品二值/null 且无 providerName。
+- provider=unofficial 榜单成功，filters 回显、1 票 / 1 人 / 2 配置正确。真实跨仓 integration smoke 通过；Gallery 当前源码 check 43/0、test 14/14，匹配的 182 件本地包严格 intake 0 错 / 9 条既有提示。后端源码未变，沿用上一轮 check 73/0、test 175/175、来源定向 7/7。
+- 没有部署、写生产库、更新消费者 pin 或替换后端 dist。Gallery 当前固定 121 件包严格 intake 仍因旧海报指纹产生 121 错 / 4 提示；部署前应选择已验证的匹配数据包。先完成后端 v25 迁移，再启用 Gallery 二值写入与榜单筛选。归档：[provider-binary-integration](docs/archive/2026-10-01-provider-binary-integration-wsnxxxs.md)。下方未推送/未联调是原实现轮次状态。
+
 ## 本轮：服务商仅官方 / 非官方（2026-10-01 Brisbane，已本地提交，未推送、未部署）
 
 - 用户本轮要求服务商统一为 `official`（官方）/ `unofficial`（非官方），未填为 null；Harness 不变。后端固定两项 providers 并在 bootstrap 返回，上传、作者 PATCH、管理员审核仅接受这两个 ID 或 null/空串，其余 400。上传/审核忽略旧自由文本字段，PATCH/meta 按未知字段规则拒绝；公开、我的作品和审核列表不再输出 `providerName`。后台选项、筛选与表单已同步，手填与相似名称提示仅为 Harness 保留。

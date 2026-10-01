@@ -289,6 +289,12 @@ export function createArena({ db, catalog, library, limits, random = Math.random
         task: taskId,
         a: `${library.originOf(tokens[0])}/`,
         b: `${library.originOf(tokens[1])}/`,
+        // Canvas framing per side so the parent can crop the iframe; the saved camera
+        // itself is embedded by the content server, never exposed here.
+        calibration: {
+          a: library.calibrationOf?.(a, 'arena')?.framing ?? null,
+          b: library.calibrationOf?.(b, 'arena')?.framing ?? null,
+        },
         counted: Boolean(user?.email),
       };
     },

@@ -624,7 +624,7 @@ describe('platform lifecycle', () => {
     assert.equal((await call('root', 'POST', '/api/admin/works/one/b1/face-settings', { show_arena: true })).status, 200);
     const match = await call('alice', 'POST', '/api/arena/matches', { task: 'one' });
     assert.equal(match.status, 200);
-    assert.deepEqual(Object.keys(match.data).sort(), ['a', 'b', 'counted', 'id', 'task']);
+    assert.deepEqual(Object.keys(match.data).sort(), ['a', 'b', 'calibration', 'counted', 'id', 'task']);
     for (const url of [match.data.a, match.data.b]) assert.match(new URL(url).hostname, /^m[0-9a-f]{32}\.localhost$/);
     const frame = await fetchContent(match.data.a);
     assert.equal(frame.status, 200);
@@ -723,7 +723,7 @@ describe('platform lifecycle', () => {
     assert.equal((await call('root', 'DELETE', `/api/comments/${curated.data.comment.id}`)).status, 200);
     const match = await call('guest', 'POST', '/api/arena/matches', { task: 'one' });
     assert.equal(match.status, 200);
-    assert.deepEqual(Object.keys(match.data).sort(), ['a', 'b', 'counted', 'id', 'task'], 'blind match carries no comments');
+    assert.deepEqual(Object.keys(match.data).sort(), ['a', 'b', 'calibration', 'counted', 'id', 'task'], 'blind match carries no comments');
   });
 
   test('calibration preserves Show1 framing and camera independently without changing trial reports', async () => {

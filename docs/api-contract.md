@@ -521,10 +521,12 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 ```json
 { "id": "…24hex…", "task": "chinese-architecture",
   "a": "http://m<32hex>.localhost:5180/", "b": "http://m<32hex>.localhost:5180/",
+  "calibration": { "a": null, "b": { "width": 1280, "height": 800, "zoom": 1, "offsetX": 0, "offsetY": 0 } },
   "counted": true }
 ```
 
 - `a` / `b` 为两侧作品的**不透明令牌 origin**（`m` 令牌，对局有效期 3 小时），iframe 直接加载；页面与地址均不泄露作品 / 模型身份。左右顺序随机。
+- `calibration.a` / `calibration.b`：该侧竞技场取景校准（管理员按门面保存的 `framing`），无校准为 `null`；父页面据此裁切 iframe。已保存的 3D 视角（`camera`）不随接口下发，由内容服务器在对局页内嵌恢复（视角桥，见 §5）。
 - `counted`：登录且绑定邮箱时为 `true`，匿名或未绑定邮箱时为 `false`。
 - 对局创建时一次捕获当前馆藏目录和两侧身份。随后切换数据包，旧令牌仍从原目录提供 HTML 与相对资源，旧对局仍可揭晓/投票；部署应保留该目录到相关对局全部过期并经过清理宽限期。
 - 前端在写请求上携带 `X-Datapack-Version: <前端所构建的数据仓库 SHA>`（读请求不带，避免跨源 GET 预检）；创建馆藏对局、馆藏题目草稿及该草稿的正式投稿时，如果该值与服务端当前可信 SHA 不同，请求照常处理，响应头增加 `X-Datapack-Stale: 1`，响应体形状不变。对局仍绑定创建时的服务端快照。社区题目不参与此检查；缺少请求头时不增加提示头。
@@ -601,19 +603,22 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 ### 3.12 作品内容伺服（令牌子域）
 
-内容端口（默认 5180）按 Host 首段令牌伺服作品，规则 `^[wmd][0-9a-f]{32}$`：
+内容端口（默认 5180）按 Host 首段令牌伺服作品，规则 `^[wmdp][0-9a-f]{32}$`：
 
 | 前缀 | 令牌来源 | 指向 | 有效期 | 注入脚本 | Cache-Control |
 | --- | --- | --- | --- | --- | --- |
 | `d…` | 草稿创建 | 草稿目录 | 24 小时 | `__sp_probe.js`（试加载探针） | `no-store` |
-| `m…` | 对战创建 | 对局某侧作品 | 3 小时（随对局） | `__sp_fold.js`（盲投折页） | `no-store` |
-| `w…` | 投稿提交（`contentKey`） | 作品目录 | 随作品存续 | 无 | `private, max-age=600` |
+| `m…` | 对战创建 | 对局某侧作品 | 3 小时（随对局） | `__sp_fold.js`（盲投折页）+ 就绪探针 + 视角桥（有存档视角时） | `no-store` |
+| `w…` | 投稿提交（`contentKey`） | 作品目录 | 随作品存续 | 视角桥（仅当存有校准视角） | `private, max-age=600` |
+| `p…` | 后台/作者预览 | 作品目录 | 预览键有效期 | 视角桥（仅当存有校准视角） | `no-store` |
 
 - 仅接受 GET / HEAD，其余方法 `405`。
 - 畸形 URL 返回 `400` 错误页，不使共享进程退出；请求期间消失的资源返回 `404`。
 - 令牌无效：`404` 错误页「作品地址无效」；令牌存在但目标不可用（草稿过期、对局结束、作品删除、对局侧作品被下架）：`410` 错误页「作品已不可用」。
 - 全部响应施加沙盒 CSP：`sandbox allow-scripts allow-same-origin allow-forms allow-modals allow-popups …`，外部资源仅放行 `bootstrap.site.cdn` 白名单内的公共 CDN；`frame-ancestors` 限定为 `SITE_ORIGINS`（即作品只能被站点 iframe 嵌入）；`Referrer-Policy: no-referrer`。
-- 注入脚本作为 HTML 首个 `<script>` 插入，仅作用于 `d` / `m` 令牌；`w` 令牌作品**原样伺服**。
+- 注入脚本作为 HTML 首个 `<script>` 插入。`d` / `m` 令牌按上表注入；`w` / `p` 令牌无校准数据时**原样伺服**。
+- **就绪探针**（`m` 令牌）：等 `window load` + 渲染循环 3 帧 + 600ms 后 `parent.postMessage('aob:work-ready','*')`，8 秒兜底；竞技场换局纸幕以此握手钉住「作品画完才掀幕」。
+- **视角桥**（`server/bridge.mjs`，移植自融合前竞技场）：作品存有管理员保存的 3D 视角（按门面）时，内嵌 `window.__AOB_SAVED__` 并注入桥运行时；桥登记作品的 OrbitControls（全局 UMD 拦截 `window.THREE`，importmap ESM 则改写映射经 `/__aob__/` 虚拟路由转发 `three` 与 `OrbitControls.js`），在机位创建后套回存档视角。`m` 令牌只恢复竞技场视角、绝不抓取；`w` / `p` 令牌带 `?aob=bridge` 时另注入 `__AOB_CAPTURE__`，桥应答 `{aob:'get-camera'}` → `{aob:'camera', camera}` 的 postMessage 握手（作品在独立源，无法直接读 iframe 窗口），供后台校准面板抓取当前视角；`?face=arena|gallery` 选择起步视角来源。importmap 仅改写可安全转发的目标（https CDN 或作品同源路径），其余原样保留；`/__aob__/` 虚拟路由校验并拒绝穿越与非 https 绝对目标。
 - 目录默认入口为作品的 `entry` 字段（通常 `index.html`）。
 
 ### 3.13 站点静态文件

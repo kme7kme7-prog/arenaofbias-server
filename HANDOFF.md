@@ -1,5 +1,14 @@
 # HANDOFF.md · 当前状态
 
+## 本轮：竞技场作品管理复刻 · 期A 后端桥（2026-10-01，本地提交，未推送未部署）
+
+- 用户拍板复刻融合前竞技场的作品校准体验（方案 fusion/竞技场作品管理复刻方案-v1.md，期A=后端桥+探针+对局下发）。老实现：Show1/server/work-bridge.js（视角桥，Show1 决策 102）+ 就绪探针（决策 096）；竞技场前端 page.tsx/work-capture.tsx 至今仍在监听 `aob:work-ready`。
+- 新增 `server/bridge.mjs`：桥运行时逐位移植（OrbitControls 登记：UMD defineProperty 拦 `window.THREE`；importmap ESM 改写映射经 `/__aob__/` 虚拟路由转发，转发模块同时转命名与默认导出）。因作品已迁独立内容源，抓视角从同源直读 iframe 窗口改为 postMessage 握手：`{aob:'get-camera'}` → `{aob:'camera', camera}`。camera 校验照旧 position/target 各三有限数。
+- `server/content.mjs`：HTML 注入泛化为多脚本头（原 withScript → withHeadTags）。`m` 令牌 = fold + 就绪探针 + 有存档竞技场视角时桥恢复（不抓取）；`w`/`p` 令牌无校准仍原样伺服，有视角则恢复（arena 优先回退 gallery），`?aob=bridge` 注入 `__AOB_CAPTURE__`（`?face=` 选起步面）。`/__aob__/` 虚拟路由：three.mjs 仅 https、ad 路由校验 base（https 或同源路径，拒 `..`/反斜杠/虚拟前缀自身）。
+- `library.calibrationOf(work, face)`：统一读取有效分面校准（curated→work_overrides，upload→trial/calibration_arena），curated 缺 taskId/id 时返回 null（测试桩形状防御）。`POST /api/arena/matches` 响应新增 `calibration.a/.b`（仅 framing；camera 由内容服务器页内恢复，不下发）。契约文档 §3.8/§3.12 已同步。
+- 验证：npm run check 76 文件 0 错；npm test **191/191**（新增 test/bridge.test.mjs 7 项：importmap 改写/虚拟路由校验/标签次序/camera 校验/内容服务器按键型注入集成）。platform.test 两处对局响应形状断言随契约更新加 calibration 键。注意：node fetch（undici）会忽略自定义 Host 头，内容服务器测试须用 node:http。
+- 未做：推送、部署、前端消费（期B 后台校准面板、期C Show1 应用 framing——朋友的活跃区，动手前先打招呼）。无数据库迁移。
+
 ## 上传档位与服务商必填（2026-10-01，本地实现并提交）
 
 - 新投稿（普通、题目示例、管理员直传、收件箱登记）强制非空 effort 和 official/unofficial providerId。PATCH/meta 禁止显式清空，省略键保持旧记录；通过核验前补齐两项，标记存疑和退回流程保留。新写 generationMode 仅 single-turn/multi-turn，历史 agent 在省略字段时保留；数据库迁移、存量行与投票快照未改。后台表单同步必填及两项生成方式。仅更新受新契约影响的原有 fixture，在既有 provenance 测试补缺失/空白/清空/agent 400 断言。

@@ -439,6 +439,19 @@ export function createLibrary({ db, catalog, config, limits }) {
       };
     },
 
+    // Effective per-face calibration for a work: admin overrides for curated works,
+    // trial columns for uploads. Read-only; writers validate the shape.
+    calibrationOf(work, face) {
+      if (!work || (face !== 'arena' && face !== 'gallery')) return null;
+      if (work.curated) {
+        if (!work.taskId || !work.id) return null;
+        const row = q.override.get(work.taskId, work.id);
+        const value = row ? row[face === 'arena' ? 'calibration_arena' : 'calibration_gallery'] : null;
+        try { return value ? JSON.parse(value) : null; } catch { return null; }
+      }
+      return face === 'arena' ? (work.calibrationArena ?? null) : (work.trial?.calibration ?? null);
+    },
+
     adminWork(work) {
       const flags = flagsOf(work);
       const override = work.curated ? q.override.get(work.taskId, work.id) : null;

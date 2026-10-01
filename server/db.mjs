@@ -382,6 +382,19 @@ const MIGRATIONS = [
       WHEN COALESCE(provider_id, '') <> '' OR provider_other <> '' THEN 'unofficial'
       ELSE NULL END, provider_other = ''`);
   },
+  // Entertainment pool decoupled from the formal switch (2026-10-01): the Show1
+  // entertainment face used to reuse show_arena for live works. Existing eligible
+  // works keep their place in the pool; everything else opts in manually.
+  (db) => {
+    const columns = new Set(db.prepare('PRAGMA table_info(works)').all().map((column) => column.name));
+    if (!columns.has('show_entertainment')) db.exec('ALTER TABLE works ADD COLUMN show_entertainment INTEGER NOT NULL DEFAULT 0');
+    const overrideColumns = new Set(db.prepare('PRAGMA table_info(work_overrides)').all().map((column) => column.name));
+    if (!overrideColumns.has('show_entertainment')) db.exec('ALTER TABLE work_overrides ADD COLUMN show_entertainment INTEGER NOT NULL DEFAULT 0');
+    db.exec(`UPDATE works SET show_entertainment = 1
+      WHERE status = 'verified' AND show_arena = 1
+      AND json_extract(moderation, '$.status') IN ('legacy', 'approved')
+      AND curated_as IS NULL AND deleted_at IS NULL`);
+  },
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

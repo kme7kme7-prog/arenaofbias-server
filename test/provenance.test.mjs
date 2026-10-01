@@ -95,6 +95,8 @@ test('v25 normalizes stored providers and can rerun without changing other metad
     ];
     for (const [id, provider, name] of cases) insert.run(id, provider, name, `key-${id}`);
     const before = db.prepare('SELECT * FROM works ORDER BY id').all();
+    // v26 adds the entertainment switch column; unverified rows default to 0.
+    for (const row of before) row.show_entertainment = 0;
     db.close();
     db = openDatabase(file);
     assert.equal(db.prepare('PRAGMA user_version').get().user_version, MIGRATIONS.length);

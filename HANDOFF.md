@@ -1,5 +1,13 @@
 # HANDOFF.md · 当前状态
 
+## 本轮：娱乐盲测池接线（2026-10-01，本地提交）
+
+- 用户拍板「开接」（悬置 open 项「娱乐盲测接线」）。娱乐面此前复用 show_arena 选池；现独立为 show_entertainment 开关：娱乐池 = 老快照 262 件 ∪ 勾选的投稿作品，可与老作品对打，不进正式排名（BT 只认 source='arena'，兼容票 source='show1' 天然隔离）。
+- v26 幂等迁移：works + work_overrides 各加 show_entertainment（DEFAULT 0），并把既有资格件（verified + show_arena=1 + 内容 legacy/approved + 未收录未删）回填为 1——线上现状不回退，之后可单独关。馆藏作品不参加娱乐面（liveWorks 只收投稿行，与老快照对打）。
+- library：flagsOf/adminWork 输出 show_entertainment；setFaceSettings/batch 白名单加该键，curated 传 true → 400「娱乐面仅对投稿作品开放」。show1compat liveWorks SQL 换 show_entertainment=1。admin：投稿审核对话框灰占位激活为真开关（curated 审核框文案改「馆藏作品不参加娱乐面」），作品行池列显示「在娱乐池」，开关走既有 face-settings 端点与保存动效。
+- 测试 194/194、check 76/0：新增 admin 用例（默认不进池/curated 400/开关后进 /api/works 花名册/关掉即移除）；show1compat 三用例换语义（夹具/撤下改 entertainment）；provenance v25 与 schema-cleanup v18 期望行补新列；editorial 用例基线 prompts 在存点评后重抓（兼容面 prompts 现带点评权重——既有行为，fixture 加 arenaId 后显现）。
+- 浏览器+curl 双验收：勾选 → toast「娱乐盲测已开启」→ 行内「在娱乐池」→ 兼容面 262→263 含投稿件。验收 fixture（admin-e2e.mjs）题加 arenaId 901/902（不与老快照 001-008 冲突）。坑：SPA 同 hash goto 不重载文档，旧 JS 缓存致假象「开关不在」，reload() 才真刷。
+
 ## 本轮：Harness 下拉答疑 + 登录后目录空 bug 修复（2026-10-01，本地提交，未推送未部署）
 
 - 用户问 Harness 下拉会不会有选项/手填。结论：选项来自数据包 data.json 的 harnesses 登记表（线上包 14 个：Claude Code/Codex/Gemini CLI/Cursor/Trae/Qoder/Kimi Code/KimiCode Desktop/官方网页App对话/API脚本/Arena/Antigravity/Zcode/DeepSeek），选「其他（手动填写）」弹手填框+相似名提示，功能一直都在；验收环境空是因为假包没登记。

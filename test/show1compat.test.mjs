@@ -122,8 +122,8 @@ const VOTE_KEYS = ['id', 'promptId', 'winnerRid', 'winnerMid', 'loserRid', 'lose
 function seedWorks(db) {
   const insert = db.prepare(`INSERT INTO works (id, task_id, owner_id, title, summary, model_id, model_other,
     effort, note, status, content_key, source_name, root, entry, file_count, bytes, digest,
-    checks, trial, created_at, updated_at, show_gallery, show_arena)
-    VALUES (?, ?, NULL, ?, '', ?, ?, '', '', 'verified', ?, '', '', 'index.html', 1, 10, ?, '[]', '{}', 1, 1, 1, 1)`);
+    checks, trial, created_at, updated_at, show_gallery, show_arena, show_entertainment)
+    VALUES (?, ?, NULL, ?, '', ?, ?, '', '', 'verified', ?, '', '', 'index.html', 1, 10, ?, '[]', '{}', 1, 1, 1, 1, 1)`);
   insert.run('up-aaaa0001', 'show1-001', 'A 作品', 'model-a', '', 'wa', 'da');
   insert.run('up-bbbb0002', 'show1-001', 'B 作品', 'model-b', '', 'wb', 'db');
   insert.run('up-cccc0003', 'chinese-architecture', 'C 作品', 'model-c', '', 'wc', 'dc');
@@ -262,11 +262,11 @@ test('retired snapshot ballots never enter live vote or rating responses', () =>
     assert.equal((await call(base, 'GET', '/api/show1/leaderboard?scope=entertainment')).data.board.totalVotes, 0);
   }));
 
-  test('a verified arena upload joins the Show1 list and entertainment votes', () => withServer({}, async ({ db, auth, base }) => {
+  test('a verified entertainment upload joins the Show1 list and entertainment votes', () => withServer({}, async ({ db, auth, base }) => {
     seedWorks(db);
     const columns = db.prepare('PRAGMA table_info(works)').all().map((column) => column.name);
     db.exec(`INSERT INTO works (${columns.join(', ')}) SELECT ${columns.map((name) => ({
-      id: "'up-live0001'", content_key: "'wlive'", digest: "'dlive'", show_arena: '1',
+      id: "'up-live0001'", content_key: "'wlive'", digest: "'dlive'", show_entertainment: '1',
     })[name] ?? name).join(', ')} FROM works WHERE id = 'up-cccc0003'`);
     const works = (await call(base, 'GET', '/api/works')).data.works;
     const live = works.find((work) => work.id === 'up-live0001');
@@ -280,7 +280,7 @@ test('retired snapshot ballots never enter live vote or rating responses', () =>
       loserRid: '004-pagoda', loserMid: 'model-d', mode: 'blind' } });
     assert.equal(result.status, 201, result.text);
     assert.equal((await call(base, 'GET', '/api/votes?scope=entertainment')).data.votes.at(-1).winnerRid, live.id);
-    db.prepare("UPDATE works SET show_arena = 0 WHERE id = 'up-live0001'").run();
+    db.prepare("UPDATE works SET show_entertainment = 0 WHERE id = 'up-live0001'").run();
     assert.equal((await call(base, 'GET', '/api/works')).data.works.some((work) => work.id === live.id), false);
   }));
 
@@ -322,7 +322,7 @@ test('retired snapshot ballots never enter live vote or rating responses', () =>
     assert.equal((await call(base, 'POST', '/api/votes', { cookie: voter.cookie,
       body: { id: randomUUID(), ...ballot, loserRid: 'up-short-b' } })).status, 400);
     assert.equal((await call(base, 'GET', '/api/comments?round=014')).status, 200);
-    db.prepare("UPDATE works SET show_arena = 0 WHERE id = 'up-long-b'").run();
+    db.prepare("UPDATE works SET show_entertainment = 0 WHERE id = 'up-long-b'").run();
     assert.equal((await call(base, 'GET', '/api/works')).data.works.some((work) => work.id === 'up-long-b'), false);
   }));
 

@@ -123,7 +123,7 @@ export function createLibrary({ db, catalog, config, limits }) {
     moderationResult: db.prepare('UPDATE works SET moderation = ? WHERE id = ? AND moderation = ? AND deleted_at IS NULL'),
     calibration: db.prepare('UPDATE works SET trial = ?, updated_at = ? WHERE id = ?'),
     arenaCalibration: db.prepare('UPDATE works SET calibration_arena = ?, updated_at = ? WHERE id = ?'),
-    faceSettings: db.prepare('UPDATE works SET show_gallery = ?, show_arena = ?, updated_at = ? WHERE id = ?'),
+    faceSettings: db.prepare('UPDATE works SET show_gallery = ?, show_arena = ?, show_entertainment = ?, updated_at = ? WHERE id = ?'),
     meta: db.prepare(`UPDATE works SET title = ?, summary = ?, model_id = ?, model_other = ?, effort = ?,
       harness_id = ?, harness_other = ?, provider_id = ?, provider_other = ?,
       model_version = ?, generation_mode = ?, human_intervention = ?, generated_on = ?, evidence_url = ?,
@@ -160,6 +160,7 @@ export function createLibrary({ db, catalog, config, limits }) {
       audience: row.show_gallery && row.show_arena ? 'both' : row.show_gallery ? 'show2' : row.show_arena ? 'show1' : 'hidden',
       showGallery: Boolean(row.show_gallery),
       showArena: Boolean(row.show_arena),
+      showEntertainment: Boolean(row.show_entertainment),
       curatedAs: row.curated_as ?? null,
       nominatedAt: row.nominated_at ?? null,
       calibrationArena: row.calibration_arena ? JSON.parse(row.calibration_arena) : null,
@@ -240,13 +241,14 @@ export function createLibrary({ db, catalog, config, limits }) {
   }
 
   const flagsOf = (work) => {
-    if (!work) return { show_gallery: false, show_arena: false };
+    if (!work) return { show_gallery: false, show_arena: false, show_entertainment: false };
     if (work.curated) {
       const row = q.override.get(work.taskId, work.id);
       // 精选馆藏默认只在展览馆展示；进正式盲测池须在竞技场系统逐件审核通过。
-      return { show_gallery: Boolean(row?.show_gallery ?? 1), show_arena: Boolean(row?.show_arena ?? 0) };
+      // 馆藏作品不参加娱乐面：娱乐池只收投稿行，与老快照对打。
+      return { show_gallery: Boolean(row?.show_gallery ?? 1), show_arena: Boolean(row?.show_arena ?? 0), show_entertainment: false };
     }
-    return { show_gallery: work.showGallery, show_arena: work.showArena };
+    return { show_gallery: work.showGallery, show_arena: work.showArena, show_entertainment: Boolean(work.showEntertainment) };
   };
   const visibleTo = (work, site = 'show2') => Boolean(contentAllowed(work) && (site === 'show1' ? flagsOf(work).show_arena : flagsOf(work).show_gallery));
   const isEligible = (work) => Boolean(work && work.status === 'verified' && work.dir && !work.curatedAs && visibleTo(work, 'show1'));
@@ -478,15 +480,18 @@ export function createLibrary({ db, catalog, config, limits }) {
       const work = this.work(taskId, id);
       if (!work) fail(404, '作品不存在', 'not_found');
       if (!body || typeof body !== 'object' || Array.isArray(body) || !Object.keys(body).length ||
-        Object.keys(body).some((key) => !['show_gallery', 'show_arena'].includes(key)) ||
+        Object.keys(body).some((key) => !['show_gallery', 'show_arena', 'show_entertainment'].includes(key)) ||
         Object.values(body).some((value) => typeof value !== 'boolean')) fail(400, '门面开关无效', 'invalid_face_settings');
       const current = flagsOf(work);
       const gallery = body.show_gallery ?? current.show_gallery;
       const arena = body.show_arena ?? current.show_arena;
+      // 娱乐面只收投稿作品（与老快照对打）；馆藏作品想玩正式盲测走 arena 开关。
+      const entertainment = body.show_entertainment ?? current.show_entertainment;
+      if (entertainment && work.curated) fail(400, '娱乐面仅对投稿作品开放', 'invalid_face_settings');
       const apply = () => {
         if (work.curated) q.setOverride.run(taskId, id, Number(gallery), Number(arena), admin.id, Date.now());
-        else q.faceSettings.run(Number(gallery), Number(arena), Date.now(), id);
-        audit(admin, 'face-settings', work, JSON.stringify({ show_gallery: gallery, show_arena: arena }));
+        else q.faceSettings.run(Number(gallery), Number(arena), Number(entertainment), Date.now(), id);
+        audit(admin, 'face-settings', work, JSON.stringify({ show_gallery: gallery, show_arena: arena, show_entertainment: entertainment }));
       };
       if (withinTransaction) apply();
       else transaction(db, apply);

@@ -50,7 +50,7 @@ async function withPlatform(run) {
   for (const id of ['a', 'b']) writeFileSync(join(dist, 'results', 'one', id, 'index.html'), html);
   writeFileSync(join(dist, 'data.json'), JSON.stringify({ schemaVersion: 1, title: '测试馆藏', models: [
     { id: 'ma', name: '模型甲', vendor: '甲' }, { id: 'mb', name: '模型乙', vendor: '乙' },
-  ], tasks: [{ id: 'one', title: '测试题', results: [
+  ], tasks: [{ id: 'one', title: '测试题', arenaId: '901', results: [
     { id: 'a', title: '精选甲', model: 'ma', scene: 'results/one/a/' },
     { id: 'b', title: '精选乙', model: 'mb', scene: 'results/one/b/' },
   ] }, { id: 'two', title: '第二题', results: [] }] }));
@@ -217,6 +217,8 @@ test('editorial validates weights, traffic aggregates, and arena switches remove
     board: (await call('voter', 'GET', '/api/leaderboard?task=one')).data,
   };
   assert.equal((await call('root', 'POST', '/api/admin/tasks/one/editorial', { face: 'arena', commentary: '这题重视视觉', weights: [0.5, 0.5, 0, 0, 0, 0] })).status, 200);
+  // 兼容面 prompts 会带上刚存的点评与权重；基线重抓后再对比开关切换的影响。
+  baseline.prompts = (await call('voter', 'GET', '/api/prompts')).data;
   const invalid = await call('root', 'POST', '/api/admin/tasks/one/editorial', { face: 'arena', commentary: '错', weights: [1, 0, 0, 0, 0, 0.1] });
   assert.equal(invalid.status, 400);
   assert.equal(invalid.data.code, 'invalid_weights');
@@ -251,4 +253,21 @@ test('editorial validates weights, traffic aggregates, and arena switches remove
   assert.deepEqual((await call('voter', 'GET', '/api/works')).data, baseline.works);
   assert.equal((await call('voter', 'GET', '/api/bootstrap')).data.apiVersion, baseline.bootstrap.apiVersion);
   assert.deepEqual((await call('voter', 'GET', '/api/leaderboard?task=one')).data.totals, { ...baseline.board.totals, votes: 1, voters: 1, entries: 2 });
+}));
+
+test('the entertainment switch opts uploads into the Show1 pool and refuses curated works', async () => withPlatform(async ({ platform, call }) => {
+  const upload = await call('root', 'POST', '/api/admin/works/upload?effort=Default&providerId=official&task=one&name=work.html&title=娱乐作品&modelName=模型丙&show_gallery=1', html, true);
+  const id = upload.data.work.id;
+  assert.equal(upload.data.work.show_entertainment, false, 'uploads start outside the entertainment pool');
+  assert.equal((await call('root', 'POST', '/api/admin/works/one/a/face-settings', { show_entertainment: true })).status, 400,
+    'curated works cannot join the entertainment face');
+  const on = await call('root', 'POST', `/api/admin/works/one/${id}/face-settings`, { show_entertainment: true });
+  assert.equal(on.status, 200);
+  assert.equal(on.data.work.show_entertainment, true);
+  assert.equal(platform.db.prepare('SELECT show_entertainment AS s FROM works WHERE id = ?').get(id).s, 1);
+  const compatWorks = (await call('root', 'GET', '/api/works')).data.works;
+  assert.ok(compatWorks.some((work) => work.id === id), 'the opted-in upload joins the Show1 roster');
+  const off = await call('root', 'POST', `/api/admin/works/one/${id}/face-settings`, { show_entertainment: false });
+  assert.equal(off.data.work.show_entertainment, false);
+  assert.equal((await call('root', 'GET', '/api/works')).data.works.some((work) => work.id === id), false, 'opting out removes it again');
 }));

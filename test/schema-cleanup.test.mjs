@@ -42,6 +42,8 @@ test('v18 preserves v16/v17 metadata, audit actors and frozen vote identities on
       db.close();
       db = openDatabase(file);
       const works = db.prepare('SELECT * FROM works ORDER BY id').all();
+      // v26 adds the entertainment switch; unverified rows stay out of the pool.
+      for (const row of originalWorks) row.show_entertainment = 0;
       for (const [i, row] of works.entries()) {
         const { audience, tool, vendor, reviewed_by, deleted_by, model_name, ...retained } = originalWorks[i];
         assert.deepEqual({ ...row }, { ...retained,

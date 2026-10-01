@@ -1,6 +1,6 @@
 # 站点与共享后端部署、回滚
 
-本页记录部署布局和操作步骤，**不代表此刻的线上版本**。最近已记录的发布为 2026-10-01 Brisbane 四仓统一发布及首页补充：后端 `566782e`、Gallery `4717910`、Show1 `7926651`、数据包 `39a2fa4`（20 题 / 121 件）、数据库 v22，详见 [HANDOFF](../HANDOFF.md) 和 [发布归档](archive/2026-10-01-four-repository-release-wsnxxxs.md)。后续文档提交不代表服务重部署。历史上曾有 `5650315` 只在 PR 中、未合并 main，却差点被后续部署覆盖；每次部署仍须先按下节核实现场，不能把记录或本地 main 当作线上版本。
+本页记录部署布局和操作步骤，**不代表此刻的线上版本**。最近已记录的发布为 2026-10-01 Brisbane 最新四仓发布：后端功能基线 `23574fb`、Gallery `e23d9a5`、Show1 `72c7f10`、数据包 `ba442b61`（源码 `997676d`，20 题 / 182 件）、数据库 v25；本轮后端 pin / 文档收尾提交同步正式源码，完整运行 SHA 见 `.server-version` / 公网 bootstrap。详见 [HANDOFF](../HANDOFF.md) 和 [发布归档](archive/2026-10-01-latest-release-wsnxxxs.md)。静态站的文档后继提交不改变已发布产物。历史上曾有 `5650315` 只在 PR 中、未合并 main，却差点被后续部署覆盖；每次部署仍须先按下节核实现场，不能把记录或本地 main 当作线上版本。
 
 后端正式目录 `/www/wwwroot/arenaofbias-server` 不是 Git 仓库，代码版本写在 `.server-version`。systemd 服务 `arenaofbias-server` 监听 `127.0.0.1:5273`（API/管理端）和 `127.0.0.1:5180`（作品沙盒内容）。Cookie、真实 IP、SMTP、截图和审核由服务器环境或 systemd drop-in 配置；最近一次审核接通记录为 `CAPTURE=1`、`CONTENT_MODERATION=1`，通过专用 SSH tunnel 使用第 6.1 节 relay，仍应在部署前重新确认。已记录每日 03:30 的 cron 运行 `/root/archive-backup.sh`，使用 restic 加密归档；证书续期由 `/root/.acme.sh` 的 cron 处理。不要把凭据、私钥或 drop-in 的实际密钥值写入本文或仓库。
 
@@ -29,7 +29,8 @@ cp -a "$conf" "$conf.bak-$(date -u +%Y%m%dT%H%M%SZ)"
 
 | 配置文件 | 域名与用途 | 目标 |
 | --- | --- | --- |
-| `114.66.27.88.conf` | `114.66.27.88`、`arenaofbias.icu`、`www.arenaofbias.icu`，Show1 静态站 | `root /www/wwwroot/show1-dist` |
+| `114.66.27.88.conf` | `114.66.27.88`、`arenaofbias.icu`、`www.arenaofbias.icu`，独立总入口 | `root /www/wwwroot/arenaofbias-home` |
+| `game.arenaofbias.icu.conf` | Show1 / 偏见试验场 | `root /www/wwwroot/show1-dist` |
 | `gallery.arenaofbias.icu.conf` | Gallery 静态站 | `root /www/wwwroot/gallery`，SPA 回退 `try_files $uri $uri/ /index.html` |
 | `api.arenaofbias.icu.conf` | API 和管理端 | 代理 `127.0.0.1:5273` |
 | `w.arenaofbias.icu.conf` | `*.w.arenaofbias.icu` 作品沙盒 | 代理 `127.0.0.1:5180` |

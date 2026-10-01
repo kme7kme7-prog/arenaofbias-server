@@ -1,5 +1,15 @@
 # HANDOFF.md · 当前状态
 
+## 本轮：四仓最新状态整理与部署（2026-10-01 Brisbane，功能与数据已部署）
+
+- 用户授权整理、合并、提交、推送及部署四仓，并确认 Gallery 的 11 个既有未提交文件一并提交部署。此前轮次的“不部署、不切换 pin”不适用于本轮。按指定 GPT-6.1 Sol medium 分工，提交身份为 GitHub 核对的 wsnxxxs / noreply；不强推、不覆盖他人有效远端修改。
+- 主站主题分支已快进进入上游与 fork 的 main（功能基线 `72c7f10`），保留 Atmeplz 原提交并删除已合入的远端主题分支。Gallery `e23d9a5` 已推送并通过 CI；数据源码 `997676d` 发布的不可变包为 `ba442b61d39e7b2892143ac8a27dcf9aa2607de6`（20 题 / 182 件），数据仓文档后继 `c14bb30` 已推送并通过 CI，消费者固定内容包，不追随文档发布。
+- 部署前已调查线上后端 `2448803`：155 个 tracked 文件除 CRLF / LF 外与已合入提交一致，没有未知补丁。线上 Gallery 的入口与媒体缓存补丁已完整进入 main，最终 LF 构建保留两项修改。四仓无开放 PR；旧 worktree 的历史输出与依赖链接保留。
+- 2026-10-01T10:37:25Z 已部署后端 `23574fbf02bd56f2e0318e827ae8a05c11b36812`，生产 Node 22.23.2 的 check / test 184/184 通过，数据库升至 v25，立即切换前后业务表计数一致，integrity_check 为 ok。备份和证据在 `/root/aob-final-release-20261001/`，一致性数据库及旧代码在其 `backup/`；服务与审核 tunnel active，capture / contentModeration / autoModeration 均开启，环境与 Nginx 未改。
+- 2026-10-01T11:26:56.467257Z（Brisbane 21:26:56）已切换 Gallery、Show1 和新数据：Gallery `e23d9a5`，Show1 功能基线 `72c7f10`；后端和 Gallery pin 同为 `ba442b61`。2366 个数据文件与 Git 规范字节、Gallery 2417 文件、Show1 820 文件均逐项 SHA256 / 精确文件集合通过；总入口 1 文件与规范产物相同，无需切换。Gallery 与 API 的 catalogDigest 同为 `ee927cc83ceb774170a86e33bfa6b66453a8c50957329eb4f01a0584b2311ae3`，20 题 / 182 件，schema 1 / sourceDirty false。
+- 公网三个首页 200；浏览器 Gallery 182 份、Show1 纸面首页 / 登录注册入口 / 25 题提示词库与动画封面、总入口两站链接正常，console error 0。Gallery / API 的来源标记、build-info、posters 均 404。数据库 v25 / integrity ok；users 27、works 268、votes 0、questions 5、comments 16、reactions 56、matches 3 保持。未创建生产测试账号、投稿或投票，未触发外部 Luna 付费调用；viewport override 未生效，实际 609px 页面无横向溢出，未宣称完成精确移动端验收。
+- 本轮收尾提交仅更新 pin、交接和部署文档，功能基线仍为 `23574fb`。正式源码与收尾 main 对齐后，完整运行 SHA 以 `.server-version` / 公网 bootstrap 和 `/root/aob-final-release-20261001/final-server-version` 为准；静态产物仍对应上述功能提交。旧 `.datapack/versions/39a2fa4…`、Gallery / Show1 的 `.prev` 及历史 `.prev.bak-*` 均保留。完整验证、备份和回退边界见 [latest-release](docs/archive/2026-10-01-latest-release-wsnxxxs.md)。下方“未部署”等是早期轮次记录，已由本节覆盖。
+
 ## 本轮：上传审核链路收口与移除 Harness 版本（2026-10-01 Brisbane，实现与验证完成，未部署）
 
 - 用户最初要求仅本地实现，现已明确把数据仓配套纳入本轮，数据仓单独一条 commit，再与后端修改一起推送远端；不部署、不切换消费者 pin。已按指定 GPT-6.1 Sol medium 分工；GitHub `/user` 核对负责人为 wsnxxxs（269096463），提交使用对应 noreply 身份。本轮不新增迁移，不清空 `harness_version` 存量值，只停止读写和输出，保留已发布迁移及数据库列。

@@ -53,7 +53,7 @@ async function withPlatform(run) {
   ], tasks: [{ id: 'one', title: '测试题', results: [
     { id: 'a', title: '精选甲', model: 'ma', scene: 'results/one/a/' },
     { id: 'b', title: '精选乙', model: 'mb', scene: 'results/one/b/' },
-  ] }] }));
+  ] }, { id: 'two', title: '第二题', results: [] }] }));
   const platform = createPlatform({ config: { dist, dataDir: join(root, 'state'), admin: join(process.cwd(), 'admin'),
     contentTemplate: 'http://{token}.localhost', siteOrigins: [], admins: ['root'], cdn: [], capture: false,
     secureCookies: false, trustProxy: false }, limits });
@@ -149,6 +149,28 @@ test('admin preview keys serve curated works on the content origin with the capt
   } finally {
     await new Promise((resolve) => content.close(resolve));
   }
+}));
+
+test('admin meta re-homes an upload to another task and moves its history along', async () => withPlatform(async ({ platform, call }) => {
+  const upload = await call('root', 'POST', '/api/admin/works/upload?task=one&name=work.html&title=搬家作品&modelName=模型丙&show_gallery=1', html, true);
+  const id = upload.data.work.id;
+  platform.db.prepare(`INSERT INTO votes (id, match_id, user_id, task_id, a_work, b_work, pair_key, choice, created_at)
+    VALUES ('mv1', 'mm1', NULL, 'one', ?, 'a', 'one:|a', 'a', 1)`).run(id);
+  platform.db.prepare(`INSERT INTO comments (id, task_id, work_id, user_id, body, created_at)
+    VALUES ('mc1', 'one', ?, NULL, '搬家前的评论', 1)`).run(id);
+  const reactor = platform.db.prepare("SELECT id FROM users WHERE name = 'voter'").get().id;
+  platform.db.prepare(`INSERT INTO reactions (task_id, work_id, user_id, emoji, created_at)
+    VALUES ('one', ?, ?, '👏', 1)`).run(id, reactor);
+  assert.equal((await call('root', 'POST', `/api/admin/works/one/${id}/meta`, { task: 'nope' })).status, 400);
+  const moved = await call('root', 'POST', `/api/admin/works/one/${id}/meta`, { task: 'two' });
+  assert.equal(moved.status, 200);
+  assert.equal(moved.data.work.task, 'two', 'the work itself is re-homed');
+  const db = platform.db;
+  assert.equal(db.prepare('SELECT task_id AS t FROM works WHERE id = ?').get(id).t, 'two');
+  assert.equal(db.prepare('SELECT task_id AS t FROM votes WHERE id = ?').get('mv1').t, 'two', 'ballots move with the work');
+  assert.equal(db.prepare('SELECT task_id AS t FROM comments WHERE id = ?').get('mc1').t, 'two', 'comments move with the work');
+  assert.equal(db.prepare('SELECT task_id AS t FROM reactions WHERE work_id = ?').get(id).t, 'two', 'reactions move with the work');
+  assert.match(db.prepare('SELECT detail AS d FROM audit WHERE action = ? AND work_id = ? ORDER BY id DESC LIMIT 1').get('meta', id).d, /one → two/);
 }));
 
 test('calibrating a curated work preserves its arena approval and invalidates the board', async () => withPlatform(async ({ platform, call }) => {

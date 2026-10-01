@@ -93,6 +93,14 @@ export function createLibrary({ db, catalog, config, limits }) {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
     deleteDraft: db.prepare('DELETE FROM drafts WHERE id = ?'),
     work: db.prepare(`${WORK} WHERE works.id = ? AND ${liveWork}`),
+    questionExists: db.prepare('SELECT 1 FROM questions WHERE id = ? AND deleted_at IS NULL'),
+    // Re-homing an upload to another task moves its historical ballots, matches,
+    // comments and reactions along, so nothing points at the old task afterwards.
+    moveWorkTask: db.prepare('UPDATE works SET task_id = ?, updated_at = ? WHERE id = ?'),
+    moveVotes: db.prepare('UPDATE votes SET task_id = ? WHERE task_id = ? AND (a_work = ? OR b_work = ?)'),
+    moveMatches: db.prepare('UPDATE matches SET task_id = ? WHERE task_id = ? AND (a_work = ? OR b_work = ?)'),
+    moveComments: db.prepare('UPDATE comments SET task_id = ? WHERE task_id = ? AND work_id = ?'),
+    moveReactions: db.prepare('UPDATE reactions SET task_id = ? WHERE task_id = ? AND work_id = ?'),
     storedWork: db.prepare('SELECT id, cover FROM works WHERE id = ?'),
     workByKey: db.prepare(`${WORK} WHERE works.content_key = ? AND ${liveWork}`),
     workByDigest: db.prepare('SELECT id, title, task_id FROM works WHERE digest = ? AND deleted_at IS NULL LIMIT 1'),
@@ -683,9 +691,18 @@ export function createLibrary({ db, catalog, config, limits }) {
       if (!admin && work.ownerId !== actor.id) fail(403, '只能修改自己上传的作品');
       if (!admin && work.status !== 'unverified') fail(409, '作品已核验，信息不能再修改；如有错误请删除后重新上传');
       if (!plainObject(body) || !Object.keys(body).length ||
-        Object.keys(body).some((key) => !['title', 'summary', 'note', 'modelName', 'modelId', 'vendor', 'effort', 'promptVariant',
+        Object.keys(body).some((key) => !['title', 'summary', 'note', 'modelName', 'modelId', 'vendor', 'effort', 'promptVariant', 'task',
           'harnessId', 'harnessOther', 'harnessVersion', 'providerId', ...GENERATION_FIELDS].includes(key))) fail(400, '没有可修改的内容');
       if (Object.keys(body).every((key) => key === 'harnessVersion')) return admin ? this.adminWork(work) : this.toPublic(work, actor);
+      // Re-homing to another task is an admin correction; the target must be a live
+      // catalog task or community question, and history moves along with the work.
+      let moved = null;
+      if (body.task !== undefined && String(body.task) !== taskId) {
+        if (!admin) fail(403, '只有管理员可以调整归属题目');
+        const target = String(body.task);
+        if (!catalog.task(target) && !q.questionExists.get(target)) fail(400, '目标题目不存在', 'invalid_task');
+        moved = { from: taskId, to: target };
+      }
       const title = body.title === undefined ? work.title : clip(body.title, 40);
       if (!title) fail(400, '请填写作品标题');
       const summary = body.summary === undefined ? work.summary : clip(body.summary, 200);
@@ -699,14 +716,21 @@ export function createLibrary({ db, catalog, config, limits }) {
       const promptVariant = promptVariantFrom(taskId, body, work.promptVariant, !admin);
       const note = noteWithVendor(body.note === undefined ? work.note : clip(body.note, 1000), who.modelId, body.vendor);
       transaction(db, () => {
+        if (moved) {
+          q.moveWorkTask.run(moved.to, Date.now(), id);
+          q.moveVotes.run(moved.to, moved.from, id, id);
+          q.moveMatches.run(moved.to, moved.from, id, id);
+          q.moveComments.run(moved.to, moved.from, id);
+          q.moveReactions.run(moved.to, moved.from, id);
+        }
         q.meta.run(title, summary, who.modelId, who.modelId ? '' : who.modelName, effort,
           source.harnessId, source.harnessOther, source.providerId, source.providerOther,
           ...GENERATION_FIELDS.map((key) => generation[key]), promptVariant, note, Date.now(), id);
-        audit(actor, 'meta', work, `编辑信息${generationAudit(work, generation)}`);
-        const next = upload(taskId, id);
+        audit(actor, 'meta', work, `编辑信息${generationAudit(work, generation)}${moved ? `；归属题目 ${moved.from} → ${moved.to}` : ''}`);
+        const next = upload(moved ? moved.to : taskId, id);
         if (config.moderation?.enabled && moderationText(work) !== moderationText(next)) q.moderation.run(JSON.stringify(pendingModeration()), id);
       });
-      return admin ? this.adminWork(upload(taskId, id)) : this.toPublic(upload(taskId, id), actor);
+      return admin ? this.adminWork(upload(moved ? moved.to : taskId, id)) : this.toPublic(upload(moved ? moved.to : taskId, id), actor);
     },
 
     setCaptures(id, captures) {

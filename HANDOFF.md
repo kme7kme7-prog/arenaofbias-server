@@ -1,5 +1,13 @@
 # HANDOFF.md · 当前状态
 
+## 本轮：验收反馈三件套——墨绿主题+圆角、归属题目迁移（2026-10-01，本地提交，未推送未部署）
+
+- 用户对比老后台（Show1 老栈本地拉起验收，admin.html 已临时恢复 d871c75^ 版本供对比）后三条反馈：①要老后台那样的圆角 ②新后台亮绿太多 ③要能编辑作品全部归属信息。
+- 视觉：亮色主题 accent 从荧光黄绿 #d9fb51 改墨绿 #3f6b4c（accent-ink/soft/text/focus 同步，注释注明"老后台墨绿"）；校准对话框圆角 16px、预览台 14px（对齐老版 work-calibration 的 16px 纸感卡）。暗色主题未动。
+- 功能：setMeta 新增 task 字段（admin-only）——改归属题目时校验目标为活题（catalog 或社区题），单事务内迁移 works.task_id + votes/matches/comments/reactions 的 task_id 引用 + audit 记「归属题目 old → new」；editDialog 首项加「归属题目」下拉（数据包题+社区题），带「改归属会连历史投票、评论、表情一起搬过去」提示，未变不发该字段。作者侧仍不可改题（403）。模型/档位/Harness/服务商/生成信息编辑此前已有，本轮只是归位到完整。
+- 测试：admin.test 新增改归属用例（票/评/表情随迁、目标题 400、audit 文案），fixture data.json 加第二题；193/193、check 76/0。验收环境已重启（bridge-demo/admin-e2e.mjs，含投稿测试件 up-jl4a80rt 可试改归属）。
+- 线上注意：老后台对比栈（Show1 npm run dev，vite 5173+api 3000，ADMIN_OWNER=admin）还在跑，admin.html 工作区是临时老版（备份 /tmp/admin-redirect.html.bak），用户验完要还原。
+
 ## 本轮：竞技场作品管理复刻 · 期B 校准面板（2026-10-01，本地提交，未推送未部署）
 
 - 用户拍板「B做一下 这个是最重要的」。重写 admin calibrationDialog：纯数字表单 → 可视化校准面板（预览+滑杆+拖拽+抓视角）。列表搜索/筛选朋友已做过，本轮补票数。

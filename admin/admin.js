@@ -899,7 +899,10 @@ function placeholderView(route) {
 // works are repo-managed and never get this dialog.
 function editDialog(w) {
   const models = state.data?.models ?? [];
+  const tasks = [...(state.data?.tasks ?? []), ...(state.questions ?? [])];
+  const taskOptions = tasks.map((t) => `<option value="${esc(t.id)}"${t.id === w.task ? ' selected' : ''}>${esc(t.title)}</option>`).join('');
   const sheet = openDialog({ title: `编辑信息 · ${w.title}`, body: `<form class="admin-editor">
+    <label class="field"><span class="field-label">归属题目<small>改归属会连历史投票、评论、表情一起搬过去</small></span><select class="input" name="task">${taskOptions}</select></label>
     <label class="field"><span class="field-label">作品标题</span><input class="input" name="title" maxlength="40" value="${esc(w.title)}" required></label>
     <div class="field-row">
       <label class="field"><span class="field-label">模型名称</span><input class="input" name="modelName" maxlength="60" value="${esc(w.modelName)}" required></label>
@@ -919,6 +922,7 @@ function editDialog(w) {
     const done = busy($('button[type="submit"]', form), '正在保存…');
     try {
       await api(`admin/works/${workKey(w)}/meta`, { method: 'POST', body: { title: form.title.value, summary: form.summary.value,
+        ...(form.task.value !== w.task ? { task: form.task.value } : {}),
         modelName: form.modelName.value, modelId: form.modelId.value || undefined, effort: form.effort.value,
         ...provenance, ...generationBody((name) => form.elements.namedItem(name)?.value, w) } });
       sheet.close();

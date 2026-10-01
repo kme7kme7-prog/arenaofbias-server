@@ -131,9 +131,10 @@ export function createLibrary({ db, catalog, config, limits }) {
     curatedAs: db.prepare('UPDATE works SET curated_as = ?, updated_at = ? WHERE id = ?'),
     votesOfWork: db.prepare('SELECT COUNT(*) AS n FROM votes WHERE task_id = ? AND (a_work = ? OR b_work = ?)'),
     override: db.prepare('SELECT * FROM work_overrides WHERE task_id = ? AND work_id = ?'),
-    setOverride: db.prepare(`INSERT INTO work_overrides (task_id, work_id, show_gallery, show_arena, updated_by, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(task_id, work_id) DO UPDATE SET
-      show_gallery = excluded.show_gallery, show_arena = excluded.show_arena, updated_by = excluded.updated_by, updated_at = excluded.updated_at`),
+    setOverride: db.prepare(`INSERT INTO work_overrides (task_id, work_id, show_gallery, show_arena, show_entertainment, updated_by, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(task_id, work_id) DO UPDATE SET
+      show_gallery = excluded.show_gallery, show_arena = excluded.show_arena, show_entertainment = excluded.show_entertainment,
+      updated_by = excluded.updated_by, updated_at = excluded.updated_at`),
     setCuratedCalibration: db.prepare(`INSERT INTO work_overrides (task_id, work_id, show_gallery, show_arena, calibration_gallery, calibration_arena, updated_by, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(task_id, work_id) DO UPDATE SET
       calibration_gallery = excluded.calibration_gallery, calibration_arena = excluded.calibration_arena,
@@ -245,8 +246,8 @@ export function createLibrary({ db, catalog, config, limits }) {
     if (work.curated) {
       const row = q.override.get(work.taskId, work.id);
       // 精选馆藏默认只在展览馆展示；进正式盲测池须在竞技场系统逐件审核通过。
-      // 馆藏作品不参加娱乐面：娱乐池只收投稿行，与老快照对打。
-      return { show_gallery: Boolean(row?.show_gallery ?? 1), show_arena: Boolean(row?.show_arena ?? 0), show_entertainment: false };
+      // 娱乐面走同一张 override 表，与正式开关互不影响。
+      return { show_gallery: Boolean(row?.show_gallery ?? 1), show_arena: Boolean(row?.show_arena ?? 0), show_entertainment: Boolean(row?.show_entertainment ?? 0) };
     }
     return { show_gallery: work.showGallery, show_arena: work.showArena, show_entertainment: Boolean(work.showEntertainment) };
   };
@@ -485,11 +486,10 @@ export function createLibrary({ db, catalog, config, limits }) {
       const current = flagsOf(work);
       const gallery = body.show_gallery ?? current.show_gallery;
       const arena = body.show_arena ?? current.show_arena;
-      // 娱乐面只收投稿作品（与老快照对打）；馆藏作品想玩正式盲测走 arena 开关。
+      // 娱乐面对投稿和馆藏都开放：投稿落本行，馆藏落 override 列。
       const entertainment = body.show_entertainment ?? current.show_entertainment;
-      if (entertainment && work.curated) fail(400, '娱乐面仅对投稿作品开放', 'invalid_face_settings');
       const apply = () => {
-        if (work.curated) q.setOverride.run(taskId, id, Number(gallery), Number(arena), admin.id, Date.now());
+        if (work.curated) q.setOverride.run(taskId, id, Number(gallery), Number(arena), Number(entertainment), admin.id, Date.now());
         else q.faceSettings.run(Number(gallery), Number(arena), Number(entertainment), Date.now(), id);
         audit(admin, 'face-settings', work, JSON.stringify({ show_gallery: gallery, show_arena: arena, show_entertainment: entertainment }));
       };

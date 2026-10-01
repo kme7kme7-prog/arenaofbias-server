@@ -43,7 +43,7 @@ function withStatus(res, status) {
 }
 
 export function registerShow1Compat(router, deps) {
-  const { db, snapshot } = deps;
+  const { db, snapshot, library } = deps;
   const limit = deps.limit ?? {};
   const write = limit.write ?? (() => {});
   const track = limit.track ?? rateLimit(60e3, 600);
@@ -75,6 +75,9 @@ export function registerShow1Compat(router, deps) {
     pageView: db.prepare('INSERT INTO page_views (day, path, ip_hash, created_at) VALUES (?, ?, ?, ?)'),
     arenaEditorial: db.prepare("SELECT commentary, weights_json FROM task_editorial WHERE task_id = ? AND face = 'arena'"),
     liveWorks: db.prepare("SELECT id, task_id, model_id, model_other, title, content_key FROM works WHERE status = 'verified' AND show_entertainment = 1 AND json_extract(moderation, '$.status') IN ('legacy', 'approved') AND curated_as IS NULL AND deleted_at IS NULL ORDER BY created_at, id"),
+    // Curated works opt into the entertainment pool through their override row; files
+    // and model identity come from the datapack, not from a works row.
+    curatedEntertainment: db.prepare("SELECT work_id, task_id FROM work_overrides WHERE show_entertainment = 1 ORDER BY task_id, work_id"),
   };
 
   // Stable arena IDs live with the authoritative question definitions in the datapack.
@@ -110,9 +113,23 @@ export function registerShow1Compat(router, deps) {
   // The roster sorted by rid once: every "first work of a mid/task" lookup is deterministic.
   const liveWorks = () => {
     const { roundByTask } = promptCatalog();
-    return q.liveWorks.all().filter((row) => roundByTask[row.task_id] && !snapshot.upToRid[row.id])
+    const uploads = q.liveWorks.all().filter((row) => roundByTask[row.task_id] && !snapshot.upToRid[row.id])
       .map((row) => ({ ...row, round: roundByTask[row.task_id],
         modelName: row.model_id ? (deps.catalog.model(row.model_id)?.name ?? row.model_id) : row.model_other }));
+    // Curated pool members resolve through the catalog; their files are reached with a
+    // short-lived p preview key (curated works have no works-row content key of their own).
+    const curated = q.curatedEntertainment.all().flatMap(({ work_id, task_id }) => {
+      const round = roundByTask[task_id];
+      if (!round) return [];
+      const archive = deps.catalog.snapshot?.() ?? deps.catalog;
+      const work = archive.work?.(task_id, work_id);
+      if (!work || !work.dir) return [];
+      const key = library?.previewOrigin ? new URL(library.previewOrigin(work)).host.split('.')[0] : work_id;
+      return [{ id: work_id, task_id, round, model_id: work.modelId ?? null, model_other: work.modelId ? '' : (work.modelName ?? ''),
+        title: work.title, content_key: key,
+        modelName: work.modelName ?? work.modelId ?? '' }];
+    });
+    return [...uploads, ...curated];
   };
   const workMap = () => Object.fromEntries([
     ...Object.entries(snapshot.workMap),

@@ -395,6 +395,13 @@ const MIGRATIONS = [
       AND json_extract(moderation, '$.status') IN ('legacy', 'approved')
       AND curated_as IS NULL AND deleted_at IS NULL`);
   },
+  // Curated works join the entertainment pool through their override row: the
+  // entertainment switch flips only that column so the formal faces stay untouched.
+  (db) => {
+    db.exec(`UPDATE work_overrides SET show_entertainment = 1
+      WHERE show_arena = 1 AND show_entertainment = 0
+      AND EXISTS (SELECT 1 FROM works WHERE works.id = work_overrides.work_id AND works.curated_as = work_overrides.work_id)`);
+  },
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

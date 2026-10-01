@@ -450,7 +450,7 @@ function openCuratedReview(w) {
         <div class="face-decision">
           <p class="face-state">${faceOn(w) ? `${FACE_LABEL[face]}：已${face === 'gallery' ? '展示' : '进正式盲测池'}` : `${FACE_LABEL[face]}：未${face === 'gallery' ? '展示' : '进盲测'}`}</p>
           <p class="fine">本面动作只改${FACE_LABEL[face]}，另一面（${face === 'gallery' ? `盲测：${faceOn(w, 'arena') ? '已进' : '未进'}` : `展览馆：${faceOn(w, 'gallery') ? '已展示' : '未展示'}`}）保持不变。</p>
-          ${face === 'arena' ? '<label class="face-checks"><input type="checkbox" disabled> 娱乐盲测<small>馆藏作品不参加娱乐面（娱乐池=投稿作品 ∪ 老快照）</small></label>' : ''}
+          ${face === 'arena' ? `<label class="face-checks"><input type="checkbox" data-entertainment-toggle="${esc(w.id)}" ${w.show_entertainment ? 'checked' : ''}> 娱乐盲测<small>进娱乐数据与老作品对打，不影响正式排名与展览馆</small></label>` : ''}
         </div>
         <p class="form-error" role="alert"></p>
         <div class="sheet-actions"><span class="spacer"></span>
@@ -845,7 +845,7 @@ function adminWorkRow(w, face = state.system) {
     <td><div class="admin-work-title">${thumb(w)}<div><b>${esc(w.title)}</b><small>${esc(taskTitle(w.task))} · ${w.votes ?? 0} 票</small></div></div></td>
     <td>${esc(w.modelName)}${provenanceText(w) ? `<small class="work-provenance">${esc(provenanceText(w))}</small>` : ''}</td><td>${w.source === 'curated' ? '精选' : '投稿'}</td><td>${statusBadge(w.status)}</td>
     <td>${promoted ? '—' : `<label class="face-toggle"><input type="checkbox" data-face-toggle="${esc(w.id)}" ${w[`show_${face}`] ? 'checked' : ''} aria-label="${esc(w.title)}${face === 'gallery' ? '在展览馆显示' : '进正式盲测'}">${w[`show_${face}`] ? '已开启' : '已关闭'}</label>`}</td>
-    ${face === 'arena' ? `<td>${promoted ? '已收录' : w.status === 'verified' && w.show_arena ? '在正式盲测池' : '不在正式盲测池'}${w.source !== 'curated' && w.show_entertainment ? '<small class="work-pool-note">在娱乐池</small>' : ''}</td>` : '<td>—</td>'}
+    ${face === 'arena' ? `<td>${promoted ? '已收录' : w.status === 'verified' && w.show_arena ? '在正式盲测池' : '不在正式盲测池'}${w.show_entertainment ? '<small class="work-pool-note">在娱乐池</small>' : ''}</td>` : '<td>—</td>'}
     <td><div class="actions">${promoted ? '<span class="badge">已收录</span>' : w.nominatedAt ? '<span class="badge">已提名</span>' : ''}<button class="btn sm" data-calibrate="${esc(w.id)}">${label}取景</button><button class="btn sm" data-task-note="${esc(w.task)}">${face === 'gallery' ? '策展笔记' : '题目点评'}</button>${w.source === 'upload' ? `${curable ? `<button class="btn sm primary" data-nominate="${esc(w.id)}">${w.nominatedAt ? '换发命令' : '提名收录'}</button>` : ''}${w.nominatedAt && !promoted ? `<button class="btn sm" data-withdraw="${esc(w.id)}">撤回提名</button>` : ''}<button class="btn sm" data-edit="${esc(w.id)}">编辑</button><button class="btn sm" data-review="${esc(w.id)}">审核</button>` : ''}</div></td>
   </tr>`;
 }

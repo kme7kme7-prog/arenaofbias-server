@@ -255,18 +255,24 @@ test('editorial validates weights, traffic aggregates, and arena switches remove
   assert.deepEqual((await call('voter', 'GET', '/api/leaderboard?task=one')).data.totals, { ...baseline.board.totals, votes: 1, voters: 1, entries: 2 });
 }));
 
-test('the entertainment switch opts uploads into the Show1 pool and refuses curated works', async () => withPlatform(async ({ platform, call }) => {
+test('the entertainment switch opts uploads and curated works into the Show1 pool', async () => withPlatform(async ({ platform, call }) => {
   const upload = await call('root', 'POST', '/api/admin/works/upload?effort=Default&providerId=official&task=one&name=work.html&title=娱乐作品&modelName=模型丙&show_gallery=1', html, true);
   const id = upload.data.work.id;
   assert.equal(upload.data.work.show_entertainment, false, 'uploads start outside the entertainment pool');
-  assert.equal((await call('root', 'POST', '/api/admin/works/one/a/face-settings', { show_entertainment: true })).status, 400,
-    'curated works cannot join the entertainment face');
   const on = await call('root', 'POST', `/api/admin/works/one/${id}/face-settings`, { show_entertainment: true });
   assert.equal(on.status, 200);
   assert.equal(on.data.work.show_entertainment, true);
   assert.equal(platform.db.prepare('SELECT show_entertainment AS s FROM works WHERE id = ?').get(id).s, 1);
   const compatWorks = (await call('root', 'GET', '/api/works')).data.works;
   assert.ok(compatWorks.some((work) => work.id === id), 'the opted-in upload joins the Show1 roster');
+  // Curated works store the switch in their override row, keeping formal faces untouched.
+  const curated = await call('root', 'POST', '/api/admin/works/one/a/face-settings', { show_entertainment: true });
+  assert.equal(curated.status, 200, 'curated works can join the entertainment face');
+  assert.equal(curated.data.work.show_entertainment, true);
+  assert.deepEqual({ ...platform.db.prepare('SELECT show_gallery, show_arena, show_entertainment FROM work_overrides WHERE work_id = ?').get('a') },
+    { show_gallery: 1, show_arena: 0, show_entertainment: 1 });
+  const withCurated = (await call('root', 'GET', '/api/works')).data.works;
+  assert.ok(withCurated.some((work) => work.id === 'a'), 'the curated work joins the Show1 roster');
   const off = await call('root', 'POST', `/api/admin/works/one/${id}/face-settings`, { show_entertainment: false });
   assert.equal(off.data.work.show_entertainment, false);
   assert.equal((await call('root', 'GET', '/api/works')).data.works.some((work) => work.id === id), false, 'opting out removes it again');

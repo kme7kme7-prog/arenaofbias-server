@@ -3,6 +3,7 @@ import { extname, join, relative, resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createArena } from './arena.mjs';
+import { createFeatured } from './featured.mjs';
 import { avatarOf, createAuth } from './auth.mjs';
 import { createEmailAuth } from './auth-email.mjs';
 import { createCapturer } from './capture.mjs';
@@ -45,6 +46,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const adminService = createAdmin({ db, catalog, library });
   const inbox = createInbox({ library, config, limits });
   const arena = createArena({ db, catalog, library, limits });
+  const featured = createFeatured({ db, catalog, library, arena });
   const curator = createCurator({ db, catalog, library, onTakeover: () => arena.invalidate() });
   catalog.onChange(curator.takeover);
   const comments = createComments(db, library);
@@ -121,6 +123,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       questions: questions.all(),
       reactions: library.reactionSummary(user),
       arena: Object.fromEntries(catalog.tasks().map((task) => [task.id, { ...arena.poolStats(task.id), uploads: task.acceptsUploads }])),
+      featured: featured.read(),
       totals: (await arena.leaderboard()).totals,
       me: user ? { votes: arena.votesBy(user.id), pending: library.pendingCount(user.id) } : null,
       review: user?.role === 'admin' ? {
@@ -412,7 +415,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         draftId: draft.id, confirmed: true, title: params.get('title'), summary: params.get('summary'),
         modelId: params.get('modelId'), modelName: params.get('modelName'), effort: params.get('effort'), tool: params.get('tool') || '',
         ...Object.fromEntries(['harnessId', 'harnessOther', 'providerId',
-          'modelVersion', 'generationMode', 'humanIntervention', 'generatedOn', 'evidenceUrl', 'promptVariant']
+          'generationMode', 'humanIntervention', 'promptVariant']
           .filter((key) => params.has(key)).map((key) => [key, params.get(key)])),
       });
     } catch (error) {
@@ -619,6 +622,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     auth,
     library,
     arena,
+    featured,
     capturer,
     moderator,
     handleSite,
@@ -626,6 +630,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     async close() {
       await emailAuth.drain();
       await Promise.all([moderator.close(), capturer.close()]);
+      await featured.close();
       db.close();
     },
   };

@@ -51,8 +51,8 @@ async function withPlatform(run) {
   writeFileSync(join(dist, 'data.json'), JSON.stringify({ schemaVersion: 1, title: '测试馆藏', models: [
     { id: 'ma', name: '模型甲', vendor: '甲' }, { id: 'mb', name: '模型乙', vendor: '乙' },
   ], tasks: [{ id: 'one', title: '测试题', arenaId: '901', results: [
-    { id: 'a', title: '精选甲', model: 'ma', scene: 'results/one/a/' },
-    { id: 'b', title: '精选乙', model: 'mb', scene: 'results/one/b/' },
+    { id: 'a', title: '精选甲', model: 'ma', scene: 'results/one/a/', generationMode: 'single-turn', humanIntervention: 'none' },
+    { id: 'b', title: '精选乙', model: 'mb', scene: 'results/one/b/', generationMode: 'single-turn', humanIntervention: 'none' },
   ] }, { id: 'two', title: '第二题', results: [] }] }));
   const platform = createPlatform({ config: { dist, dataDir: join(root, 'state'), admin: join(process.cwd(), 'admin'),
     contentTemplate: 'http://{token}.localhost', siteOrigins: [], admins: ['root'], cdn: [], capture: false,

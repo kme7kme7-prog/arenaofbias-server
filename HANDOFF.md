@@ -1,5 +1,19 @@
 # HANDOFF.md · 当前状态
 
+## 本轮：盲评池资格、作品分与每日代表作（2026-10-02 Brisbane，本地提交，未推送未部署）
+
+- 用户后续授权本地提交，仍不推送、不部署；不自动维护生产数据。本轮只改本仓相关源码、测试、API 契约与本页，不改数据包、数据仓或 Gallery。初始工作区干净，无他人遗留源码改动。
+- 非文字盲评资格共用 `library.isEligible`：已核验、内容放行、竞技场开关开启、单轮且无人工介入；配对、计票、poolStats 一起生效。馆藏没有覆盖记录时仍默认竞技场关闭。历史 agent 读取为 single-turn，新写 agent 仍 400；后台显示已开关但生成信息不合格的状态。文字题维持原有行为；社区文字题只有 templates 没有 kind，同样排除本轮作品分、代表作与维护。
+- 生成信息仅保留 generationMode / humanIntervention；三个停用字段的任何请求类型均忽略，单独 PATCH/meta 成功空操作；SQL 参数同步删去，不读写旧列，数据库列与 CHECK 不改。作品/导出/管理员/送审/新快照/新审计不输出；旧快照及结构化历史审计在读取时剥离，原记录不改写。后台表单与详情同步精简。
+- 配对按 promptVariant + 配置分组，禁止长短版跨组；配置强度、冷启动权重、同区间配对与均匀抽样保持原算法。按题新增作品 Bradley–Terry：先计算原配置 logit 强度，再以 N(配置强度, 0.5²) 先验拟合作品，同配置作品之间的票计入作品分；内部返回 id / score / interval / games，超过 200 条目走原 worker。
+- v28（排在远端娱乐池 v26、v27 之后）只追加幂等建表 featured_picks / featured_refreshes，不回填历史作品。代表作跨档位按 catalog.modelKey 分组，封面取全题；至少 5 场，按 score - interval，挑战者比当天重算的旧当选者至少高 40 分才替换。每日按服务器时区自然日最多重算一次（空结果也记录），bootstrap 懒触发后台计算并先返回旧结果；重启保留，当选作品不合格时读取立即移除。契约新增 bootstrap.featured，缺少题目/模型由前端兜底。
+- 手动 CLI：`npm run arena-backfill -- --db .data/platform.db --dist .datapack/current [--exclude task/id,...]` 默认只读演练、不迁移。`--apply` 必须另带新备份路径与 actor，停服后手动运行，VACUUM INTO 备份，作品修改与逐件 arena-backfill audit 同事务；显式多轮/人工介入保留原声明，排除参数不修改该作品，文字题不碰。保留 show_gallery 与校准，执行后重启服务清空排行榜/作品分缓存，poolStats 无缓存；进程内调用在提交后可用 invalidate 回调。没有启动回填入口。
+- 验证 Windows Node 24.16.0：最终 `npm run check` 79 文件 / 0 错，`npm test` 194/194（0 fail/cancel/skip），git diff --check 通过。额外对比 Git HEAD 的原算法：80 组确定性数据的原始 fit 与配置榜行逐项完全一致。新增测试覆盖资格与 agent、忽略停用字段/旧值保留/历史审计裁剪、长短版、分层先验与同配置票、worker、门槛/保守分/40 分边界、每日固定含空结果/跨重启/即时剔除、bootstrap、维护演练/排除/apply/备份/事务回滚。初轮 171/184，旧夹具缺声明及旧停用字段 400 断言导致失败，按新契约更新后通过；新增夹具初轮的 NOT NULL 与开关默认值断言也已修正。
+- 对实际本地 `.data/platform.db` 已仅演练：schema v13，当前 `.datapack/current` 为旧 `92f8ab99…`（5 题 / 83 件），不是本轮背景的 182 件新包。将开启馆藏 83 件（boeing-787 3、chinese-architecture 36、denza-z 1、mechanical-keyboard 17、miniature-railway-town 26）；补齐投稿 0、显式非标准 0。全部 83 件旧包作品都缺生成声明，开关开启也要等配套新包才合格；三个待决定的重复 ZIP 均 present=false，命令仍单列。旧库须另行手动升级到至少 v19 才能 apply，CLI 不自动升级。本轮未 apply、未迁移本地业务库，库文件演练前后 SHA-256 均 `40cf07c52bfaa52b334ef341456f970787f6dc701ffe18ad3c572cb5056dbd70`。
+- 证据在忽略目录 output：`blind-pool-check.log`、`blind-pool-test-full.log`、`arena-backfill-local-dry-run.json`，早期失败日志也保留。未连接生产、未执行真实业务库 apply、未运行 Node 22 或浏览器视觉联调、未调用截图/Luna/邮件外部服务；apply 的证据仅来自测试临时数据库。完整 diff 和本地演练交用户审阅，三个重复 ZIP 是否排除尚待用户决定；本轮不写推送归档。
+- 补修：后台竞技场状态列曾把文字题作品误标「不符合盲评条件」（前端未考虑文字题豁免）。管理员作品视图新增 `arena_eligible`（即 isEligible）与 `arena_generation_ok`（文字题恒真），后台改为读取这两个字段；资格判断仍只有服务端 `generationQualified` 一处。blind-pool 测试补文字题、多轮与合格作品三种断言。
+- 提交前 rebase 到 origin/main（远端新增娱乐池开关、归属题目迁移、校准面板等 6 条）：db 迁移保留远端两条在前、featured 在后；setMeta 合并 task 归属与停用字段忽略；后台状态列合并盲评资格与「在娱乐池」提示；admin 测试夹具合并 arenaId/第二题与生成声明。
+
 ## 本轮：娱乐盲测池接线（2026-10-01，本地提交）
 
 - 用户拍板「开接」（悬置 open 项「娱乐盲测接线」）。娱乐面此前复用 show_arena 选池；现独立为 show_entertainment 开关：娱乐池 = 老快照 262 件 ∪ 勾选的投稿作品，可与老作品对打，不进正式排名（BT 只认 source='arena'，兼容票 source='show1' 天然隔离）。
@@ -39,7 +53,6 @@
 - `library.calibrationOf(work, face)`：统一读取有效分面校准（curated→work_overrides，upload→trial/calibration_arena），curated 缺 taskId/id 时返回 null（测试桩形状防御）。`POST /api/arena/matches` 响应新增 `calibration.a/.b`（仅 framing；camera 由内容服务器页内恢复，不下发）。契约文档 §3.8/§3.12 已同步。
 - 验证：npm run check 76 文件 0 错；npm test **191/191**（新增 test/bridge.test.mjs 7 项：importmap 改写/虚拟路由校验/标签次序/camera 校验/内容服务器按键型注入集成）。platform.test 两处对局响应形状断言随契约更新加 calibration 键。注意：node fetch（undici）会忽略自定义 Host 头，内容服务器测试须用 node:http。
 - 未做：推送、部署、前端消费（期B 后台校准面板、期C Show1 应用 framing——朋友的活跃区，动手前先打招呼）。无数据库迁移。
-
 ## 上传档位与服务商必填（2026-10-01，本地实现并提交）
 
 - 新投稿（普通、题目示例、管理员直传、收件箱登记）强制非空 effort 和 official/unofficial providerId。PATCH/meta 禁止显式清空，省略键保持旧记录；通过核验前补齐两项，标记存疑和退回流程保留。新写 generationMode 仅 single-turn/multi-turn，历史 agent 在省略字段时保留；数据库迁移、存量行与投票快照未改。后台表单同步必填及两项生成方式。仅更新受新契约影响的原有 fixture，在既有 provenance 测试补缺失/空白/清空/agent 400 断言。

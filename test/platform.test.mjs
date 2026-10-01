@@ -470,7 +470,7 @@ describe('platform lifecycle', () => {
       title: 'test',
       models: [{ id: 'm-a', name: 'Model A', vendor: 'VA' }, { id: 'm-b', name: 'Model B', vendor: 'VB' }],
       tasks: [
-        { id: 'one', title: 'One', category: '建模', tags: ['Three.js'], promptPending: false, results: results.map(([id, model, effort]) => ({ id, model, effort, title: id.toUpperCase(), summary: '', scene: `results/one/${id}/`, captures: {}, gallery: [] })) },
+        { id: 'one', title: 'One', category: '建模', tags: ['Three.js'], promptPending: false, results: results.map(([id, model, effort]) => ({ id, model, effort, title: id.toUpperCase(), summary: '', scene: `results/one/${id}/`, captures: {}, gallery: [], generationMode: 'single-turn', humanIntervention: 'none' })) },
         { id: 'closed', title: 'Closed', promptPending: true, results: [] },
         { id: 'literature', title: 'Literature', category: '文学', results: [] },
         { id: 'literature-empty', title: 'Literature empty', category: '文学', templates: [], results: [] },
@@ -598,7 +598,7 @@ describe('platform lifecycle', () => {
     assert.match(preview.text, /<head><script src="\/__sp_probe\.js"><\/script>/);
     assert.match(preview.headers['content-security-policy'], /^sandbox allow-scripts/);
 
-    const form = { draftId: staged.data.draft.id, title: 'Mine', modelName: 'Model X', vendor: 'VX', note: 'Original note', effort: 'high', providerId: 'official', tool: 'CLI', trial: { loaded: true, loadMs: 120 } };
+    const form = { draftId: staged.data.draft.id, title: 'Mine', modelName: 'Model X', vendor: 'VX', note: 'Original note', effort: 'high', providerId: 'official', tool: 'CLI', trial: { loaded: true, loadMs: 120 }, generationMode: 'single-turn', humanIntervention: 'none' };
     assert.equal((await call('alice', 'POST', '/api/works', form)).status, 400);
     const submitted = await call('alice', 'POST', '/api/works', { ...form, confirmed: true });
     assert.equal(submitted.status, 200);
@@ -981,7 +981,7 @@ describe('platform lifecycle', () => {
   test('imported works stay out of both public lists until admin chooses a site', async () => {
     const staged = await call('alice', 'POST', '/api/drafts?task=one&name=legacy.html', '<!doctype html><html><head><title>Legacy</title></head><body><h1>Legacy</h1></body></html>', { raw: true });
     assert.equal(staged.status, 200);
-    const submitted = await call('alice', 'POST', '/api/works', { draftId: staged.data.draft.id, confirmed: true, title: 'Legacy', modelId: 'm-a', effort: 'Default', providerId: 'official', tool: 'CLI' });
+    const submitted = await call('alice', 'POST', '/api/works', { draftId: staged.data.draft.id, confirmed: true, title: 'Legacy', modelId: 'm-a', effort: 'Default', providerId: 'official', tool: 'CLI', generationMode: 'single-turn', humanIntervention: 'none' });
     assert.equal(submitted.status, 200, JSON.stringify(submitted.data));
     const id = submitted.data.work.id;
     platform.db.prepare("UPDATE works SET show_gallery = 0, show_arena = 0 WHERE id = ?").run(id);

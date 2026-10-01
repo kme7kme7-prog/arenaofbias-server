@@ -25,8 +25,7 @@ function inputFor(work, library, capture) {
   const text = JSON.stringify({ title: work.title, summary: work.summary, note: work.note,
     model: work.modelName, effort: work.effort, harnessOther: work.harnessOther,
     providerOther: work.providerOther,
-    modelVersion: work.modelVersion, generationMode: work.generationMode,
-    humanIntervention: work.humanIntervention, generatedOn: work.generatedOn, evidenceUrl: work.evidenceUrl,
+    generationMode: work.generationMode, humanIntervention: work.humanIntervention,
     pageText: staticText, renderedText: capture.texts });
   if (text.length > 100000) throw new Error('text_too_large');
   const input = [{ type: 'input_text', text }];

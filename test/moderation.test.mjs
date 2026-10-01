@@ -66,7 +66,7 @@ async function setup(run, { capture = true, key = 'test-key', enabled = true } =
     const draft = await call(who, 'POST', '/api/drafts?task=one&name=work.html', PAGE, true);
     assert.equal(draft.status, 200);
     const result = await call(who, 'POST', '/api/works', { draftId: draft.data.draft.id, confirmed: true, title: '测试作品',
-      modelId: 'm', effort: 'Default', providerId: 'official', harnessOther: '测试工具', cover: `data:image/png;base64,${PNG.toString('base64')}`, ...extra });
+      modelId: 'm', effort: 'Default', providerId: 'official', harnessOther: '测试工具', generationMode: 'single-turn', humanIntervention: 'none', cover: `data:image/png;base64,${PNG.toString('base64')}`, ...extra });
     assert.equal(result.status, 200);
     return result.data.work;
   }

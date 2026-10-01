@@ -9,8 +9,8 @@ import { transaction } from './db.mjs';
 import { providerOf } from './catalog.mjs';
 import { fail } from './http.mjs';
 import { inspectUpload } from './inspect.mjs';
-import { templatesOf } from './categories.mjs';
-import { GENERATION_FIELDS, generationFrom, generationOf, generationAudit } from './generation.mjs';
+import { isTextTask, templatesOf } from './categories.mjs';
+import { GENERATION_FIELDS, IGNORED_GENERATION_FIELDS, generationFrom, generationOf, generationAudit, generationAuditView } from './generation.mjs';
 
 const token = (prefix) => `${prefix}${randomBytes(16).toString('hex')}`;
 const workId = () => `up-${[...randomBytes(8)].map((byte) => (byte % 36).toString(36)).join('')}`;
@@ -111,11 +111,11 @@ export function createLibrary({ db, catalog, config, limits }) {
     insertWork: db.prepare(`INSERT INTO works (id, task_id, owner_id, title, summary, model_id, model_other, effort,
       harness_id, harness_other, provider_id, provider_other, note, content_key,
       source_name, root, entry, file_count, bytes, digest, checks, trial, cover, created_at, updated_at,
-      model_version, generation_mode, human_intervention, generated_on, evidence_url, moderation, prompt_variant, show_gallery, show_arena)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`),
+      generation_mode, human_intervention, moderation, prompt_variant, show_gallery, show_arena)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`),
     review: db.prepare(`UPDATE works SET status = ?, status_reason = ?, model_id = ?, model_other = ?, effort = ?,
       harness_id = ?, harness_other = ?, provider_id = ?, provider_other = ?,
-      model_version = ?, generation_mode = ?, human_intervention = ?, generated_on = ?, evidence_url = ?,
+      generation_mode = ?, human_intervention = ?,
       show_gallery = ?, show_arena = ?, title = ?, summary = ?, note = ?, reviewed_at = ?, updated_at = ? WHERE id = ?`),
     remove: db.prepare('UPDATE works SET deleted_at = ?, updated_at = ? WHERE id = ?'),
     captures: db.prepare('UPDATE works SET captures = ? WHERE id = ?'),
@@ -126,7 +126,7 @@ export function createLibrary({ db, catalog, config, limits }) {
     faceSettings: db.prepare('UPDATE works SET show_gallery = ?, show_arena = ?, show_entertainment = ?, updated_at = ? WHERE id = ?'),
     meta: db.prepare(`UPDATE works SET title = ?, summary = ?, model_id = ?, model_other = ?, effort = ?,
       harness_id = ?, harness_other = ?, provider_id = ?, provider_other = ?,
-      model_version = ?, generation_mode = ?, human_intervention = ?, generated_on = ?, evidence_url = ?,
+      generation_mode = ?, human_intervention = ?,
       prompt_variant = ?, note = ?, updated_at = ? WHERE id = ?`),
     curatedAs: db.prepare('UPDATE works SET curated_as = ?, updated_at = ? WHERE id = ?'),
     votesOfWork: db.prepare('SELECT COUNT(*) AS n FROM votes WHERE task_id = ? AND (a_work = ? OR b_work = ?)'),
@@ -177,11 +177,8 @@ export function createLibrary({ db, catalog, config, limits }) {
       harnessOther: row.harness_other,
       providerId: providerOf(row.provider_id, row.provider_other),
       providerOther: '',
-      modelVersion: row.model_version,
-      generationMode: row.generation_mode,
+      generationMode: row.generation_mode === 'agent' ? 'single-turn' : row.generation_mode,
       humanIntervention: row.human_intervention,
-      generatedOn: row.generated_on,
-      evidenceUrl: row.evidence_url,
       promptVariant: row.prompt_variant,
       note: row.note,
       ownerId: row.owner_id,
@@ -252,7 +249,11 @@ export function createLibrary({ db, catalog, config, limits }) {
     return { show_gallery: work.showGallery, show_arena: work.showArena, show_entertainment: Boolean(work.showEntertainment) };
   };
   const visibleTo = (work, site = 'show2') => Boolean(contentAllowed(work) && (site === 'show1' ? flagsOf(work).show_arena : flagsOf(work).show_gallery));
-  const isEligible = (work) => Boolean(work && work.status === 'verified' && work.dir && !work.curatedAs && visibleTo(work, 'show1'));
+  // Text tasks keep their earlier rules; other works must be single-turn without human intervention.
+  const generationQualified = (work) => isTextTask(catalog.task(work.taskId)) ||
+    generationOf(work).generationMode === 'single-turn' && work.humanIntervention === 'none';
+  const isEligible = (work) => Boolean(work && work.status === 'verified' && work.dir && !work.curatedAs && visibleTo(work, 'show1') &&
+    generationQualified(work));
   const isInteractive = (work) => Boolean(work && work.status !== 'questioned' &&
     (visibleTo(work, 'show1') || visibleTo(work, 'show2')));
 
@@ -474,6 +475,8 @@ export function createLibrary({ db, catalog, config, limits }) {
         calibration_arena: work.curated ? (override?.calibration_arena ? JSON.parse(override.calibration_arena) : null) : work.calibrationArena,
         has_calibration_gallery: Boolean(work.curated ? override?.calibration_gallery : work.trial.calibration),
         has_calibration_arena: Boolean(work.curated ? override?.calibration_arena : work.calibrationArena),
+        arena_eligible: isEligible(work),
+        arena_generation_ok: generationQualified(work),
       };
     },
 
@@ -697,8 +700,8 @@ export function createLibrary({ db, catalog, config, limits }) {
       if (!admin && work.status !== 'unverified') fail(409, '作品已核验，信息不能再修改；如有错误请删除后重新上传');
       if (!plainObject(body) || !Object.keys(body).length ||
         Object.keys(body).some((key) => !['title', 'summary', 'note', 'modelName', 'modelId', 'vendor', 'effort', 'promptVariant', 'task',
-          'harnessId', 'harnessOther', 'harnessVersion', 'providerId', ...GENERATION_FIELDS].includes(key))) fail(400, '没有可修改的内容');
-      if (Object.keys(body).every((key) => key === 'harnessVersion')) return admin ? this.adminWork(work) : this.toPublic(work, actor);
+          'harnessId', 'harnessOther', 'harnessVersion', 'providerId', ...GENERATION_FIELDS, ...IGNORED_GENERATION_FIELDS].includes(key))) fail(400, '没有可修改的内容');
+      if (Object.keys(body).every((key) => key === 'harnessVersion' || IGNORED_GENERATION_FIELDS.includes(key))) return admin ? this.adminWork(work) : this.toPublic(work, actor);
       // Re-homing to another task is an admin correction; the target must be a live
       // catalog task or community question, and history moves along with the work.
       let moved = null;
@@ -849,7 +852,7 @@ export function createLibrary({ db, catalog, config, limits }) {
 
     pendingCount: (userId) => q.pendingOf.get(userId).n,
     auditLog(limit = 200) {
-      return q.auditLog.all(limit).map((row) => ({ at: iso(row.at), actor: row.actor_name, action: row.action, task: row.task_id, work: row.work_id, detail: row.detail }));
+      return q.auditLog.all(limit).map((row) => ({ at: iso(row.at), actor: row.actor_name, action: row.action, task: row.task_id, work: row.work_id, detail: generationAuditView(row.detail) }));
     },
     hasDirectory: (id) => existsSync(join(dirs.works, id)),
   };

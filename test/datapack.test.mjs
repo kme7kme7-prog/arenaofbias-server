@@ -27,8 +27,8 @@ function pack(root, sha, firstModel) {
     schemaVersion: 1, sourceCommit: 'c'.repeat(40), title: `Pack ${sha[0]}`,
     models: [{ id: firstModel, name: `Model ${sha[0]}`, vendor: 'Vendor' }, { id: 'm-b', name: 'B', vendor: 'Vendor' }],
     tasks: [{ id: 'one', title: 'One', results: [
-      { id: 'a1', model: firstModel, title: `A ${sha[0]}`, scene: 'results/one/a1/' },
-      { id: 'b1', model: 'm-b', title: `B ${sha[0]}`, scene: 'results/one/b1/' },
+      { id: 'a1', model: firstModel, title: `A ${sha[0]}`, scene: 'results/one/a1/', generationMode: 'single-turn', humanIntervention: 'none' },
+      { id: 'b1', model: 'm-b', title: `B ${sha[0]}`, scene: 'results/one/b1/', generationMode: 'single-turn', humanIntervention: 'none' },
     ] }],
   }));
 }

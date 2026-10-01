@@ -72,7 +72,7 @@ export function createAdmin({ db, catalog, library }) {
         (!model || (model === 'other' ? !work.model : work.model === model)) &&
         (!effort || (effort === 'unset' ? !work.effort : effortKey(work.effort) === effortKey(effort))) &&
         Object.entries(generation).every(([key, value]) => !value || (value === 'unset' ? !work[key] : work[key] === value)) &&
-        (!search || `${work.title} ${work.modelName} ${work.vendor} ${work.modelVersion} ${work.task} ${work.harnessName ?? ''} ${catalog.provider(work.provider)?.name ?? ''}`.toLocaleLowerCase().includes(search)));
+        (!search || `${work.title} ${work.modelName} ${work.vendor} ${work.task} ${work.harnessName ?? ''} ${catalog.provider(work.provider)?.name ?? ''}`.toLocaleLowerCase().includes(search)));
       rows.sort((a, b) => a.task.localeCompare(b.task) || a.title.localeCompare(b.title, 'zh-CN') || a.id.localeCompare(b.id));
       return { works: rows.slice((page - 1) * pageSize, page * pageSize), total: rows.length, page, pageSize, efforts };
     },

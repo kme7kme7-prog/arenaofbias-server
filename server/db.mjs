@@ -402,6 +402,22 @@ const MIGRATIONS = [
       WHERE show_arena = 1 AND show_entertainment = 0
       AND EXISTS (SELECT 1 FROM works WHERE works.id = work_overrides.work_id AND works.curated_as = work_overrides.work_id)`);
   },
+  // Persistent daily representatives; refreshes also remember days with no eligible picks.
+  (db) => {
+    db.exec(`CREATE TABLE IF NOT EXISTS featured_picks (
+      task_id TEXT NOT NULL,
+      scope TEXT NOT NULL CHECK (scope IN ('cover', 'model')),
+      model_key TEXT NOT NULL DEFAULT '',
+      work_id TEXT NOT NULL,
+      conservative REAL NOT NULL,
+      picked_at INTEGER NOT NULL,
+      PRIMARY KEY (task_id, scope, model_key)
+    );
+    CREATE TABLE IF NOT EXISTS featured_refreshes (
+      task_id TEXT PRIMARY KEY,
+      day TEXT NOT NULL
+    );`);
+  },
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

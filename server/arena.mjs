@@ -13,8 +13,9 @@ import { Worker } from 'node:worker_threads';
 import { effortKey, entityKey, modelKey, providerOf } from './catalog.mjs';
 import { transaction } from './db.mjs';
 import { fail } from './http.mjs';
-import { rankEntries } from './ranking.mjs';
+import { rankEntries, rankWorks } from './ranking.mjs';
 import { generationOf } from './generation.mjs';
+import { isTextTask } from './categories.mjs';
 
 const MATCH = { tierWidth: 150, sameTierRate: 0.9, blowoutGap: 400, rerolls: 2 };
 // The dense solver grows roughly cubically with entry count: 40 entries took
@@ -34,8 +35,8 @@ const identityOf = (work, digest = work.digest ?? null) => ({
 });
 const fromIdentity = (text) => {
   if (!text) return null;
-  const { harnessVersion, providerOther, providerName, ...identity } = JSON.parse(text);
-  return { ...identity, providerId: providerOf(identity.providerId, providerOther || providerName) };
+  const { harnessVersion, modelVersion, generatedOn, evidenceUrl, providerOther, providerName, ...identity } = JSON.parse(text);
+  return { ...identity, ...generationOf(identity), providerId: providerOf(identity.providerId, providerOther || providerName) };
 };
 
 export function createArena({ db, catalog, library, limits, random = Math.random }) {
@@ -119,6 +120,8 @@ export function createArena({ db, catalog, library, limits, random = Math.random
   });
 
   function rankOffThread(votes, by, rankedEntryCount) {
+    if (by === 'work' && rankedEntryCount <= RANK_WORKER_ENTRY_THRESHOLD)
+      return Promise.resolve(rankWorks(votes, (work) => work.configKey ?? entityKey(work)));
     if (rankedEntryCount <= RANK_WORKER_ENTRY_THRESHOLD) return Promise.resolve(rankEntries(votes, by === 'model'
       ? (work) => work.modelKey ?? modelKey(work) : (work) => work.configKey ?? entityKey(work), limits));
     return new Promise((resolve, reject) => {
@@ -127,6 +130,20 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       worker.once('error', reject);
       worker.once('exit', (code) => { if (code !== 0) reject(new Error(`Ranking worker exited with ${code}`)); });
     });
+  }
+
+  function workScores(taskId, snapshot = catalog.snapshot()) {
+    if (isTextTask(catalog.task(taskId))) return Promise.resolve([]);
+    const cacheKey = `${snapshot.version}|${taskId}|work`;
+    if (cache.has(cacheKey)) return cache.get(cacheKey);
+    const activeCache = cache;
+    const pending = Promise.resolve().then(async () => {
+      const { votes, rankedEntryCount } = await countedVotes(taskId, snapshot, (work) => work.id);
+      return rankOffThread(votes, 'work', rankedEntryCount);
+    });
+    activeCache.set(cacheKey, pending);
+    void pending.catch(() => { if (activeCache.get(cacheKey) === pending) activeCache.delete(cacheKey); });
+    return pending;
   }
 
   // `category` (the datapack's task category, e.g. 建模) scores only that category's tasks.
@@ -208,8 +225,10 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     const candidates = [];
     for (let i = 0; i < entries.length; i++) {
       for (let j = i + 1; j < entries.length; j++) {
+        if (!entries[i][1].length || !entries[j][1].length ||
+          (entries[i][1][0].promptVariant ?? '') !== (entries[j][1][0].promptVariant ?? '')) continue;
         const available = entries[i][1].length * entries[j][1].length - (unavailable.get(`${i}:${j}`) ?? 0);
-        if (available > 0) candidates.push({ keys: [entries[i][0], entries[j][0]], left: entries[i][1], right: entries[j][1], available });
+        if (available > 0) candidates.push({ keys: [entityKey(entries[i][1][0]), entityKey(entries[j][1][0])], left: entries[i][1], right: entries[j][1], available });
       }
     }
     return candidates;
@@ -254,6 +273,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
   return {
     invalidate,
     leaderboard,
+    workScores,
     poolStats,
 
     async createMatch(user, taskId, previousId, snapshot = catalog.snapshot()) {
@@ -262,11 +282,12 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       const groups = new Map();
       for (const work of library.eligible(taskId, snapshot)) {
         if (user && work.ownerId === user.id) continue;
-        const key = entityKey(work);
+        const key = JSON.stringify([work.promptVariant ?? '', entityKey(work)]);
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push(work);
       }
-      if (groups.size < 2) fail(409, '这道题还没有两个不同模型配置的已验证作品', 'insufficient');
+      if (new Set([...groups.values()].map((works) => entityKey(works[0]))).size < 2)
+        fail(409, '这道题还没有两个不同模型配置的已验证作品', 'insufficient');
       const votedRows = user ? q.votedPairs.all(user.id, taskId).filter((row) => row.pair_key.startsWith(`${taskId}:`)) : [];
       const voted = new Set(votedRows.map((row) => row.pair_key));
       const previous = previousId ? q.match.get(String(previousId)) : user ? q.lastMatch.get(user.id, taskId) : null;

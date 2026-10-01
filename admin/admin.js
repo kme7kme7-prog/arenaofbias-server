@@ -350,27 +350,21 @@ function suggestionHtml(type, choice, other) {
   return match ? `可能是 ${esc(match.name)}<button type="button" class="btn sm" data-pick-provenance="${type}" data-id="${esc(match.id)}">改选 ${esc(match.name)}</button>` : '';
 }
 
-const GENERATION_FIELDS = ['modelVersion', 'generationMode', 'humanIntervention', 'generatedOn', 'evidenceUrl'];
+const GENERATION_FIELDS = ['generationMode', 'humanIntervention'];
 const GENERATION_CHOICES = {
-  generationMode: { 'single-turn': '一轮', 'multi-turn': '多轮' },
+  generationMode: { 'single-turn': '单轮', 'multi-turn': '多轮' },
   humanIntervention: { none: '仅初始提示，未修改代码', 'prompt-guided': '人工提示与指导（未改代码）', 'code-edited': '人工修改了代码' },
 };
 const GENERATION_LABELS = { generationMode: '生成方式', humanIntervention: '人工介入程度' };
 function generationFields(work = {}) {
   const select = (key) => `<label class="field"><span class="field-label">${GENERATION_LABELS[key]}</span><select class="input" name="${key}"><option value="">未注明</option>${Object.entries(GENERATION_CHOICES[key]).map(([value, label]) => `<option value="${value}"${work[key] === value ? ' selected' : ''}>${label}</option>`).join('')}</select></label>`;
-  return `<details class="generation-fields"${GENERATION_FIELDS.some((key) => work[key]) ? ' open' : ''}><summary>生成与证据信息（选填）</summary>
-    <div class="field-row"><label class="field"><span class="field-label">模型版本 / 快照<small>模型的具体版本，区别于 Harness 版本</small></span><input class="input" name="modelVersion" maxlength="60" value="${esc(work.modelVersion)}" placeholder="按原始记录填写"></label>
-      <label class="field"><span class="field-label">生成日期<small>区别于上传日期</small></span><input class="input" type="date" name="generatedOn" value="${esc(work.generatedOn)}"></label></div>
+  return `<details class="generation-fields"${GENERATION_FIELDS.some((key) => work[key]) ? ' open' : ''}><summary>生成信息（选填）</summary>
     <div class="field-row">${select('generationMode')}${select('humanIntervention')}</div>
-    <label class="field"><span class="field-label">公开证据链接<small>对话分享、运行记录等；请勿填写私密链接</small></span><input class="input" type="url" name="evidenceUrl" maxlength="2000" value="${esc(work.evidenceUrl)}" placeholder="https://…"></label>
-    <p class="fine">只填写有记录支持的信息；未注明与没有人工介入是不同含义。</p></details>`;
+    <p class="fine">用户只发一次提示词即为单轮，智能体自主迭代也算单轮。仅单轮且无人工介入的作品可进盲评池；未注明与没有人工介入是不同含义。</p></details>`;
 }
 const generationBody = (get, work = {}) => Object.fromEntries(GENERATION_FIELDS
-  .map((key) => [key, String(get(key) ?? '').trim()]).filter(([key, value]) => value !== (work[key] ?? '') && !(key === 'generationMode' && work[key] === 'agent' && value === '')));
-const generationFacts = (work) => `<div><dt>模型版本</dt><dd>${esc(work.modelVersion || '未注明')}</dd></div>
-  ${Object.keys(GENERATION_CHOICES).map((key) => `<div><dt>${GENERATION_LABELS[key]}</dt><dd>${esc(GENERATION_CHOICES[key][work[key]] || '未注明')}</dd></div>`).join('')}
-  <div><dt>生成日期</dt><dd>${esc(work.generatedOn || '未注明')}</dd></div>
-  <div><dt>公开证据</dt><dd>${/^https?:\/\//i.test(work.evidenceUrl ?? '') ? `<a href="${esc(work.evidenceUrl)}" target="_blank" rel="noopener noreferrer">查看记录</a>` : '未注明'}</dd></div>`;
+  .map((key) => [key, String(get(key) ?? '').trim()]).filter(([key, value]) => value !== (work[key] ?? '')));
+const generationFacts = (work) => Object.keys(GENERATION_CHOICES).map((key) => `<div><dt>${GENERATION_LABELS[key]}</dt><dd>${esc(GENERATION_CHOICES[key][work[key]] || '未注明')}</dd></div>`).join('');
 let effortInputId = 0;
 function effortField(value = '') {
   const id = `admin-efforts-${++effortInputId}`;
@@ -845,7 +839,7 @@ function adminWorkRow(w, face = state.system) {
     <td><div class="admin-work-title">${thumb(w)}<div><b>${esc(w.title)}</b><small>${esc(taskTitle(w.task))} · ${w.votes ?? 0} 票</small></div></div></td>
     <td>${esc(w.modelName)}${provenanceText(w) ? `<small class="work-provenance">${esc(provenanceText(w))}</small>` : ''}</td><td>${w.source === 'curated' ? '精选' : '投稿'}</td><td>${statusBadge(w.status)}</td>
     <td>${promoted ? '—' : `<label class="face-toggle"><input type="checkbox" data-face-toggle="${esc(w.id)}" ${w[`show_${face}`] ? 'checked' : ''} aria-label="${esc(w.title)}${face === 'gallery' ? '在展览馆显示' : '进正式盲测'}">${w[`show_${face}`] ? '已开启' : '已关闭'}</label>`}</td>
-    ${face === 'arena' ? `<td>${promoted ? '已收录' : w.status === 'verified' && w.show_arena ? '在正式盲测池' : '不在正式盲测池'}${w.show_entertainment ? '<small class="work-pool-note">在娱乐池</small>' : ''}</td>` : '<td>—</td>'}
+    ${face === 'arena' ? `<td>${promoted ? '已收录' : w.arena_eligible ? '在正式盲测池' : w.show_arena && !w.arena_generation_ok ? '不符合盲评条件（多轮 / 人工介入）' : '不在正式盲测池'}${w.show_entertainment ? '<small class="work-pool-note">在娱乐池</small>' : ''}</td>` : '<td>—</td>'}
     <td><div class="actions">${promoted ? '<span class="badge">已收录</span>' : w.nominatedAt ? '<span class="badge">已提名</span>' : ''}<button class="btn sm" data-calibrate="${esc(w.id)}">${label}取景</button><button class="btn sm" data-task-note="${esc(w.task)}">${face === 'gallery' ? '策展笔记' : '题目点评'}</button>${w.source === 'upload' ? `${curable ? `<button class="btn sm primary" data-nominate="${esc(w.id)}">${w.nominatedAt ? '换发命令' : '提名收录'}</button>` : ''}${w.nominatedAt && !promoted ? `<button class="btn sm" data-withdraw="${esc(w.id)}">撤回提名</button>` : ''}<button class="btn sm" data-edit="${esc(w.id)}">编辑</button><button class="btn sm" data-review="${esc(w.id)}">审核</button>` : ''}</div></td>
   </tr>`;
 }

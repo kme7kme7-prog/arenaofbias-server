@@ -28,8 +28,8 @@ const pack = (root, registries = true) => {
       providers: [{ id: 'official', name: '官方', listed: true }, { id: 'openrouter', name: 'OpenRouter', listed: true }] } : {}),
     tasks: [{ id: 'one', title: 'One', results: [
       { id: 'a1', model: 'm-a', effort: 'High', title: 'A1', scene: 'results/one/a1/', harness: 'codex', harnessVersion: '1', provider: 'official',
-        modelVersion: 'v1', generationMode: 'single-turn' },
-      { id: 'b1', model: 'm-b', title: 'B1', scene: 'results/one/b1/' },
+        modelVersion: 'v1', generationMode: 'single-turn', humanIntervention: 'none' },
+      { id: 'b1', model: 'm-b', title: 'B1', scene: 'results/one/b1/', generationMode: 'single-turn', humanIntervention: 'none' },
     ] }],
   }));
   return dist;
@@ -219,8 +219,7 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
     }
     const generation = { modelVersion: '2026-09-29', generationMode: 'multi-turn', humanIntervention: 'prompt-guided',
       generatedOn: '2026-09-29', evidenceUrl: 'https://example.test/shared/run' };
-    for (const invalid of [{ generationMode: 'agent' }, { generationMode: 'anything' }, { humanIntervention: 'unknown' }, { generatedOn: '2026-02-30' },
-      { evidenceUrl: 'javascript:alert(1)' }, { modelVersion: 'x'.repeat(61) }]) {
+    for (const invalid of [{ generationMode: 'agent' }, { generationMode: 'anything' }, { humanIntervention: 'unknown' }]) {
       const rejected = await call('alice', 'POST', '/api/works', { ...baseBody, harnessId: 'codex', ...invalid });
       assert.equal(rejected.status, 400, JSON.stringify(invalid));
       assert.equal(rejected.data.code, 'invalid_generation');
@@ -231,7 +230,20 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
     const id = first.data.work.id;
     platform.db.prepare('UPDATE works SET harness_version = ? WHERE id = ?').run('stored-old-version', id);
     assert.equal(platform.db.prepare('SELECT model_other FROM works WHERE id = ?').get(id).model_other, '');
-    for (const [key, value] of Object.entries(generation)) assert.equal(first.data.work[key], value);
+    for (const key of ['generationMode', 'humanIntervention']) assert.equal(first.data.work[key], generation[key]);
+    const retired = ['modelVersion', 'generatedOn', 'evidenceUrl'];
+    for (const key of retired) assert.equal(key in first.data.work, false);
+    const oldDetail = '编辑信息；生成信息 ' + JSON.stringify({ modelVersion: { from: '', to: 'old' },
+      generatedOn: { from: '', to: '2026-09-29' }, evidenceUrl: { from: '', to: 'https://example.test/old' },
+      generationMode: { from: '', to: 'single-turn' } });
+    platform.db.prepare("INSERT INTO audit (at, actor_name, action, work_id, detail) VALUES (1, 'root', 'legacy-generation', ?, ?)")
+      .run(id, oldDetail);
+    const oldAudit = platform.library.auditLog().find((item) => item.action === 'legacy-generation');
+    assert.equal(retired.some((key) => oldAudit.detail.includes(key)), false);
+    assert.ok(oldAudit.detail.includes('generationMode'));
+    assert.equal(platform.db.prepare("SELECT detail FROM audit WHERE action = 'legacy-generation'").get().detail, oldDetail);
+    platform.db.prepare('UPDATE works SET model_version = ?, generated_on = ?, evidence_url = ? WHERE id = ?')
+      .run('stored-version', '2026-09-29', 'https://example.test/stored', id);
     assert.deepEqual([first.data.work.harness, first.data.work.harnessName, first.data.work.provider, first.data.work.tool],
       ['codex', 'Codex', 'official', 'Codex']);
     const editPath = `/api/works/one/${id}`;
@@ -241,10 +253,14 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
         ['root', 'POST', `/api/admin/works/one/${id}/meta`, {}],
         ['root', 'POST', `${editPath}/review`, { status: 'unverified' }],
       ]) {
-        const ignored = await call(who, method, path, { ...extra, harnessVersion });
+        const ignored = await call(who, method, path, { ...extra, harnessVersion,
+          modelVersion: { invalid: true }, generatedOn: '2026-02-30', evidenceUrl: 42 });
         assert.equal(ignored.status, 200);
         assert.equal('harnessVersion' in ignored.data.work, false);
         assert.equal(platform.db.prepare('SELECT harness_version FROM works WHERE id = ?').get(id).harness_version, 'stored-old-version');
+        for (const key of retired) assert.equal(key in ignored.data.work, false);
+        assert.deepEqual({ ...platform.db.prepare('SELECT model_version, generated_on, evidence_url FROM works WHERE id = ?').get(id) },
+          { model_version: 'stored-version', generated_on: '2026-09-29', evidence_url: 'https://example.test/stored' });
       }
     }
     for (const body of [{ effort: '' }, { effort: '   ' }, { providerId: null }, { providerId: '' }, { providerId: 'openrouter' }, { providerId: 'missing' }, { providerOther: 'Local service' }, { providerName: 'Local service' }])
@@ -272,10 +288,9 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
     assert.equal(blank.status, 400, 'provider is required');
     const meta = `/api/admin/works/one/${id}/meta`;
     const edited = await call('root', 'POST', meta, { modelVersion: 'snapshot-2', humanIntervention: 'code-edited' });
-    assert.equal(edited.data.work.modelVersion, 'snapshot-2');
-    assert.equal(edited.data.work.generatedOn, generation.generatedOn, 'patch preserves omitted fields');
-    assert.equal((await call('root', 'POST', meta, { generatedOn: '2026-02-30' })).status, 400);
-    assert.equal(platform.library.work('one', id).generatedOn, generation.generatedOn, 'failed patch leaves saved fields intact');
+    assert.equal(edited.data.work.humanIntervention, 'code-edited');
+    assert.equal((await call('root', 'POST', meta, { generatedOn: '2026-02-30' })).status, 200);
+    for (const key of retired) assert.equal(key in platform.library.work('one', id), false);
     assert.equal((await call('root', 'POST', meta, { providerOther: '其他服务' })).status, 400);
     assert.equal((await call('root', 'POST', meta, { harnessOther: '备用工具' })).data.work.harnessName, '备用工具');
     const cleared = await call('root', 'POST', meta, { harnessId: null, providerId: null });
@@ -319,10 +334,11 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
     assert.equal((await call('root', 'GET', '/api/admin/works?harness=missing')).status, 400);
     assert.deepEqual(await listed('model=m-a&generationMode=multi-turn&humanIntervention=code-edited'), [id]);
     assert.deepEqual(await listed('effort=hIgH'), ['a1']);
-    assert.deepEqual(await listed('model=m-b&generationMode=unset'), ['b1']);
+    assert.deepEqual(await listed('model=m-a&generationMode=unset'), [other.data.work.id, legacy.data.work.id].sort());
     assert.equal((await call('root', 'GET', '/api/admin/works?generationMode=missing')).status, 400);
     const audits = platform.db.prepare("SELECT detail FROM audit WHERE work_id = ? AND action = 'meta'").all(id);
-    assert.equal(audits.some((audit) => audit.detail.includes('snapshot-2')), true);
+    assert.equal(audits.some((audit) => audit.detail.includes('code-edited')), true);
+    assert.equal(audits.some((audit) => retired.some((key) => audit.detail.includes(key))), false);
     const nomination = await call('root', 'POST', `/api/admin/works/one/${id}/nominate`);
     assert.equal(nomination.status, 200);
     const exported = await call('alice', 'GET', new URL(nomination.data.exportUrl).pathname);
@@ -330,10 +346,9 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
     assert.deepEqual([exported.data.harnessId, exported.data.harnessOther,
       exported.data.providerId, exported.data.providerOther], ['codex', '', 'official', '']);
     assert.equal('harnessVersion' in exported.data, false);
-    assert.equal(exported.data.modelVersion, 'snapshot-2');
-    assert.equal(exported.data.evidenceUrl, generation.evidenceUrl);
+    for (const key of retired) assert.equal(key in exported.data, false);
     const clear = await call('root', 'POST', meta, { evidenceUrl: '' });
-    assert.equal(clear.data.work.evidenceUrl, '', 'empty text explicitly clears metadata');
+    assert.equal('evidenceUrl' in clear.data.work, false);
     assert.equal(clear.data.work.generationMode, 'multi-turn');
     for (const work of ['a1', 'b1']) platform.db.prepare(`INSERT INTO work_overrides
       (task_id, work_id, show_gallery, show_arena, updated_by, updated_at) VALUES ('one', ?, 1, 1, 'root', 0)`).run(work);
@@ -345,7 +360,7 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
       identity.id === 'a1' ? ['codex', 'official'] : [null, null]);
     assert.equal('harnessVersion' in identity, false);
     assert.equal(identity.configKey, `${identity.modelKey}|${identity.effortKey}`);
-    assert.equal(identity.modelVersion, identity.id === 'a1' ? 'v1' : '');
+    for (const key of retired) assert.equal(key in identity, false);
     assert.equal(platform.arena.vote(alice, match.id, 'a').counted, true);
     const vote = platform.db.prepare('SELECT id FROM votes WHERE match_id = ?').get(match.id);
     const before = await platform.arena.leaderboard({ task: 'one' });

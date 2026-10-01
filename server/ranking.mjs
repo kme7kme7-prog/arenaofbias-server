@@ -41,15 +41,20 @@ function solveWith(lower, vector) {
 }
 
 // comparisons: [{ a, b, y }] with entry indexes and y = 1 (a preferred), 0 (b), 0.5 (tie).
-export function fitBradleyTerry(size, comparisons, prior = 1) {
+// Numeric prior is the original precision. Per-entry priors use logit mean/variance.
+// Anchored work fits retain the configuration scale instead of recentering by work count.
+export function fitBradleyTerry(size, comparisons, prior = 1, { anchored = false, strength = false } = {}) {
+  if (!size) return [];
   const beta = new Float64Array(size);
   let hessian = null;
   for (let iteration = 0; iteration < 60; iteration++) {
     const gradient = new Float64Array(size);
     hessian = Array.from({ length: size }, () => new Float64Array(size));
     for (let i = 0; i < size; i++) {
-      gradient[i] = -prior * beta[i];
-      hessian[i][i] = prior;
+      const precision = Array.isArray(prior) ? 1 / prior[i].variance : prior;
+      const mean = Array.isArray(prior) ? prior[i].mean : 0;
+      gradient[i] = -precision * (beta[i] - mean);
+      hessian[i][i] = precision;
     }
     for (const { a, b, y } of comparisons) {
       const p = 1 / (1 + Math.exp(beta[b] - beta[a]));
@@ -80,14 +85,15 @@ export function fitBradleyTerry(size, comparisons, prior = 1) {
   const rowMeans = covariance.map((row) => row.reduce((sum, value) => sum + value, 0) / size);
   const grandMean = rowMeans.reduce((sum, value) => sum + value, 0) / size;
   return [...beta].map((value, i) => {
-    const variance = Math.max(covariance[i][i] - 2 * rowMeans[i] + grandMean, 0);
-    return { score: CENTER + ELO * (value - mean), interval: 1.96 * ELO * Math.sqrt(variance) };
+    const variance = Math.max(anchored ? covariance[i][i] : covariance[i][i] - 2 * rowMeans[i] + grandMean, 0);
+    return { score: CENTER + ELO * (anchored ? value : value - mean), interval: 1.96 * ELO * Math.sqrt(variance),
+      ...(strength ? { strength: value } : {}) };
   });
 }
 
 // votes: [{ a: work, b: work, choice: 'a' | 'b' | 'tie', userId }] where work carries the fields
 // entityKey needs. Votes between two works of the same entry say nothing about the entry.
-export function rankEntries(votes, keyOf, { provisionalGames }) {
+export function rankEntries(votes, keyOf, { provisionalGames, strength = false }) {
   const entries = new Map();
   const touch = (work) => {
     const key = keyOf(work);
@@ -111,13 +117,14 @@ export function rankEntries(votes, keyOf, { provisionalGames }) {
   }
   const ranked = [...entries.values()].filter((entry) => entry.games > 0);
   const index = new Map(ranked.map((entry, i) => [entry, i]));
-  const fitted = ranked.length ? fitBradleyTerry(ranked.length, comparisons.map(({ a, b, y }) => ({ a: index.get(a), b: index.get(b), y }))) : [];
+  const fitted = ranked.length ? fitBradleyTerry(ranked.length, comparisons.map(({ a, b, y }) => ({ a: index.get(a), b: index.get(b), y })), 1, { strength }) : [];
   return ranked.map((entry, i) => ({
     key: entry.key,
     sample: entry.sample,
     score: Math.round(fitted[i].score),
     interval: Math.round(fitted[i].interval),
     games: entry.games,
+    ...(strength ? { strength: fitted[i].strength } : {}),
     wins: entry.wins,
     draws: entry.draws,
     losses: entry.losses,
@@ -126,4 +133,30 @@ export function rankEntries(votes, keyOf, { provisionalGames }) {
     tasks: entry.tasks.size,
     provisional: entry.games < provisionalGames,
   })).sort((x, y) => y.score - x.score || y.games - x.games || x.key.localeCompare(y.key));
+}
+
+// One task at a time; same-configuration comparisons inform the work deviation.
+export function rankWorks(votes, configKeyOf) {
+  const configurations = new Map(rankEntries(votes, configKeyOf, { provisionalGames: 0, strength: true })
+    .map((row) => [row.key, row.strength]));
+  const works = new Map();
+  const touch = (work) => {
+    if (!works.has(work.id)) works.set(work.id, { id: work.id, config: configKeyOf(work), games: 0 });
+    return works.get(work.id);
+  };
+  const comparisons = [];
+  for (const vote of votes) {
+    const a = touch(vote.a), b = touch(vote.b);
+    if (a === b) continue;
+    a.games++;
+    b.games++;
+    comparisons.push({ a, b, y: vote.choice === 'a' ? 1 : vote.choice === 'b' ? 0 : 0.5 });
+  }
+  const entries = [...works.values()].filter((work) => work.games > 0);
+  const indexes = new Map(entries.map((work, i) => [work, i]));
+  const fitted = fitBradleyTerry(entries.length,
+    comparisons.map(({ a, b, y }) => ({ a: indexes.get(a), b: indexes.get(b), y })),
+    entries.map((work) => ({ mean: configurations.get(work.config) ?? 0, variance: 0.25 })), { anchored: true });
+  return entries.map((work, i) => ({ id: work.id, score: Math.round(fitted[i].score),
+    interval: Math.round(fitted[i].interval), games: work.games }));
 }

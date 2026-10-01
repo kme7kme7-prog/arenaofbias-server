@@ -108,11 +108,8 @@ API 域静态 `/data.json`（含等价编码路径）仅管理员登录后返回
 | `title` / `summary` / `note` | string | 标题（≤40 字）/ 简介（≤200 字）/ 备注（≤1000 字） |
 | `modelId` / `modelName` / `vendor` | string / null | 模型归属；`modelId` 命中数据包模型表时名称与厂商取自模型表 |
 | `effort` | string | 新投稿必填的强度档位，禁止显式清空；大小写不敏感地归入 `Low / Medium / High / XHigh / Max`；未知值原样保留 |
-| `modelVersion` | string | 模型具体版本或快照，≤60 字；区别于模型注册 ID |
-| `generationMode` | string | `single-turn`（一轮）、`multi-turn`（多轮）；空串为未注明；历史 `agent` 可读取，禁止新写入 |
+| `generationMode` | string | `single-turn`（单轮）、`multi-turn`（多轮）；用户只发一次提示词即为单轮，智能体自主迭代也算单轮；空串为未注明；历史 `agent` 读取为 `single-turn`，新写 `agent` 返回 400 |
 | `humanIntervention` | string | `none`（仅初始提示，未改代码）、`prompt-guided`（额外人工提示指导，未改代码）、`code-edited`（人工改代码）；空串为未注明 |
-| `generatedOn` | string | 实际生成日期，有效的 `YYYY-MM-DD`；不以上传日期代填 |
-| `evidenceUrl` | string | 公开对话或运行记录的 HTTP / HTTPS 链接，≤2000 字、不含账号密码；服务端不抓取链接内容 |
 | `promptVariant` | string | 生成时使用的题目提示词版本 ID（数据包 `promptVariants[].id`）；单一提示词题目为空串（schema v21） |
 | `tool` | string | 兼容输出，由 Harness 注册表名称或「其他」原文生成，不再独立存储 |
 | `harnessId` / `harnessOther` | string / null、string | Harness 注册表 ID 或自填「其他」，两者互斥；旧作品分别为 null、空串。写入时 ID 传空串与 null 相同，表示未注明 |
@@ -210,7 +207,7 @@ unverified ──审核──▶ verified ──审核──▶ questioned
 ```
 
 - `unverified`：初始状态，**不进入**盲投对战池，不进入排行；在作品列表中可见。
-- `verified`：进入对战池与排行。
+- `verified`：可公开展示；非文字题还须内容放行、`show_arena` 开启、`generationMode=single-turn` 且 `humanIntervention=none` 才进入盲评池与排行。已转为馆藏的原投稿不重复进池。
 - `questioned`：存疑。必须填写理由（作者与访客均可见）；退出对战池与排行，且**不可再互动**（表情返回 `409`）。
 - 删除为软删除（`deleted_at`），馆藏作品不可经 API 删除（`409`，须在数据仓库移除）。
 
@@ -255,6 +252,7 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
     "mine": { "task-id/work-id": ["🔥"] }
   },
   "arena": { "chinese-architecture": { "works": 40, "entries": 33, "uploads": true } },
+  "featured": { "chinese-architecture": { "cover": "work-id", "models": { "model-id": "work-id", "x:custom model": "up-work-id" } } },
   "totals": { "votes": 128, "voters": 17, "entries": 33 },
   "me": { "votes": 12, "pending": 1 },
   "review": null
@@ -265,6 +263,8 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
 - `datapack` 只在已加载数据包带有有效 GitHub 来源文件时返回真实 SHA；无来源元数据或标为 `local` 的本地包返回 `null`。`catalogDigest` 是实际加载的 `data.json` 原始字节的 SHA-256，本地开发前后端在 `datapack=null` 时可据此比较是否使用同一目录数据版本。`serverVersion` 在进程启动时优先读取 `SERVER_VERSION`，其次读取部署目录 Git HEAD；非 Git 部署读取 `.server-version`，均不可用时为 `dev`。它标识服务代码，不是数据包版本；数据包以 `datapack` 字段判读，部署后分别核对两者。
 - `works` **包含未验证与存疑投稿**（不含馆藏作品，馆藏经数据包分发），访客可见非特权字段。
 - `arena[题目]`：`works` = 对战池作品数（馆藏 + 已验证投稿），`entries` = 不同「模型+档位」配置数，`uploads` = 该题是否接受上传。
+- `featured`：按题目返回已当选的封面 `cover`（作品 ID 或 null）及各模型跨档位的代表作 `models`。只列已有当选记录的题目和模型；空结果为 `{}`，缺少封面时为 null。模型键使用 `catalog.modelKey(work)`：有 `modelId` 时用该 ID，否则用 `x:` 加上模型名的 NFKC、首尾去空白、小写结果。馆藏和投稿均用作品 `id`，无需来源前缀。
+- 代表作与封面只选当前盲评合格且至少 5 场比较的作品，以作品分的 `score - interval` 最大者当选；同模型代表作跨推理档位选择。每日重算时按当前票重新评估候选与旧当选者的保守分，新候选至少高出 40 分才替换。每题按服务器时区自然日最多重算一次，包括没有达标作品的日子；结果与重算日期保存在 SQLite，重启不重排。bootstrap 懒触发后台计算并先返回旧结果；已撤出、存疑、删除或其他不合格的当选作品在读取时立即移除，剩余结果仍等次日重算。文字题跳过，前端自行兜底。
 - 匿名：`user`、`me` 为 `null`，`reactions.mine` 为 `{}`；`review` 仅管理员非 null（`{ "unverified": <所属题目已公开、内容已放行且 status=unverified 的作品数>, "content": <moderation.status=review 的作品数>, "questions": <未删除的 pending 题目数> }`）。`unverified` 使用不传 viewer 的 `catalog.task(id)` 判断公开题目，待审题目的示例结果不计入，题目通过后自动计入。`pending` 仍在自动队列、`rejected` 已有决定，均不计入 `content`。
 - `site.capture` 表示截图当前是否可用；浏览器启动失败后为 false，冷却五分钟后的下一件作品会尝试恢复。`site.contentModeration` 表示内容审核开关；`site.autoModeration` 为 `moderator.enabled && Boolean(apiKey) && capturer.available`，只有开关、密钥与截图能力齐备时为 true，截图恢复后自动变回 true。前端在内容审核开启且 autoModeration=false 时显示「管理员检查内容」；旧后端缺少该字段时按 true 兼容。
 - `user.emailBound` 仅当前会话用户在 bootstrap 中返回，反映是否绑定邮箱；不加入 `auth.public`，评论等公开用户数据不包含该字段。
@@ -386,7 +386,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
   "tool": "CLI",
   "harnessId": "claude-code", "providerId": "official",
   "promptVariant": "short",
-  "modelVersion": "", "generationMode": "single-turn", "humanIntervention": "none", "generatedOn": "2026-09-30", "evidenceUrl": "",
+  "generationMode": "single-turn", "humanIntervention": "none",
   "cover": "data:image/webp;base64,…",
   "trial": { "loaded": true, "loadMs": 120, "errors": 0, "errorSamples": [], "failedResources": [], "blocked": [], "canvases": 1, "media": 3, "words": 120 }
 }
@@ -401,7 +401,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 - `providerId` 新投稿必填，只接受 `official` 或 `unofficial`，其他值 `400`。编辑禁止显式清空，缺省保留旧值；通过核验前须补齐服务商和推理档位。上传与审核忽略未知字段 `providerOther` / `providerName`，作者 PATCH 与管理员 meta 按未知字段规则返回 `400`。v25 迁移保留 `official`，其余非空旧 ID 或手填名称归为 `unofficial`，未填保持 null，并清空 `provider_other`；旧数据包读取时同样归类。
 - 普通用户须填写 Harness ID、「其他」或兼容字段 `tool` 中至少一项；过渡期旧前端只传 `tool` 仍可投稿。管理员可留空。仅传 `tool`（或 Harness 两项均空）时将其存入 `harness_other`；有非空 Harness 声明时以声明为准。输出 `tool` 从 Harness 派生，不自动猜测 ID。
 - `promptVariant`（schema v21）：题目在数据包里有 `promptVariants` 时，普通用户必须填写其中一个 `id`，管理员可留空；无效 ID 为 `400 invalid_prompt_variant`。单一提示词的题目忽略该字段并存为空串。作品视图仅在非空时输出 `promptVariant`，前端据此与同模型、同来源的其他版本合为一张卡片。
-- 生成信息五个字段的取值规则见作品字段表，服务端不要求必填；Gallery 前端要求填写 `generationMode` 与 `humanIntervention`。
+- 生成信息只保留 `generationMode` 与 `humanIntervention`，取值规则见作品字段表；服务端不要求必填，未注明的非文字作品不进盲评池。旧请求中的 `modelVersion`、`generatedOn`、`evidenceUrl` 一律忽略（任何类型均不报错），公开/管理员视图、收录导出、审计、送审声明与新身份快照均不输出。数据库旧列与值保留，不删除、不清空；历史审计日志和快照的结构化停用字段在读取时剥离，原记录不改写。
 
 成功 `200`：`{ "work": <作品公开视图> }`。作品初始状态 `unverified`，并自动排队无头截图（1440×900 与 390×844 两档，写回 `captures`；截图能力可用性见 `bootstrap.site.capture`）。
 
@@ -530,7 +530,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 - `counted`：登录且绑定邮箱时为 `true`，匿名或未绑定邮箱时为 `false`。
 - 对局创建时一次捕获当前馆藏目录和两侧身份。随后切换数据包，旧令牌仍从原目录提供 HTML 与相对资源，旧对局仍可揭晓/投票；部署应保留该目录到相关对局全部过期并经过清理宽限期。
 - 前端在写请求上携带 `X-Datapack-Version: <前端所构建的数据仓库 SHA>`（读请求不带，避免跨源 GET 预检）；创建馆藏对局、馆藏题目草稿及该草稿的正式投稿时，如果该值与服务端当前可信 SHA 不同，请求照常处理，响应头增加 `X-Datapack-Stale: 1`，响应体形状不变。对局仍绑定创建时的服务端快照。社区题目不参与此检查；缺少请求头时不增加提示头。
-- 抽样规则：先抽两个不同「模型+档位」配置，再各抽一件作品；偏向对局数少的配置、偏向实力相近者（同档 90% 概率软匹配，分差过大重掷 2 次）；避开上一场两侧作品、本人作品与已评组合。
+- 抽样规则：按 `promptVariant`（缺失为空串）与「模型+档位」分组，只在同一提示词版本的不同配置间抽取，再各均匀抽一件作品；长短版不跨组，配置分仍跨版本合计。偏向对局数少的配置、偏向实力相近者（同档 90% 概率软匹配，分差过大重掷 2 次）；避开上一场两侧作品、本人作品与已评组合。无提示词变体的题目行为不变。
 - `previous` 缺省时，登录用户自动取本人该题最近一场对局作为「上一场」回避。
 
 错误：`404 题目不存在`；`409 + code:"insufficient"` 对战池不足两个配置；`409 + code:"exhausted"` 该用户已评完全部组合；`429`。
@@ -590,6 +590,8 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 - `provisional`：对局数 < `provisionalGames`（30）者为暂定。
 - `unranked`：池内存在但尚无计入对局的配置，按模型名字典序排列。
 - 排行在票数或作品状态变化时失效重建，并以数据包版本参与缓存键。
+
+非文字题的单件作品分供代表作选择使用，不改变上述配置榜响应与算法。先以当前两件作品均 `isEligible` 的 arena 票计算该题原配置级 Bradley–Terry 强度，再以作品为单位拟合，先验为 N(配置 logit 强度, 0.5²)。同配置内不同作品的票也参与作品拟合；旧快照或显式更正中的配置键保持原计分口径。内部 `arena.workScores(taskId)` 返回 `{ id, score, interval, games }[]`；`score` 在配置分的 Elo 刻度上估计作品偏差，保持配置中心，不按作品数量再次归零；`interval` 仍为 95% 后验不确定区间半宽（以配置先验均值为锚）。超过现有 200 条目阈值时沿用 worker。文字题不计算作品分。
 
 错误：`404 题目不存在`（`task` 参数无效）；`400 invalid_query`（`harness` 既不是当前注册表 ID 也不是 `unset`，或 `provider` 不在上述三项中；`category` 不是当前题目的题型，或与 `task` 同时出现）。
 
@@ -691,8 +693,10 @@ v23 追加可空 `questions.category`，无分类旧题按标签顺序取第一�
 **`GET /api/admin/works`** 合并馆藏精选和 SQLite 投稿。查询参数：`task`（题目 ID）、`status=verified|unverified|questioned`、`source=curated|upload`、`face=gallery|arena` 与 `show=on|off`（两者一起使用）、`harness`（注册表 ID、`other` 表示只填了「其他」、`unset` 表示未注明）、`provider=official|unofficial|unset`（其他值 `400 invalid_query`）、`search`（标题、模型、题目 ID、Harness 与服务商显示名）、`page`（默认 1）、`pageSize`（默认 30，最多 100）。成功形状：
 
 ```json
-{ "works": [{ "task": "one", "id": "a", "source": "curated", "status": "verified", "show_gallery": true, "show_arena": true, "calibration_gallery": null, "calibration_arena": null, "has_calibration_gallery": false, "has_calibration_arena": false }], "total": 1, "page": 1, "pageSize": 30 }
+{ "works": [{ "task": "one", "id": "a", "source": "curated", "status": "verified", "show_gallery": true, "show_arena": true, "calibration_gallery": null, "calibration_arena": null, "has_calibration_gallery": false, "has_calibration_arena": false, "arena_eligible": true, "arena_generation_ok": true }], "total": 1, "page": 1, "pageSize": 30 }
 ```
+
+管理员作品视图带两个只读字段：`arena_eligible` 即服务端盲评池资格（`library.isEligible`）的判定结果；`arena_generation_ok` 表示生成信息是否合格（文字题恒为 true，其余须单轮且无人工介入）。后台竞技场系统据此显示「在正式盲测池」「不符合盲评条件（多轮 / 人工介入）」或「不在正式盲测池」，不在前端重复判断题型。
 
 作品对象还含原有管理员作品视图字段。精选开关和取景先读 `work_overrides`，缺失时展览馆开关默认开启、竞技场开关默认关闭。查询错误：`400 invalid_query`、`404 not_found`（题目不存在）。
 
@@ -774,11 +778,11 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 
 `works` 追加 `model_version`、`generation_mode`、`human_intervention`、`generated_on`、`evidence_url` 五列；迁移只追加列，历史行默认为空串（未注明），不推断历史来源、日期或人工介入情况。
 
-上表中的五个 API 字段同时支持投稿、审核、管理员直接上传、收件箱登记与 `/api/admin/works/:task/:id/meta`。投稿、馆藏的公开作品视图、管理员视图与收录导出均返回它们；请求省略字段保持已有值，空串显式清空，非字符串或非法值返回 `400 invalid_generation`。字段属于作者或管理员声明；证据链接不表示平台已经核验链接中的内容。后台编辑和审核的 audit 保存变化前后值。
+当前 API 只保留 `generationMode`、`humanIntervention`，同时支持投稿、审核、管理员直接上传、收件箱登记与 `/api/admin/works/:task/:id/meta`。投稿、馆藏的公开作品视图、管理员视图与收录导出均返回这两项；请求省略字段保持已有值，空串显式清空，非字符串或非法值返回 `400 invalid_generation`。历史 `agent` 读取为 `single-turn`，禁止新写。三个停用字段一律忽略，单独 PATCH/meta 是成功空操作；不会触发重新审核，也不写字段审计。后台编辑和审核的 audit 只记录两项生成信息的变化前后值。
 
-`GET /api/admin/works` 新增 `model`（注册 ID 或 `other` 表示未登记模型）、`effort`（档位文本，大小写不敏感；`unset` 为未注明）、`generationMode` 和 `humanIntervention`（各自枚举值或 `unset`）。筛选可以组合，仍在分页前执行。搜索另外覆盖厂商和模型版本。响应追加 `efforts` 数组，取全部作品实际记录的非空档位，供后台选择自定义档位；其余分页字段不变。
+`GET /api/admin/works` 新增 `model`（注册 ID 或 `other` 表示未登记模型）、`effort`（档位文本，大小写不敏感；`unset` 为未注明）、`generationMode` 和 `humanIntervention`（各自枚举值或 `unset`）。筛选可以组合，仍在分页前执行。搜索另外覆盖厂商。响应追加 `efforts` 数组，取全部作品实际记录的非空档位，供后台选择自定义档位；其余分页字段不变。竞技场开关已开启但生成信息不合格时，后台作品表显示「不符合盲评条件（多轮 / 人工介入）」。
 
-推理档位输入提供常用值与手填，新投稿必填，编辑禁止显式清空。历史空串表示未注明，明确使用默认设置可填写 `Default`；历史空串不改写成 `Default`。新对局的身份快照保留五个生成字段，历史快照不回填，计分键仍为模型或模型+档位。
+推理档位输入提供常用值与手填，新投稿必填，编辑禁止显式清空。历史空串表示未注明，明确使用默认设置可填写 `Default`；历史空串不改写成 `Default`。新对局的身份快照只保留两项生成字段，历史快照读取时剥离停用字段、不回写，计分键仍为模型或模型+档位。
 
 数据仓收录将非空生成字段写入 manifest、task.json 和作品 README，构建 data.json 时透传。manifest 与 task.json 同时声明时必须一致；消费旧包时缺失字段仍按未注明处理。Show1 旧兼容端点的返回形状保持不变。
 
@@ -808,6 +812,29 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 - **`POST /api/works/:task/:id/moderation/retry`**：仅管理员，无需请求体；仅开启自动审查时可用，否则 409。成功 200 `{ "work": <pending 作品视图> }`，写 `content-retry` audit 并刷新竞技场缓存，重新进入队列并暂不公开。
 
 送审使用 Responses API，`gpt-6-luna`、`service_tier: flex`、`store: false`、低推理档、严格 JSON schema。材料为投稿声明、入口静态文字、两档实际页面文字、可选封面及桌面/手机首屏。疑似风险返回 review，明确风险可返回 rejected。未遍历所有文件、滚动区域或交互；语境模糊交人工。缺密钥、截图不完整、超出材料限额、请求超过 15 分钟、429/其他错误、未完成/拒答/无效结构或未确认 Flex 均转 review，不自动重试或切换标准档。`CAPTURE=0` 无法完成自动审查。关闭开关不放行已有待审或被拒作品。
+
+### 3.25 盲评资格维护与代表作持久化（schema v26）
+
+v26 仅追加幂等建表 `featured_picks(task_id, scope, model_key, work_id, conservative, picked_at)` 与 `featured_refreshes(task_id, day)`，不回填作品、不打开竞技场开关，也不修改旧 CHECK 约束。`scope` 为 `cover` 或 `model`；封面的 `model_key` 为空串。日刷新状态独立保存，未有当选者的题目也不会在同日重复拟合。
+
+维护命令默认只读演练，不运行迁移、不写库：
+
+```powershell
+npm run arena-backfill -- --db .data/platform.db --dist .datapack/current
+npm run arena-backfill -- --db .data/platform.db --dist .datapack/current --exclude boeing-787/claude-opus-5.5-max-zip,voxel-construction-site/claude-opus-5.5-max-zip,sydney-opera-house/claude-opus-5.5-max-zip
+```
+
+按题返回将打开竞技场的数量和 ID、将补齐生成信息的数量和 ID、显式多轮或人工介入的数量和 ID、排除清单。三件重复 ZIP 无论当前包是否包含均在 `duplicates` 中单列 `present`/`excluded`，由用户决定包含或排除后再执行。`curatedMissingGeneration` 列出仍缺生成声明的旧包作品；命令不会修改数据包，开关打开也须等包含两项声明的新包才合格。
+
+`--exclude task/id,...` 排除该作品的全部维护修改。非文字题中，未删除投稿只有未申报多轮或人工介入时才补齐空值，并把 `agent` 改为 `single-turn`；显式非标准作品保留原生成信息。内容已公开放行、已核验的作品开启竞技场开关；馆藏 upsert 保留原 `show_gallery`（无记录为 1）及校准值。文字题完全跳过，包括只声明 `templates: ['text']` 的社区题目。
+
+写库只能由操作人员停服后手动执行，备份路径须不存在，`--actor` 为负责人姓名；全部作品修改与逐件 `arena-backfill` audit 在同一事务完成：
+
+```powershell
+npm run arena-backfill -- --db .data/platform.db --dist .datapack/current --exclude boeing-787/claude-opus-5.5-max-zip,voxel-construction-site/claude-opus-5.5-max-zip,sydney-opera-house/claude-opus-5.5-max-zip --apply --backup <new-backup.db> --actor <name>
+```
+
+命令先用 `VACUUM INTO` 保存一致性备份。演练支持旧 schema（未有生成/内容审核字段时按已发布迁移的空串/legacy 默认值展示），输出 `schemaVersion`；`--apply` 要求至少 v19，旧库须另行手动升级，命令不自动升级。执行后重启已停服的服务以清空排行榜和作品分缓存；`poolStats` 无缓存，每次读取当前资格。进程内维护调用可传 `invalidate` 回调，在事务提交后失效。没有启动时回填或自动维护入口。
 
 ## 4. 数据包契约（`dist/data.json`）
 

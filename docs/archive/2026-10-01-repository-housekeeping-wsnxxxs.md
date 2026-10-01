@@ -33,3 +33,9 @@
 ## 下一步建议
 
 主会话统一推送后核对远端提交，再保留历史证据并清理已合入的旧 worktree / 分支；不得把源码推送称为部署。
+
+## 收尾补记（2026-10-01）
+
+- 主会话已将 `99311dc` 推送到 origin/main，GitHub Node 22 check / test CI 成功；画廊对当前 182 件本地数据包及后端运行 integration smoke 通过。没有部署或生产写入，生产 pin 保持原样。
+- 两处历史 output 已在主目录忽略的 `output/repository-housekeeping-20261001/` 完整备份，文件数、字节数和逐文件 SHA-256 全部匹配。归档跳过三处依赖 junction，并在 `junctions.txt` 记录目标。
+- shared-question-intake 后端工作树及分支已确认干净、祖先关系完整后删除。自动审批拒绝 luna 的非递归依赖 junction 删除，理由仅为 `blocked by policy`；luna 与 vote 的工作树及分支因此保留，没有尝试替代删除机制。

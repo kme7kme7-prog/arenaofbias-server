@@ -1,5 +1,11 @@
 # HANDOFF.md · 当前状态
 
+## 整理收尾（2026-10-01 Brisbane，已推送，不部署）
+
+- 四仓 main 均已完成源码推送；后端 `99311dc` 已在 origin/main，GitHub 的 Node 22 check / test CI 成功。画廊对当前 182 件本地数据包和后端的真实隔离 integration smoke 也通过。本轮没有部署、生产写入或 pin 升级；下面“待推送”是整理过程记录。
+- 已删除干净且合入 main 的 shared-question-intake 后端工作树与同名本地分支。luna-flex-moderation 和 show1-vote-processing 的工作树、依赖链接及分支保留：自动审批拒绝依赖目录链接删除，理由为 `blocked by policy`，没有改用其他删除机制。
+- 两处历史 output 已归档到主目录忽略的 `output/repository-housekeeping-20261001/`：luna 37 文件 / 2751142 字节，vote 2620 文件 / 159813720 字节，全部逐文件 SHA-256 一致。归档排除并记录三处依赖 junction，依赖目标与主目录业务数据保留。
+
 ## 本轮：四仓整理中的后端分支核对（2026-10-01 Brisbane，本地完成，待统一推送，不部署）
 
 - 用户授权本轮合并、提交、推送和保留有效工作后的目录清理，明确不部署。后端主工作区与三个旧 worktree 均无待提交源码；fetch 后 `origin/main` 为 `e81cb4e`，main 另有注册邮箱绑定提交 `55e3288` 待推送。既有提交作者保持原样，本轮身份经 GitHub `/user` 核对为 wsnxxxs。

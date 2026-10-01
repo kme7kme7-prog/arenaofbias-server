@@ -152,7 +152,7 @@ test('admin preview keys serve curated works on the content origin with the capt
 }));
 
 test('admin meta re-homes an upload to another task and moves its history along', async () => withPlatform(async ({ platform, call }) => {
-  const upload = await call('root', 'POST', '/api/admin/works/upload?task=one&name=work.html&title=搬家作品&modelName=模型丙&show_gallery=1', html, true);
+  const upload = await call('root', 'POST', '/api/admin/works/upload?effort=Default&providerId=official&task=one&name=work.html&title=搬家作品&modelName=模型丙&show_gallery=1', html, true);
   const id = upload.data.work.id;
   platform.db.prepare(`INSERT INTO votes (id, match_id, user_id, task_id, a_work, b_work, pair_key, choice, created_at)
     VALUES ('mv1', 'mm1', NULL, 'one', ?, 'a', 'one:|a', 'a', 1)`).run(id);

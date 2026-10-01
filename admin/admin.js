@@ -205,10 +205,13 @@ async function loadCatalog() {
   if (state.data) return;
   try {
     const response = await fetch('/data.json', { cache: 'no-store' });
-    state.data = response.ok ? await response.json() : { tasks: [], models: [] };
+    state.data = response.ok ? await response.json() : null;
   } catch {
-    state.data = { tasks: [], models: [] };
+    state.data = null;
   }
+  // A failed read (e.g. the pre-login 404) stays null so the post-login boot retries;
+  // caching an empty stub here would blank every registry dropdown until a hard reload.
+  if (!state.data) return;
 }
 
 async function loadReview() {

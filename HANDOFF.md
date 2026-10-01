@@ -1,5 +1,11 @@
 # HANDOFF.md · 当前状态
 
+## 本轮：Harness 下拉答疑 + 登录后目录空 bug 修复（2026-10-01，本地提交，未推送未部署）
+
+- 用户问 Harness 下拉会不会有选项/手填。结论：选项来自数据包 data.json 的 harnesses 登记表（线上包 14 个：Claude Code/Codex/Gemini CLI/Cursor/Trae/Qoder/Kimi Code/KimiCode Desktop/官方网页App对话/API脚本/Arena/Antigravity/Zcode/DeepSeek），选「其他（手动填写）」弹手填框+相似名提示，功能一直都在；验收环境空是因为假包没登记。
+- 顺手抓到并修掉一个真 bug（admin/admin.js loadCatalog）：登录前渲染作品页会以游客身份拉 /data.json → 404 → 缓存空目录 {tasks:[],models:[]}，登录后 boot() 的 if(state.data) return 跳过重拉 → 本次会话所有模型/Harness/题目下拉一直空，直到手动强刷。修法：失败路径置 state.data=null 允许登录后重试（正常路径缓存不变）。浏览器复现登录→编辑对话框验证：10 个 Harness 选项齐全、其他→手填框出现、手填 Trae CN 保存 toast「信息已更新」。193/193、check 76/0。
+- 验收环境（bridge-demo/admin-e2e.mjs）data.json 已补 harnesses（10 项 listed:true）+providers 二值——注意 filter 只认 listed:true，真包都带。演示用投稿测试件每轮重启后重传。
+
 ## 本轮：验收反馈三件套——墨绿主题+圆角、归属题目迁移（2026-10-01，本地提交，未推送未部署）
 
 - 用户对比老后台（Show1 老栈本地拉起验收，admin.html 已临时恢复 d871c75^ 版本供对比）后三条反馈：①要老后台那样的圆角 ②新后台亮绿太多 ③要能编辑作品全部归属信息。

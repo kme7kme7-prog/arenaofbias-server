@@ -602,6 +602,9 @@ export function createLibrary({ db, catalog, config, limits }) {
       const source = provenance(!body.harnessId && !body.harnessOther && body.tool
         ? { ...body, harnessOther: clip(body.tool, 40) } : body);
       const generation = generationFrom(body);
+      const effort = effortOf(body.effort);
+      if (!effort) fail(400, '请选择或填写推理档位');
+      if (!source.providerId) fail(400, '请选择服务商');
       const promptVariant = promptVariantFrom(draft.task_id, body, '', user.role !== 'admin');
       if (user.role !== 'admin' && !source.harnessId && !source.harnessOther) fail(400, '请选择或填写 Harness');
       const who = identity(body);
@@ -637,7 +640,7 @@ export function createLibrary({ db, catalog, config, limits }) {
             taskId = question.id;
           } else if (!templatesOf(catalog.task(taskId, user)).includes(format)) fail(400, '该题不支持此提交格式');
           q.insertWork.run(id, taskId, user.id, title, clip(body.summary, 200), who.modelId, who.modelId ? '' : who.modelName,
-            effortOf(body.effort), source.harnessId, source.harnessOther, source.providerId,
+            effort, source.harnessId, source.harnessOther, source.providerId,
             source.providerOther, noteWithVendor(clip(body.note, 1000), who.modelId, body.vendor), token('w'), draft.source_name, draft.root, draft.entry, draft.file_count,
             draft.bytes, draft.digest, draft.checks, JSON.stringify(sanitizeTrial(body.trial)), coverName, now, now,
             ...GENERATION_FIELDS.map((key) => generation[key]), JSON.stringify(config.moderation?.enabled ? pendingModeration() : { status: 'legacy' }), promptVariant);
@@ -675,6 +678,8 @@ export function createLibrary({ db, catalog, config, limits }) {
       const who = body.modelId !== undefined || body.modelName !== undefined ? identity(body) : work;
       const effort = body.effort !== undefined ? effortOf(body.effort) : work.effort;
       const source = provenance(body, work);
+      if (body.effort !== undefined && !effort) fail(400, '请选择或填写推理档位');
+      if (Object.hasOwn(body, 'providerId') && !source.providerId) fail(400, '请选择服务商');
       if (!admin && !source.harnessId && !source.harnessOther) fail(400, '请选择或填写 Harness');
       const generation = generationFrom(body, work);
       const promptVariant = promptVariantFrom(taskId, body, work.promptVariant, !admin);
@@ -734,6 +739,8 @@ export function createLibrary({ db, catalog, config, limits }) {
       const effort = body.effort !== undefined ? effortOf(body.effort) : work.effort;
       const source = provenance(body, work);
       const generation = generationFrom(body, work);
+      if ((status === 'verified' || body.effort !== undefined) && !effort) fail(400, '请选择或填写推理档位');
+      if ((status === 'verified' || Object.hasOwn(body, 'providerId')) && !source.providerId) fail(400, '请选择服务商');
       const audience = body.audience === undefined ? work.audience : String(body.audience);
       if (!['hidden', 'show1', 'show2', 'both'].includes(audience)) fail(400, '展示站点无效');
       for (const key of ['show_gallery', 'show_arena']) if (body[key] !== undefined && typeof body[key] !== 'boolean') fail(400, '门面开关无效', 'invalid_face_settings');

@@ -46,7 +46,7 @@ describe('nomination and export', () => {
     const draft = await call('alice', 'POST', '/api/drafts?task=one&name=candidate.html', PAGE, true);
     assert.equal(draft.status, 200);
     const submission = await call('alice', 'POST', '/api/works', { draftId: draft.data.draft.id, confirmed: true,
-      title: 'Candidate', modelId: 'm-a', tool: 'CLI' });
+      title: 'Candidate', modelId: 'm-a', effort: 'Default', providerId: 'official', tool: 'CLI' });
     assert.equal(submission.status, 200);
     id = submission.data.work.id;
   });
@@ -73,7 +73,7 @@ describe('nomination and export', () => {
     assert.equal(meta.status, 200);
     assert.equal(meta.data.id, id);
     assert.deepEqual([meta.data.harnessId, meta.data.harnessOther,
-      meta.data.providerId, meta.data.providerOther], [null, 'CLI', null, '']);
+      meta.data.providerId, meta.data.providerOther], [null, 'CLI', 'official', '']);
     assert.equal('harnessVersion' in meta.data, false);
     assert.equal(meta.data.files.length, 1);
     const response = await fetch(base + exportPath + '/file?path=index.html');
@@ -152,7 +152,7 @@ describe('nomination and export', () => {
       const draft = await call('alice', 'POST', `/api/drafts?task=one&name=${title}.html`, PAGE, true);
       assert.equal(draft.status, 200);
       const submitted = await call('alice', 'POST', '/api/works', { draftId: draft.data.draft.id,
-        confirmed: true, title, modelId: 'm-a', tool: 'CLI' });
+        confirmed: true, title, modelId: 'm-a', effort: 'Default', providerId: 'official', tool: 'CLI' });
       assert.equal(submitted.status, 200);
       const uploadId = submitted.data.work.id;
       assert.equal((await call('root', 'POST', `/api/works/one/${uploadId}/review`,

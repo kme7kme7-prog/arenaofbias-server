@@ -100,7 +100,7 @@ describe('admin inbox', () => {
     const listed = await call('root', 'GET', '/api/admin/inbox');
     const entry = listed.data.entries[0];
     const registered = await call('root', 'POST', '/api/admin/inbox/register', {
-      id: entry.id, task: 'one', summary: '水乡', modelId: 'm-a', harnessVersion: 'ignored-version',
+      id: entry.id, task: 'one', summary: '水乡', effort: 'Default', providerId: 'official', modelId: 'm-a', harnessVersion: 'ignored-version',
     });
     assert.equal(registered.status, 200);
     const work = registered.data.work;
@@ -117,7 +117,7 @@ describe('admin inbox', () => {
     // Second file, registered with publish → straight into the verified pool.
     await call('root', 'POST', `/api/admin/inbox?name=published.html`, PAGE, { raw: true });
     const second = (await call('root', 'GET', '/api/admin/inbox')).data.entries[0];
-    const direct = await call('root', 'POST', '/api/admin/inbox/register', { id: second.id, task: 'one', publish: true, modelName: '手工模型', show_gallery: true, show_arena: false, harnessVersion: '' });
+    const direct = await call('root', 'POST', '/api/admin/inbox/register', { id: second.id, task: 'one', publish: true, effort: 'Default', providerId: 'official', modelName: '手工模型', show_gallery: true, show_arena: false, harnessVersion: '' });
     assert.equal(direct.status, 200);
     assert.equal(direct.data.work.status, 'verified');
     assert.equal(direct.data.work.modelName, '手工模型');

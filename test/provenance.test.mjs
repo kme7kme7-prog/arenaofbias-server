@@ -159,7 +159,7 @@ test('an old pack accepts a custom Harness and binary providers but no Harness r
     assert.equal((await call('POST', '/api/auth/login', { name: 'alice', password: 'correct horse' })).status, 200);
     const draft = await call('POST', '/api/drafts?task=one&name=work.html', PAGE, true);
     assert.equal(draft.status, 200);
-    const body = { draftId: draft.data.draft.id, confirmed: true, title: 'Old pack upload', modelId: 'm-a' };
+    const body = { draftId: draft.data.draft.id, confirmed: true, title: 'Old pack upload', modelId: 'm-a', effort: 'Default' };
     assert.equal((await call('POST', '/api/works', { ...body, harnessId: 'codex' })).status, 400);
     const custom = await call('POST', '/api/works', { ...body, harnessOther: 'Local tool', providerId: 'unofficial' });
     assert.equal(custom.status, 200);
@@ -206,15 +206,18 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
       ['codex', 'Codex', 'official']);
     assert.equal('harnessVersion' in curated, false);
     assert.equal('providerName' in curated, false);
-    const baseBody = { draftId: await draft(), confirmed: true, title: 'Candidate', modelId: 'm-a' };
+    const baseBody = { draftId: await draft(), confirmed: true, title: 'Candidate', modelId: 'm-a', effort: 'Default', providerId: 'official' };
     for (const bad of [{}, { harnessId: 'missing' }, { harnessId: 'codex', harnessOther: 'Other' },
       ...['missing', 'openrouter', 'third-party', 'other', 1, false].map((providerId) => ({ providerId, tool: 'CLI' }))]) {
       const response = await call('alice', 'POST', '/api/works', { ...baseBody, ...bad });
       assert.equal(response.status, 400, JSON.stringify(bad));
     }
-    const generation = { modelVersion: '2026-09-29', generationMode: 'agent', humanIntervention: 'prompt-guided',
+    for (const bad of [{ effort: undefined }, { effort: '' }, { effort: '   ' }, { providerId: undefined }, { providerId: '' }, { providerId: null }]) {
+      assert.equal((await call('alice', 'POST', '/api/works', { ...baseBody, harnessId: 'codex', ...bad })).status, 400);
+    }
+    const generation = { modelVersion: '2026-09-29', generationMode: 'multi-turn', humanIntervention: 'prompt-guided',
       generatedOn: '2026-09-29', evidenceUrl: 'https://example.test/shared/run' };
-    for (const invalid of [{ generationMode: 'anything' }, { humanIntervention: 'unknown' }, { generatedOn: '2026-02-30' },
+    for (const invalid of [{ generationMode: 'agent' }, { generationMode: 'anything' }, { humanIntervention: 'unknown' }, { generatedOn: '2026-02-30' },
       { evidenceUrl: 'javascript:alert(1)' }, { modelVersion: 'x'.repeat(61) }]) {
       const rejected = await call('alice', 'POST', '/api/works', { ...baseBody, harnessId: 'codex', ...invalid });
       assert.equal(rejected.status, 400, JSON.stringify(invalid));
@@ -242,9 +245,9 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
         assert.equal(platform.db.prepare('SELECT harness_version FROM works WHERE id = ?').get(id).harness_version, 'stored-old-version');
       }
     }
-    for (const body of [{ providerId: 'openrouter' }, { providerId: 'missing' }, { providerOther: 'Local service' }, { providerName: 'Local service' }])
+    for (const body of [{ effort: '' }, { effort: '   ' }, { providerId: null }, { providerId: '' }, { providerId: 'openrouter' }, { providerId: 'missing' }, { providerOther: 'Local service' }, { providerName: 'Local service' }])
       assert.equal((await call('alice', 'PATCH', editPath, body)).status, 400);
-    for (const value of ['unofficial', null, 'official']) {
+    for (const value of ['unofficial', 'official']) {
       const edited = await call('alice', 'PATCH', editPath, { providerId: value });
       assert.equal(edited.status, 200);
       assert.equal(edited.data.work.provider, value);
@@ -262,10 +265,9 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
     assert.equal(legacy.status, 200);
     assert.equal(legacy.data.work.harness, null);
     assert.equal(legacy.data.work.harnessName, '原始工具');
-    assert.equal(legacy.data.work.provider, null);
+    assert.equal(legacy.data.work.provider, 'official');
     const blank = await call('alice', 'POST', '/api/works', { ...baseBody, draftId: await draft(), tool: 'CLI', harnessId: '', providerId: '' });
-    assert.equal(blank.status, 200, 'an empty id means not stated');
-    assert.deepEqual([blank.data.work.harness, blank.data.work.harnessName, blank.data.work.provider], [null, 'CLI', null]);
+    assert.equal(blank.status, 400, 'provider is required');
     const meta = `/api/admin/works/one/${id}/meta`;
     const edited = await call('root', 'POST', meta, { modelVersion: 'snapshot-2', humanIntervention: 'code-edited' });
     assert.equal(edited.data.work.modelVersion, 'snapshot-2');
@@ -275,9 +277,7 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
     assert.equal((await call('root', 'POST', meta, { providerOther: '其他服务' })).status, 400);
     assert.equal((await call('root', 'POST', meta, { harnessOther: '备用工具' })).data.work.harnessName, '备用工具');
     const cleared = await call('root', 'POST', meta, { harnessId: null, providerId: null });
-    assert.deepEqual([cleared.data.work.harness, cleared.data.work.harnessName,
-      cleared.data.work.provider], [null, null, null]);
-    assert.equal('harnessVersion' in cleared.data.work, false);
+    assert.equal(cleared.status, 400, 'provider cannot be cleared');
     for (const providerId of ['openrouter', 'missing'])
       assert.equal((await call('root', 'POST', `/api/works/one/${id}/review`, { status: 'verified', providerId })).status, 400);
     const unofficialReview = await call('root', 'POST', `/api/works/one/${id}/review`,
@@ -307,15 +307,15 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
       return response.data.works.map((work) => work.id).sort();
     };
     assert.deepEqual(await listed('harness=codex'), ['a1', id].sort());
-    assert.deepEqual(await listed('harness=other'), [other.data.work.id, legacy.data.work.id, blank.data.work.id].sort());
+    assert.deepEqual(await listed('harness=other'), [other.data.work.id, legacy.data.work.id].sort());
     assert.deepEqual(await listed('harness=unset'), ['b1']);
     assert.deepEqual(await listed('provider=official&harness=codex'), ['a1', id].sort());
     assert.deepEqual(await listed('provider=unofficial'), [other.data.work.id]);
-    assert.deepEqual(await listed('provider=unset'), ['b1', legacy.data.work.id, blank.data.work.id].sort());
+    assert.deepEqual(await listed('provider=unset'), ['b1']);
     assert.equal((await call('root', 'GET', '/api/admin/works?provider=other')).status, 400);
     assert.deepEqual(await listed('search=自制'), [other.data.work.id]);
     assert.equal((await call('root', 'GET', '/api/admin/works?harness=missing')).status, 400);
-    assert.deepEqual(await listed('model=m-a&generationMode=agent&humanIntervention=code-edited'), [id]);
+    assert.deepEqual(await listed('model=m-a&generationMode=multi-turn&humanIntervention=code-edited'), [id]);
     assert.deepEqual(await listed('effort=hIgH'), ['a1']);
     assert.deepEqual(await listed('model=m-b&generationMode=unset'), ['b1']);
     assert.equal((await call('root', 'GET', '/api/admin/works?generationMode=missing')).status, 400);
@@ -332,7 +332,7 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
     assert.equal(exported.data.evidenceUrl, generation.evidenceUrl);
     const clear = await call('root', 'POST', meta, { evidenceUrl: '' });
     assert.equal(clear.data.work.evidenceUrl, '', 'empty text explicitly clears metadata');
-    assert.equal(clear.data.work.generationMode, 'agent');
+    assert.equal(clear.data.work.generationMode, 'multi-turn');
     for (const work of ['a1', 'b1']) platform.db.prepare(`INSERT INTO work_overrides
       (task_id, work_id, show_gallery, show_arena, updated_by, updated_at) VALUES ('one', ?, 1, 1, 'root', 0)`).run(work);
     const alice = platform.auth.userFrom({ headers: { cookie: jars.get('alice') } });

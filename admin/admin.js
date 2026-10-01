@@ -349,7 +349,7 @@ function suggestionHtml(type, choice, other) {
 
 const GENERATION_FIELDS = ['modelVersion', 'generationMode', 'humanIntervention', 'generatedOn', 'evidenceUrl'];
 const GENERATION_CHOICES = {
-  generationMode: { 'single-turn': '单轮生成', 'multi-turn': '多轮生成', agent: '智能体执行' },
+  generationMode: { 'single-turn': '一轮', 'multi-turn': '多轮' },
   humanIntervention: { none: '仅初始提示，未修改代码', 'prompt-guided': '人工提示与指导（未改代码）', 'code-edited': '人工修改了代码' },
 };
 const GENERATION_LABELS = { generationMode: '生成方式', humanIntervention: '人工介入程度' };
@@ -363,7 +363,7 @@ function generationFields(work = {}) {
     <p class="fine">只填写有记录支持的信息；未注明与没有人工介入是不同含义。</p></details>`;
 }
 const generationBody = (get, work = {}) => Object.fromEntries(GENERATION_FIELDS
-  .map((key) => [key, String(get(key) ?? '').trim()]).filter(([key, value]) => value !== (work[key] ?? '')));
+  .map((key) => [key, String(get(key) ?? '').trim()]).filter(([key, value]) => value !== (work[key] ?? '') && !(key === 'generationMode' && work[key] === 'agent' && value === '')));
 const generationFacts = (work) => `<div><dt>模型版本</dt><dd>${esc(work.modelVersion || '未注明')}</dd></div>
   ${Object.keys(GENERATION_CHOICES).map((key) => `<div><dt>${GENERATION_LABELS[key]}</dt><dd>${esc(GENERATION_CHOICES[key][work[key]] || '未注明')}</dd></div>`).join('')}
   <div><dt>生成日期</dt><dd>${esc(work.generatedOn || '未注明')}</dd></div>
@@ -371,7 +371,7 @@ const generationFacts = (work) => `<div><dt>模型版本</dt><dd>${esc(work.mode
 let effortInputId = 0;
 function effortField(value = '') {
   const id = `admin-efforts-${++effortInputId}`;
-  return `<label class="field"><span class="field-label">推理档位<small>可选择常用值或手填；留空表示未注明</small></span><input class="input" name="effort" list="${id}" maxlength="20" value="${esc(value)}" placeholder="未注明"><datalist id="${id}">${['Default', 'Low', 'Medium', 'High', 'XHigh', 'Max'].map((effort) => `<option value="${effort}">${effort === 'Default' ? '默认档位（明确使用默认设置）' : effort}</option>`).join('')}</datalist></label>`;
+  return `<label class="field"><span class="field-label">推理档位<i>*</i><small>请选择常用值或手填，使用默认设置填 Default</small></span><input class="input" name="effort" list="${id}" required maxlength="20" value="${esc(value)}" placeholder="选择或填写档位"><datalist id="${id}">${['Default', 'Low', 'Medium', 'High', 'XHigh', 'Max'].map((effort) => `<option value="${effort}">${effort === 'Default' ? '默认档位（明确使用默认设置）' : effort}</option>`).join('')}</datalist></label>`;
 }
 
 function provenanceFields({ harness = { choice: '', other: '' }, provider = { choice: '' } } = {}) {
@@ -389,7 +389,7 @@ function provenanceFields({ harness = { choice: '', other: '' }, provider = { ch
         <span class="provenance-suggestion" data-provenance-suggestion="${type}"${suggestion ? '' : ' hidden'}>${suggestion}</span></label>`;
   };
   return `<div class="field-row">${field('harness', harness)}</div>
-    <div class="field-row"><label class="field"><span class="field-label">服务商</span><select class="input" name="providerChoice"><option value="">未注明</option>${Object.entries(PROVIDER_CHOICES).map(([value, label]) => `<option value="${value}"${provider.choice === value ? ' selected' : ''}>${label}</option>`).join('')}</select></label></div>`;
+    <div class="field-row"><label class="field"><span class="field-label">服务商<i>*</i></span><select class="input" name="providerChoice" required><option value="">选择服务商</option>${Object.entries(PROVIDER_CHOICES).map(([value, label]) => `<option value="${value}"${provider.choice === value ? ' selected' : ''}>${label}</option>`).join('')}</select></label></div>`;
 }
 
 function refreshProvenance(form) {
@@ -419,6 +419,8 @@ function provenanceBody(get, work = null) {
     body[`${type}Other`] = next.other;
   }
   const provider = get('providerChoice') ?? '';
+  if (!provider) throw new Error('请选择服务商');
+  if (!String(get('effort') ?? '').trim()) throw new Error('请选择或填写推理档位');
   if (work ? provider !== providerChoice(work) : provider) body.providerId = provider;
   return body;
 }

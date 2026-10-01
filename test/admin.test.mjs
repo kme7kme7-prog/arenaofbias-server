@@ -84,7 +84,7 @@ async function withPlatform(run) {
 }
 
 test('admin API merges curated and upload works, applies face settings, calibration and audit', async () => withPlatform(async ({ platform, call }) => {
-  const upload = await call('root', 'POST', '/api/admin/works/upload?task=one&name=work.html&title=代传作品&modelName=模型丙&show_gallery=1&show_arena=1', html, true);
+  const upload = await call('root', 'POST', '/api/admin/works/upload?effort=Default&providerId=official&task=one&name=work.html&title=代传作品&modelName=模型丙&show_gallery=1&show_arena=1', html, true);
   assert.equal(upload.status, 200, JSON.stringify(upload.data));
   const id = upload.data.work.id;
   assert.equal(upload.data.work.status, 'verified');
@@ -127,7 +127,7 @@ test('calibrating a curated work preserves its arena approval and invalidates th
 }));
 
 test('admin batch face settings update curated and uploaded works atomically with one audit per work', async () => withPlatform(async ({ platform, call }) => {
-  const upload = await call('root', 'POST', '/api/admin/works/upload?task=one&name=work.html&title=代传作品&modelName=模型丙', html, true);
+  const upload = await call('root', 'POST', '/api/admin/works/upload?effort=Default&providerId=official&task=one&name=work.html&title=代传作品&modelName=模型丙', html, true);
   const id = upload.data.work.id;
   const path = '/api/admin/works/batch-face-settings';
   const works = [{ task: 'one', id: 'a' }, { task: 'one', id }];

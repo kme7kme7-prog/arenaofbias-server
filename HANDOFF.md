@@ -1,5 +1,13 @@
 # HANDOFF.md · 当前状态
 
+## 上传档位与服务商必填（2026-10-01，本地实现并提交）
+
+- 新投稿（普通、题目示例、管理员直传、收件箱登记）强制非空 effort 和 official/unofficial providerId。PATCH/meta 禁止显式清空，省略键保持旧记录；通过核验前补齐两项，标记存疑和退回流程保留。新写 generationMode 仅 single-turn/multi-turn，历史 agent 在省略字段时保留；数据库迁移、存量行与投票快照未改。后台表单同步必填及两项生成方式。仅更新受新契约影响的原有 fixture，在既有 provenance 测试补缺失/空白/清空/agent 400 断言。
+- check 74/0、test 184/184（0 fail/cancel/skip）；跨仓真实隔离 integration smoke 通过；git diff --check 通过。早期测试因旧 fixture 省略新必填字段失败，补齐声明后全量通过。未操作生产或业务库，未调用真实 SMTP、截图服务、Luna。
+- 忽略的 output/submission-options-test*.log 与定向测试日志保留；无其它未提交改动。
+- 本轮未推送、部署或切换生产 pin；详见 [本轮归档](docs/archive/2026-10-01-submission-options-wsnxxxs.md)。
+
+
 ## 本轮：四仓最新状态整理与部署（2026-10-01 Brisbane，功能与数据已部署）
 
 - 用户授权整理、合并、提交、推送及部署四仓，并确认 Gallery 的 11 个既有未提交文件一并提交部署。此前轮次的“不部署、不切换 pin”不适用于本轮。按指定 GPT-6.1 Sol medium 分工，提交身份为 GitHub 核对的 wsnxxxs / noreply；不强推、不覆盖他人有效远端修改。

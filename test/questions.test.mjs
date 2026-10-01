@@ -62,7 +62,7 @@ describe('community question and sample review lifecycle', () => {
   let root, platform, site, content, base;
   const cookies = new Map();
   const questionBody = { title: 'Question', summary: 'Test interaction', prompt: 'Build a page.\nKeep this text.', category: '静态网页', tags: ['UI'], templates: ['static'] };
-  const workBody = { title: 'Sample', modelId: 'model-a', effort: 'High', harnessOther: 'Test harness', trial: { loaded: true } };
+  const workBody = { title: 'Sample', modelId: 'model-a', effort: 'High', providerId: 'official', harnessOther: 'Test harness', trial: { loaded: true } };
   async function call(who, method, path, body, raw = false) {
     const headers = { origin: base };
     if (cookies.has(who)) headers.cookie = cookies.get(who);

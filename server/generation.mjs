@@ -1,7 +1,7 @@
 import { fail } from './http.mjs';
 
 export const GENERATION_FIELDS = ['modelVersion', 'generationMode', 'humanIntervention', 'generatedOn', 'evidenceUrl'];
-export const GENERATION_MODES = ['single-turn', 'multi-turn', 'agent'];
+export const GENERATION_MODES = ['single-turn', 'multi-turn'];
 export const HUMAN_INTERVENTIONS = ['none', 'prompt-guided', 'code-edited'];
 export const generationOf = (work) => Object.fromEntries(GENERATION_FIELDS.map((key) => [key, work[key] ?? '']));
 
@@ -14,7 +14,7 @@ export function generationFrom(body, current = {}) {
     next[key] = body[key].trim();
   }
   if (next.modelVersion.length > 60) fail(400, '模型版本不能超过 60 字', 'invalid_generation');
-  if (next.generationMode && !GENERATION_MODES.includes(next.generationMode)) fail(400, '生成方式无效', 'invalid_generation');
+  if (Object.hasOwn(body, 'generationMode') && next.generationMode && !GENERATION_MODES.includes(next.generationMode)) fail(400, '生成方式无效', 'invalid_generation');
   if (next.humanIntervention && !HUMAN_INTERVENTIONS.includes(next.humanIntervention)) fail(400, '人工介入程度无效', 'invalid_generation');
   if (next.generatedOn && (!/^\d{4}-\d{2}-\d{2}$/.test(next.generatedOn) ||
     !Number.isFinite(Date.parse(next.generatedOn)) || new Date(next.generatedOn).toISOString().slice(0, 10) !== next.generatedOn))

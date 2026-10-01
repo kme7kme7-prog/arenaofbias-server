@@ -28,7 +28,7 @@ test('cover write failure keeps the draft and startup moves orphan work director
     syncBuiltinESMExports();
     try {
       assert.throws(() => platform.library.submit(user, { draftId: draft.id, confirmed: true, title: 'Test',
-        modelName: 'Local', tool: 'Test', cover: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l1sAAAAASUVORK5CYII=' }),
+        modelName: 'Local', effort: 'Default', providerId: 'official', tool: 'Test', cover: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l1sAAAAASUVORK5CYII=' }),
       (error) => error.code === 'ENOSPC');
     } finally { fs.writeFileSync = original; syncBuiltinESMExports(); }
     assert.equal(platform.db.prepare('SELECT COUNT(*) AS n FROM drafts').get().n, 1);
@@ -42,7 +42,7 @@ test('cover write failure keeps the draft and startup moves orphan work director
     syncBuiltinESMExports();
     try {
       assert.throws(() => platform.library.submit(user, { draftId: draft.id, confirmed: true, title: 'Test',
-        modelName: 'Local', tool: 'Test', cover: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l1sAAAAASUVORK5CYII=' }),
+        modelName: 'Local', effort: 'Default', providerId: 'official', tool: 'Test', cover: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l1sAAAAASUVORK5CYII=' }),
       (error) => error.code === 'EIO');
     } finally { fs.renameSync = rename; syncBuiltinESMExports(); }
     assert.equal(platform.db.prepare('SELECT COUNT(*) AS n FROM drafts').get().n, 1);

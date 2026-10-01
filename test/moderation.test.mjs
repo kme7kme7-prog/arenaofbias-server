@@ -66,7 +66,7 @@ async function setup(run, { capture = true, key = 'test-key', enabled = true } =
     const draft = await call(who, 'POST', '/api/drafts?task=one&name=work.html', PAGE, true);
     assert.equal(draft.status, 200);
     const result = await call(who, 'POST', '/api/works', { draftId: draft.data.draft.id, confirmed: true, title: '测试作品',
-      modelId: 'm', harnessOther: '测试工具', cover: `data:image/png;base64,${PNG.toString('base64')}`, ...extra });
+      modelId: 'm', effort: 'Default', providerId: 'official', harnessOther: '测试工具', cover: `data:image/png;base64,${PNG.toString('base64')}`, ...extra });
     assert.equal(result.status, 200);
     return result.data.work;
   }
@@ -183,7 +183,7 @@ test('ordinary verification requires content approval while admin publication re
     assert.equal(reviewCounts.content, 1);
     assert.equal(reviewCounts.unverified, 0);
     assert.deepEqual(Object.keys((await call('owner', 'GET', '/api/me')).data.works[0].moderation).sort(), ['at', 'status']);
-    const adminUpload = await call('admin', 'POST', '/api/admin/works/upload?task=one&name=a.html&title=管理员作品&modelId=m', PAGE, true);
+    const adminUpload = await call('admin', 'POST', '/api/admin/works/upload?task=one&name=a.html&title=管理员作品&modelId=m&effort=Default&providerId=official', PAGE, true);
     assert.equal(adminUpload.status, 200);
     assert.equal(adminUpload.data.work.status, 'verified');
     assert.equal(adminUpload.data.work.moderation.status, 'approved');
@@ -192,7 +192,7 @@ test('ordinary verification requires content approval while admin publication re
     assert.equal(adminUpload.data.work.moderation.reason, '管理员上传');
     assert.equal((await call('admin', 'POST', '/api/admin/inbox?name=inbox.html', PAGE, true)).status, 200);
     const inbox = (await call('admin', 'GET', '/api/admin/inbox')).data.entries[0];
-    const registered = await call('admin', 'POST', '/api/admin/inbox/register', { id: inbox.id, task: 'one', title: '收件箱作品', modelId: 'm', publish: true });
+    const registered = await call('admin', 'POST', '/api/admin/inbox/register', { id: inbox.id, task: 'one', title: '收件箱作品', modelId: 'm', effort: 'Default', providerId: 'official', publish: true });
     assert.equal(registered.status, 200);
     assert.equal(registered.data.work.status, 'verified');
     assert.equal(registered.data.work.moderation.status, 'approved');
@@ -201,7 +201,7 @@ test('ordinary verification requires content approval while admin publication re
     assert.equal(registered.data.work.moderation.reason, '管理员上传');
     assert.equal((await call('admin', 'POST', '/api/admin/inbox?name=private.html', PAGE, true)).status, 200);
     const privateInbox = (await call('admin', 'GET', '/api/admin/inbox')).data.entries[0];
-    const privateRegistration = await call('admin', 'POST', '/api/admin/inbox/register', { id: privateInbox.id, task: 'one', title: '待审收件箱作品', modelId: 'm', publish: false });
+    const privateRegistration = await call('admin', 'POST', '/api/admin/inbox/register', { id: privateInbox.id, task: 'one', title: '待审收件箱作品', modelId: 'm', effort: 'Default', providerId: 'official', publish: false });
     assert.equal(privateRegistration.status, 200);
     assert.equal(privateRegistration.data.work.status, 'unverified');
     assert.equal(privateRegistration.data.work.moderation.status, 'pending');

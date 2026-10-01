@@ -2,6 +2,7 @@
 
 ## 本轮：题目分类与文本投稿（2026-10-01 Brisbane，已本地提交，未推送、未部署）
 
+- 与 Gallery 联调后补充：文本投稿不再生成「说明文件 / README」检查项（`server/inspect.mjs`），`test/text.test.mjs` 加断言；check 72/0、test 167/167。隔离联调（临时库、CAPTURE=0、内容审核关闭）走通文学题 + 文本示例、建模题、审核改分类与审计、按分类推断格式，详见 Gallery 归档 question-categories-2。
 - 后端追加 v23 幂等迁移 `questions.category`：旧题优先从标签回填分类，否则仅 text 格式回填文学，其余保持 null。新建题必填文学 / 静态网页 / 建模，格式按分类校验，标签选填 0–6 个，写入时丢弃同分类标签。公开、作者和管理员题目视图均返回 category / templates。
 - 人工通过时可补充或修改分类，缺分类拒绝通过；拒绝时忽略 category。改分类与原格式不兼容时重置默认格式，并在 question-review 审计记录旧值与新值。平台题目通过现有 catalog 分类筛选加入对应榜单；数据包缺少非空 templates 时按分类推断。
 - `template=text` 支持单个 UTF-8 `.txt` / `.md` / `.markdown`，沿用 uploadBytes 并限制 200000 Unicode 字符。安全 Markdown 子集生成自包含 index.html，原 HTML 转义、无外链图片或脚本；纯文本保留段落换行，原件保存为 original.<扩展名>。沿用草稿探针、内容审核、截图与核验；无新增 npm 依赖。

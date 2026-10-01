@@ -15,6 +15,7 @@ test('text uploads render a self contained Markdown subset and retain original b
   const html = result.files.get('index.html').toString();
   for (const fragment of ['<h1>标题</h1>', '<strong>粗体</strong>', '<em>斜体</em>', '<code>代码</code>', '<ul><li>第一项</li><li>第二项</li></ul>', '<ol><li>有序项</li></ol>', '<blockquote><p>引用<br>第二行</p></blockquote>', '<hr>', '<pre><code>&lt;div&gt;代码&lt;/div&gt;</code></pre>', 'prefers-color-scheme:dark']) assert.ok(html.includes(fragment), fragment);
   assert.match(result.checks[0].detail, /^识别为 Markdown · 约 [\d,]+ 字/);
+  assert.ok(!result.checks.some((check) => check.id === 'readme'));
   assert.equal(result.checks.find((check) => check.id === 'external').state, 'ok');
   assert.match(result.digest, /^[a-f0-9]{64}$/);
 });

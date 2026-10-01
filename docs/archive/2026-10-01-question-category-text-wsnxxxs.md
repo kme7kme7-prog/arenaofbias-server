@@ -35,3 +35,7 @@
 ## 下一步建议
 
 按既有发布流程将 Gallery 分类表单、后端 v23 与新的不可变数据包配套发布。后端 catalog 观察发布目录 realpath / 版本变化，无需为本轮单独改缓存或手改已发布包。
+
+## 补充（2026-10-01）
+
+- 与 Gallery 本地联调后，文本投稿去掉无意义的 README 检查项（`server/inspect.mjs`），`test/text.test.mjs` 断言不再出现；check 72/0、test 167/167。联调范围与未验证项见 Gallery 归档 `2026-10-01-question-categories-wsnxxxs-2.md`。

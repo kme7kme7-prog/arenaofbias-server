@@ -222,8 +222,9 @@ export function inspectUpload(buffer, filename, { limits, cdn, template }) {
   } else {
     checks.push({ id: 'external', state: 'ok', label: '外部资源', detail: '未引用外部地址，作品可以独立运行' });
   }
+  // A text upload is the work itself; a README only makes sense beside a page.
   const readme = [...files.keys()].find((path) => /^readme\.md$/i.test(path));
-  checks.push({ id: 'readme', state: readme ? 'ok' : 'info', label: '说明文件', detail: readme ? '包含 README.md' : '未包含 README.md（选填）' });
+  if (!textUpload) checks.push({ id: 'readme', state: readme ? 'ok' : 'info', label: '说明文件', detail: readme ? '包含 README.md' : '未包含 README.md（选填）' });
 
   const digest = sha256([...files.keys()].sort().map((path) => `${path}\0${sha256(files.get(path))}`).join('\n'));
   return { files, root, entry, count: files.size, bytes, digest, entryDigest: sha256(entryData), checks, kind: textUpload ? 'text' : isZip ? 'zip' : 'html' };

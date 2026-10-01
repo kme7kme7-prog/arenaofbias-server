@@ -1,4 +1,4 @@
-// Optional verified email for existing accounts. Codes are one-use and only their hashes
+// Verified email for registration and existing accounts. Codes are one-use and only their hashes
 // are stored. Reset requests always return the same public response.
 import { createHash, randomInt, timingSafeEqual } from 'node:crypto';
 import { fail, rateLimit } from './http.mjs';
@@ -12,7 +12,7 @@ const validEmail = (email) => email.length <= 254 && /^[a-z0-9._%+-]+@[a-z0-9.-]
 const invalidCode = () => fail(400, '验证码不正确或已过期，请重新获取。');
 const resetResponse = { sent: true, email: '' };
 
-export function createEmailAuth(db, auth) {
+export function createEmailAuth(db, auth, { mailer = { ready: mailReady, send: sendVerificationEmail } } = {}) {
   const background = new Set();
   const q = {
     userByName: db.prepare('SELECT * FROM users WHERE name_key = ?'),
@@ -45,7 +45,7 @@ export function createEmailAuth(db, auth) {
     const code = String(randomInt(1000000)).padStart(6, '0');
     q.save.run(purpose, emailHash, digest(`${purpose}:${emailHash}:${code}`), now + codeTtl, now);
     try {
-      await sendVerificationEmail({ to: email, code, purpose });
+      await mailer.send({ to: email, code, purpose });
     } catch (error) {
       if (previous) q.restore.run(previous.code_hash, previous.expires_at, previous.attempts, previous.last_sent_at, purpose, emailHash);
       else q.delete.run(purpose, emailHash);
@@ -76,20 +76,31 @@ export function createEmailAuth(db, auth) {
   return {
     async drain() { await Promise.all(background); },
     gate,
+    async register(body) {
+      if (!body.email || !body.code) fail(400, '请填写邮箱和验证码。');
+      const email = normalizeEmail(body.email);
+      if (!validEmail(email)) fail(400, '请填写正确的邮箱地址。');
+      if (q.userByEmail.get(email)) fail(409, '该邮箱已被其他账号绑定，请换一个。');
+      return auth.register(body.name ?? body.username, body.password, {
+        email,
+        verifyCode() { if (!match('register', email, body.code)) invalidCode(); },
+        consumeCode() { q.delete.run('register', digest(email)); },
+      });
+    },
     async send(body, user, ip) {
       const purpose = body.purpose;
-      if (!['bind', 'reset'].includes(purpose)) fail(400, '请求类型无效。');
+      if (!['register', 'bind', 'reset'].includes(purpose)) fail(400, '请求类型无效。');
       if (purpose === 'bind' && !user) fail(401, '请先登录后再绑定邮箱。');
-      const email = purpose === 'bind' ? normalizeEmail(body.email) : q.userByName.get(nameKey(String(body.username ?? '')))?.email;
-      if (purpose === 'bind' && !validEmail(email)) fail(400, '请填写正确的邮箱地址。');
-      if (purpose === 'bind') {
+      const email = purpose !== 'reset' ? normalizeEmail(body.email) : q.userByName.get(nameKey(String(body.username ?? '')))?.email;
+      if (purpose !== 'reset' && !validEmail(email)) fail(400, '请填写正确的邮箱地址。');
+      if (purpose !== 'reset') {
         const owner = q.userByEmail.get(email);
-        if (owner && owner.id !== user.id) fail(409, '该邮箱已被其他账号绑定，请换一个。');
+        if (owner && (purpose === 'register' || owner.id !== user.id)) fail(409, '该邮箱已被其他账号绑定，请换一个。');
       }
       ipLimit(ip);
       emailLimit(digest(email || nameKey(String(body.username ?? ''))));
       await gate(body.turnstileToken, ip);
-      if (!mailReady()) {
+      if (!mailer.ready()) {
         if (purpose === 'reset') return resetResponse;
         fail(503, '邮件服务未配置，暂时无法发送验证码。');
       }

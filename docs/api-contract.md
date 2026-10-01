@@ -237,7 +237,7 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
   "catalogDigest": "<实际加载 data.json 原始字节的 SHA-256>",
   "apiVersion": 1,
   "serverVersion": "<服务端构建版本或 dev>",
-  "user": { "id": "…", "name": "alice", "role": "member" },
+  "user": { "id": "…", "name": "alice", "role": "member", "emailBound": true },
   "site": {
     "content": "http://{token}.localhost:5180",
     "cdn": ["cdn.jsdelivr.net", "unpkg.com", "cdnjs.cloudflare.com", "esm.sh", "fonts.googleapis.com", "fonts.gstatic.com"],
@@ -264,12 +264,13 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
 - `works` **包含未验证与存疑投稿**（不含馆藏作品，馆藏经数据包分发），访客可见非特权字段。
 - `arena[题目]`：`works` = 对战池作品数（馆藏 + 已验证投稿），`entries` = 不同「模型+档位」配置数，`uploads` = 该题是否接受上传。
 - 匿名：`user`、`me` 为 `null`，`reactions.mine` 为 `{}`；`review` 仅管理员非 null（`{ "unverified": <作品待审数>, "questions": <未删除的 pending 题目数> }`）。
+- `user.emailBound` 仅当前会话用户在 bootstrap 中返回，反映是否绑定邮箱；不加入 `auth.public`，评论等公开用户数据不包含该字段。
 
 ### 3.2 `POST /api/auth/register` —— 注册
 
 **认证**：无。**限流**：auth 桶（10 次/分钟/IP）。
 
-请求体：`{ "name": "…", "password": "…", "turnstileToken": "…" }`；Show1 可用 `username` 代替 `name`。邮箱选填且不在注册时验证；Turnstile 启用时必须提供 token，未配置两把密钥时自动关闭。
+请求体：`{ "name": "…", "password": "…", "email": "…", "code": "六位数字" }`；Show1 可用 `username` 代替 `name`。邮箱与验证码必填，先通过 `purpose: "register"` 发码；注册不再要求 `turnstileToken`，人机验证在发码时完成。校验验证码后，在同一事务消费验证码、创建账号并写入归一化 `email` 与 `email_verified_at`。
 
 成功 `200`（**同时种下会话 Cookie，即注册即登录**）：
 
@@ -279,11 +280,11 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
 
 Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）。`GET /api/auth/me` 的 `user` 返回 `{ id, username, role, email }`，绑定后为真实归一化邮箱。
 
-错误：`400` 用户名 / 密码不合规或人机验证失败；`409` 用户名已被使用或属于 `ADMIN_USERNAMES` 保留名（同一错误文案，不区分原因）；`415`；`429`；人机验证服务不可用时 `503`。
+错误：`400` 缺少邮箱或验证码、用户名 / 密码 / 邮箱不合规、验证码不正确或已过期；`409` 邮箱已占用（「该邮箱已被其他账号绑定，请换一个。」）、用户名已被使用或属于 `ADMIN_USERNAMES` 保留名；`415`；`429`。
 
 ### 3.3 `POST /api/auth/login` —— 登录
 
-**认证**：无。**限流**：auth 桶。请求体同注册。
+**认证**：无。**限流**：auth 桶。请求体 `{ "name": "…", "password": "…" }`（兼容 `username`）。旧账号无需先绑定邮箱即可登录。
 
 成功 `200`：`{ "user": … }` 并种下会话 Cookie。错误：`401 用户名或密码不正确`（对不存在的账号同样执行哈希比较，不泄露账号是否存在）；其余同 3.2。
 
@@ -295,11 +296,17 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 ### 3.4.1 邮箱验证码、绑定与找回
 
-`GET /api/auth/turnstile` 返回 `{ "siteKey": string | null }`。只有 `TURNSTILE_SITE_KEY` 与 `TURNSTILE_SECRET_KEY` 都配置时才启用；注册提交和发码请求都校验 `turnstileToken`。
+`GET /api/auth/turnstile` 返回 `{ "siteKey": string | null }`。只有 `TURNSTILE_SITE_KEY` 与 `TURNSTILE_SECRET_KEY` 都配置时才启用；发码请求校验 `turnstileToken`，注册提交无需 token。
 
 `POST /api/auth/email/send`：绑定请求 `{ "purpose": "bind", "email": "…", "turnstileToken": "…" }`，需登录，成功返回 `{ "sent": true, "email": "归一化邮箱" }`。重置请求 `{ "purpose": "reset", "username": "…", "turnstileToken": "…" }`，无论账号是否存在或是否绑定邮箱，成功响应均为 `{ "sent": true, "email": "" }`；不提供邮箱占用提示。发码按 IP 和目标邮箱每 15 分钟限流，另有同地址 60 秒冷却（可用 `MAIL_*` 调整）。SMTP 未配置时绑定返回 `503`；重置仍采用统一响应。
 
 `POST /api/auth/email/verify`：`{ "purpose": "bind", "email": "…", "code": "六位数字" }` 或 `{ "purpose": "reset", "username": "…", "code": "六位数字" }`。成功 `{ "ok": true }`，不消耗验证码。验证码默认 10 分钟有效、输错 5 次作废；数据库只存哈希。
+
+注册发码：`POST /api/auth/email/send` 的 `{ "purpose": "register", "email": "…", "turnstileToken": "…" }` 无需登录；校验邮箱格式并拒绝任何账号已绑定的邮箱（`409`「该邮箱已被其他账号绑定，请换一个。」）。沿用上述 IP / 邮箱限流及 Turnstile gate；邮件未配置或发送失败为 `503`，成功 `{ "sent": true, "email": "归一化邮箱" }`，邮件说明为注册验证。注册验证码仅由注册接口校验消费，不能用于 bind/reset；v24 迁移扩展验证码表的 purpose 约束并保留现有验证码。
+
+测试与审计脚本可在隔离进程创建 `createPlatform({ config, limits, mailer })`，其中 `mailer` 提供 `ready: () => true` 和 `send: async ({ to, code, purpose }) => …`，捕获验证码后先调用 send 再 register。示例辅助函数见 `test/helpers/email.mjs`；HTTP 响应不包含验证码，也没有验证码读取端点。外部 smoke 脚本可使用本地测试 SMTP（如 `test/email-auth.test.mjs`）读取邮件内容。已有无邮箱账号测试可直接构建旧账号夹具再登录，不能通过 HTTP 绕过注册验证。
+
+旧账号邮箱限制：发起题目、上传与草稿（POST / GET / DELETE）、Gallery 与 Show1 表情回应均要求绑定邮箱，否则 `403 { "code": "email_required", "error": "请先绑定邮箱" }`。绑定后当前会话立即可用；评论、登录和换绑规则沿用现有行为。
 
 `POST /api/auth/email/bind`：需登录，`{ "email": "…", "code": "…" }`；成功 `{ "user": <Show1 兼容用户> }`。同一账号可换绑，邮箱全局唯一且大小写归一。
 
@@ -511,7 +518,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 ```
 
 - `a` / `b` 为两侧作品的**不透明令牌 origin**（`m` 令牌，对局有效期 3 小时），iframe 直接加载；页面与地址均不泄露作品 / 模型身份。左右顺序随机。
-- `counted`：登录用户恒 `true`，匿名恒 `false`。
+- `counted`：登录且绑定邮箱时为 `true`，匿名或未绑定邮箱时为 `false`。
 - 对局创建时一次捕获当前馆藏目录和两侧身份。随后切换数据包，旧令牌仍从原目录提供 HTML 与相对资源，旧对局仍可揭晓/投票；部署应保留该目录到相关对局全部过期并经过清理宽限期。
 - 前端在写请求上携带 `X-Datapack-Version: <前端所构建的数据仓库 SHA>`（读请求不带，避免跨源 GET 预检）；创建馆藏对局、馆藏题目草稿及该草稿的正式投稿时，如果该值与服务端当前可信 SHA 不同，请求照常处理，响应头增加 `X-Datapack-Stale: 1`，响应体形状不变。对局仍绑定创建时的服务端快照。社区题目不参与此检查；缺少请求头时不增加提示头。
 - 抽样规则：先抽两个不同「模型+档位」配置，再各抽一件作品；偏向对局数少的配置、偏向实力相近者（同档 90% 概率软匹配，分差过大重掷 2 次）；避开上一场两侧作品、本人作品与已评组合。
@@ -533,7 +540,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 ```
 
 - 响应的 `a` / `b` 即**揭晓**：投票后返回两侧作品的完整公开视图（含模型名）。
-- `counted=false` 时 `reason` 取值：`skipped`（skip）、`anonymous`（未登录）、`changed`（投票时某侧作品已失效）、`own`（涉及本人作品）、`duplicate`（已评过该组合）。
+- `counted=false` 时 `reason` 取值：`skipped`（skip）、`anonymous`（未登录）、`unbound`（未绑定邮箱）、`changed`（投票时某侧作品已失效）、`own`（涉及本人作品）、`duplicate`（已评过该组合）。未绑定账号正常揭晓双方结果，但不写入投票。
 - `skip` 同样终局化对局，但不产生投票记录。
 - 对局绑定创建者：登录用户创建的对局仅本人可投；匿名创建的对局任何人可投（但仍不计票）。
 - 作品被标记存疑 / 删除后，其参与的历史投票**即时退出**排行统计；恢复验证后自动回归。
@@ -728,13 +735,13 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 | `GET /api/prompts` | `{ prompts: [...] }`；合并历史快照与数据包正式题目，竞技场 editorial 覆盖对应题目的 `commentary`、`weights`。 |
 | `GET /api/works` | `{ works: [...] }`；快照作品加符合条件的 live 投稿。 |
 | `GET /api/votes?scope=entertainment\|formal` | `{ votes: [...] }`；只读库内 `source=show1` 的票，按时间和 ID 排序，不合入旧快照。scope 必填，非法或缺失为 400。 |
-| `POST /api/votes` | 登录必需；提交 `id`、`promptId`、`winnerRid/Mid`、`loserRid/Mid`、`mode`、`outcome`，成功 `201 { vote }`；同 ID 同票幂等重放，已投同一对返回 `409 pair`；`formal` 仅管理员。 |
+| `POST /api/votes` | 登录必需；提交 `id`、`promptId`、`winnerRid/Mid`、`loserRid/Mid`、`mode`、`outcome`。未绑定邮箱时有效请求返回 `200 { counted: false, reason: 'unbound' }`，不写入对局或票；已绑定时成功 `201 { vote }`，同 ID 同票幂等重放，已投同一对返回 `409 pair`；`formal` 仅管理员。 |
 | `GET /api/ratings?scope=entertainment\|formal` | `{ ratings: { [modelId]: number }, games: { [modelId]: number } }`；按库内票回放未取整 Elo，供配对，复用聚合缓存。scope 必填。 |
 | `GET /api/show1/leaderboard?scope=entertainment\|formal&category=all\|text\|web` | 主站聚合榜单，scope 必填，category 缺省 all；非法参数 400。见下方。 |
 | `GET /api/comments?round=<题目编号>` | `{ comments: [...] }`；无效题目 `400`。 |
 | `POST /api/comments` | 登录必需；请求 `id`、`roundId`、`side`、`body`，成功 `201 { comment }`。 |
 | `GET /api/reactions?prompt=<题目编号>` | `{ counts, mine }`；无效题目 `400`。 |
-| `POST /api/reactions` | 登录必需；请求 `id`、`promptId`、`mid`、`kind`，成功 `201 { counts, mine }`；`kind:null` 撤销。 |
+| `POST /api/reactions` | 登录且绑定邮箱；请求 `id`、`promptId`、`mid`、`kind`，成功 `201 { counts, mine }`；`kind:null` 撤销。未绑定返回 `403 email_required`。 |
 | `POST /api/track` | 最佳努力记录 `path` 浏览量，成功 `204`。 |
 
 正式题目在数据仓库登记 `arenaId`（稳定三位编号）、`kind`（`text` / `web`）和 `category`。共享后端将同一个 task ID 映射到 Show1 编号，新增题目及其已验证、开启竞技场展示的投稿可以进入娱乐玩法；长短提示词使用同一个 task ID 与编号，以 `promptVariants: [{id, label, prompt}]` 返回两份原文，由前端按钮切换；作品可通过 `promptVariant` 标明使用的版本，同一模型的两版展示在一起。既有快照题目保留编号、名称及权重，正式提示词由数据包提供；未进入数据包的历史题目仍保留。此登记不写入社区 `questions` 表，也不改变作品审核和展示开关。

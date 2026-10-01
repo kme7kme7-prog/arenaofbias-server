@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { createPlatform } from '../server/app.mjs';
+import { verifiedUser } from './helpers/email.mjs';
 import { limits } from '../server/config.mjs';
 
 test('cover write failure keeps the draft and startup moves orphan work directories', async () => {
@@ -17,7 +18,7 @@ test('cover write failure keeps the draft and startup moves orphan work director
     admins: [], cdn: [], capture: false, secureCookies: false, trustProxy: false };
   let platform = createPlatform({ config, limits });
   try {
-    const user = await platform.auth.register('writer', 'correct horse');
+    const user = await verifiedUser(platform.auth, 'writer', 'correct horse');
     const draft = platform.library.createDraft(user, 'one', 'page.html', Buffer.from('<!doctype html><html><body>Test</body></html>'));
     const original = fs.writeFileSync;
     fs.writeFileSync = (path, ...args) => {

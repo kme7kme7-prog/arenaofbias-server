@@ -39,6 +39,12 @@ async function post(path, body, session = '') {
 async function me(session) {
   return (await (await fetch(base + '/api/auth/me', { headers: { cookie: session } })).json()).user;
 }
+async function register(username, password, turnstileToken) {
+  const email = `${username}-registration@test.invalid`;
+  const sent = await post('/api/auth/email/send', { purpose: 'register', email, turnstileToken });
+  assert.equal(sent.status, 200);
+  return post('/api/auth/register', { username, password, email, code: codeFromLastMail() });
+}
 function openSmtp() {
   return createSmtpServer((socket) => {
     let pending = '';
@@ -106,18 +112,77 @@ after(async () => {
 });
 
 let alice, alicePassword = 'correct horse';
-test('registration needs no email and Turnstile is off without keys', async () => {
+test('registration requires a verified email and Turnstile is off without keys', async () => {
   assert.deepEqual(await (await fetch(base + '/api/auth/turnstile')).json(), { siteKey: null });
-  const result = await post('/api/auth/register', { username: 'alice', password: alicePassword });
+  assert.equal((await post('/api/auth/register', { username: 'alice', password: alicePassword })).status, 400);
+  const result = await register('alice', alicePassword);
   assert.equal(result.status, 200);
   alice = result.cookie;
-  assert.equal(result.data.user.email, null);
+  assert.equal(result.data.user.email, 'alice-registration@test.invalid');
+  const mailText = Buffer.from(messages.at(-1).split('\r\n\r\n')[1], 'base64').toString('utf8');
+  assert.match(mailText, /注册账号并验证邮箱/);
 });
 
 test('email migration can rerun without changing existing account data', () => {
   const before = platform.db.prepare('SELECT * FROM users WHERE name_key = ?').get('alice');
   MIGRATIONS.at(-1)(platform.db);
   assert.deepEqual(platform.db.prepare('SELECT * FROM users WHERE name_key = ?').get('alice'), before);
+});
+
+test('registration codes are purpose-specific, one-use and roll back with failed account creation', async () => {
+  const delivered = [];
+  const emailAuth = createEmailAuth(platform.db, platform.auth, {
+    mailer: { ready: () => true, send: async (mail) => { delivered.push(mail); } },
+  });
+  const email = 'atomic-registration@test.invalid';
+  const body = { name: 'atomic-user', password: 'correct horse', email };
+  await assert.rejects(() => emailAuth.register(body), { status: 400 });
+  await emailAuth.send({ purpose: 'bind', email }, platform.auth.userFrom({ headers: { cookie: alice } }), 'core-ip');
+  await assert.rejects(() => emailAuth.register({ ...body, code: delivered.at(-1).code }), { status: 400 });
+  await emailAuth.send({ purpose: 'register', email }, null, 'core-ip');
+  const code = delivered.at(-1).code;
+  assert.equal(delivered.at(-1).purpose, 'register');
+  await assert.rejects(() => emailAuth.register({ ...body, code: code === '000000' ? '000001' : '000000' }), { status: 400 });
+  platform.db.exec("CREATE TRIGGER fail_registration BEFORE INSERT ON users WHEN NEW.name = 'atomic-user' BEGIN SELECT RAISE(ABORT, 'registration insert failed'); END");
+  try {
+    await assert.rejects(() => emailAuth.register({ ...body, code }), /registration insert failed/);
+    assert.equal(platform.db.prepare('SELECT id FROM users WHERE name_key = ?').get('atomic-user'), undefined);
+    assert.equal(platform.db.prepare("SELECT COUNT(*) AS n FROM email_codes WHERE purpose = 'register' AND email_hash = ?")
+      .get(createHash('sha256').update(email).digest('hex')).n, 1);
+  } finally {
+    platform.db.exec('DROP TRIGGER fail_registration');
+  }
+  const user = await emailAuth.register({ ...body, email: email.toUpperCase(), code });
+  assert.equal(user.email, email);
+  assert.equal(user.email_verified_at > 0, true);
+  assert.equal(platform.db.prepare("SELECT COUNT(*) AS n FROM email_codes WHERE purpose = 'register' AND email_hash = ?")
+    .get(createHash('sha256').update(email).digest('hex')).n, 0);
+  assert.equal('emailBound' in platform.auth.public(user), false);
+  await assert.rejects(() => emailAuth.register({ ...body, name: 'another-user', email: 'unused@test.invalid', code }), { status: 400 });
+  await assert.rejects(() => emailAuth.send({ purpose: 'register', email }, null, 'core-ip'), { status: 409 });
+  await assert.rejects(() => emailAuth.register({ ...body, name: 'another-user', code }), { status: 409 });
+});
+
+test('registration send rejects bad emails, unavailable delivery, expired codes and shared limits', async () => {
+  const delivered = [];
+  const mailer = { ready: () => false, send: async (mail) => { delivered.push(mail); } };
+  const emailAuth = createEmailAuth(platform.db, platform.auth, { mailer });
+  await assert.rejects(() => emailAuth.send({ purpose: 'register', email: 'bad' }, null, 'registration-ip'), { status: 400 });
+  await assert.rejects(() => emailAuth.send({ purpose: 'register', email: 'offline@test.invalid' }, null, 'registration-ip'), { status: 503 });
+  mailer.ready = () => true;
+  const email = 'registration-limit@test.invalid';
+  await emailAuth.send({ purpose: 'register', email }, null, 'registration-ip');
+  const code = delivered.at(-1).code;
+  platform.db.prepare("UPDATE email_codes SET expires_at = 0 WHERE purpose = 'register' AND email_hash = ?")
+    .run(createHash('sha256').update(email).digest('hex'));
+  await assert.rejects(() => emailAuth.register({ name: 'expired-user', password: 'correct horse', email, code }), { status: 400 });
+  for (let i = 0; i < 2; i++) {
+    await emailAuth.send({ purpose: 'register', email }, null, 'registration-ip');
+    platform.db.prepare("UPDATE email_codes SET last_sent_at = 0 WHERE purpose = 'register'").run();
+  }
+  await assert.rejects(() => emailAuth.send({ purpose: 'register', email }, null, 'registration-ip'), { status: 429 });
+  mailer.send = async () => { throw new Error('test delivery failure'); };
+  await assert.rejects(() => emailAuth.send({ purpose: 'register', email: 'delivery-fail@test.invalid' }, null, 'registration-ip'), { status: 503 });
 });
 
 test('fake SMTP receives a six-digit bind code and binding normalizes email', async () => {
@@ -165,7 +230,7 @@ test('email and IP send limits apply independently', async () => {
 });
 
 test('changing email preserves the account and rejects an already bound address', async () => {
-  const bob = await post('/api/auth/register', { username: 'bob', password: 'correct horse' });
+  const bob = await register('bob', 'correct horse');
   assert.equal((await post('/api/auth/email/send', { purpose: 'bind', email: 'alice@test.invalid' }, bob.cookie)).status, 409);
   const newEmail = 'new@test.invalid';
   assert.equal((await post('/api/auth/email/send', { purpose: 'bind', email: newEmail }, alice)).status, 200);
@@ -238,7 +303,7 @@ test('closing the platform waits for a reset email sent after the response', asy
   }
 });
 
-test('configured Turnstile verifies registration and email sends through a local HTTP stub', async () => {
+test('configured Turnstile gates code sends and registration uses only the sent code', async () => {
   const checks = [];
   const stub = createHttpServer((req, res) => {
     let body = '';
@@ -251,9 +316,10 @@ test('configured Turnstile verifies registration and email sends through a local
   process.env.TURNSTILE_VERIFY_URL = `http://127.0.0.1:${stub.address().port}/siteverify`;
   try {
     assert.deepEqual(await (await fetch(base + '/api/auth/turnstile')).json(), { siteKey: 'site-test' });
-    assert.equal((await post('/api/auth/register', { username: 'charlie', password: 'correct horse' })).status, 400);
-    assert.equal((await post('/api/auth/register', { username: 'charlie', password: 'correct horse', turnstileToken: 'bad' })).status, 400);
-    const charlie = await post('/api/auth/register', { username: 'charlie', password: 'correct horse', turnstileToken: 'good' });
+    const email = 'charlie-registration@test.invalid';
+    assert.equal((await post('/api/auth/email/send', { purpose: 'register', email })).status, 400);
+    assert.equal((await post('/api/auth/email/send', { purpose: 'register', email, turnstileToken: 'bad' })).status, 400);
+    const charlie = await register('charlie', 'correct horse', 'good');
     assert.equal(charlie.status, 200);
     assert.equal((await post('/api/auth/email/send', { purpose: 'bind', email: 'gate@test.invalid' }, charlie.cookie)).status, 400);
     assert.equal((await post('/api/auth/email/send', { purpose: 'bind', email: 'gate@test.invalid', turnstileToken: 'good' }, charlie.cookie)).status, 200);

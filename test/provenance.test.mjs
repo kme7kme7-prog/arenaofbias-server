@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { createPlatform } from '../server/app.mjs';
+import { verifiedUser } from './helpers/email.mjs';
 import { createCatalog } from '../server/catalog.mjs';
 import { limits } from '../server/config.mjs';
 import { MIGRATIONS, openDatabase } from '../server/db.mjs';
@@ -100,7 +101,8 @@ test('an old pack accepts a custom Harness but no registry ID', async () => {
     return { status: response.status, data: await response.json().catch(() => ({})) };
   };
   try {
-    assert.equal((await call('POST', '/api/auth/register', { name: 'alice', password: 'correct horse' })).status, 200);
+    await verifiedUser(platform.auth, 'alice');
+    assert.equal((await call('POST', '/api/auth/login', { name: 'alice', password: 'correct horse' })).status, 200);
     const draft = await call('POST', '/api/drafts?task=one&name=work.html', PAGE, true);
     assert.equal(draft.status, 200);
     const body = { draftId: draft.data.draft.id, confirmed: true, title: 'Old pack upload', modelId: 'm-a' };
@@ -142,7 +144,8 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
   try {
     platform.auth.createAdmin('root', 'correct horse');
     assert.equal((await call('root', 'POST', '/api/auth/login', { name: 'root', password: 'correct horse' })).status, 200);
-    assert.equal((await call('alice', 'POST', '/api/auth/register', { name: 'alice', password: 'correct horse' })).status, 200);
+    await verifiedUser(platform.auth, 'alice');
+    assert.equal((await call('alice', 'POST', '/api/auth/login', { name: 'alice', password: 'correct horse' })).status, 200);
     const curated = platform.library.toPublic(platform.library.work('one', 'a1'));
     assert.deepEqual([curated.harness, curated.harnessName, curated.harnessVersion, curated.provider, curated.providerName],
       ['codex', 'Codex', '1', 'official', '官方']);

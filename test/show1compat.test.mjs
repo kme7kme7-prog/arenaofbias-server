@@ -11,6 +11,7 @@ import { after, before, describe, test } from 'node:test';
 import { createPlatform } from '../server/app.mjs';
 import { createArena } from '../server/arena.mjs';
 import { createAuth } from '../server/auth.mjs';
+import { captureMailer, verifiedUser } from './helpers/email.mjs';
 import { limits as defaultLimits } from '../server/config.mjs';
 import { MIGRATIONS, openDatabase } from '../server/db.mjs';
 import { HttpError, createRouter, fail, sendJson } from '../server/http.mjs';
@@ -108,7 +109,8 @@ async function call(base, method, path, { body, cookie, raw = false } = {}) {
 }
 
 async function signIn(auth, name) {
-  const user = name === 'root' ? auth.createAdmin(name, 'correct horse') : await auth.register(name, 'correct horse');
+  const user = name === 'root' ? auth.createAdmin(name, 'correct horse') : await verifiedUser(auth, name);
+  if (!user.email) Object.assign(user, auth.bindEmail(user.id, `${name}@example.test`));
   const headers = new Map();
   auth.startSession({ setHeader: (key, value) => headers.set(key, value) }, user.id);
   return { cookie: headers.get('Set-Cookie').split(';')[0], user };
@@ -209,6 +211,20 @@ test('countedVotes only feeds source=arena votes to Bradley–Terry', async () =
 });
 
 describe('show1 compat endpoints', () => {
+  test('unbound legacy users cannot react or record Show1 votes', () => withServer({}, async ({ db, auth, base }) => {
+    seedWorks(db);
+    const user = await auth.register('legacy-show1', 'correct horse');
+    let session;
+    auth.startSession({ setHeader: (key, value) => { if (key === 'Set-Cookie') session = value.split(';')[0]; } }, user.id);
+    const voted = await call(base, 'POST', '/api/votes', { cookie: session, body: { ...BALLOT, id: randomUUID() } });
+    assert.equal(voted.status, 200);
+    assert.deepEqual(voted.data, { counted: false, reason: 'unbound' });
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM votes').get().n, 0);
+    const reaction = await call(base, 'POST', '/api/reactions', { cookie: session, body: { id: randomUUID(), promptId: '001', mid: 'model-a', kind: 'up' } });
+    assert.equal(reaction.status, 403);
+    assert.deepEqual(reaction.data, { error: '请先绑定邮箱', code: 'email_required' });
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM reactions').get().n, 0);
+  }));
   test('GET /api/prompts and /api/works return the snapshot verbatim', () => withServer({}, async ({ base }) => {
     const prompts = await call(base, 'GET', '/api/prompts');
     assert.equal(prompts.status, 200);
@@ -730,6 +746,7 @@ describe('auth dual shape', () => {
   let site;
   let base;
   const jars = new Map();
+  const mail = captureMailer();
 
   async function call(who, method, path, body) {
     const headers = { origin: base };
@@ -747,7 +764,7 @@ describe('auth dual shape', () => {
     mkdirSync(dist, { recursive: true });
     writeFileSync(join(dist, 'data.json'), JSON.stringify({ title: 'test', models: [], tasks: [] }));
     const config = { dist, dataDir: join(root, 'data'), contentTemplate: '', siteOrigins: [], admins: ['root'], cdn: [], capture: false, secureCookies: false, trustProxy: false };
-    platform = createPlatform({ config, limits: defaultLimits });
+    platform = createPlatform({ config, limits: defaultLimits, mailer: mail.mailer });
     site = createServer(platform.handleSite).listen(0, '127.0.0.1');
     await new Promise((resolve) => site.once('listening', resolve));
     base = `http://127.0.0.1:${site.address().port}`;
@@ -760,13 +777,15 @@ describe('auth dual shape', () => {
   });
 
   test('username aliases name; login/register/me gain the old fields additively', async () => {
-    const registered = await call('u1', 'POST', '/api/auth/register', { username: 'show1user', password: 'correct horse' });
+    const email = 'show1user@example.test';
+    assert.equal((await call('guest', 'POST', '/api/auth/email/send', { purpose: 'register', email })).status, 200);
+    const registered = await call('u1', 'POST', '/api/auth/register', { username: 'show1user', password: 'correct horse', email, code: mail.lastCode(email, 'register') });
     assert.equal(registered.status, 200);
     assert.equal(registered.data.user.name, 'show1user', 'platform fields stay');
     assert.equal(registered.data.user.nickname, 'show1user');
     assert.equal(registered.data.user.role, 'member');
     assert.equal(registered.data.user.username, 'show1user');
-    assert.equal(registered.data.user.email, null);
+    assert.equal(registered.data.user.email, email);
 
     const loggedIn = await call('u1', 'POST', '/api/auth/login', { username: 'show1user', password: 'correct horse' });
     assert.equal(loggedIn.status, 200);
@@ -782,16 +801,17 @@ describe('auth dual shape', () => {
     assert.equal(me.data.user.avatar, registered.data.user.avatar, 'the session read carries the same avatar');
     assert.equal(me.data.user.username, 'show1user');
     assert.equal(me.data.user.role, null, 'members read role null in the old shape');
-    assert.equal(me.data.user.email, null);
+    assert.equal(me.data.user.email, email);
 
     platform.auth.createAdmin('root', 'correct horse');
     assert.equal((await call('admin', 'POST', '/api/auth/login', { username: 'root', password: 'correct horse' })).status, 200);
     assert.equal((await call('admin', 'GET', '/api/auth/me')).data.user.role, 'admin');
 
-    // Platform rules are untouched: bad names still fail, no email is ever required.
+    // Missing registration email still fails for the username alias.
     assert.equal((await call('bad', 'POST', '/api/auth/register', { username: 'x', password: 'correct horse' })).status, 400);
     const boot = await call('u1', 'GET', '/api/bootstrap');
     assert.equal(boot.data.user.name, 'show1user');
+    assert.equal(boot.data.user.emailBound, true);
     assert.equal(boot.data.user.username, undefined, 'bootstrap keeps the platform-only shape');
   });
 });

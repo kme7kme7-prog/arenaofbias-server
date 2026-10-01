@@ -356,6 +356,25 @@ const MIGRATIONS = [
       CASE WHEN json_array_length(templates) = 1 AND json_extract(templates, '$[0]') = 'text' THEN '文学' END
     ) WHERE category IS NULL`);
   },
+  // Registration codes use the same storage and limits as binding and reset codes.
+  (db) => {
+    const schema = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'email_codes'").get().sql;
+    if (schema.includes("'register'")) return;
+    db.exec(`CREATE TABLE email_codes_v24 (
+      purpose TEXT NOT NULL CHECK (purpose IN ('bind', 'reset', 'register')),
+      email_hash TEXT NOT NULL,
+      code_hash TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      last_sent_at INTEGER NOT NULL,
+      PRIMARY KEY (purpose, email_hash)
+    );
+    INSERT INTO email_codes_v24 (purpose, email_hash, code_hash, expires_at, attempts, last_sent_at)
+      SELECT purpose, email_hash, code_hash, expires_at, attempts, last_sent_at FROM email_codes;
+    DROP TABLE email_codes;
+    ALTER TABLE email_codes_v24 RENAME TO email_codes;
+    CREATE INDEX email_codes_expiry ON email_codes(expires_at);`);
+  },
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

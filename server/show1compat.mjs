@@ -246,6 +246,7 @@ export function registerShow1Compat(router, deps) {
     const loser = map[loserRid];
     if (!winner || !loser || winner.round !== promptId || loser.round !== promptId
       || winner.mid !== winnerMid || loser.mid !== loserMid) fail(400, '投票内容与作品不匹配');
+    if (!user.email) return { counted: false, reason: 'unbound' };
 
     // a/b follow the rid order, like the migration's placeholder matches; the choice then
     // falls out of which side won (a draw is a tie, side a reports as the old "winner").
@@ -393,6 +394,7 @@ export function registerShow1Compat(router, deps) {
 
   router.on('POST', '/api/reactions', async (ctx) => {
     const user = ctx.user ?? fail(401, '请先登录再表态。');
+    if (!user.email) fail(403, '请先绑定邮箱', 'email_required');
     write(user.id);
     const body = await readJson(ctx.req);
     const id = String(body.id ?? '');

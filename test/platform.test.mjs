@@ -13,6 +13,7 @@ import { runInNewContext } from 'node:vm';
 import { crc32, deflateRawSync } from 'node:zlib';
 import { createPlatform } from '../server/app.mjs';
 import { createAuth } from '../server/auth.mjs';
+import { verifiedUser } from './helpers/email.mjs';
 import { createArena } from '../server/arena.mjs';
 import { createCatalog } from '../server/catalog.mjs';
 import { limits as defaultLimits } from '../server/config.mjs';
@@ -476,14 +477,17 @@ describe('platform lifecycle', () => {
         { id: 'versions', title: 'Versions', promptPending: false, promptVariants: [{ id: 'long', label: '长版', prompt: 'Long' }, { id: 'short', label: '短版', prompt: 'Short' }], results: [] },
       ],
     }));
-    const config = { dist, dataDir: join(root, 'data'), contentTemplate: '', siteOrigins: ['http://127.0.0.1'], admins: ['root'], cdn: [], capture: false, secureCookies: false, trustProxy: false };
+    const config = { dist, dataDir: join(root, 'data'), contentTemplate: '', siteOrigins: ['http://127.0.0.1'], admins: ['root'], cdn: [], capture: false, secureCookies: false, trustProxy: false, readLimits: { catalog: 100 } };
     platform = createPlatform({ config, limits: { ...defaultLimits, pendingPerUser: 2 } });
     site = createServer(platform.handleSite).listen(0, '127.0.0.1');
     content = createServer(platform.handleContent).listen(0, '127.0.0.1');
     await Promise.all([site, content].map((server) => new Promise((resolve) => server.once('listening', resolve))));
     base = `http://127.0.0.1:${site.address().port}`;
     config.contentTemplate = `http://{token}.localhost:${content.address().port}`;
-    for (const name of ['alice', 'bob']) assert.equal((await call(name, 'POST', '/api/auth/register', { name, password: 'correct horse' })).status, 200);
+    for (const name of ['alice', 'bob']) {
+      await verifiedUser(platform.auth, name);
+      assert.equal((await call(name, 'POST', '/api/auth/login', { name, password: 'correct horse' })).status, 200);
+    }
     platform.auth.createAdmin('root', 'correct horse');
     assert.equal((await call('root', 'POST', '/api/auth/login', { name: 'root', password: 'correct horse' })).status, 200);
   });
@@ -525,6 +529,29 @@ describe('platform lifecycle', () => {
       assert.equal(rejected.headers.get('access-control-allow-origin'), null);
     }
     assert.equal((await fetch(`${base}/api/me`, { method: 'OPTIONS', headers: { origin: 'https://evil.example', 'Access-Control-Request-Method': 'PATCH' } })).status, 403);
+  });
+
+  test('legacy users need email for questions, drafts and reactions; bootstrap keeps binding private', async () => {
+    const legacy = await platform.auth.register('legacy-user', 'correct horse');
+    platform.auth.startSession({ setHeader: (key, value) => { if (key === 'Set-Cookie') jars.set('legacy', value.split(';')[0]); } }, legacy.id);
+    assert.equal((await call('legacy', 'GET', '/api/bootstrap')).data.user.emailBound, false);
+    assert.equal((await call('alice', 'GET', '/api/bootstrap')).data.user.emailBound, true);
+    assert.equal((await call('guest', 'GET', '/api/bootstrap')).data.user, null);
+    assert.equal(Object.hasOwn(platform.auth.public(legacy), 'emailBound'), false);
+    const before = ['questions', 'drafts', 'works', 'reactions'].map((table) => platform.db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n);
+    for (const [method, path, body] of [
+      ['POST', '/api/questions', {}], ['POST', '/api/drafts?task=one&name=test.html', {}],
+      ['GET', '/api/drafts?task=one'], ['DELETE', '/api/drafts/none'],
+      ['POST', '/api/works', {}], ['POST', '/api/works/one/a1/reactions', { emoji: '🔥' }],
+    ]) {
+      const result = await call('legacy', method, path, body);
+      assert.equal(result.status, 403, path);
+      assert.deepEqual(result.data, { error: '请先绑定邮箱', code: 'email_required' });
+    }
+    assert.deepEqual(['questions', 'drafts', 'works', 'reactions'].map((table) => platform.db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n), before);
+    platform.auth.bindEmail(legacy.id, 'legacy-user@example.test');
+    assert.equal((await call('legacy', 'GET', '/api/bootstrap')).data.user.emailBound, true);
+    assert.equal((await call('legacy', 'GET', '/api/drafts?task=one')).status, 200);
   });
 
   test('trusted origins can read the stale datapack response header', async () => {
@@ -611,6 +638,21 @@ describe('platform lifecycle', () => {
     const board = await call('alice', 'GET', '/api/leaderboard?task=one');
     assert.equal(board.data.totals.votes, 1);
     assert.equal(board.data.rows.length, 2);
+  });
+
+  test('unbound users can reveal blind matches without recording a ballot', async () => {
+    const legacy = await platform.auth.register('legacy-voter', 'correct horse');
+    platform.auth.startSession({ setHeader: (key, value) => { if (key === 'Set-Cookie') jars.set('unbound-voter', value.split(';')[0]); } }, legacy.id);
+    const match = await call('unbound-voter', 'POST', '/api/arena/matches', { task: 'one' });
+    assert.equal(match.status, 200);
+    assert.equal(match.data.counted, false);
+    const before = platform.db.prepare('SELECT COUNT(*) AS n FROM votes').get().n;
+    const result = await call('unbound-voter', 'POST', `/api/arena/matches/${match.data.id}/vote`, { choice: 'a' });
+    assert.equal(result.status, 200);
+    assert.equal(result.data.counted, false);
+    assert.equal(result.data.reason, 'unbound');
+    assert.ok(result.data.a && result.data.b);
+    assert.equal(platform.db.prepare('SELECT COUNT(*) AS n FROM votes').get().n, before);
   });
 
   test('the leaderboard scores one task category and the combined board ranks entries per category', async () => {
@@ -897,7 +939,8 @@ describe('platform lifecycle', () => {
   });
 
   test('personal activity counts participation while received reactions exclude self and deleted works', async () => {
-    assert.equal((await call('charlie', 'POST', '/api/auth/register', { name: 'charlie', password: 'correct horse' })).status, 200);
+    await verifiedUser(platform.auth, 'charlie');
+    assert.equal((await call('charlie', 'POST', '/api/auth/login', { name: 'charlie', password: 'correct horse' })).status, 200);
     const empty = (await call('charlie', 'GET', '/api/me')).data;
     assert.equal(empty.activity.total, 0);
     assert.equal(empty.activity.activeDays, 0);
@@ -985,7 +1028,8 @@ describe('platform lifecycle', () => {
   });
 
   test('literature markdown drafts become samples and answers with safe previews and original text', async () => {
-    assert.equal((await call('writer', 'POST', '/api/auth/register', { name: 'writer', password: 'correct horse' })).status, 200);
+    await verifiedUser(platform.auth, 'writer');
+    assert.equal((await call('writer', 'POST', '/api/auth/login', { name: 'writer', password: 'correct horse' })).status, 200);
     for (const content of [Buffer.from('PK\x03\x04disguised'), Buffer.from([0xe4, 0xb8])]) {
       assert.equal((await call('writer', 'POST', '/api/drafts?task=__new__&template=text&name=story.md', content, { raw: true })).status, 400);
     }

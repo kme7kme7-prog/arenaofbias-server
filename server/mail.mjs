@@ -12,6 +12,7 @@ export const mailReady = () =>
   );
 
 const PURPOSE_TEXT = {
+  register: '注册账号并验证邮箱',
   bind: '绑定邮箱',
   reset: '重置密码',
 };

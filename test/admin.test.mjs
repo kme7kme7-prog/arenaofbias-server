@@ -71,7 +71,8 @@ async function withPlatform(run) {
   }
   try {
     platform.auth.createAdmin('root', 'correct horse');
-    await platform.auth.register('voter', 'correct horse');
+    const voter = await platform.auth.register('voter', 'correct horse');
+    platform.auth.bindEmail(voter.id, 'voter@example.test');
     assert.equal((await call('root', 'POST', '/api/auth/login', { name: 'root', password: 'correct horse' })).status, 200);
     assert.equal((await call('voter', 'POST', '/api/auth/login', { name: 'voter', password: 'correct horse' })).status, 200);
     await run({ platform, call });

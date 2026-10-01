@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { createPlatform } from '../server/app.mjs';
+import { verifiedUser } from './helpers/email.mjs';
 import { limits } from '../server/config.mjs';
 import { MIGRATIONS, openDatabase } from '../server/db.mjs';
 import { createModerator } from '../server/moderation.mjs';
@@ -81,9 +82,10 @@ async function setup(run, { capture = true, key = 'test-key' } = {}) {
     });
   }
   try {
-    platform.auth.createAdmin('admin', 'correct horse');
-    await platform.auth.register('owner', 'correct horse');
-    await platform.auth.register('visitor', 'correct horse');
+    const admin = platform.auth.createAdmin('admin', 'correct horse');
+    platform.auth.bindEmail(admin.id, 'admin@example.test');
+    await verifiedUser(platform.auth, 'owner', 'correct horse');
+    await verifiedUser(platform.auth, 'visitor', 'correct horse');
     for (const name of ['admin', 'owner', 'visitor']) assert.equal((await call(name, 'POST', '/api/auth/login', { name, password: 'correct horse' })).status, 200);
     await run({ platform, call, submit, readContent, received, root, config, captureFactory, setResponse: (handler) => { respond = handler; } });
   } finally {

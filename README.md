@@ -106,11 +106,11 @@ npm start
 | --- | --- | --- |
 | GET | `/api/bootstrap` | 首屏聚合：当前用户、站点配置、作品列表、反应汇总、各题对战池、排行榜总计、我的投票/待审数、管理员待审计数 |
 | GET | `/api/prompts` | Show1 共用与历史题库，长短原文通过同题 `promptVariants` 返回 |
-| POST | `/api/auth/register` | 注册并建立会话（限流） |
+| POST | `/api/auth/register` | 凭注册邮箱验证码创建账号并建立会话（限流） |
 | POST | `/api/auth/login` | 登录（限流） |
 | POST | `/api/auth/logout` | 登出 |
 | GET | `/api/auth/turnstile` | 获取 Turnstile 站点密钥；未开启时返回 `null` |
-| POST | `/api/auth/email/send` | 发绑定或重置密码验证码 |
+| POST | `/api/auth/email/send` | 发注册、绑定或重置密码验证码（注册发码无需登录） |
 | POST | `/api/auth/email/verify` | 预校验验证码 |
 | POST | `/api/auth/email/bind` | 登录后绑定或更换邮箱 |
 | POST | `/api/auth/password/reset` | 凭邮箱验证码重置密码并撤销所有会话 |

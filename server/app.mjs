@@ -27,7 +27,7 @@ import { registerShow1Guess } from './show1/guess.mjs';
 import { turnstileEnabled, turnstileSiteKey } from './turnstile.mjs';
 import { createReadGuard } from './read-guard.mjs';
 
-export function createPlatform({ config, limits, captureFactory = createCapturer }) {
+export function createPlatform({ config, limits, captureFactory = createCapturer, mailer }) {
   const serverVersion = process.env.SERVER_VERSION || (() => {
     try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: new URL('..', import.meta.url), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); }
     catch { /* 部署目录没有 .git：读部署时写入的版本文件 */ }
@@ -40,7 +40,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const catalog = createCatalog(config.dist, questions);
   catalog.refresh();
   const auth = createAuth(db, { admins: config.admins, secureCookies: config.secureCookies, cookieSameSite: config.cookieSameSite, sessionTtl: limits.sessionTtl });
-  const emailAuth = createEmailAuth(db, auth);
+  const emailAuth = createEmailAuth(db, auth, { mailer });
   const library = createLibrary({ db, catalog, config, limits });
   const adminService = createAdmin({ db, catalog, library });
   const inbox = createInbox({ library, config, limits });
@@ -81,6 +81,11 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const adminDir = resolve(config.admin ?? join(config.dist, '..', 'admin'));
 
   const signedIn = (ctx) => ctx.user ?? fail(401, '请先登录');
+  const emailBound = (ctx) => {
+    const user = signedIn(ctx);
+    if (!user.email) fail(403, '请先绑定邮箱', 'email_required');
+    return user;
+  };
   const adminOnly = (ctx) => (signedIn(ctx).role === 'admin' ? ctx.user : fail(403, '仅管理员可以操作'));
   const publicList = (works, viewer) => works.map((work) => library.toPublic(work, viewer));
   const checkDatapack = (ctx, taskId) => {
@@ -99,7 +104,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       catalogDigest: snapshot.catalogDigest,
       apiVersion: 1,
       serverVersion,
-      user: auth.public(user),
+      user: user ? { ...auth.public(user), emailBound: Boolean(user.email) } : null,
       site: {
         content: config.contentTemplate,
         cdn: config.cdn,
@@ -136,8 +141,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   router.on('POST', '/api/auth/register', async (ctx) => {
     limit.auth(ctx.ip);
     const body = await readJson(ctx.req);
-    await emailAuth.gate(body.turnstileToken, ctx.ip);
-    const user = await auth.register(body.name ?? body.username, body.password);
+    const user = await emailAuth.register(body);
     auth.startSession(ctx.res, user.id);
     return { user: compatUser(user) };
   });
@@ -162,7 +166,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   });
 
   router.on('POST', '/api/questions', async (ctx) => {
-    const user = signedIn(ctx);
+    const user = emailBound(ctx);
     limit.write(user.id);
     const body = await readJson(ctx.req, 6 * 1024 * 1024);
     requireCategory(body.category);
@@ -207,7 +211,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
 
   // Upload: the raw ZIP/HTML/text body is inspected and staged for the trial load.
   router.on('POST', '/api/drafts', async (ctx) => {
-    const user = signedIn(ctx);
+    const user = emailBound(ctx);
     limit.write(user.id);
     limit.drafts(user.id);
     const task = ctx.url.searchParams.get('task') ?? '';
@@ -217,15 +221,15 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     return { draft: library.createDraft(user, task, name, buffer, ctx.url.searchParams.get('template')) };
   });
   router.on('GET', '/api/drafts', (ctx) =>
-    ({ draft: library.latestDraft(signedIn(ctx), ctx.url.searchParams.get('task') ?? '') }));
+    ({ draft: library.latestDraft(emailBound(ctx), ctx.url.searchParams.get('task') ?? '') }));
   router.on('DELETE', '/api/drafts/:id', (ctx) => {
-    const user = signedIn(ctx);
+    const user = emailBound(ctx);
     limit.write(user.id);
     library.discardDraft(user, ctx.params.id);
     return { ok: true };
   });
   router.on('POST', '/api/works', async (ctx) => {
-    const user = signedIn(ctx);
+    const user = emailBound(ctx);
     limit.write(user.id);
     const body = await readJson(ctx.req, 6 * 1024 * 1024);
     checkDatapack(ctx, library.draftTask(String(body.draftId ?? '')));
@@ -263,7 +267,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     return { work: library.adminWork(work) };
   });
   router.on('POST', '/api/works/:task/:id/reactions', async (ctx) => {
-    const user = signedIn(ctx);
+    const user = emailBound(ctx);
     limit.write(user.id);
     const body = await readJson(ctx.req);
     return library.react(user, ctx.params.task, ctx.params.id, String(body.emoji ?? ''));

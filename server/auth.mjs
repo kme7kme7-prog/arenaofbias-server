@@ -3,6 +3,7 @@
 import { createHash, randomBytes, scrypt, scryptSync, timingSafeEqual } from 'node:crypto';
 import { AVATARS } from './config.mjs';
 import { fail, HttpError, uniqueCookie } from './http.mjs';
+import { transaction } from './db.mjs';
 
 const COOKIE = 'sp_session';
 const SCRYPT = { N: 16384, r: 8, p: 1 };
@@ -28,6 +29,8 @@ export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', 
     userById: db.prepare('SELECT * FROM users WHERE id = ?'),
     listUsers: db.prepare('SELECT * FROM users ORDER BY created_at'),
     insertUser: db.prepare('INSERT INTO users (id, name, name_key, role, salt, hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'),
+    insertVerifiedUser: db.prepare('INSERT INTO users (id, name, name_key, role, salt, hash, created_at, email, email_verified_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+    userByEmail: db.prepare('SELECT * FROM users WHERE email = ? COLLATE NOCASE'),
     upgradeHash: db.prepare('UPDATE users SET salt = ?, hash = ?, hash_params = NULL WHERE id = ?'),
     setRole: db.prepare('UPDATE users SET role = ? WHERE id = ?'),
     setNickname: db.prepare('UPDATE users SET nickname = ? WHERE id = ?'),
@@ -97,7 +100,7 @@ export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', 
       q.deleteUserSessions.run(userId);
     },
 
-    async register(rawName, rawPassword) {
+    async register(rawName, rawPassword, registration) {
       const name = validName(rawName);
       const password = validPassword(rawPassword);
       const key = nameKey(name);
@@ -106,7 +109,15 @@ export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', 
       const id = newId(8);
       const hash = await hashPassword(password, salt);
       if (q.userByKey.get(key)) fail(409, '这个用户名已被使用');
-      q.insertUser.run(id, name, key, 'member', salt, hash, Date.now());
+      if (registration) {
+        if (q.userByEmail.get(registration.email)) fail(409, '该邮箱已被其他账号绑定，请换一个。');
+        registration.verifyCode();
+        transaction(db, () => {
+          registration.consumeCode();
+          const now = Date.now();
+          q.insertVerifiedUser.run(id, name, key, 'member', salt, hash, now, registration.email, now);
+        });
+      } else q.insertUser.run(id, name, key, 'member', salt, hash, Date.now());
       return q.userById.get(id);
     },
 

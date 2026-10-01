@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { createPlatform } from '../server/app.mjs';
+import { verifiedUser } from './helpers/email.mjs';
 import { limits } from '../server/config.mjs';
 
 async function withPlatform(readLimits, run) {
@@ -27,7 +28,7 @@ async function withPlatform(readLimits, run) {
   const base = `http://127.0.0.1:${site.address().port}`;
   const work = `http://127.0.0.1:${content.address().port}`;
   async function cookie(name, admin = false) {
-    const user = await platform.auth.register(name, 'correct horse');
+    const user = await verifiedUser(platform.auth, name, 'correct horse');
     if (admin) platform.db.prepare("UPDATE users SET role = 'admin' WHERE id = ?").run(user.id);
     let value;
     platform.auth.startSession({ setHeader: (_key, header) => { value = header.split(';')[0]; } }, user.id);

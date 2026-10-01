@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { createPlatform } from '../server/app.mjs';
+import { verifiedUser } from './helpers/email.mjs';
 import { limits as defaultLimits } from '../server/config.mjs';
 import { parseWorkFilename } from '../server/inbox.mjs';
 
@@ -48,7 +49,8 @@ describe('admin inbox', () => {
     base = `http://127.0.0.1:${site.address().port}`;
     platform.auth.createAdmin('root', 'correct horse');
     assert.equal((await call('root', 'POST', '/api/auth/login', { name: 'root', password: 'correct horse' })).status, 200);
-    assert.equal((await call('alice', 'POST', '/api/auth/register', { name: 'alice', password: 'correct horse' })).status, 200);
+    await verifiedUser(platform.auth, 'alice');
+    assert.equal((await call('alice', 'POST', '/api/auth/login', { name: 'alice', password: 'correct horse' })).status, 200);
   });
 
   after(async () => {

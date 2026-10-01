@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, before, describe, test } from 'node:test';
 import { createPlatform } from '../server/app.mjs';
+import { verifiedUser } from './helpers/email.mjs';
 import { createCatalog } from '../server/catalog.mjs';
 import { limits } from '../server/config.mjs';
 import { MIGRATIONS, openDatabase } from '../server/db.mjs';
@@ -102,8 +103,12 @@ describe('community question and sample review lifecycle', () => {
     await Promise.all([site, content].map(server => new Promise(resolve => server.once('listening', resolve))));
     base = `http://127.0.0.1:${site.address().port}`;
     config.contentTemplate = `http://{token}.localhost:${content.address().port}`;
-    for (const name of ['author', 'other', 'quota', 'deletion', 'categories']) assert.equal((await call(name, 'POST', '/api/auth/register', { name, password: 'correct horse' })).status, 200);
-    platform.auth.createAdmin('root', 'correct horse');
+    for (const name of ['author', 'other', 'quota', 'deletion', 'categories']) {
+      await verifiedUser(platform.auth, name);
+      assert.equal((await call(name, 'POST', '/api/auth/login', { name, password: 'correct horse' })).status, 200);
+    }
+    const admin = platform.auth.createAdmin('root', 'correct horse');
+    platform.auth.bindEmail(admin.id, 'root@example.test');
     assert.equal((await call('root', 'POST', '/api/auth/login', { name: 'root', password: 'correct horse' })).status, 200);
   });
   after(async () => {

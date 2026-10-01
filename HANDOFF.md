@@ -1,5 +1,14 @@
 # HANDOFF.md · 当前状态
 
+## 本轮：注册强制绑定邮箱（2026-10-01 Brisbane，已本地提交，未推送、未部署）
+
+- 按 Gallery `register-email-binding` 契约实现匿名 `purpose: register` 发码、邮箱格式 / 占用校验、原 Turnstile 与 IP / 邮箱限流、注册验证邮件。注册必填 email/code，不再要求 Turnstile token；保留注册 auth 限流。异步密码哈希后校验 register 验证码，在同一事务消费验证码、创建用户并写入 email/email_verified_at，插入失败保留验证码可重试。bind/reset 行为保留。
+- v24 仅在 MIGRATIONS 末尾追加幂等迁移，扩展 email_codes 的 CHECK 以接受 register，保留原验证码数据、主键与过期索引。bootstrap.user 增加 emailBound，仅当前会话可见，auth.public 不变。
+- 旧无邮箱账号发起题目、上传、草稿 POST/GET/DELETE、Gallery 与 Show1 表情回应均 403 email_required「请先绑定邮箱」。Gallery 双盲仍揭晓，200 counted:false/reason:unbound，不写票；创建对局 counted:false。用户另行确认 Show1 兼容 /api/votes 也限制：有效未绑定请求返回同样 200 不计票响应，不写对局/票；已绑定请求保留 201 {vote}。
+- 测试可注入 createPlatform 的 mailer（ready/send）并捕获 to/code/purpose；辅助函数 test/helpers/email.mjs。生产默认 SMTP，HTTP 不暴露验证码或新增读取接口。前端 integration-smoke 与外部审计脚本须先 send 再 register，使用隔离 mailer 或测试 SMTP；本轮未修改前端仓。
+- 验证：Windows Node 24.16.0，npm run check 73/0，最终 npm test 173/173（无失败/取消/跳过），git diff --check 通过。首轮全量 171/173：遗漏 admin voter 邮箱夹具、平台新增读取用例触发默认 catalog 桶，补齐夹具并仅提高生命周期测试的 catalog 配置后全过；生产限流不变。预期邮件/数据库故障注入日志是断言内的测试结果。
+- 用户明确范围为后端本地提交；使用 wsnxxxs 的 GitHub noreply 身份、英文简单句，一轮一条。未推送、部署、操作生产库、运行 Node 22 / 真实邮件与 Turnstile / 前端联调。上线需同时准备 Gallery 和 Show1 注册表单、Show1 未计票响应处理与 smoke 脚本。归档：[register-email-binding](docs/archive/2026-10-01-register-email-binding-wsnxxxs.md)。
+
 ## 本轮：题目分类与文本投稿（2026-10-01 Brisbane，已本地提交，未推送、未部署）
 
 - 与 Gallery 联调后补充：文本投稿不再生成「说明文件 / README」检查项（`server/inspect.mjs`），`test/text.test.mjs` 加断言；check 72/0、test 167/167。隔离联调（临时库、CAPTURE=0、内容审核关闭）走通文学题 + 文本示例、建模题、审核改分类与审计、按分类推断格式，详见 Gallery 归档 question-categories-2。

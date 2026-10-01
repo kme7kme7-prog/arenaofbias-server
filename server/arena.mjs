@@ -285,7 +285,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
         task: taskId,
         a: `${library.originOf(tokens[0])}/`,
         b: `${library.originOf(tokens[1])}/`,
-        counted: Boolean(user),
+        counted: Boolean(user?.email),
       };
     },
 
@@ -306,6 +306,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
         q.decide.run(choice, Date.now(), match.id);
         if (choice === 'skip') return;
         if (!user) { reason = 'anonymous'; return; }
+        if (!user.email) { reason = 'unbound'; return; }
         if (!library.isEligible(library.work(match.task_id, match.a_work)) || !library.isEligible(library.work(match.task_id, match.b_work))) { reason = 'changed'; return; }
         if (aIdentity.ownerId === user.id || bIdentity.ownerId === user.id) { reason = 'own'; return; }
         const key = pairKey(match.task_id, match.a_work, match.b_work);

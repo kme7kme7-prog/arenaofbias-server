@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { createPlatform } from '../server/app.mjs';
+import { verifiedUser } from './helpers/email.mjs';
 import { createCatalog } from '../server/catalog.mjs';
 import { limits } from '../server/config.mjs';
 import { MIGRATIONS, openDatabase } from '../server/db.mjs';
@@ -61,7 +62,7 @@ test('a match keeps its original package and vote identity across a same-mtime s
     platform = createPlatform({ config, limits });
     content = createServer(platform.handleContent).listen(0, '127.0.0.1');
     await new Promise((resolve) => content.once('listening', resolve));
-    const user = await platform.auth.register('voter', 'correct horse');
+    const user = await verifiedUser(platform.auth, 'voter', 'correct horse');
     // 精选馆藏默认不进正式盲测池：先审批 a1/b1（等价于竞技场面的逐件通过）。
     platform.db.prepare("INSERT INTO work_overrides (task_id, work_id, show_gallery, show_arena, updated_by, updated_at) VALUES ('one', 'a1', 1, 1, 'test', 0), ('one', 'b1', 1, 1, 'test', 0)").run();
     assert.equal((await platform.arena.leaderboard()).unranked.some((row) => row.key === 'm-a|'), true);

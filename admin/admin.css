@@ -702,4 +702,3 @@ dialog.sheet.sheet-calib { width: min(1120px, calc(100% - 32px)); border-radius:
 .calib-hint-row { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
 .calib-mode { display: inline-flex; gap: 4px; }
 .calib-mode .btn.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
-.work-pool-note { display: block; color: var(--ink-2); font-size: 12px; margin-top: 2px; }

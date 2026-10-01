@@ -20,6 +20,7 @@ import { createAdmin } from './admin.mjs';
 import { createInbox } from './inbox.mjs';
 import { createCurator } from './curate.mjs';
 import { createQuestions } from './questions.mjs';
+import { requireCategory } from './categories.mjs';
 import { createProfile } from './profile.mjs';
 import { registerShow1Compat } from './show1compat.mjs';
 import { registerShow1Guess } from './show1/guess.mjs';
@@ -164,6 +165,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     const user = signedIn(ctx);
     limit.write(user.id);
     const body = await readJson(ctx.req, 6 * 1024 * 1024);
+    requireCategory(body.category);
     if (!Object.hasOwn(body, 'draftId') && !Object.hasOwn(body, 'work') && !Object.hasOwn(body, 'confirmed')) {
       const question = transaction(db, () => questions.create(user, body, catalog.tags()));
       return { question };
@@ -203,7 +205,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     return { ok: true };
   });
 
-  // Upload: the raw ZIP/HTML body is inspected and staged as a draft for the trial load.
+  // Upload: the raw ZIP/HTML/text body is inspected and staged for the trial load.
   router.on('POST', '/api/drafts', async (ctx) => {
     const user = signedIn(ctx);
     limit.write(user.id);

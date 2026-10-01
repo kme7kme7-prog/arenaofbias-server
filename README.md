@@ -118,7 +118,7 @@ npm start
 | GET | `/api/admin/questions` | 全部未删除社区题目、人工审核状态及作者示例结果（仅管理员） |
 | POST | `/api/questions/:id/moderation` | 人工通过或拒绝社区题目；拒绝须填理由（仅管理员） |
 | DELETE | `/api/questions/:id` | 软删除题目及关联投稿；作者受归属与投票限制，管理员也不能删除有票题目 |
-| POST | `/api/drafts?task=&name=&template=` | 上传 ZIP/HTML，检查后暂存为草稿；新题目使用 `task=__new__`，仅能经 `/api/questions` 提交；`template=static|vite` 可选（需登录，限流） |
+| POST | `/api/drafts?task=&name=&template=` | 上传 ZIP/HTML 或 UTF-8 文本，检查后暂存为草稿；新题目使用 `task=__new__`，仅能经 `/api/questions` 提交；`template=static|vite|text` 按分类校验（需登录，限流） |
 | GET | `/api/drafts?task=` | 本人在该题最新的未过期草稿，供继续试加载（需登录） |
 | DELETE | `/api/drafts/:id` | 丢弃草稿（需登录） |
 | POST | `/api/works` | 由草稿正式投稿，入审核队列并排队截图（需登录） |

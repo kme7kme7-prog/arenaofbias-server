@@ -1,9 +1,10 @@
-// Upload inspection: unpacks a ZIP (or takes a single HTML file), rejects unsafe archives,
+// Upload inspection: unpacks a ZIP, takes HTML or renders text, rejects unsafe archives,
 // finds the entry page and checks what it references. Nothing from the upload is executed.
 import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
 import * as zlib from 'node:zlib';
 import { fail, formatBytes } from './http.mjs';
+import { renderTextUpload } from './text.mjs';
 
 const JUNK = /(^|\/)(__MACOSX(\/|$)|\.DS_Store$|Thumbs\.db$|desktop\.ini$)/i;
 const IGNORED = /(^|\/)(node_modules|\.git|\.svn|\.hg)(\/|$)/i;
@@ -168,11 +169,12 @@ const hostOf = (url) => { try { return new URL(url, 'https://local.invalid/').ho
 
 export function inspectUpload(buffer, filename, { limits, cdn, template }) {
   if (!buffer.length) fail(400, '文件是空的');
+  const textUpload = template === 'text' ? renderTextUpload(buffer, filename) : null;
   const isZip = buffer.length >= 4 && buffer.readUInt32LE(0) === 0x04034b50;
   const isHtml = !isZip && (/\.html?$/i.test(filename) || /^\s*(<!doctype html|<html|<head|<body|<meta|<script|<!--)/i.test(buffer.subarray(0, 512).toString('utf8').replace(/^﻿/, '')));
-  if (!isZip && !isHtml) fail(400, '请上传 ZIP 压缩包或单个 HTML 文件');
+  if (!textUpload && !isZip && !isHtml) fail(400, '请上传 ZIP 压缩包或单个 HTML 文件');
 
-  const archive = isZip ? readZip(buffer, limits) : { files: new Map([['index.html', buffer]]), ignored: 0 };
+  const archive = textUpload ? { files: textUpload.files, ignored: 0 } : isZip ? readZip(buffer, limits) : { files: new Map([['index.html', buffer]]), ignored: 0 };
   const files = stripWrapper(archive.files);
   const builtRoot = (template === 'vite' || (!template && files.has('package.json')))
     && ['dist', 'build', 'out'].find((dir) => files.has(`${dir}/index.html`));
@@ -184,7 +186,7 @@ export function inspectUpload(buffer, filename, { limits, cdn, template }) {
 
   const checks = [];
   const bytes = [...files.values()].reduce((sum, data) => sum + data.length, 0);
-  checks.push({ id: 'format', state: 'ok', label: '文件格式', detail: isZip ? `ZIP · ${files.size} 个文件 · 解压后 ${formatBytes(bytes)}` : `单个 HTML · ${formatBytes(bytes)}` });
+  checks.push({ id: 'format', state: 'ok', label: '文件格式', detail: textUpload ? `识别为 ${textUpload.isMarkdown ? 'Markdown' : '纯文本'} · 约 ${textUpload.characters.toLocaleString('en-US')} 字 · ${formatBytes(buffer.length)}` : isZip ? `ZIP · ${files.size} 个文件 · 解压后 ${formatBytes(bytes)}` : `单个 HTML · ${formatBytes(bytes)}` });
   if (archive.ignored) checks.push({ id: 'ignored', state: 'info', label: '依赖目录', detail: `已忽略 ${archive.ignored} 个依赖或版本库文件（node_modules、.git 等）` });
   checks.push({ id: 'entry', state: 'ok', label: '入口页面', detail: root ? `${root}/${entry}（以 ${root}/ 作为站点根目录）` : entry });
 
@@ -224,5 +226,5 @@ export function inspectUpload(buffer, filename, { limits, cdn, template }) {
   checks.push({ id: 'readme', state: readme ? 'ok' : 'info', label: '说明文件', detail: readme ? '包含 README.md' : '未包含 README.md（选填）' });
 
   const digest = sha256([...files.keys()].sort().map((path) => `${path}\0${sha256(files.get(path))}`).join('\n'));
-  return { files, root, entry, count: files.size, bytes, digest, entryDigest: sha256(entryData), checks, kind: isZip ? 'zip' : 'html' };
+  return { files, root, entry, count: files.size, bytes, digest, entryDigest: sha256(entryData), checks, kind: textUpload ? 'text' : isZip ? 'zip' : 'html' };
 }

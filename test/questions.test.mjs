@@ -25,7 +25,7 @@ test('v22 migrates existing questions to legacy without losing their data and is
       .run('q-old', 'owner', 'Old title', 'Old summary', 'Exact\nprompt', '["UI"]', '["static"]', 2);
     db.close(); db = openDatabase(file);
     const row = db.prepare('SELECT * FROM questions WHERE id = ?').get('q-old');
-    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 22);
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, MIGRATIONS.length);
     assert.deepEqual(JSON.parse(row.moderation), { status: 'legacy' });
     assert.equal(row.deleted_at, null);
     assert.equal(row.prompt, 'Exact\nprompt');
@@ -34,10 +34,33 @@ test('v22 migrates existing questions to legacy without losing their data and is
   } finally { db.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
+test('v23 backfills categories from tags before text templates and preserves existing categories', () => {
+  const root = mkdtempSync(join(tmpdir(), 'question-category-migration-'));
+  let db = new DatabaseSync(join(root, 'platform.db'));
+  try {
+    for (const migration of MIGRATIONS.slice(0, 22)) {
+      if (typeof migration === 'function') migration(db); else db.exec(migration);
+    }
+    db.exec('PRAGMA user_version = 22');
+    db.prepare('INSERT INTO users (id, name, name_key, salt, hash, created_at) VALUES (?, ?, ?, ?, ?, ?)').run('owner', 'owner', 'owner', 'unused', 'unused', 1);
+    const insert = db.prepare('INSERT INTO questions (id, owner_id, title, summary, prompt, tags, templates, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    for (const [id, tags, templates] of [['tag', ['UI', '建模', '文学'], ['text']], ['text', [], ['text']], ['unknown', ['UI'], ['static']], ['mixed', [], ['text', 'static']]]) {
+      insert.run(id, 'owner', id, 'summary', 'prompt', JSON.stringify(tags), JSON.stringify(templates), 2);
+    }
+    db.close(); db = openDatabase(join(root, 'platform.db'));
+    const categories = () => Object.fromEntries(db.prepare('SELECT id, category FROM questions ORDER BY id').all().map(row => [row.id, row.category]));
+    assert.deepEqual(categories(), { mixed: null, tag: '建模', text: '文学', unknown: null });
+    db.prepare('UPDATE questions SET category = ? WHERE id = ?').run('静态网页', 'tag');
+    const rows = db.prepare('SELECT * FROM questions ORDER BY id').all();
+    MIGRATIONS[22](db);
+    assert.deepEqual(db.prepare('SELECT * FROM questions ORDER BY id').all(), rows);
+  } finally { db.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
 describe('community question and sample review lifecycle', () => {
   let root, platform, site, content, base;
   const cookies = new Map();
-  const questionBody = { title: 'Question', summary: 'Test interaction', prompt: 'Build a page.\nKeep this text.', tags: ['UI'], templates: ['static'] };
+  const questionBody = { title: 'Question', summary: 'Test interaction', prompt: 'Build a page.\nKeep this text.', category: '静态网页', tags: ['UI'], templates: ['static'] };
   const workBody = { title: 'Sample', modelId: 'model-a', effort: 'High', harnessOther: 'Test harness', trial: { loaded: true } };
   async function call(who, method, path, body, raw = false) {
     const headers = { origin: base };
@@ -79,13 +102,65 @@ describe('community question and sample review lifecycle', () => {
     await Promise.all([site, content].map(server => new Promise(resolve => server.once('listening', resolve))));
     base = `http://127.0.0.1:${site.address().port}`;
     config.contentTemplate = `http://{token}.localhost:${content.address().port}`;
-    for (const name of ['author', 'other', 'quota', 'deletion']) assert.equal((await call(name, 'POST', '/api/auth/register', { name, password: 'correct horse' })).status, 200);
+    for (const name of ['author', 'other', 'quota', 'deletion', 'categories']) assert.equal((await call(name, 'POST', '/api/auth/register', { name, password: 'correct horse' })).status, 200);
     platform.auth.createAdmin('root', 'correct horse');
     assert.equal((await call('root', 'POST', '/api/auth/login', { name: 'root', password: 'correct horse' })).status, 200);
   });
   after(async () => {
     site?.close(); content?.close(); await platform?.close();
     if (root) rmSync(root, { recursive: true, force: true });
+  });
+
+  test('categories are required, templates match and tags may be empty or omit the category', async () => {
+    const staged = await draft('categories');
+    for (const invalid of [{ category: undefined }, { category: '' }, { category: 'UI' }, { category: ['文学'] }, { category: '文学', templates: ['static'] }, { category: '建模', templates: ['text'] }]) {
+      for (const sample of [{}, { draftId: staged.id, confirmed: true, work: workBody }]) {
+        const result = await call('categories', 'POST', '/api/questions', { ...questionBody, ...sample, ...invalid });
+        assert.equal(result.status, 400, JSON.stringify(result.data));
+      }
+    }
+    for (const tags of [undefined, [], ['静态网页', 'UI']]) {
+      const created = await call('categories', 'POST', '/api/questions', { ...questionBody, tags });
+      assert.equal(created.status, 200, JSON.stringify(created.data));
+      assert.equal(created.data.question.category, '静态网页');
+      assert.deepEqual(created.data.question.tags, tags?.length ? ['UI'] : []);
+      await moderate(created.data.question.id, 'approved');
+    }
+  });
+
+  test('approval fills or changes category, resets incompatible templates and records the changes', async () => {
+    const created = await call('categories', 'POST', '/api/questions', questionBody);
+    assert.equal(created.status, 200, JSON.stringify(created.data));
+    const id = created.data.question.id;
+    platform.db.prepare('UPDATE questions SET category = NULL WHERE id = ?').run(id);
+    assert.equal((await moderate(id, 'approved')).status, 400);
+    assert.equal((await call('root', 'POST', `/api/questions/${id}/moderation`, { status: 'approved', category: 'UI' })).status, 400);
+    assert.equal((await call('categories', 'GET', '/api/me')).data.questions.find(q => q.id === id).category, null);
+    const decision = await call('root', 'POST', `/api/questions/${id}/moderation`, { status: 'approved', category: '文学' });
+    assert.equal(decision.status, 200, JSON.stringify(decision.data));
+    assert.equal(decision.data.question.category, '文学');
+    assert.deepEqual(decision.data.question.templates, ['text']);
+    const detail = JSON.parse(platform.db.prepare("SELECT detail FROM audit WHERE task_id = ? AND action = 'question-review' ORDER BY rowid DESC LIMIT 1").get(id).detail);
+    assert.deepEqual(detail.category, { from: null, to: '文学' });
+    assert.deepEqual(detail.templates, { from: ['static'], to: ['text'] });
+    assert.equal((await call('guest', 'GET', '/api/bootstrap')).data.questions.find(q => q.id === id).category, '文学');
+    assert.equal((await call('root', 'GET', '/api/admin/questions')).data.questions.find(q => q.id === id).category, '文学');
+    const changed = await call('root', 'POST', `/api/questions/${id}/moderation`, { status: 'approved', category: '建模' });
+    assert.equal(changed.status, 200);
+    assert.deepEqual(changed.data.question.templates, ['static', 'vite']);
+    const changedDetail = JSON.parse(platform.db.prepare("SELECT detail FROM audit WHERE task_id = ? AND action = 'question-review' ORDER BY rowid DESC LIMIT 1").get(id).detail);
+    assert.deepEqual(changedDetail.category, { from: '文学', to: '建模' });
+    assert.deepEqual(changedDetail.templates, { from: ['text'], to: ['static', 'vite'] });
+    platform.db.prepare('UPDATE questions SET templates = ? WHERE id = ?').run('["static"]', id);
+    const compatible = await call('root', 'POST', `/api/questions/${id}/moderation`, { status: 'approved', category: '静态网页' });
+    assert.equal(compatible.status, 200);
+    assert.deepEqual(compatible.data.question.templates, ['static']);
+    const compatibleDetail = JSON.parse(platform.db.prepare("SELECT detail FROM audit WHERE task_id = ? AND action = 'question-review' ORDER BY rowid DESC LIMIT 1").get(id).detail);
+    assert.deepEqual(compatibleDetail.category, { from: '建模', to: '静态网页' });
+    assert.ok(!Object.hasOwn(compatibleDetail, 'templates'));
+    const rejected = await call('root', 'POST', `/api/questions/${id}/moderation`, { status: 'rejected', reason: '测试', category: 'invalid' });
+    assert.equal(rejected.status, 200);
+    assert.equal(rejected.data.question.category, '静态网页');
   });
 
   test('reserved drafts recover and cannot be submitted as ordinary works; validation preserves the draft', async () => {
@@ -100,7 +175,7 @@ describe('community question and sample review lifecycle', () => {
     const normal = await draft('author', 'one');
     assert.equal((await call('author', 'POST', '/api/questions', { ...questionBody, draftId: normal.id, confirmed: true, work: workBody })).status, 400);
     const count = platform.db.prepare('SELECT count(*) AS n FROM questions').get().n;
-    for (const invalid of [{ confirmed: false }, { work: { ...workBody, harnessOther: '' } }, { work: { ...workBody, cover: 'invalid' } }, { templates: ['vite'] }, { tags: [] }]) {
+    for (const invalid of [{ confirmed: false }, { work: { ...workBody, harnessOther: '' } }, { work: { ...workBody, cover: 'invalid' } }, { templates: ['vite'] }]) {
       const response = await call('author', 'POST', '/api/questions', { ...questionBody, draftId: staged.id, confirmed: true, work: workBody, ...invalid });
       assert.equal(response.status, 400, JSON.stringify(response.data));
       assert.equal(platform.db.prepare('SELECT count(*) AS n FROM questions').get().n, count);

@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { avatarOf } from './auth.mjs';
 import { transaction } from './db.mjs';
 import { fail } from './http.mjs';
+import { compatibleTemplates, defaultTemplates, requireCategory } from './categories.mjs';
 
 const tagName = (value) => String(value).normalize('NFKC').trim().replace(/^#+/, '').trim();
 const tagKey = (value) => tagName(value).toLowerCase();
@@ -14,14 +15,15 @@ function required(value, label, max) {
   return value.trim();
 }
 
-export function normalizeTags(input, existing = []) {
-  if (!Array.isArray(input) || !input.length) fail(400, '请至少添加一个标签');
+export function normalizeTags(input = [], existing = [], category = null) {
+  if (!Array.isArray(input)) fail(400, '标签格式不正确');
   const names = new Map(existing.map((name) => [tagKey(name), name]));
   const unique = new Map();
   for (const raw of input) {
     if (typeof raw !== 'string') fail(400, '标签格式不正确');
     const name = tagName(raw), key = tagKey(name);
     if (!key || name.length > 24 || /[<>{}\n\r,，]/.test(name)) fail(400, '标签为 1–24 字，不能包含特殊符号');
+    if (category && key === tagKey(category)) continue;
     unique.set(key, names.get(key) ?? name);
   }
   if (unique.size > 6) fail(400, '每道题最多添加 6 个标签');
@@ -35,16 +37,16 @@ export function createQuestions(db) {
   const one = db.prepare(`${select} WHERE questions.id = ? AND questions.deleted_at IS NULL`);
   const owned = db.prepare(`${select} WHERE questions.owner_id = ? AND questions.deleted_at IS NULL ORDER BY questions.created_at DESC, questions.id`);
   const pending = db.prepare(`SELECT COUNT(*) AS n FROM questions WHERE owner_id = ? AND deleted_at IS NULL AND json_extract(moderation, '$.status') = 'pending'`);
-  const insert = db.prepare(`INSERT INTO questions (id, owner_id, title, summary, prompt, tags, templates, created_at, moderation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const insert = db.prepare(`INSERT INTO questions (id, owner_id, title, summary, prompt, tags, templates, created_at, moderation, category) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const audit = db.prepare('INSERT INTO audit (at, actor_id, actor_name, action, task_id, work_id, detail) VALUES (?, ?, ?, ?, ?, ?, ?)');
   const works = db.prepare('SELECT id, owner_id, task_id FROM works WHERE task_id = ? AND deleted_at IS NULL ORDER BY created_at, id');
   const votes = db.prepare('SELECT COUNT(*) AS n FROM votes WHERE task_id = ?');
   const deleteWork = db.prepare('UPDATE works SET deleted_at = ?, updated_at = ? WHERE id = ?');
   const deleteQuestion = db.prepare('UPDATE questions SET deleted_at = ? WHERE id = ?');
-  const setModeration = db.prepare('UPDATE questions SET moderation = ? WHERE id = ?');
+  const setModeration = db.prepare('UPDATE questions SET moderation = ?, category = ?, templates = ?, tags = ? WHERE id = ?');
   const fromRow = (row, privateView = false) => row ? {
     id: row.id, title: row.title, summary: row.summary, prompt: row.prompt,
-    tags: JSON.parse(row.tags), templates: JSON.parse(row.templates),
+    category: row.category, tags: JSON.parse(row.tags), templates: JSON.parse(row.templates),
     owner: row.owner_name, ownerAvatar: avatarOf({ id: row.owner_id, avatar: row.owner_avatar }), version: row.version, community: true,
     createdAt: new Date(row.created_at).toISOString(),
     date: new Date(row.created_at).toISOString().slice(0, 10),
@@ -67,31 +69,44 @@ export function createQuestions(db) {
       });
     },
     create(user, body, existingTags = []) {
+      const category = requireCategory(body.category);
       const title = required(body.title, '题目标题', 70);
       const summary = required(body.summary, '测试简述', 400);
       const prompt = required(body.prompt, '完整提示词', 20000);
-      const tags = normalizeTags(body.tags, existingTags);
-      const templates = Array.isArray(body.templates) ? [...new Set(body.templates)] : ['static', 'vite'];
-      if (!templates.length || templates.some((type) => !['static', 'vite'].includes(type))) fail(400, '请至少选择一种有效的提交格式');
+      const tags = normalizeTags(body.tags, existingTags, category);
+      if (!compatibleTemplates(category, body.templates)) fail(400, '提交格式与题目分类不匹配');
+      const templates = [...new Set(body.templates)];
       if (pending.get(user.id).n >= 3) fail(429, '你已有 3 道题目在等待审核');
       const id = `q-${randomBytes(8).toString('hex')}`;
       const now = Date.now();
-      insert.run(id, user.id, title, summary, prompt, JSON.stringify(tags), JSON.stringify(templates), now, JSON.stringify({ status: 'pending', at: now }));
+      insert.run(id, user.id, title, summary, prompt, JSON.stringify(tags), JSON.stringify(templates), now, JSON.stringify({ status: 'pending', at: now }), category);
       audit.run(now, user.id, user.name, 'question-create', id, null, title);
       return fromRow(one.get(id), true);
     },
     review(actor, id, body) {
       if (actor.role !== 'admin') fail(403, '仅管理员可以操作');
-      if (!one.get(id)) fail(404, '题目不存在');
+      const row = one.get(id);
+      if (!row) fail(404, '题目不存在');
       if (!['approved', 'rejected'].includes(body.status)) fail(400, '题目审核结果无效');
       if (body.reason != null && typeof body.reason !== 'string') fail(400, '审核理由格式不正确');
       const reason = (body.reason ?? '').trim();
       if (reason.length > 500) fail(400, '审核理由最多 500 字');
       if (body.status === 'rejected' && !reason) fail(400, '请填写拒绝理由');
+      const category = body.status === 'approved'
+        ? requireCategory(Object.hasOwn(body, 'category') ? body.category : row.category) : row.category;
+      const previousTemplates = JSON.parse(row.templates);
+      const changedCategory = category !== row.category;
+      const templates = changedCategory && !compatibleTemplates(category, previousTemplates)
+        ? defaultTemplates(category) : previousTemplates;
+      const tags = body.status === 'approved' ? JSON.parse(row.tags).filter((tag) => tagKey(tag) !== tagKey(category)) : JSON.parse(row.tags);
       const moderation = { status: body.status, source: 'human', reason, reviewer: actor.name, at: Date.now() };
+      const detail = { ...moderation,
+        ...(changedCategory ? { category: { from: row.category, to: category } } : {}),
+        ...(templates !== previousTemplates ? { templates: { from: previousTemplates, to: templates } } : {}),
+      };
       transaction(db, () => {
-        setModeration.run(JSON.stringify(moderation), id);
-        audit.run(moderation.at, actor.id, actor.name, 'question-review', id, null, JSON.stringify(moderation));
+        setModeration.run(JSON.stringify(moderation), category, JSON.stringify(templates), JSON.stringify(tags), id);
+        audit.run(moderation.at, actor.id, actor.name, 'question-review', id, null, JSON.stringify(detail));
       });
       return fromRow(one.get(id), true);
     },

@@ -1,5 +1,14 @@
 # HANDOFF.md · 当前状态
 
+## 本轮：题目分类与文本投稿（2026-10-01 Brisbane，已本地提交，未推送、未部署）
+
+- 后端追加 v23 幂等迁移 `questions.category`：旧题优先从标签回填分类，否则仅 text 格式回填文学，其余保持 null。新建题必填文学 / 静态网页 / 建模，格式按分类校验，标签选填 0–6 个，写入时丢弃同分类标签。公开、作者和管理员题目视图均返回 category / templates。
+- 人工通过时可补充或修改分类，缺分类拒绝通过；拒绝时忽略 category。改分类与原格式不兼容时重置默认格式，并在 question-review 审计记录旧值与新值。平台题目通过现有 catalog 分类筛选加入对应榜单；数据包缺少非空 templates 时按分类推断。
+- `template=text` 支持单个 UTF-8 `.txt` / `.md` / `.markdown`，沿用 uploadBytes 并限制 200000 Unicode 字符。安全 Markdown 子集生成自包含 index.html，原 HTML 转义、无外链图片或脚本；纯文本保留段落换行，原件保存为 original.<扩展名>。沿用草稿探针、内容审核、截图与核验；无新增 npm 依赖。
+- 验证：Windows Node 24.16.0，check 72 文件 / 0 错、最终全量 test 167/167、git diff --check 通过。覆盖迁移、分类/格式/标签校验、审核与审计/格式重置、各题目 DTO、文学建题和投稿/预览原件、ZIP 与非法 UTF-8 拒绝、安全转义、数据包格式推断和平台文学作品进入分榜。未运行生产 Node 22、浏览器视觉验收、真实内容审核或截图服务。
+- 数据仓由指定 GPT-6.1 Sol medium 子代理完成 15 道题重复分类 tags 清空，其余 5 道内容标签保留；无需修改空数组校验。check 28/0、test 16/16、intake 121 件 / 0 错 / 4 既有提示、完整构建 20 题 / 121 件通过。data 本地提交 `a2f8f95`，未推送或更新消费者 pin；后端本地数据包未变。
+- 前端未修改。上线应配合 Gallery 已完成的分类契约；数据包仍按不可变版本发布，消费者更新 pin / 切换发布目录后 catalog 自动观察新的 realpath 与版本。归档：[question-category-text](docs/archive/2026-10-01-question-category-text-wsnxxxs.md)。
+
 ## 本轮：示例作品选填与上传忽略目录（2026-10-01 Brisbane，已本地提交，未推送、未部署）
 
 - 社区建题的示例作品改为选填：`POST /api/questions` 完全不带 `draftId`、`work`、`confirmed` 时只建题，返回 `{ question }`；仍为 pending、人工审核、每人最多 3 道。带任一作品字段时沿用原路径。后台空 samples 已有空态，无需修改。

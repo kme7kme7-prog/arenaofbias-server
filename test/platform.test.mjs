@@ -14,6 +14,7 @@ import { crc32, deflateRawSync } from 'node:zlib';
 import { createPlatform } from '../server/app.mjs';
 import { createAuth } from '../server/auth.mjs';
 import { createArena } from '../server/arena.mjs';
+import { createCatalog } from '../server/catalog.mjs';
 import { limits as defaultLimits } from '../server/config.mjs';
 import { inspectUpload } from '../server/inspect.mjs';
 import { MIGRATIONS, openDatabase } from '../server/db.mjs';
@@ -470,6 +471,8 @@ describe('platform lifecycle', () => {
       tasks: [
         { id: 'one', title: 'One', category: '建模', tags: ['Three.js'], promptPending: false, results: results.map(([id, model, effort]) => ({ id, model, effort, title: id.toUpperCase(), summary: '', scene: `results/one/${id}/`, captures: {}, gallery: [] })) },
         { id: 'closed', title: 'Closed', promptPending: true, results: [] },
+        { id: 'literature', title: 'Literature', category: '文学', results: [] },
+        { id: 'literature-empty', title: 'Literature empty', category: '文学', templates: [], results: [] },
         { id: 'versions', title: 'Versions', promptPending: false, promptVariants: [{ id: 'long', label: '长版', prompt: 'Long' }, { id: 'short', label: '短版', prompt: 'Short' }], results: [] },
       ],
     }));
@@ -617,7 +620,7 @@ describe('platform lifecycle', () => {
     const combined = (await call('alice', 'GET', '/api/leaderboard')).data;
     assert.equal(combined.category, null);
     assert.deepEqual(combined.standings, { 建模: Object.fromEntries(scoped.rows.map((row) => [row.key, row.rank])) });
-    for (const query of ['category=文学', 'category=建模&task=one']) {
+    for (const query of ['category=无效', 'category=建模&task=one']) {
       assert.equal((await call('alice', 'GET', `/api/leaderboard?${query}`)).status, 400);
     }
   });
@@ -758,10 +761,10 @@ describe('platform lifecycle', () => {
   test('publishing requires a session and complete question details', async () => {
     const staged = await call('bob', 'POST', '/api/drafts?task=__new__&name=validation.html', '<!doctype html><title>Validation</title><h1>Validation</h1>', { raw: true });
     assert.equal(staged.status, 200);
-    const body = { title: 'Keyboard', summary: 'Test product interaction', prompt: 'Build a keyboard.', tags: ['Three.js'], templates: ['static'], draftId: staged.data.draft.id, confirmed: true, work: { title: 'Validation', modelId: 'm-a', tool: 'CLI' } };
+    const body = { title: 'Keyboard', summary: 'Test product interaction', prompt: 'Build a keyboard.', category: '建模', tags: ['Three.js'], templates: ['static'], draftId: staged.data.draft.id, confirmed: true, work: { title: 'Validation', modelId: 'm-a', tool: 'CLI' } };
     assert.equal((await call('guest', 'POST', '/api/questions', body)).status, 401);
     assert.equal((await call('bob', 'POST', '/api/questions', body, { origin: false })).status, 403);
-    for (const invalid of [{ title: ' ' }, { summary: '' }, { prompt: '' }, { tags: [] }, { tags: ['bad,tag'] }, { tags: Array.from({ length: 7 }, (_, i) => `tag${i}`) }, { templates: [] }, { templates: ['server'] }]) {
+    for (const invalid of [{ title: ' ' }, { summary: '' }, { prompt: '' }, { tags: ['bad,tag'] }, { tags: Array.from({ length: 7 }, (_, i) => `tag${i}`) }, { templates: [] }, { templates: ['server'] }]) {
       assert.equal((await call('bob', 'POST', '/api/questions', { ...body, ...invalid })).status, 400);
     }
   });
@@ -770,7 +773,7 @@ describe('platform lifecycle', () => {
     const sample = await call('bob', 'POST', '/api/drafts?task=__new__&name=sample.html', '<!doctype html><title>Sample</title><h1>Sample</h1>', { raw: true });
     const created = await call('bob', 'POST', '/api/questions', {
       title: 'Dense question grid', summary: 'Compare responsive layouts.', prompt: 'Build a page.\nKeep this exact prompt.',
-      tags: [' #three.js ', 'Three.js', '界面'], templates: ['static'], owner: 'root',
+      category: '静态网页', tags: [' #three.js ', 'Three.js', '界面'], templates: ['static'], owner: 'root',
       draftId: sample.data.draft.id, confirmed: true, work: { title: 'Sample', modelId: 'm-a', tool: 'CLI' },
     });
     assert.equal(created.status, 200);
@@ -820,7 +823,7 @@ describe('platform lifecycle', () => {
       assert.equal(staged.data.draft.root, 'dist');
       assert.match((await fetchContent(staged.data.draft.preview)).text, /Static sample/);
       const created = await call('bob', 'POST', '/api/questions', {
-        title: 'Static export', summary: 'A static page in dist.', prompt: 'Make an HTML page.', tags: ['UI'], templates: ['static'],
+        title: 'Static export', summary: 'A static page in dist.', prompt: 'Make an HTML page.', category: '静态网页', tags: ['UI'], templates: ['static'],
         draftId: staged.data.draft.id, confirmed: true, work: { title: 'Static sample', modelId: 'm-a', tool: 'CLI' },
       });
       assert.equal(created.status, 200, JSON.stringify(created.data));
@@ -839,7 +842,7 @@ describe('platform lifecycle', () => {
       { name: 'dist/index.html', data: '<html><h1>Built answer</h1></html>' },
     ]);
     const sample = await call('alice', 'POST', '/api/drafts?task=__new__&template=vite&name=sample.zip', archive, { raw: true });
-    const created = await call('alice', 'POST', '/api/questions', { title: 'Vite', summary: 'Built browser page', prompt: 'Build it.', tags: ['Vite'], templates: ['vite'], draftId: sample.data.draft.id, confirmed: true, work: { title: 'Sample', modelId: 'm-a', tool: 'CLI' } });
+    const created = await call('alice', 'POST', '/api/questions', { title: 'Vite', summary: 'Built browser page', prompt: 'Build it.', category: '静态网页', tags: ['Vite'], templates: ['vite'], draftId: sample.data.draft.id, confirmed: true, work: { title: 'Sample', modelId: 'm-a', tool: 'CLI' } });
     assert.equal(created.status, 200);
     const id = created.data.question.id;
     await call('root', 'POST', `/api/questions/${id}/moderation`, { status: 'approved' });
@@ -901,7 +904,7 @@ describe('platform lifecycle', () => {
     assert.equal(empty.receivedReactions.total, 0);
 
     const staged = await call('charlie', 'POST', '/api/drafts?task=__new__&name=answer.html', '<!doctype html><title>Answer</title><h1>Answer</h1>', { raw: true });
-    const created = await call('charlie', 'POST', '/api/questions', { title: 'Profile test', summary: 'A profile fixture', prompt: 'Make a page.', tags: ['UI'], templates: ['static'], draftId: staged.data.draft.id, confirmed: true, work: { title: 'Answer', modelId: 'm-a', tool: 'CLI' } });
+    const created = await call('charlie', 'POST', '/api/questions', { title: 'Profile test', summary: 'A profile fixture', prompt: 'Make a page.', category: '静态网页', tags: ['UI'], templates: ['static'], draftId: staged.data.draft.id, confirmed: true, work: { title: 'Answer', modelId: 'm-a', tool: 'CLI' } });
     const task = created.data.question.id;
     await call('root', 'POST', `/api/questions/${task}/moderation`, { status: 'approved' });
     const submitted = { status: created.status, data: { work: created.data.work } };
@@ -979,5 +982,51 @@ describe('platform lifecycle', () => {
     assert.equal((await call('bob', 'PATCH', path, { title: 'Late' })).status, 409, 'reviewed works are frozen for the author');
     assert.equal((await call('root', 'POST', `/api/admin/works/versions/${id}/meta`, { title: 'Fixed' })).status, 200);
     assert.equal((await call('bob', 'DELETE', path)).status, 200);
+  });
+
+  test('literature markdown drafts become samples and answers with safe previews and original text', async () => {
+    assert.equal((await call('writer', 'POST', '/api/auth/register', { name: 'writer', password: 'correct horse' })).status, 200);
+    for (const content of [Buffer.from('PK\x03\x04disguised'), Buffer.from([0xe4, 0xb8])]) {
+      assert.equal((await call('writer', 'POST', '/api/drafts?task=__new__&template=text&name=story.md', content, { raw: true })).status, 400);
+    }
+    const markdown = '# 故事\n\n<script>alert("story")</script>\n原文结尾';
+    const staged = await call('writer', 'POST', '/api/drafts?task=__new__&name=story.md', markdown, { raw: true });
+    assert.equal(staged.status, 200, JSON.stringify(staged.data));
+    const preview = await fetchContent(staged.data.draft.preview);
+    assert.equal(preview.status, 200);
+    assert.match(preview.text, /&lt;script&gt;/);
+    assert.ok(!preview.text.includes('<script>alert("story")</script>'));
+    const created = await call('writer', 'POST', '/api/questions', {
+      title: '写故事', summary: '比较故事', prompt: '写一篇故事。', category: '文学', templates: ['text'], tags: [],
+      draftId: staged.data.draft.id, confirmed: true, work: { title: '故事示例', modelId: 'm-b', effort: 'High', tool: 'CLI' },
+    });
+    assert.equal(created.status, 200, JSON.stringify(created.data));
+    const id = created.data.question.id;
+    assert.equal(created.data.question.category, '文学');
+    const samplePreview = await fetchContent(created.data.work.scene);
+    assert.equal(samplePreview.status, 200);
+    assert.match(samplePreview.text, /&lt;script&gt;/);
+    assert.equal((await fetchContent(new URL('original.md', created.data.work.scene).href)).text, markdown);
+    assert.equal((await call('root', 'POST', `/api/questions/${id}/moderation`, { status: 'approved' })).status, 200);
+    assert.equal((await call('root', 'POST', `/api/works/${id}/${created.data.work.id}/review`, { status: 'verified', show_gallery: true, show_arena: true })).status, 200);
+    const answer = await call('writer', 'POST', `/api/drafts?task=${id}&name=answer.md`, markdown, { raw: true });
+    assert.equal(answer.status, 200, JSON.stringify(answer.data));
+    const submitted = await call('writer', 'POST', '/api/works', { draftId: answer.data.draft.id, confirmed: true, title: '故事回答', modelId: 'm-a', tool: 'CLI' });
+    assert.equal(submitted.status, 200, JSON.stringify(submitted.data));
+    assert.equal((await fetchContent(new URL('original.md', submitted.data.work.scene).href)).text, markdown);
+    assert.match((await fetchContent(submitted.data.work.scene)).text, /&lt;script&gt;/);
+    const boot = (await call('guest', 'GET', '/api/bootstrap')).data;
+    assert.equal(boot.questions.find(q => q.id === id).category, '文学');
+    for (const task of ['literature', 'literature-empty']) {
+      assert.deepEqual(createCatalog(join(root, 'dist')).task(task).templates, ['text']);
+      assert.equal((await call('writer', 'POST', `/api/drafts?task=${task}&name=wrong.html`, '<!doctype html><h1>Wrong</h1>', { raw: true })).status, 400);
+    }
+    const board = await call('guest', 'GET', '/api/leaderboard?category=文学');
+    assert.equal(board.status, 200);
+    assert.equal(board.data.category, '文学');
+    assert.ok(board.data.unranked.some(row => row.key === 'm-b|high' && row.model === 'm-b' && row.works === 1));
+    const staticBoard = await call('guest', 'GET', '/api/leaderboard?category=静态网页');
+    assert.equal(staticBoard.status, 200);
+    assert.ok(![...staticBoard.data.rows, ...staticBoard.data.unranked].some(row => row.key === 'm-b|high'));
   });
 });

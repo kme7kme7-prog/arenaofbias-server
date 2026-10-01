@@ -5,6 +5,7 @@ import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fail } from './http.mjs';
 import { generationOf } from './generation.mjs';
+import { templatesOf } from './categories.mjs';
 
 export const effortKey = (effort) => String(effort ?? '').normalize('NFKC').trim().toLowerCase();
 export const modelKey = (work) => work.modelId ?? `x:${work.modelName.normalize('NFKC').trim().toLowerCase()}`;
@@ -31,6 +32,7 @@ function readSnapshot(root) {
   const tasks = new Map(data.tasks.map((task) => [task.id, {
     id: task.id, title: task.title, summary: task.summary, prompt: task.prompt,
     arenaId: task.arenaId ?? null, kind: task.kind ?? 'web', category: task.category ?? '',
+    templates: templatesOf(task),
     promptVariants: (task.promptVariants ?? []).map(({ id, label, prompt }) => ({ id, label, prompt })),
     acceptsUploads: !task.promptPending,
     works: new Map(task.results.map((result) => {

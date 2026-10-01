@@ -8,6 +8,7 @@ import { EFFORTS, EMOJIS } from './config.mjs';
 import { transaction } from './db.mjs';
 import { fail } from './http.mjs';
 import { inspectUpload } from './inspect.mjs';
+import { templatesOf } from './categories.mjs';
 import { GENERATION_FIELDS, generationFrom, generationOf, generationAudit } from './generation.mjs';
 
 const token = (prefix) => `${prefix}${randomBytes(16).toString('hex')}`;
@@ -541,13 +542,13 @@ export function createLibrary({ db, catalog, config, limits }) {
 
     // ---- drafts: stage → trial load → submit --------------------------------------------
     createDraft(user, taskId, filename, buffer, template = null) {
-      const task = taskId === '__new__' ? { acceptsUploads: true, templates: ['static', 'vite'] } : catalog.task(taskId, user);
+      const task = taskId === '__new__' ? { acceptsUploads: true, templates: ['static', 'vite', 'text'] } : catalog.task(taskId, user);
       if (!task) fail(404, '题目不存在');
       if (!task.acceptsUploads) fail(409, '这道题的提示词原文尚未公开，暂不接受上传');
       purgeDrafts();
-      const allowed = task.templates ?? ['static', 'vite'];
+      const allowed = templatesOf(task);
       if (template && !allowed.includes(template)) fail(400, '该题不支持此提交格式');
-      const selected = template ?? (allowed.length === 1 ? allowed[0] : null);
+      const selected = template ?? (allowed.length === 1 ? allowed[0] : /\.(txt|md|markdown)$/i.test(filename) && allowed.includes('text') ? 'text' : null);
       const inspected = inspectUpload(buffer, filename, { limits, cdn: config.cdn, template: selected });
       const format = selected ?? (inspected.files.has('package.json') && inspected.root ? 'vite' : 'static');
       if (!allowed.includes(format)) fail(400, '该题不支持此提交格式');
@@ -629,13 +630,13 @@ export function createLibrary({ db, catalog, config, limits }) {
         renameSync(staged, stored);
         moved = true;
         transaction(db, () => {
+          const format = JSON.parse(draft.checks).find((check) => check.id === 'format')?.template
+            ?? (draft.root && existsSync(join(stored, 'package.json')) ? 'vite' : 'static');
           if (createQuestion) {
             const question = createQuestion();
-            const format = JSON.parse(draft.checks).find((check) => check.id === 'format')?.template
-              ?? (draft.root && existsSync(join(stored, 'package.json')) ? 'vite' : 'static');
             if (!question.templates.includes(format)) fail(400, '该题不支持此提交格式');
             taskId = question.id;
-          }
+          } else if (!templatesOf(catalog.task(taskId, user)).includes(format)) fail(400, '该题不支持此提交格式');
           q.insertWork.run(id, taskId, user.id, title, clip(body.summary, 200), who.modelId, who.modelId ? '' : who.modelName,
             effortOf(body.effort), source.harnessId, source.harnessOther, source.harnessVersion, source.providerId,
             source.providerOther, noteWithVendor(clip(body.note, 1000), who.modelId, body.vendor), token('w'), draft.source_name, draft.root, draft.entry, draft.file_count,

@@ -347,6 +347,15 @@ const MIGRATIONS = [
     if (!columns.has('moderation')) db.exec(`ALTER TABLE questions ADD COLUMN moderation TEXT NOT NULL DEFAULT '{"status":"legacy"}'`);
     if (!columns.has('deleted_at')) db.exec('ALTER TABLE questions ADD COLUMN deleted_at INTEGER');
   },
+  // Classify old platform questions from their tags, then their text-only format.
+  (db) => {
+    const columns = new Set(db.prepare('PRAGMA table_info(questions)').all().map((column) => column.name));
+    if (!columns.has('category')) db.exec('ALTER TABLE questions ADD COLUMN category TEXT');
+    db.exec(`UPDATE questions SET category = COALESCE(
+      (SELECT value FROM json_each(questions.tags) WHERE value IN ('文学', '静态网页', '建模') ORDER BY key LIMIT 1),
+      CASE WHEN json_array_length(templates) = 1 AND json_extract(templates, '$[0]') = 'text' THEN '文学' END
+    ) WHERE category IS NULL`);
+  },
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

@@ -72,7 +72,7 @@ export function createContentHandler({ config, library, arena, siteOrigins, read
       if (library.isEligible(work)) target = { dir: work.dir, entry: work.entry ?? 'index.html' };
     } else if (key[0] === 'p') {
       work = library.previewByKey(key);
-      if (work) target = { dir: work.dir, entry: work.entry, private: true };
+      if (work) target = { dir: work.dir, entry: work.entry ?? 'index.html', private: true };
     } else {
       work = library.byContentKey(key);
       if (library.contentAllowed(work)) target = { dir: work.dir, entry: work.entry, private: work.moderation.status !== 'legacy' };

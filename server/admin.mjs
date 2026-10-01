@@ -21,6 +21,10 @@ export function createAdmin({ db, catalog, library }) {
   const daily = db.prepare('SELECT day, COUNT(*) AS pv, COUNT(DISTINCT ip_hash) AS unique_ips FROM page_views WHERE day >= ? AND day <= ? GROUP BY day ORDER BY day');
   const paths = db.prepare('SELECT path, COUNT(*) AS pv FROM page_views WHERE day >= ? AND day <= ? GROUP BY path ORDER BY pv DESC, path LIMIT 20');
   const users = db.prepare('SELECT COUNT(*) AS total, SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS new_users FROM users');
+  // Ballots each work has appeared in (skips excluded), matching the pre-fusion admin list.
+  const votesPerWork = db.prepare(`SELECT task_id, work_id, COUNT(*) AS votes FROM (
+    SELECT task_id, a_work AS work_id FROM votes WHERE choice != 'skip'
+    UNION ALL SELECT task_id, b_work FROM votes WHERE choice != 'skip') GROUP BY task_id, work_id`);
 
   const task = (id) => catalog.task(id) ?? fail(404, '题目不存在', 'not_found');
   const iso = (ms) => new Date(ms).toISOString();
@@ -58,7 +62,8 @@ export function createAdmin({ db, catalog, library }) {
       const search = String(query.get('search') ?? '').trim().toLocaleLowerCase();
       const curated = catalog.tasks().flatMap((t) => [...t.works.values()]);
       const uploads = library.uploads();
-      const allWorks = [...curated, ...uploads].map((work) => library.adminWork(work));
+      const voteCounts = new Map(votesPerWork.all().map((row) => [`${row.task_id}/${row.work_id}`, row.votes]));
+      const allWorks = [...curated, ...uploads].map((work) => ({ ...library.adminWork(work), votes: voteCounts.get(`${work.taskId}/${work.id}`) ?? 0 }));
       const efforts = [...new Set(allWorks.map((work) => work.effort).filter(Boolean))].sort();
       const rows = allWorks.filter((work) =>
         (!taskId || work.task === taskId) && (!status || work.status === status) &&

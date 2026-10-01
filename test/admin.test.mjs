@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:http';
+import { createServer, request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -111,8 +111,44 @@ test('admin API merges curated and upload works, applies face settings, calibrat
   assert.deepEqual(rows.find((w) => w.id === id).calibration_gallery.framing, framing);
   assert.deepEqual(rows.find((w) => w.id === id).calibration_arena.camera, camera);
   assert.deepEqual(rows.find((w) => w.id === 'a').calibration_arena.framing, framing);
+  assert.ok(rows.every((row) => Number.isInteger(row.votes)), 'every row carries a ballot count');
+  assert.equal(rows.find((w) => w.id === id).votes, 0);
+  platform.db.prepare(`INSERT INTO votes (id, match_id, user_id, task_id, a_work, b_work, pair_key, choice, created_at)
+    VALUES ('v1', 'm1', NULL, 'one', 'a', 'b', 'one:a|b', 'a', 1)`).run();
+  const counted = (await call('root', 'GET', '/api/admin/works')).data.works;
+  assert.equal(counted.find((w) => w.id === 'a').votes, 1, 'appearances are counted per work');
+  assert.equal(counted.find((w) => w.id === 'b').votes, 1);
   assert.equal((await call('root', 'POST', `/api/admin/works/one/${id}/calibration`, { face: 'arena', calibration: { framing: { ...framing, zoom: 5 } } })).status, 400);
   assert.ok(platform.db.prepare("SELECT COUNT(*) AS n FROM audit WHERE action IN ('submit','verified','face-settings','calibration')").get().n >= 6);
+}));
+
+test('admin preview keys serve curated works on the content origin with the capture bridge', async () => withPlatform(async ({ platform, call }) => {
+  const content = createServer(platform.handleContent).listen(0, '127.0.0.1');
+  await new Promise((resolve) => content.once('listening', resolve));
+  const fetchPreview = (path, host) => new Promise((resolve, reject) => {
+    const req = request({ host: '127.0.0.1', port: content.address().port, path, headers: { host } }, (res) => {
+      let text = '';
+      res.on('data', (chunk) => { text += chunk; });
+      res.on('end', () => resolve({ status: res.statusCode, text }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+  try {
+    assert.equal((await call('voter', 'POST', '/api/admin/works/one/a/preview')).status, 403);
+    assert.equal((await call('root', 'POST', '/api/admin/works/one/zz/preview')).status, 404);
+    const preview = await call('root', 'POST', '/api/admin/works/one/a/preview');
+    assert.equal(preview.status, 200);
+    assert.match(preview.data.url, /^http:\/\/p[0-9a-f]{32}\.localhost\/$/, 'a short-lived p key is issued');
+    const host = new URL(preview.data.url).host;
+    const page = await fetchPreview('/?aob=bridge&face=gallery', host);
+    assert.equal(page.status, 200, 'the curated work itself is reachable through the key');
+    assert.match(page.text, /__AOB_CAPTURE__=true/, 'the capture handshake is armed for the admin panel');
+    const plain = await fetchPreview('/', host);
+    assert.ok(!plain.text.includes('__AOB_CAPTURE__'), 'without aob=bridge the page stays untouched');
+  } finally {
+    await new Promise((resolve) => content.close(resolve));
+  }
 }));
 
 test('calibrating a curated work preserves its arena approval and invalidates the board', async () => withPlatform(async ({ platform, call }) => {

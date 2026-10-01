@@ -374,7 +374,8 @@ export function createLibrary({ db, catalog, config, limits }) {
     previewByKey(key) {
       const value = previews.get(key);
       if (!value || value.expiresAt <= Date.now()) { previews.delete(key); return null; }
-      return upload(value.task, value.id);
+      // Curated works preview from the datapack directory; uploads from their own dir.
+      return this.work(value.task, value.id);
     },
     uploadById(id) {
       const row = q.work.get(id);

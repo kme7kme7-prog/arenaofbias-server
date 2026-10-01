@@ -370,6 +370,16 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     arena.invalidate();
     return { task: ctx.params.task, id: ctx.params.id, face: body.face, calibration };
   });
+  // Short-lived preview host for the admin calibration panel: works of either source
+  // (curated datapack or upload) become viewable on the content origin, where the
+  // camera bridge answers the capture handshake. The key itself is the permission.
+  router.on('POST', '/api/admin/works/:task/:id/preview', (ctx) => {
+    const admin = adminOnly(ctx);
+    limit.write(admin.id);
+    const work = library.work(ctx.params.task, ctx.params.id);
+    if (!work) fail(404, '作品不存在', 'not_found');
+    return { url: `${library.previewOrigin(work)}/` };
+  });
   router.on('GET', '/api/admin/tasks/:id/editorial', (ctx) => {
     adminOnly(ctx);
     return adminService.getEditorial(ctx.params.id, ctx.url.searchParams.get('face'));

@@ -839,7 +839,7 @@ function adminWorkRow(w, face = state.system) {
   const promoted = Boolean(w.curatedAs);
   return `<tr data-work-key="${esc(`${w.task}/${w.id}`)}">
     <td><input type="checkbox" data-select-work="${esc(`${w.task}/${w.id}`)}" aria-label="选择${esc(w.title)}" ${promoted ? 'disabled' : ''}></td>
-    <td><div class="admin-work-title">${thumb(w)}<div><b>${esc(w.title)}</b><small>${esc(taskTitle(w.task))}</small></div></div></td>
+    <td><div class="admin-work-title">${thumb(w)}<div><b>${esc(w.title)}</b><small>${esc(taskTitle(w.task))} · ${w.votes ?? 0} 票</small></div></div></td>
     <td>${esc(w.modelName)}${provenanceText(w) ? `<small class="work-provenance">${esc(provenanceText(w))}</small>` : ''}</td><td>${w.source === 'curated' ? '精选' : '投稿'}</td><td>${statusBadge(w.status)}</td>
     <td>${promoted ? '—' : `<label class="face-toggle"><input type="checkbox" data-face-toggle="${esc(w.id)}" ${w[`show_${face}`] ? 'checked' : ''} aria-label="${esc(w.title)}${face === 'gallery' ? '在展览馆显示' : '进正式盲测'}">${w[`show_${face}`] ? '已开启' : '已关闭'}</label>`}</td>
     ${face === 'arena' ? `<td>${promoted ? '已收录' : w.status === 'verified' && w.show_arena ? '在正式盲测池' : '不在正式盲测池'}</td>` : '<td>—</td>'}
@@ -928,34 +928,156 @@ function editDialog(w) {
   });
 }
 
+// The camera answer arrives from the work's content origin via postMessage (server/bridge.mjs).
+let calibrationCapture = null;
+addEventListener('message', (event) => {
+  if (event.data?.aob === 'camera' && calibrationCapture) calibrationCapture(event.data.camera);
+});
+
+// Same contain-and-offset math as the arena frontend (Show1 lib/work-framing.ts), so the
+// panel preview matches what a calibrated match side will look like on the site.
+function applyCalibrationFrame(mat, frame, canvas) {
+  const viewWidth = mat.clientWidth;
+  const viewHeight = mat.clientHeight;
+  const scale = Math.min(viewWidth / canvas.width, viewHeight / canvas.height) * canvas.zoom;
+  frame.style.width = `${canvas.width}px`;
+  frame.style.height = `${canvas.height}px`;
+  frame.style.transform = `scale(${scale})`;
+  frame.style.left = `${(viewWidth - canvas.width * scale) / 2 + canvas.offsetX * viewWidth}px`;
+  frame.style.top = `${(viewHeight - canvas.height * scale) / 2 + canvas.offsetY * viewHeight}px`;
+}
+
 function calibrationDialog(w) {
   const face = state.system;
   const current = w[`calibration_${face}`] ?? {};
   const framing = current.framing ?? { width: 1440, height: 900, zoom: 1, offsetX: 0, offsetY: 0 };
   const camera = current.camera ?? { position: [0, 0, 5], target: [0, 0, 0] };
-  const fields = [['width', 320, 3840, 1], ['height', 240, 3840, 1], ['zoom', 0.25, 4, 0.01], ['offsetX', -1, 1, 0.01], ['offsetY', -1, 1, 0.01]];
+  const draft = { framing: { ...framing }, camera: { position: [...camera.position], target: [...camera.target] } };
   const names = { width: '画框宽度', height: '画框高度', zoom: '缩放', offsetX: '水平偏移', offsetY: '垂直偏移',
     position0: '相机位置 X', position1: '相机位置 Y', position2: '相机位置 Z', target0: '相机目标 X', target1: '相机目标 Y', target2: '相机目标 Z' };
-  const input = (name, value, min, max, step) => `<label class="field"><span class="field-label">${names[name]}</span><input class="input" type="number" name="${name}" value="${value}" min="${min}" max="${max}" step="${step}" required></label>`;
-  const sheet = openDialog({ title: `${faceLabel()}取景 · ${w.title}`, body: `<form class="admin-editor">
-    <label class="field"><input type="checkbox" name="framing_enabled" ${current.framing ? 'checked' : ''}> 使用画框参数</label><div class="admin-grid">${fields.map(([name, min, max, step]) => input(name, framing[name], min, max, step)).join('')}</div>
-    <label class="field"><input type="checkbox" name="camera_enabled" ${current.camera ? 'checked' : ''}> 使用相机参数</label><div class="admin-grid">${['position', 'target'].flatMap((key) => [0, 1, 2].map((i) => input(`${key}${i}`, camera[key][i], -9999999, 9999999, 'any'))).join('')}</div>
-    <p class="form-error" role="alert"></p><div class="actions"><button class="btn primary" type="submit">保存取景</button><button class="btn" type="button" data-clear-calibration>清空取景</button></div></form>` });
+  const number = (name, value, min, max, step) => `<label class="field"><span class="field-label">${names[name]}</span><input class="input" type="number" data-calib-num="${name}" value="${value}" min="${min}" max="${max}" step="${step}"></label>`;
+  const range = (name, min, max, step) => `<label class="calib-range"><span>${names[name]}</span><input type="range" data-calib-range="${name}" min="${min}" max="${max}" step="${step}" value="${draft.framing[name]}"><output>${draft.framing[name]}</output></label>`;
+  const sheet = openDialog({ title: `${faceLabel()}取景 · ${w.title}`, className: 'sheet-calib', onClose: () => { calibrationCapture = null; }, body: `<div class="calib">
+    <div class="calib-stage">
+      <div class="calib-mat" data-calib-mat><div class="calib-frame" data-calib-frame><iframe data-calib-view title="取景预览「${esc(w.title)}」" loading="lazy" referrerpolicy="no-referrer"></iframe></div><div class="calib-drag" data-calib-drag title="拖动移动取景" aria-hidden="true"></div></div>
+      <div class="calib-hint-row"><span class="calib-mode"><button type="button" class="btn sm on" data-calib-mode="frame">取景模式</button><button type="button" class="btn sm" data-calib-mode="camera">视角模式（可拖作品）</button></span><span class="calib-hint" data-calib-hint>正在准备预览…</span></div>
+    </div>
+    <form class="calib-side">
+      <fieldset class="calib-group"><legend>1 · 画框 · 装下完整作品</legend>
+        <div class="calib-pair">${number('width', draft.framing.width, 320, 3840, 1)}${number('height', draft.framing.height, 240, 3840, 1)}</div>
+        <div class="calib-presets">${[720, 960, 1200, 1600].map((h) => `<button type="button" class="btn sm" data-calib-height="${h}">${h}px 高</button>`).join('')}</div>
+      </fieldset>
+      <fieldset class="calib-group"><legend>2 · 取景 · 缩放与位置</legend>
+        ${range('zoom', 0.25, 4, 0.01)}${range('offsetX', -1, 1, 0.01)}${range('offsetY', -1, 1, 0.01)}
+      </fieldset>
+      <fieldset class="calib-group"><legend>3 · 相机 · 3D 作品</legend>
+        <label class="field calib-toggle"><input type="checkbox" data-calib-camera-enabled ${current.camera ? 'checked' : ''}> 使用相机参数</label>
+        <div class="calib-row"><button type="button" class="btn sm primary" data-calib-grab disabled>抓取当前视角</button><span class="calib-cam-state" data-calib-cam-state>预览就绪后，把作品转到满意的角度再抓取。</span></div>
+        <div class="calib-pair">${['position', 'target'].flatMap((key) => [0, 1, 2].map((i) => number(`${key}${i}`, draft.camera[key][i], -9999999, 9999999, 'any'))).join('')}</div>
+      </fieldset>
+      <label class="field calib-toggle"><input type="checkbox" data-calib-framing-enabled ${current.framing ? 'checked' : ''}> 使用画框取景（不勾则前台按原始比例显示）</label>
+      <p class="form-error" role="alert"></p>
+      <div class="actions"><button class="btn primary" type="submit">保存取景</button><button class="btn" type="button" data-clear-calibration>清空取景</button></div>
+    </form></div>` });
   const form = $('form', sheet.el);
+  const mat = $('[data-calib-mat]', sheet.el);
+  const frame = $('[data-calib-frame]', sheet.el);
+  const view = $('[data-calib-view]', sheet.el);
+  const hint = $('[data-calib-hint]', sheet.el);
+  const grab = $('[data-calib-grab]', sheet.el);
+  const camState = $('[data-calib-cam-state]', sheet.el);
+  const paint = () => applyCalibrationFrame(mat, frame, draft.framing);
+  const syncInputs = () => {
+    for (const el of $$('[data-calib-num]', form)) {
+      const key = el.dataset.calibNum;
+      if (key in draft.framing) el.value = Math.round(draft.framing[key] * 100) / 100;
+    }
+    for (const el of $$('[data-calib-range]', form)) {
+      const key = el.dataset.calibRange;
+      el.value = draft.framing[key];
+      el.nextElementSibling.value = Math.round(draft.framing[key] * 100) / 100;
+    }
+    paint();
+  };
   const save = async (calibration) => {
     const done = busy($('button[type="submit"]', form), '正在保存…');
     $('[data-clear-calibration]', form).disabled = true;
     try { await api(`admin/works/${workKey(w)}/calibration`, { method: 'POST', body: { face, calibration } }); sheet.close(); toast('取景已保存'); await reload(); }
     catch (error) { $('.form-error', form).textContent = error.message; done(); $('[data-clear-calibration]', form).disabled = false; }
   };
+  // Live preview: a short-lived content-origin key makes any work (curated or upload)
+  // viewable, with the bridge answering the camera handshake (?aob=bridge&face=…).
+  (async () => {
+    try {
+      const { url } = await api(`admin/works/${workKey(w)}/preview`, { method: 'POST' });
+      view.src = `${url}${url.includes('?') ? '&' : '?'}aob=bridge&face=${face}`;
+      grab.disabled = false;
+      hint.textContent = '拖动画面移动取景；滑杆与数字实时联动。取景只改显示，不改作品文件。';
+    } catch {
+      hint.textContent = '预览暂不可用，仍可手动填写参数保存。';
+    }
+  })();
+  const onResize = () => paint();
+  addEventListener('resize', onResize);
+  const wasClose = sheet.close.bind(sheet);
+  sheet.close = () => { removeEventListener('resize', onResize); wasClose(); };
+  for (const el of $$('[data-calib-height]', form)) el.addEventListener('click', () => { draft.framing.height = Number(el.dataset.calibHeight); syncInputs(); });
+  for (const el of $$('[data-calib-range]', form)) el.addEventListener('input', () => { draft.framing[el.dataset.calibRange] = Number(el.value); syncInputs(); });
+  for (const el of $$('[data-calib-num]', form)) el.addEventListener('input', () => {
+    const key = el.dataset.calibNum;
+    const value = Number(el.value);
+    if (!(key in draft.framing) || !Number.isFinite(value)) return;
+    draft.framing[key] = key === 'width' || key === 'height' ? Math.round(value) : value;
+    paint();
+  });
+  // Drag-to-frame: pointer travel maps to offset in units of the visible viewport.
+  // Camera mode lets pointer events fall through to the work itself, so its OrbitControls
+  // can be turned before capture (the pre-fusion admin used a separate dialog for this).
+  const dragLayer = $('[data-calib-drag]', sheet.el);
+  for (const btn of $$('[data-calib-mode]', sheet.el)) btn.addEventListener('click', () => {
+    const cameraMode = btn.dataset.calibMode === 'camera';
+    for (const other of $$('[data-calib-mode]', sheet.el)) other.classList.toggle('on', other === btn);
+    dragLayer.style.pointerEvents = cameraMode ? 'none' : '';
+    hint.textContent = cameraMode ? '视角模式：直接拖动作品转到满意角度，然后「抓取当前视角」。' : '拖动画面移动取景；滑杆与数字实时联动。取景只改显示，不改作品文件。';
+  });
+  let drag = null;
+  dragLayer.addEventListener('pointerdown', (e) => {
+    drag = { x: e.clientX, y: e.clientY, offsetX: draft.framing.offsetX, offsetY: draft.framing.offsetY };
+    dragLayer.setPointerCapture(e.pointerId);
+  });
+  dragLayer.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const clamp = (v) => Math.min(1, Math.max(-1, v));
+    draft.framing.offsetX = clamp(drag.offsetX + (e.clientX - drag.x) / mat.clientWidth);
+    draft.framing.offsetY = clamp(drag.offsetY + (e.clientY - drag.y) / mat.clientHeight);
+    syncInputs();
+  });
+  const endDrag = () => { drag = null; };
+  dragLayer.addEventListener('pointerup', endDrag);
+  dragLayer.addEventListener('pointercancel', endDrag);
+  grab.addEventListener('click', () => {
+    camState.textContent = '等待回包…';
+    view.contentWindow?.postMessage({ aob: 'get-camera' }, '*');
+  });
+  calibrationCapture = (cam) => {
+    if (!cam) { camState.textContent = '这件作品没有可抓取的 3D 相机（可能是纯 2D 页面）。'; return; }
+    draft.camera = { position: [...cam.position], target: [...cam.target] };
+    for (const key of ['position', 'target']) [0, 1, 2].forEach((i) => { form.querySelector(`[data-calib-num="${key}${i}"]`).value = Math.round(cam[key][i] * 1000) / 1000; });
+    $('[data-calib-camera-enabled]', form).checked = true;
+    camState.textContent = '已抓取当前视角 ✓';
+  };
   form.addEventListener('submit', (e) => {
     e.preventDefault();
-    const val = (name) => Number(form.elements.namedItem(name).value);
-    const patch = { framing: form.elements.namedItem('framing_enabled').checked ? Object.fromEntries(fields.map(([name]) => [name, val(name)])) : null,
-      camera: form.elements.namedItem('camera_enabled').checked ? { position: [0, 1, 2].map((i) => val(`position${i}`)), target: [0, 1, 2].map((i) => val(`target${i}`)) } : null };
+    const num = (name) => Number(form.querySelector(`[data-calib-num="${name}"]`).value);
+    // Framing lives in draft (sliders, drag and numbers all keep it current); camera
+    // inputs are read from the DOM because hand edits there are authoritative.
+    const patch = { framing: $('[data-calib-framing-enabled]', form).checked ? { ...draft.framing } : null,
+      camera: $('[data-calib-camera-enabled]', form).checked
+        ? { position: [0, 1, 2].map((i) => num(`position${i}`)), target: [0, 1, 2].map((i) => num(`target${i}`)) } : null };
     save(patch);
   });
   $('[data-clear-calibration]', sheet.el).addEventListener('click', () => save(null));
+  setTimeout(paint);
 }
 
 async function editorialDialog(taskId) {

@@ -1,5 +1,14 @@
 # HANDOFF.md · 当前状态
 
+## 本轮：竞技场作品管理复刻 · 期B 校准面板（2026-10-01，本地提交，未推送未部署）
+
+- 用户拍板「B做一下 这个是最重要的」。重写 admin calibrationDialog：纯数字表单 → 可视化校准面板（预览+滑杆+拖拽+抓视角）。列表搜索/筛选朋友已做过，本轮补票数。
+- 后端三处：①adminService.works 每件作品带 votes（votes 表 a/b 两侧出现次数聚合，skip 不计）；②POST /api/admin/works/:task/:id/preview 发 1 小时 p 键（library.previewOrigin 现成），内容服务器 p 分支 entry 补 'index.html' 兜底 + previewByKey 改 library.work() 使 curated 作品也能预览；③无新迁移。
+- 前端 admin.js：calibrationDialog 重写——16:9 取景台（framedCanvas 同款公式：contain×zoom+比例偏移，与 Show1 lib/work-framing.ts 口径一致）、iframe 实时预览（p 键 + ?aob=bridge&face=当前系统面）、拖动改 offset（±1 clamp）、缩放/偏移滑杆与数字联动、画框宽高+720/960/1200/1600 预设、「取景模式/视角模式」切换（视角模式 dragLayer pointer-events:none 让指针穿透进作品拖 3D，合并老版两个对话框）、抓取当前视角（postMessage {aob:'get-camera'}→回包回填 6 数字+自动勾选）、保存/清空沿用 setFaceCalibration。模块级 calibrationCapture+window message 分发，onClose 清理。adminWorkRow 作品列加「· N 票」。
+- 浏览器端到端验收（bridge-demo/admin-e2e.mjs：真平台+真 admin+three.js curated 作品）：登录→竞技场取景→视角模式拖 3D→抓取 (4.739,0,-1.595)→保存→重开面板值还原→开 arena 开关建对局→对局侧 HTML 内嵌 __AOB_SAVED__ 同值 + createMatch calibration 下发 framing。192/192 测试、check 76/0。
+- 修的坑：①submit 读滑杆参数当数字框（num('zoom') null 崩，改 framing 取 draft.framing 内存值，camera 仍读 DOM）；②undici fetch 吞自定义 Host 头（诊断对局键假 404，native http 才可信——bridge.test 教训重演）；③合成拖拽要先把 iframe scrollIntoView（对话框超高可滚，作品可能滚出视口）。
+- 未做：推送、部署、Show1 前端消费 calibration（期C，朋友活跃区）。演示台 fusion/bridge-demo/（8787/8788 演示 + admin-e2e 8790/8791 验收脚本）保留。
+
 ## 本轮：竞技场作品管理复刻 · 期A 后端桥（2026-10-01，本地提交，未推送未部署）
 
 - 用户拍板复刻融合前竞技场的作品校准体验（方案 fusion/竞技场作品管理复刻方案-v1.md，期A=后端桥+探针+对局下发）。老实现：Show1/server/work-bridge.js（视角桥，Show1 决策 102）+ 就绪探针（决策 096）；竞技场前端 page.tsx/work-capture.tsx 至今仍在监听 `aob:work-ready`。

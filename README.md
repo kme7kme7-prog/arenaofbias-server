@@ -114,7 +114,7 @@ npm start
 | POST | `/api/auth/email/verify` | 预校验验证码 |
 | POST | `/api/auth/email/bind` | 登录后绑定或更换邮箱 |
 | POST | `/api/auth/password/reset` | 凭邮箱验证码重置密码并撤销所有会话 |
-| POST | `/api/questions` | 用 `__new__` 草稿连同示例结果提交社区题目，等待人工审核（需登录） |
+| POST | `/api/questions` | 提交社区题目，示例结果选填；附示例时使用 `__new__` 草稿，等待人工审核（需登录） |
 | GET | `/api/admin/questions` | 全部未删除社区题目、人工审核状态及作者示例结果（仅管理员） |
 | POST | `/api/questions/:id/moderation` | 人工通过或拒绝社区题目；拒绝须填理由（仅管理员） |
 | DELETE | `/api/questions/:id` | 软删除题目及关联投稿；作者受归属与投票限制，管理员也不能删除有票题目 |

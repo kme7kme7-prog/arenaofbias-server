@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { scryptSync } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -387,11 +387,33 @@ describe('upload inspection', () => {
 
   test('unsafe or incomplete archives are refused with a reason', () => {
     assert.throws(() => inspect(zip([{ name: '../evil.html', data: PAGE }])), /不安全/);
-    assert.throws(() => inspect(zip([{ name: 'index.html', data: PAGE }, { name: 'node_modules/x/index.js', data: '' }])), /node_modules/);
+    for (const name of ['.env', '.env.local', '.npmrc', '.pypirc', 'id_rsa', 'id_ed25519']) {
+      assert.throws(() => inspect(zip([{ name: 'index.html', data: PAGE }, { name, data: 'secret' }])),
+        (error) => error.status === 400 && error.message === `请移除 ${name}：压缩包不能包含密钥文件`);
+    }
     assert.throws(() => inspect(zip([{ name: 'index.html', data: PAGE }, { name: 'app.js', symlink: true, data: '/etc/passwd' }])), /符号链接/);
     assert.throws(() => inspect(zip([{ name: 'package.json', data: '{}' }, { name: 'src/main.js', data: '' }])), /构建/);
     assert.throws(() => inspect(zip([{ name: 'index.html', data: PAGE }])), /app\.js/);
     assert.throws(() => inspect(Buffer.from('plain text'), 'notes.txt'), /ZIP/);
+  });
+
+  test('dependency and version-control files are ignored before extraction limits', () => {
+    const page = '<html><h1>Built</h1></html>';
+    const result = inspectUpload(zip([
+      { name: 'project/package.json', data: '{}' },
+      { name: 'project/dist/index.html', data: page },
+      { name: 'project/node_modules/dependency/index.js', data: 'x'.repeat(2 * 1024 * 1024) },
+      { name: 'project/.git/config', data: 'git' },
+      { name: 'project/.svn/entries', data: 'svn' },
+      { name: 'project/.hg/store/data', data: 'hg' },
+    ]), 'project.zip', { limits: { ...defaultLimits, files: 2, fileBytes: 100, unpackedBytes: 100 }, cdn: [] });
+    assert.equal(result.root, 'dist');
+    assert.deepEqual([...result.files.keys()], ['package.json', 'dist/index.html']);
+    assert.equal(result.count, 2);
+    assert.equal(result.bytes, Buffer.byteLength(page) + 2);
+    assert.deepEqual(result.checks.find((check) => check.id === 'ignored'), {
+      id: 'ignored', state: 'info', label: '已忽略', detail: '已忽略 4 个依赖或版本库文件（node_modules、.git 等）',
+    });
   });
 
   test('external references are reported, allowlisted CDNs are noted', () => {
@@ -507,6 +529,31 @@ describe('platform lifecycle', () => {
     assert.equal(trusted.headers.get('access-control-expose-headers'), 'X-Datapack-Stale');
     const foreign = await fetch(`${base}/api/bootstrap`, { headers: { origin: 'https://evil.example' } });
     assert.equal(foreign.headers.get('access-control-expose-headers'), null);
+  });
+
+  test('Vite ZIP drafts ignore dependencies and repositories but reject secrets', async () => {
+    const entries = [
+      { name: 'project/package.json', data: '{}' },
+      { name: 'project/index.html', data: '<html><script src="/src/main.js"></script></html>' },
+      { name: 'project/dist/index.html', data: '<html><h1>Built without dependencies</h1></html>' },
+      { name: 'project/node_modules/pkg/index.js', data: 'dependency' },
+      { name: 'project/.git/config', data: 'repository' },
+    ];
+    const staged = await call('alice', 'POST', '/api/drafts?task=__new__&name=project.zip', zip(entries), { raw: true });
+    assert.equal(staged.status, 200, JSON.stringify(staged.data));
+    const draft = staged.data.draft;
+    assert.equal(draft.root, 'dist');
+    assert.equal(draft.checks.find((check) => check.id === 'format').template, 'vite');
+    assert.deepEqual(draft.checks.find((check) => check.id === 'ignored'), {
+      id: 'ignored', state: 'info', label: '已忽略', detail: '已忽略 2 个依赖或版本库文件（node_modules、.git 等）',
+    });
+    assert.equal(existsSync(join(root, 'data', 'drafts', draft.id, 'package.json')), true);
+    for (const path of ['node_modules', '.git']) assert.equal(existsSync(join(root, 'data', 'drafts', draft.id, path)), false);
+    assert.match((await fetchContent(draft.preview)).text, /Built without dependencies/);
+    const secret = await call('alice', 'POST', '/api/drafts?task=__new__&name=secret.zip', zip([...entries, { name: 'project/.env', data: 'SECRET=hidden' }]), { raw: true });
+    assert.equal(secret.status, 400);
+    assert.equal(secret.data.error, '请移除 project/.env：压缩包不能包含密钥文件');
+    assert.equal((await call('alice', 'DELETE', `/api/drafts/${draft.id}`)).status, 200);
   });
 
   let upload;

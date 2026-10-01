@@ -93,7 +93,7 @@ describe('community question and sample review lifecycle', () => {
     assert.equal((await call('author', 'GET', '/api/drafts?task=__new__')).data.draft.id, staged.id);
     assert.equal((await call('author', 'POST', '/api/works', { ...workBody, draftId: staged.id, confirmed: true })).status, 400);
     assert.equal((await call('guest', 'POST', '/api/questions', questionBody)).status, 401);
-    for (const missing of [{}, { draftId: staged.id }, { work: workBody }]) {
+    for (const missing of [{ confirmed: true }, { draftId: staged.id }, { work: workBody }]) {
       const response = await call('author', 'POST', '/api/questions', { ...questionBody, ...missing });
       assert.equal(response.status, 400); assert.match(JSON.stringify(response.data), /[\u4e00-\u9fff]/);
     }
@@ -119,6 +119,41 @@ describe('community question and sample review lifecycle', () => {
     assert.equal(platform.db.prepare('SELECT count(*) AS n FROM audit').get().n, audits);
     assert.equal((await call('author', 'GET', '/api/drafts?task=__new__')).data.draft.id, staged.id);
     assert.ok(existsSync(join(root, 'data', 'drafts', staged.id, 'index.html')));
+  });
+
+  test('questions without samples stay pending and private with empty admin samples', async () => {
+    const works = platform.db.prepare('SELECT count(*) AS n FROM works').get().n;
+    const response = await call('other', 'POST', '/api/questions', questionBody);
+    assert.equal(response.status, 200, JSON.stringify(response.data));
+    assert.deepEqual(Object.keys(response.data), ['question']);
+    const { question } = response.data;
+    assert.equal(question.moderation.status, 'pending');
+    assert.equal(platform.db.prepare('SELECT count(*) AS n FROM works').get().n, works);
+    assert.ok((await call('other', 'GET', '/api/me')).data.questions.some(q => q.id === question.id && q.moderation.status === 'pending'));
+    assert.ok(!(await call('guest', 'GET', '/api/bootstrap')).data.questions.some(q => q.id === question.id));
+    assert.equal(createCatalog(join(root, 'dist'), createQuestions(platform.db)).task(question.id), null);
+    const admin = (await call('root', 'GET', '/api/admin/questions')).data.questions.find(q => q.id === question.id);
+    assert.equal(admin.works, 0); assert.deepEqual(admin.samples, []);
+    assert.ok(platform.db.prepare('SELECT * FROM audit WHERE task_id = ? AND action = ?').get(question.id, 'question-create'));
+  });
+
+  test('question-only creation rolls back if its audit fails', async () => {
+    const questions = platform.db.prepare('SELECT count(*) AS n FROM questions').get().n;
+    const audits = platform.db.prepare('SELECT count(*) AS n FROM audit').get().n;
+    platform.db.exec("CREATE TRIGGER fail_question_audit BEFORE INSERT ON audit WHEN NEW.action = 'question-create' BEGIN SELECT RAISE(ABORT, 'question audit failed'); END");
+    try {
+      assert.equal((await call('other', 'POST', '/api/questions', questionBody)).status, 500);
+    } finally { platform.db.exec('DROP TRIGGER fail_question_audit'); }
+    assert.equal(platform.db.prepare('SELECT count(*) AS n FROM questions').get().n, questions);
+    assert.equal(platform.db.prepare('SELECT count(*) AS n FROM audit').get().n, audits);
+  });
+
+  test('three pending questions without samples block a fourth', async () => {
+    assert.equal((await call('root', 'POST', '/api/questions', questionBody)).status, 200);
+    assert.equal((await call('root', 'POST', '/api/questions', questionBody)).status, 200);
+    assert.equal((await call('root', 'POST', '/api/questions', questionBody)).status, 200);
+    assert.equal((await call('root', 'POST', '/api/questions', questionBody)).status, 429);
+    assert.equal((await call('root', 'GET', '/api/me')).data.questions.filter(q => q.moderation.status === 'pending').length, 3);
   });
 
   test('question and sample appear privately, admin previews work, and approval gates public surfaces', async () => {

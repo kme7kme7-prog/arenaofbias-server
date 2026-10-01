@@ -6,7 +6,8 @@ import * as zlib from 'node:zlib';
 import { fail, formatBytes } from './http.mjs';
 
 const JUNK = /(^|\/)(__MACOSX(\/|$)|\.DS_Store$|Thumbs\.db$|desktop\.ini$)/i;
-const FORBIDDEN = /(^|\/)(node_modules|\.git|\.svn|\.hg)(\/|$)|(^|\/)(\.env(\.[^/]*)?|\.npmrc|\.pypirc|id_rsa|id_ed25519)$/i;
+const IGNORED = /(^|\/)(node_modules|\.git|\.svn|\.hg)(\/|$)/i;
+const FORBIDDEN = /(^|\/)(\.env(\.[^/]*)?|\.npmrc|\.pypirc|id_rsa|id_ed25519)$/i;
 const WINDOWS_RESERVED = /^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/i;
 const sha256 = (data) => createHash('sha256').update(data).digest('hex');
 
@@ -47,6 +48,7 @@ export function readZip(buffer, limits) {
   const files = new Map();
   const seen = new Set();
   let total = 0;
+  let ignored = 0;
   let p = offset;
   for (let i = 0; i < count; i++) {
     if (p + 46 > eocd || b.readUInt32LE(p) !== 0x02014b50) fail(400, 'ZIP 目录已损坏');
@@ -66,7 +68,8 @@ export function readZip(buffer, limits) {
 
     const { path, isDir } = cleanPath(raw);
     if (isDir || JUNK.test(path)) continue;
-    if (FORBIDDEN.test(path)) fail(400, `请移除 ${path}：压缩包不能包含依赖目录、版本库或密钥文件`);
+    if (IGNORED.test(path)) { ignored++; continue; }
+    if (FORBIDDEN.test(path)) fail(400, `请移除 ${path}：压缩包不能包含密钥文件`);
     if (madeBy === 3 && ((external >>> 16) & 0xf000) === 0xa000) fail(400, `不支持符号链接：${path}`);
     if (flags & 1) fail(400, '不支持加密的 ZIP');
     if (method !== 0 && method !== 8) fail(400, `不支持的压缩方式：${path}（请使用标准 ZIP）`);
@@ -101,7 +104,7 @@ export function readZip(buffer, limits) {
       if (seen.has(parts.slice(0, i).join('/'))) fail(400, `压缩包内有同名的文件和文件夹：${parts.slice(0, i).join('/')}`);
     }
   }
-  return files;
+  return { files, ignored };
 }
 
 // A folder zipped as a whole puts everything under one top-level directory; serve from inside it.
@@ -169,7 +172,8 @@ export function inspectUpload(buffer, filename, { limits, cdn, template }) {
   const isHtml = !isZip && (/\.html?$/i.test(filename) || /^\s*(<!doctype html|<html|<head|<body|<meta|<script|<!--)/i.test(buffer.subarray(0, 512).toString('utf8').replace(/^﻿/, '')));
   if (!isZip && !isHtml) fail(400, '请上传 ZIP 压缩包或单个 HTML 文件');
 
-  let files = isZip ? stripWrapper(readZip(buffer, limits)) : new Map([['index.html', buffer]]);
+  const archive = isZip ? readZip(buffer, limits) : { files: new Map([['index.html', buffer]]), ignored: 0 };
+  const files = stripWrapper(archive.files);
   const builtRoot = (template === 'vite' || (!template && files.has('package.json')))
     && ['dist', 'build', 'out'].find((dir) => files.has(`${dir}/index.html`));
   const { root, entry } = builtRoot ? { root: builtRoot, entry: 'index.html' } : findEntry(files);
@@ -181,6 +185,7 @@ export function inspectUpload(buffer, filename, { limits, cdn, template }) {
   const checks = [];
   const bytes = [...files.values()].reduce((sum, data) => sum + data.length, 0);
   checks.push({ id: 'format', state: 'ok', label: '文件格式', detail: isZip ? `ZIP · ${files.size} 个文件 · 解压后 ${formatBytes(bytes)}` : `单个 HTML · ${formatBytes(bytes)}` });
+  if (archive.ignored) checks.push({ id: 'ignored', state: 'info', label: '已忽略', detail: `已忽略 ${archive.ignored} 个依赖或版本库文件（node_modules、.git 等）` });
   checks.push({ id: 'entry', state: 'ok', label: '入口页面', detail: root ? `${root}/${entry}（以 ${root}/ 作为站点根目录）` : entry });
 
   const missingCritical = [];

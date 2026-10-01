@@ -11,7 +11,7 @@ import { createCatalog } from './catalog.mjs';
 import { createComments } from './comments.mjs';
 import { AVATARS, EFFORTS, EMOJIS } from './config.mjs';
 import { createContentHandler } from './content.mjs';
-import { openDatabase } from './db.mjs';
+import { openDatabase, transaction } from './db.mjs';
 import {
   HttpError, assertSameOrigin, clientIp, createRouter, fail, isTrustedOrigin, rateLimit, readBody, readJson, resolveInside, sendJson, streamFile,
 } from './http.mjs';
@@ -164,6 +164,10 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     const user = signedIn(ctx);
     limit.write(user.id);
     const body = await readJson(ctx.req, 6 * 1024 * 1024);
+    if (!Object.hasOwn(body, 'draftId') && !Object.hasOwn(body, 'work') && !Object.hasOwn(body, 'confirmed')) {
+      const question = transaction(db, () => questions.create(user, body, catalog.tags()));
+      return { question };
+    }
     if (!body.draftId || !body.work || typeof body.work !== 'object' || Array.isArray(body.work)) fail(400, '请附上一份模型结果');
     let question;
     const work = library.submit(user, { ...body.work, draftId: body.draftId, confirmed: body.confirmed }, {

@@ -1,14 +1,12 @@
 # HANDOFF.md · 当前状态
 
-## 本轮：示例作品选填与上传忽略目录（2026-10-01 Brisbane，未提交、未推送、未部署）
+## 本轮：示例作品选填与上传忽略目录（2026-10-01 Brisbane，已本地提交，未推送、未部署）
 
-- 按本轮授权保持零依赖与最小改动；只在本页记录轮次，不写归档。工作区起始干净，本轮修改 `server/app.mjs`、`server/inspect.mjs`、`test/questions.test.mjs`、`test/platform.test.mjs`、README、API 契约与本页；无迁移、数据包或 Gallery 文件改动。
-- `POST /api/questions` 完全不带 `draftId`、`work`、`confirmed` 时，只在现有 `transaction` 中调用 `questions.create(user, body, catalog.tags())`，题目与 `question-create` 审计一起提交，返回 `{ question }`，不含 `work`。仍为 pending、人工审核、每人最多 3 道 pending；作者可见，公开不可见。无作品分支不调用 `queueWork`，pending 题目不改变公开题库与榜单，故不调用 `arena.invalidate`。任一作品字段存在时沿用原路径，完整校验、作品事务、排队、榜单失效与 `{ question, work }` 返回不变；字段不完整（含仅 `confirmed`）仍为 400。
-- 检查 `GET /api/admin/questions` 与 `admin/admin.js`：空作品映射返回 `works: 0`、`samples: []`，后台已有“没有作者本人上传的结果”空态，不需修改。新增无作品建题、私有可见性、空 samples、额度及审计失败回滚用例；原有仅 `draftId` 校验保留，旧 `{}` 400 断言按新契约替换为仅 `confirmed`，带作品用例保持。
-- ZIP 目录规则拆分：`node_modules`、`.git`、`.svn`、`.hg` 路径段文件在文件数、体积、压缩方式等限制及解压前跳过，不存储；目录条目不计为忽略文件。密钥文件仍拒绝，文案为“请移除 …：压缩包不能包含密钥文件”。`readZip` 仅有 `inspectUpload` 一个调用方，改为返回 `{ files, ignored }` 并同步消费；有忽略文件时增加约定的 `ignored` info 检查项。30 MB 原始上传上限不变，保留路径校验与 ZIP 结构检查。
-- 上传回归覆盖带四种忽略目录的包装 Vite 项目、低文件数/单文件/总解压体积上限下忽略超限依赖、包装目录剥离、自动推断 package.json + dist；HTTP 草稿用例核对预览与 `ignored` 项、草稿落盘无 node_modules/.git、`.env` 仍返回 400。密钥规则同时覆盖 `.env.local`、`.npmrc`、`.pypirc`、`id_rsa`、`id_ed25519`。README 路由表和 `docs/api-contract.md` 已同步。
-- 验证环境为本地 Windows / Node v24.16.0。定向 questions 测试 9/9、上传检查与草稿定向测试 7/7；`npm run check` 69 文件 / 0 错；完整 `npm test` 159/159，0 失败/取消/跳过（9313 ms），本轮未出现间歇性失败。`sample insert failed`、`question audit failed` 及 relay ECONNRESET 为预期故障测试输出，对应用例通过；历史 moderation 间歇失败记录保留，不声称已消除原因。`git diff --check` 通过。
-- 未执行 Gallery 真实前端联调、后台浏览器验收、真实 Luna/截图服务调用、生产 Node 22 验证或部署；本轮用本地 API/测试桩验证。生产发布必须与 Gallery 的 `publish.js` / `submit.js` / `account.js` 配套改动一起发布：旧后端会拒绝前端无作品建题请求。以下已发布记录仍描述现网版本，本轮改动尚未上线。
+- 社区建题的示例作品改为选填：`POST /api/questions` 完全不带 `draftId`、`work`、`confirmed` 时只建题，返回 `{ question }`；仍为 pending、人工审核、每人最多 3 道。带任一作品字段时沿用原路径。后台空 samples 已有空态，无需修改。
+- ZIP 中 `node_modules`、`.git`、`.svn`、`.hg` 改为跳过（不解压、不存储、不计入限制），检查项 `ignored`（标签「依赖目录」）提示数量；密钥文件仍拒绝；30 MB 上限不变。无迁移、无新依赖。
+- 提交：`5f2320c`（实现、测试、文档），联调后另一条提交将检查项标签由「已忽略」改为「依赖目录」并写归档。check 69/0、test 159/159、`git diff --check` 通过。
+- 本地联调（隔离库、CAPTURE=0、CONTENT_MODERATION 关闭，后端 `DIST_DIR` 指向 Gallery 的固定包 `39a2fa4`）：无示例建题、附示例建题、带 node_modules/.git 的 Vite ZIP、`.env` 拒绝、我的题目、后台题目审核均通过；被忽略文件未落盘。未做真实 Luna/截图、生产 Node 22、移动端或部署。
+- 上线须与 Gallery `f06dbf3` 及其后续修复一起发布：旧后端会拒绝无作品建题。本地 `.datapack/current` 仍指向旧包 `92f8ab9`，本地起服务前需 `npm run fetch:datapack` 或设 `DIST_DIR`。归档：[question-sample-optional](docs/archive/2026-10-01-question-sample-optional-wsnxxxs.md)。以下已发布记录描述现网版本。
 
 ## 四仓统一发布完成（2026-10-01 Brisbane）
 

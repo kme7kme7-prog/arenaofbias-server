@@ -412,7 +412,7 @@ describe('upload inspection', () => {
     assert.equal(result.count, 2);
     assert.equal(result.bytes, Buffer.byteLength(page) + 2);
     assert.deepEqual(result.checks.find((check) => check.id === 'ignored'), {
-      id: 'ignored', state: 'info', label: '已忽略', detail: '已忽略 4 个依赖或版本库文件（node_modules、.git 等）',
+      id: 'ignored', state: 'info', label: '依赖目录', detail: '已忽略 4 个依赖或版本库文件（node_modules、.git 等）',
     });
   });
 
@@ -545,7 +545,7 @@ describe('platform lifecycle', () => {
     assert.equal(draft.root, 'dist');
     assert.equal(draft.checks.find((check) => check.id === 'format').template, 'vite');
     assert.deepEqual(draft.checks.find((check) => check.id === 'ignored'), {
-      id: 'ignored', state: 'info', label: '已忽略', detail: '已忽略 2 个依赖或版本库文件（node_modules、.git 等）',
+      id: 'ignored', state: 'info', label: '依赖目录', detail: '已忽略 2 个依赖或版本库文件（node_modules、.git 等）',
     });
     assert.equal(existsSync(join(root, 'data', 'drafts', draft.id, 'package.json')), true);
     for (const path of ['node_modules', '.git']) assert.equal(existsSync(join(root, 'data', 'drafts', draft.id, path)), false);

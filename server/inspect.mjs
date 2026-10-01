@@ -185,7 +185,7 @@ export function inspectUpload(buffer, filename, { limits, cdn, template }) {
   const checks = [];
   const bytes = [...files.values()].reduce((sum, data) => sum + data.length, 0);
   checks.push({ id: 'format', state: 'ok', label: '文件格式', detail: isZip ? `ZIP · ${files.size} 个文件 · 解压后 ${formatBytes(bytes)}` : `单个 HTML · ${formatBytes(bytes)}` });
-  if (archive.ignored) checks.push({ id: 'ignored', state: 'info', label: '已忽略', detail: `已忽略 ${archive.ignored} 个依赖或版本库文件（node_modules、.git 等）` });
+  if (archive.ignored) checks.push({ id: 'ignored', state: 'info', label: '依赖目录', detail: `已忽略 ${archive.ignored} 个依赖或版本库文件（node_modules、.git 等）` });
   checks.push({ id: 'entry', state: 'ok', label: '入口页面', detail: root ? `${root}/${entry}（以 ${root}/ 作为站点根目录）` : entry });
 
   const missingCritical = [];

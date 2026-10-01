@@ -10,7 +10,7 @@
 // round's works, the voter's own uploads and pairs the voter has already judged.
 import { randomBytes } from 'node:crypto';
 import { Worker } from 'node:worker_threads';
-import { effortKey, entityKey, modelKey } from './catalog.mjs';
+import { effortKey, entityKey, modelKey, providerOf } from './catalog.mjs';
 import { transaction } from './db.mjs';
 import { fail } from './http.mjs';
 import { rankEntries } from './ranking.mjs';
@@ -28,11 +28,15 @@ const identityOf = (work, digest = work.digest ?? null) => ({
   taskId: work.taskId, id: work.id, curated: work.curated, digest,
   title: work.title, modelId: work.modelId, modelName: work.modelName,
   vendor: work.vendor, effort: work.effort, effortKey: effortKey(work.effort),
-  harnessId: work.harnessId ?? null, harnessVersion: work.harnessVersion ?? '', providerId: work.providerId ?? null,
+  harnessId: work.harnessId ?? null, harnessVersion: work.harnessVersion ?? '', providerId: providerOf(work.providerId, work.providerOther),
   ...generationOf(work),
   modelKey: modelKey(work), configKey: entityKey(work), ownerId: work.ownerId,
 });
-const fromIdentity = (text) => text ? JSON.parse(text) : null;
+const fromIdentity = (text) => {
+  if (!text) return null;
+  const { providerOther, providerName, ...identity } = JSON.parse(text);
+  return { ...identity, providerId: providerOf(identity.providerId, providerOther || providerName) };
+};
 
 export function createArena({ db, catalog, library, limits, random = Math.random }) {
   const q = {
@@ -61,12 +65,12 @@ export function createArena({ db, catalog, library, limits, random = Math.random
   // Eligibility follows current moderation/catalog membership; identity and score keys
   // come from the vote's saved snapshot and never drift with later label edits.
   // Votes without a snapshot (pre-snapshot test data) are not scored.
-  // Provenance filters: `null` (off), a registry id, or 'unset' (no registered id). A vote counts
-  // only when BOTH sides' snapshots match, so a filtered board never mixes provenances; free text
-  // is not kept in snapshots and counts as 'unset'. Scoring keys are unchanged.
+  // A vote counts only when BOTH saved identities match the provenance filters.
+  // Historical provider ids normalize to the same categories as current works.
+  // Harness free text is not kept in snapshots and counts as 'unset'.
   const provenanceMatch = (filters, item) => ['harness', 'provider'].every((field) => {
     const want = filters[field];
-    const id = item[`${field}Id`] ?? null;
+    const id = field === 'provider' ? providerOf(item.providerId, item.providerOther || item.providerName) : item.harnessId ?? null;
     return !want || (want === 'unset' ? !id : id === want);
   });
 
@@ -340,7 +344,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       if (!replacement || typeof replacement !== 'object' || Array.isArray(replacement)
         || Object.keys(replacement).some((key) => !['modelId', 'modelName', 'vendor', 'effort', 'harnessId', 'providerId'].includes(key))) fail(400, '仅可更正模型、厂商、档位、Harness 和服务商');
       for (const [field, lookup, label] of [['harnessId', 'harness', 'Harness'], ['providerId', 'provider', '服务商']]) {
-        if (Object.hasOwn(replacement, field) && replacement[field] !== null &&
+        if (Object.hasOwn(replacement, field) && replacement[field] !== null && !(field === 'providerId' && replacement[field] === '') &&
           (typeof replacement[field] !== 'string' || !catalog[lookup](replacement[field]))) fail(400, `所选${label}不存在`);
       }
       const row = q.vote.get(voteId);

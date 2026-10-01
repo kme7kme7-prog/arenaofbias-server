@@ -104,6 +104,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       catalogDigest: snapshot.catalogDigest,
       apiVersion: 1,
       serverVersion,
+      providers: snapshot.providers(),
       user: user ? { ...auth.public(user), emailBound: Boolean(user.email) } : null,
       site: {
         content: config.contentTemplate,
@@ -395,7 +396,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       submitted = library.submit(admin, {
         draftId: draft.id, confirmed: true, title: params.get('title'), summary: params.get('summary'),
         modelId: params.get('modelId'), modelName: params.get('modelName'), effort: params.get('effort'), tool: params.get('tool') || '',
-        ...Object.fromEntries(['harnessId', 'harnessOther', 'harnessVersion', 'providerId', 'providerOther',
+        ...Object.fromEntries(['harnessId', 'harnessOther', 'harnessVersion', 'providerId',
           'modelVersion', 'generationMode', 'humanIntervention', 'generatedOn', 'evidenceUrl', 'promptVariant']
           .filter((key) => params.has(key)).map((key) => [key, params.get(key)])),
       });

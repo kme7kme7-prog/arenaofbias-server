@@ -37,10 +37,10 @@ export function createAdmin({ db, catalog, library }) {
       if (show && !face) fail(400, '请指定筛选门面', 'invalid_query');
       const source = query.get('source') || null;
       if (source && !['curated', 'upload'].includes(source)) fail(400, '来源筛选无效', 'invalid_query');
-      // Provenance filters take a registry id, `other` (free text only) or `unset` (nothing stated).
+      // Harness supports free text; providers are official, unofficial or unset.
       const provenance = Object.fromEntries(['harness', 'provider'].map((field) => {
         const value = query.get(field) || null;
-        if (value && !['other', 'unset'].includes(value) && !catalog[field](value)) fail(400, `${field === 'harness' ? 'Harness' : '服务商'}筛选无效`, 'invalid_query');
+        if (value && value !== 'unset' && !(field === 'harness' && value === 'other') && !catalog[field](value)) fail(400, `${field === 'harness' ? 'Harness' : '服务商'}筛选无效`, 'invalid_query');
         return [field, value];
       }));
       const provenanceOf = (work, field) => work[field] ?? (work[`${field}Name`] ? 'other' : 'unset');
@@ -67,7 +67,7 @@ export function createAdmin({ db, catalog, library }) {
         (!model || (model === 'other' ? !work.model : work.model === model)) &&
         (!effort || (effort === 'unset' ? !work.effort : effortKey(work.effort) === effortKey(effort))) &&
         Object.entries(generation).every(([key, value]) => !value || (value === 'unset' ? !work[key] : work[key] === value)) &&
-        (!search || `${work.title} ${work.modelName} ${work.vendor} ${work.modelVersion} ${work.task} ${work.harnessName ?? ''} ${work.providerName ?? ''}`.toLocaleLowerCase().includes(search)));
+        (!search || `${work.title} ${work.modelName} ${work.vendor} ${work.modelVersion} ${work.task} ${work.harnessName ?? ''} ${catalog.provider(work.provider)?.name ?? ''}`.toLocaleLowerCase().includes(search)));
       rows.sort((a, b) => a.task.localeCompare(b.task) || a.title.localeCompare(b.title, 'zh-CN') || a.id.localeCompare(b.id));
       return { works: rows.slice((page - 1) * pageSize, page * pageSize), total: rows.length, page, pageSize, efforts };
     },

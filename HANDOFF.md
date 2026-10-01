@@ -1,5 +1,13 @@
 # HANDOFF.md · 当前状态
 
+## 本轮：服务商仅官方 / 非官方（2026-10-01 Brisbane，已本地提交，未推送、未部署）
+
+- 用户本轮要求服务商统一为 `official`（官方）/ `unofficial`（非官方），未填为 null；Harness 不变。后端固定两项 providers 并在 bootstrap 返回，上传、作者 PATCH、管理员审核仅接受这两个 ID 或 null/空串，其余 400。上传/审核忽略旧自由文本字段，PATCH/meta 按未知字段规则拒绝；公开、我的作品和审核列表不再输出 `providerName`。后台选项、筛选与表单已同步，手填与相似名称提示仅为 Harness 保留。
+- MIGRATIONS 末尾追加 v25：`official` 保留，其他非空旧 ID 或手填名称归为 `unofficial`，未填保持 null，清空 `provider_other`；可重复执行。旧数据包和旧投票快照读取时同样归类，不重写原票快照。榜单支持 `provider=official|unofficial|unset`，filters 回显与两侧都符合才计票规则保持。
+- 本地 Node 24.16.0：check 73 文件/0 错，全量 test 175/175（无失败/取消/跳过），来源定向测试 7/7（补充实际 `/api/me` 输出后再通过），diff --check 通过；后台语法与内存表单函数验证通过。首轮定向测试发现两处新夹具/断言问题（v24 已移除 model_name，作者 PATCH 新增 meta 审计），修正后通过。邮箱幂等测试固定检查 v24，避免追加迁移后误测 v25。
+- 数据仓同步本地提交 `0f68eca`，实际源码 182 件：77 官方/1 非官方/104 未填；check 30/0、test 16/16、intake 182 件/0 错/9 既有提示、完整 build:data 通过。后端直接读取其开发构建包，核对 20 题、两项 providers 和作品分类数量通过；未切换后端本地包或消费者 pin，生成物未提交。
+- 已用 GitHub `/user` 核对负责人 wsnxxxs，按用户本轮授权每仓一条英文简单句提交，未推送、部署或操作生产库。上线须先部署后端并完成 v25 迁移，再启用 Gallery 二值提交与排行榜筛选；新版数据包按不可变发布流程另行更新 pin。未做生产 Node 22、真实 Gallery 浏览器联调、后台视觉或外部审核/截图服务验收；本轮元数据修改按 API 集成与函数测试验证。完整归档：[provider-binary](docs/archive/2026-10-01-provider-binary-wsnxxxs.md)。
+
 ## 整理收尾（2026-10-01 Brisbane，已推送，不部署）
 
 - 四仓 main 均已完成源码推送；后端 `99311dc` 已在 origin/main，GitHub 的 Node 22 check / test CI 成功。画廊对当前 182 件本地数据包和后端的真实隔离 integration smoke 也通过。本轮没有部署、生产写入或 pin 升级；下面“待推送”是整理过程记录。

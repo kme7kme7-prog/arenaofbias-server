@@ -323,19 +323,21 @@ function trialRows(trial) {
 }
 
 // ---- provenance (Harness / provider) -------------------------------------------------------------
-// Registries come from the datapack (/data.json). A select holds a registry id, '' for "not stated"
-// or OTHER for free text; registry ids never contain '_', so OTHER cannot collide with one.
+// Harness entries come from the datapack (/data.json); providers use fixed categories.
 const PROVENANCE = { harness: { label: 'Harness', list: 'harnesses' }, provider: { label: '服务商', list: 'providers' } };
 const OTHER = '__other';
+const PROVIDER_CHOICES = { official: '官方', unofficial: '非官方' };
+const providerChoice = (w) => w?.provider === 'official' ? 'official' : w?.provider || w?.providerName ? 'unofficial' : '';
+const providerLabel = (w) => PROVIDER_CHOICES[providerChoice(w)] ?? '未注明';
 const registry = (type) => state.data?.[PROVENANCE[type].list] ?? [];
-const provenanceText = (w) => [w.harnessName && `${w.harnessName}${w.harnessVersion ? ` ${w.harnessVersion}` : ''}`, w.providerName].filter(Boolean).join(' · ');
+const provenanceText = (w) => [w.harnessName && `${w.harnessName}${w.harnessVersion ? ` ${w.harnessVersion}` : ''}`, providerChoice(w) && providerLabel(w)].filter(Boolean).join(' · ');
 const nameKey = (value) => String(value ?? '').normalize('NFKC').toLowerCase().replace(/[\s-]/g, '');
 const suggestEntry = (type, text) => {
   const key = nameKey(text);
   return key ? registry(type).find((entry) => [entry.name, ...(entry.aliases ?? [])].some((name) => nameKey(name) === key)) ?? null : null;
 };
 // The stored choice of a work: registry id, OTHER (free text only) or ''.
-const currentProvenance = (w, type) => ({ choice: w?.[type] ?? (w?.[`${type}Name`] ? OTHER : ''), other: w?.[type] ? '' : w?.[`${type}Name`] ?? '' });
+const currentProvenance = (w, type) => type === 'provider' ? { choice: providerChoice(w) } : ({ choice: w?.[type] ?? (w?.[`${type}Name`] ? OTHER : ''), other: w?.[type] ? '' : w?.[`${type}Name`] ?? '' });
 
 function suggestionHtml(type, choice, other) {
   const match = choice === OTHER ? suggestEntry(type, other) : null;
@@ -369,7 +371,7 @@ function effortField(value = '') {
   return `<label class="field"><span class="field-label">推理档位<small>可选择常用值或手填；留空表示未注明</small></span><input class="input" name="effort" list="${id}" maxlength="20" value="${esc(value)}" placeholder="未注明"><datalist id="${id}">${['Default', 'Low', 'Medium', 'High', 'XHigh', 'Max'].map((effort) => `<option value="${effort}">${effort === 'Default' ? '默认档位（明确使用默认设置）' : effort}</option>`).join('')}</datalist></label>`;
 }
 
-function provenanceFields({ harness = { choice: '', other: '' }, provider = { choice: '', other: '' }, version = '' } = {}) {
+function provenanceFields({ harness = { choice: '', other: '' }, provider = { choice: '' }, version = '' } = {}) {
   const field = (type, { choice, other }) => {
     const entries = registry(type).filter((entry) => entry.listed || entry.id === choice);
     const known = !choice || choice === OTHER || entries.some((entry) => entry.id === choice);
@@ -386,11 +388,11 @@ function provenanceFields({ harness = { choice: '', other: '' }, provider = { ch
   return `<div class="field-row">${field('harness', harness)}
       <label class="field"><span class="field-label">Harness 版本<small>选填</small></span><input class="input" name="harnessVersion" maxlength="40" value="${esc(version)}" placeholder="例如 2.1.3"${harness.choice ? '' : ' disabled'}></label>
     </div>
-    <div class="field-row">${field('provider', provider)}</div>`;
+    <div class="field-row"><label class="field"><span class="field-label">服务商</span><select class="input" name="providerChoice"><option value="">未注明</option>${Object.entries(PROVIDER_CHOICES).map(([value, label]) => `<option value="${value}"${provider.choice === value ? ' selected' : ''}>${label}</option>`).join('')}</select></label></div>`;
 }
 
 function refreshProvenance(form) {
-  for (const type of Object.keys(PROVENANCE)) {
+  for (const type of ['harness']) {
     const choice = form.elements.namedItem(`${type}Choice`);
     if (!choice) continue;
     const other = form.elements.namedItem(`${type}Other`).value;
@@ -403,11 +405,10 @@ function refreshProvenance(form) {
   if (version) version.disabled = !form.elements.namedItem('harnessChoice').value;
 }
 
-// Request fields for the chosen provenance. With `work`, only changed fields are sent; an id and
-// its free text are always sent together so the server clears the other half.
+// With `work`, only changed fields are sent. Harness id and free text are sent together.
 function provenanceBody(get, work = null) {
   const body = {};
-  for (const type of Object.keys(PROVENANCE)) {
+  for (const type of ['harness']) {
     const choice = get(`${type}Choice`) ?? '';
     const other = String(get(`${type}Other`) ?? '').trim();
     if (choice === OTHER && !other) throw new Error(`请填写${PROVENANCE[type].label}名称，或改选「未注明」`);
@@ -418,13 +419,15 @@ function provenanceBody(get, work = null) {
     body[`${type}Id`] = next.id;
     body[`${type}Other`] = next.other;
   }
+  const provider = get('providerChoice') ?? '';
+  if (work ? provider !== providerChoice(work) : provider) body.providerId = provider;
   const version = get('harnessChoice') ? String(get('harnessVersion') ?? '').trim() : '';
   if (work ? version !== (work.harnessVersion ?? '') : version) body.harnessVersion = version;
   return body;
 }
 
 const provenanceFacts = (w) => `<div><dt>Harness</dt><dd>${esc(w.harnessName ? `${w.harnessName}${w.harnessVersion ? ` ${w.harnessVersion}` : ''}` : '未注明')}</dd></div>
-  <div><dt>服务商</dt><dd>${esc(w.providerName ?? '未注明')}</dd></div>`;
+  <div><dt>服务商</dt><dd>${esc(providerLabel(w))}</dd></div>`;
 
 // Curated works are repo-managed: reviewing one only decides the current face's flag.
 function openCuratedReview(w) {
@@ -675,7 +678,7 @@ function inboxPanel() {
     const form = state.inboxForms[entry.id] ??= {
       task: store.get('admin-inbox-task') ?? '', title: entry.suggest.title, summary: '',
       modelId: '', modelName: entry.suggest.model, effort: '',
-      harnessChoice: '', harnessOther: '', harnessVersion: '', providerChoice: '', providerOther: '',
+      harnessChoice: '', harnessOther: '', harnessVersion: '', providerChoice: '',
       ...Object.fromEntries(GENERATION_FIELDS.map((key) => [key, ''])) };
     const value = (name) => esc(String(form[name] ?? ''));
     return `<article class="inbox-card" data-inbox-id="${esc(entry.id)}">
@@ -692,7 +695,7 @@ function inboxPanel() {
           <label class="field"><span class="field-label">模型名称<small>展签显示的名字，选了档案会自动回填</small></span><input class="input" name="modelName" maxlength="60" value="${value('modelName')}" placeholder="如 Claude 4.5"></label>
         </div>
         <label class="field"><span class="field-label">摘要</span><input class="input" name="summary" maxlength="200" value="${value('summary')}"></label>
-        ${provenanceFields({ harness: { choice: form.harnessChoice, other: form.harnessOther }, provider: { choice: form.providerChoice, other: form.providerOther }, version: form.harnessVersion })}
+        ${provenanceFields({ harness: { choice: form.harnessChoice, other: form.harnessOther }, provider: { choice: form.providerChoice }, version: form.harnessVersion })}
         ${generationFields(form)}
         <p class="fine">登记只是入库，不决定展示：作品会同时出现在两边的审核队列——展览馆系统审「上不上展览馆」，竞技场系统审「进不进盲测」，两边各审一次。</p>
         <p class="form-error" role="alert"></p>
@@ -864,7 +867,7 @@ function systemWorksView() {
       }).join('')}
       ${['harness', 'provider'].map((type) => {
         const current = type === 'harness' ? state.workHarness : state.workProvider;
-        const choices = [['unset', '未注明'], ['other', '其他（手填）'], ...registry(type).map((entry) => [entry.id, entry.name])];
+        const choices = type === 'provider' ? [['unset', '未注明'], ...Object.entries(PROVIDER_CHOICES)] : [['unset', '未注明'], ['other', '其他（手填）'], ...registry(type).map((entry) => [entry.id, entry.name])];
         return `<select class="input" name="${type}" aria-label="筛选${PROVENANCE[type].label}"><option value="">全部${PROVENANCE[type].label}</option>${choices.map(([value, label]) => `<option value="${esc(value)}"${current === value ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select>`;
       }).join('')}
       <button class="btn" type="submit">筛选</button></form>
@@ -1497,7 +1500,7 @@ document.addEventListener('change', async (e) => {
 });
 // Provenance fields: show the free-text box, enable the version, offer a registry match.
 document.addEventListener('input', (e) => {
-  if (e.target.matches?.('[data-provenance-choice], [name="harnessOther"], [name="providerOther"]')) refreshProvenance(e.target.form);
+  if (e.target.matches?.('[data-provenance-choice], [name="harnessOther"]')) refreshProvenance(e.target.form);
 });
 document.addEventListener('click', (e) => {
   const pick = e.target.closest?.('[data-pick-provenance]');

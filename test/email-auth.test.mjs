@@ -125,7 +125,7 @@ test('registration requires a verified email and Turnstile is off without keys',
 
 test('email migration can rerun without changing existing account data', () => {
   const before = platform.db.prepare('SELECT * FROM users WHERE name_key = ?').get('alice');
-  MIGRATIONS.at(-1)(platform.db);
+  MIGRATIONS[23](platform.db);
   assert.deepEqual(platform.db.prepare('SELECT * FROM users WHERE name_key = ?').get('alice'), before);
 });
 

@@ -117,7 +117,7 @@ API 域静态 `/data.json`（含等价编码路径）仅管理员登录后返回
 | `tool` | string | 兼容输出，由 Harness 注册表名称或「其他」原文生成，不再独立存储 |
 | `harnessId` / `harnessOther` | string / null、string | Harness 注册表 ID 或自填「其他」，两者互斥；旧作品分别为 null、空串。写入时 ID 传空串与 null 相同，表示未注明 |
 | `harnessVersion` | string | Harness 版本（≤40 字）；仅有 Harness 时可填写 |
-| `providerId` / `providerOther` | string / null、string | 服务商注册表 ID 或自填「其他」，两者互斥；旧作品分别为 null、空串。写入时 ID 传空串与 null 相同，表示未注明 |
+| `providerId` | `official` \| `unofficial` \| null | 官方（模型厂商自己的 API、网页或 App）或非官方（其他一切）；写入时空串与 null 相同，表示未注明。内部兼容字段 `providerOther` 恒为空串，不再接受手填 |
 | `status` | `unverified` \| `verified` \| `questioned` | 审核状态，默认 `unverified` |
 | `audience` | `hidden` \| `show1` \| `show2` \| `both` | 兼容输出，由两个展示开关计算；v18 删除数据库列 |
 | `reason` | string | 审核理由；`verified` 时恒为空串 |
@@ -143,7 +143,7 @@ API 域静态 `/data.json`（含等价编码路径）仅管理员登录后返回
   "model": "grok-4.6", "modelName": "Grok 4.6", "vendor": "xAI",
   "effort": "High", "tool": "CLI",
   "harness": "claude-code", "harnessName": "Claude Code", "harnessVersion": "1.0",
-  "provider": "official", "providerName": "官方",
+  "provider": "official",
   "status": "verified", "reason": "",
   "owner": "alice", "mine": false,
   "addedAt": "2026-09-27T08:00:00.000Z", "reviewedAt": null,
@@ -164,7 +164,7 @@ API 域静态 `/data.json`（含等价编码路径）仅管理员登录后返回
 ```json
 { "task": "…", "id": "grok-4.6", "curated": true, "title": "…", "model": "…",
   "modelName": "…", "vendor": "…", "effort": "…", "tool": "…", "cover": "…", "status": "verified",
-  "harness": null, "harnessName": null, "harnessVersion": "", "provider": null, "providerName": null }
+  "harness": null, "harnessName": null, "harnessVersion": "", "provider": null }
 ```
 
 ### 2.2 任务 / 题目（task）
@@ -237,6 +237,7 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
   "catalogDigest": "<实际加载 data.json 原始字节的 SHA-256>",
   "apiVersion": 1,
   "serverVersion": "<服务端构建版本或 dev>",
+  "providers": [{ "id": "official", "name": "官方", "listed": true }, { "id": "unofficial", "name": "非官方", "listed": true }],
   "user": { "id": "…", "name": "alice", "role": "member", "emailBound": true },
   "site": {
     "content": "http://{token}.localhost:5180",
@@ -265,6 +266,7 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
 - `arena[题目]`：`works` = 对战池作品数（馆藏 + 已验证投稿），`entries` = 不同「模型+档位」配置数，`uploads` = 该题是否接受上传。
 - 匿名：`user`、`me` 为 `null`，`reactions.mine` 为 `{}`；`review` 仅管理员非 null（`{ "unverified": <作品待审数>, "questions": <未删除的 pending 题目数> }`）。
 - `user.emailBound` 仅当前会话用户在 bootstrap 中返回，反映是否绑定邮箱；不加入 `auth.public`，评论等公开用户数据不包含该字段。
+- `providers` 固定返回上述两项，不依赖数据包中的历史登记表。作品公开、作者与管理员视图的 `provider` 只为 `official`、`unofficial` 或 null，不再返回 `providerName`。
 
 ### 3.2 `POST /api/auth/register` —— 注册
 
@@ -392,7 +394,8 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 - 模型二选一：`modelId` 命中数据包模型表，或自填 `modelName`。
 - `trial` 为试加载探针回传数据，服务端逐字段消毒（数值截断、字符串截长、样例限条数）。
 - `cover` 仅接受 PNG / JPEG / WebP（魔数校验），≤3 MB。
-- `harnessId` / `providerId` 须存在于当前数据包注册表，停用的 `listed: false` 条目仍可引用；也可分别填写 `harnessOther` / `providerOther`。同一维度的 ID 与「其他」不能同时非空；设置一边会清空另一边。两个「其他」及 `harnessVersion` 经 NFKC 归一化并去首尾空白后最多 40 字。版本只能随 Harness 填写，清空 Harness 会清空版本。字段未出现时保持原值，旧数据包没有注册表时可填「其他」。
+- `harnessId` 须存在于当前数据包注册表，停用的 `listed: false` 条目仍可引用；也可填写 `harnessOther`。Harness ID 与「其他」不能同时非空；设置一边会清空另一边。`harnessOther` 及 `harnessVersion` 经 NFKC 归一化并去首尾空白后最多 40 字。版本只能随 Harness 填写，清空 Harness 会清空版本。字段未出现时保持原值，旧数据包没有注册表时可填 Harness「其他」。
+- `providerId` 只接受 `official`、`unofficial`、null 或空串，其他值 `400`。上传与审核忽略未知字段 `providerOther` / `providerName`，作者 PATCH 与管理员 meta 按未知字段规则返回 `400`。v25 迁移保留 `official`，其余非空旧 ID 或手填名称归为 `unofficial`，未填保持 null，并清空 `provider_other`；旧数据包读取时同样归类。
 - 普通用户须填写 Harness ID、「其他」或兼容字段 `tool` 中至少一项；过渡期旧前端只传 `tool` 仍可投稿。管理员可留空。仅传 `tool`（或 Harness 两项均空）时将其存入 `harness_other`；有非空 Harness 声明时以声明为准。输出 `tool` 从 Harness 派生，不自动猜测 ID。
 - `promptVariant`（schema v21）：题目在数据包里有 `promptVariants` 时，普通用户必须填写其中一个 `id`，管理员可留空；无效 ID 为 `400 invalid_prompt_variant`。单一提示词的题目忽略该字段并存为空串。作品视图仅在非空时输出 `promptVariant`，前端据此与同模型、同来源的其他版本合为一张卡片。
 - 生成信息五个字段的取值规则见作品字段表，服务端不要求必填；Gallery 前端要求填写 `generationMode` 与 `humanIntervention`。
@@ -431,7 +434,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 - `status` 取值 `verified` / `questioned` / `unverified`；`questioned` 必须给 `reason`（`400` 否则）；置为 `verified` 会清空理由。
 - 仅当请求体出现 `modelId` / `modelName` 键时才重取模型身份，否则保持原值；`effort` 同理。
 - `title`、`summary` 与两个布尔门面开关均可选；审核通过时可同时修改。兼容旧的 `audience` 参数，将其换算为两个开关；响应中的 `audience` 由最终开关计算。审核状态和 audit 在同一事务写入。
-- 审核可选 `harnessId`、`harnessOther`、`harnessVersion`、`providerId`、`providerOther`；按 3.6 节的互斥、40 字及版本规则校验，只更新请求中出现的维度。
+- 审核可选 `harnessId`、`harnessOther`、`harnessVersion`、`providerId`；按 3.6 节的 Harness 与服务商规则校验，只更新请求中出现的维度。
 
 成功 `200`：`{ "work": <作品公开视图（管理员视角，含特权字段）> }`。错误：`401` / `403 仅管理员可以操作`；`404`；`400 审核结果无效`。
 
@@ -551,11 +554,11 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 **认证**：无。**限流**：无。
 
-查询参数：`task=<题目id>`（缺省为全部题目合计）；`category=<题型>`（数据包题目的 `category`，如 `建模`、`文学`、`静态网页`；只统计该题型的题目，不能与 `task` 同用）；`by=config`（默认，按「模型+档位」）或 `by=model`（按模型跨档位合计）；可选的 `harness`、`provider`（注册表 ID，或 `unset` 表示未登记）。
+查询参数：`task=<题目id>`（缺省为全部题目合计）；`category=<题型>`（数据包题目的 `category`，如 `建模`、`文学`、`静态网页`；只统计该题型的题目，不能与 `task` 同用）；`by=config`（默认，按「模型+档位」）或 `by=model`（按模型跨档位合计）；可选 `harness`（注册表 ID 或 `unset`）及 `provider=official|unofficial|unset`（`unset` 表示未注明）。
 
 来源筛选只缩小计入的票和作品池，**不改变计分维度**（仍是「模型+档位」或模型）：
 - 一张票只有两侧的身份快照（有更正时取更正）都满足全部筛选条件时才计入；只满足一侧的是跨来源比较，不计入。
-- 快照只保存注册表 ID，自填的「其他」与未注明一样记作 `unset`；快照没有这些键的旧票同样记作 `unset`。
+- Harness 快照只保存注册表 ID，自填的「其他」与未注明一样记作 `unset`。读取旧票时将非空的旧服务商 ID 或已保存手填名称归为 `unofficial`，原始快照不重写；没有保存服务商声明的旧票仍为 `unset`。
 - `unranked` 与 `works` 计数按作品当前的来源字段筛选。
 - 带筛选时响应多一个 `"filters": { "harness": …, "provider": … }`；不带筛选时响应形状、计票范围与缓存键都与不支持筛选时完全相同。
 
@@ -582,7 +585,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 - `unranked`：池内存在但尚无计入对局的配置，按模型名字典序排列。
 - 排行在票数或作品状态变化时失效重建，并以数据包版本参与缓存键。
 
-错误：`404 题目不存在`（`task` 参数无效）；`400 invalid_query`（`harness` 或 `provider` 既不是当前注册表 ID 也不是 `unset`；`category` 不是当前题目的题型，或与 `task` 同时出现）。
+错误：`404 题目不存在`（`task` 参数无效）；`400 invalid_query`（`harness` 既不是当前注册表 ID 也不是 `unset`，或 `provider` 不在上述三项中；`category` 不是当前题目的题型，或与 `task` 同时出现）。
 
 ### 3.11 `/media/*` —— 投稿媒体
 
@@ -676,7 +679,7 @@ v23 追加可空 `questions.category`，无分类旧题按标签顺序取第一�
 
 以下端点均须管理员会话；非管理员返回 `401`（未登录）或 `403`。写请求走同源检查、`write` 限流并记录 audit。错误仍按 1.4 节的 `{ "error": "中文提示", "code": "可选代码" }` 格式返回。
 
-**`GET /api/admin/works`** 合并馆藏精选和 SQLite 投稿。查询参数：`task`（题目 ID）、`status=verified|unverified|questioned`、`source=curated|upload`、`face=gallery|arena` 与 `show=on|off`（两者一起使用）、`harness` 与 `provider`（取注册表 ID、`other` 表示只填了「其他」、`unset` 表示未注明；其他值 `400 invalid_query`）、`search`（标题、模型、题目 ID、Harness 与服务商名称）、`page`（默认 1）、`pageSize`（默认 30，最多 100）。成功形状：
+**`GET /api/admin/works`** 合并馆藏精选和 SQLite 投稿。查询参数：`task`（题目 ID）、`status=verified|unverified|questioned`、`source=curated|upload`、`face=gallery|arena` 与 `show=on|off`（两者一起使用）、`harness`（注册表 ID、`other` 表示只填了「其他」、`unset` 表示未注明）、`provider=official|unofficial|unset`（其他值 `400 invalid_query`）、`search`（标题、模型、题目 ID、Harness 与服务商显示名）、`page`（默认 1）、`pageSize`（默认 30，最多 100）。成功形状：
 
 ```json
 { "works": [{ "task": "one", "id": "a", "source": "curated", "status": "verified", "show_gallery": true, "show_arena": true, "calibration_gallery": null, "calibration_arena": null, "has_calibration_gallery": false, "has_calibration_arena": false }], "total": 1, "page": 1, "pageSize": 30 }
@@ -696,7 +699,7 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 
 **`GET /api/admin/traffic?days=N`** `N` 默认 30，范围 1–90。响应 `{ "days": 30, "daily": [{ "day": "2026-09-28", "pv": 12, "uniqueIps": 8 }], "paths": [{ "path": "/", "pv": 9 }], "users": { "total": 24, "new": 2 } }`。`daily` 按 UTC 日补齐零值；`paths` 最多 20 条；错误 `400 invalid_query`。
 
-**`POST /api/admin/works/upload`** 原始 HTML 或 ZIP 请求体，查询参数 `task`、`name`（含扩展名）、`title`、`modelId` 或 `modelName`、`summary`、`tool`、`harnessId`、`harnessOther`、`harnessVersion`、`providerId`、`providerOther`、`template`、`show_gallery=0|1`、`show_arena=0|1`。来源字段遵循 3.6 节规则；管理员可不填 Harness，`tool` 不再自动设为录入渠道。沿用草稿检查和投稿存储，直接核验为 `verified`；开关缺省时展览馆开启、竞技场关闭。响应 `{ "work": <合并管理员作品视图> }`。错误沿用 `/api/drafts` 和 `/api/works`，另有 `400 invalid_face_settings`、`413`、`429`。该流程在 audit 中留下 `submit` 和 `verified` 两条记录。
+**`POST /api/admin/works/upload`** 原始 HTML 或 ZIP 请求体，查询参数 `task`、`name`（含扩展名）、`title`、`modelId` 或 `modelName`、`summary`、`tool`、`harnessId`、`harnessOther`、`harnessVersion`、`providerId`、`template`、`show_gallery=0|1`、`show_arena=0|1`。来源字段遵循 3.6 节规则；管理员可不填 Harness，`tool` 不再自动设为录入渠道。沿用草稿检查和投稿存储，直接核验为 `verified`；开关缺省时展览馆开启、竞技场关闭。响应 `{ "work": <合并管理员作品视图> }`。错误沿用 `/api/drafts` 和 `/api/works`，另有 `400 invalid_face_settings`、`413`、`429`。该流程在 audit 中留下 `submit` 和 `verified` 两条记录。
 
 竞技场配对和 Bradley–Terry 计分都只纳入当前 `show_arena=1` 的已验证作品；精选没有覆盖记录时竞技场开关默认关闭。`votes.source='arena'` 的限制不变。Show1 娱乐榜仍从全量历史票回放。
 
@@ -707,12 +710,12 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 - **`GET /api/admin/inbox`** 返回 `{ "entries": [...] }`，按加入时间升序。每项含 `id`、原文件名 `name`、`kind`（HTML/ZIP）、字节数 `size`、毫秒时间戳 `addedAt`、从文件名推断的 `suggest: { title, model }` 和预览路径 `preview`。
 - **`POST /api/admin/inbox?name=<文件名>[&overwrite=1]`** 请求体为原始 HTML 或 ZIP，最多 30 MB；文件名只接受 `.html`、`.htm`、`.zip`（含「标题，模型.html」格式）。上传前执行包检查；同名文件默认返回 `409 inbox_conflict`，`overwrite=1` 覆盖。成功 `200`：`{ "ok": true, "name": "…" }`，写 `inbox-upload` audit。
 - **`GET /admin/inbox/:id/...`** 是预览文件路径，不是 API；仅管理员可读取，其他用户或文件不存在时返回纯文本 `404`。`/file` 返回原始文件；ZIP 的预览路径由列表给出，响应使用 `no-store`。
-- **`POST /api/admin/inbox/register`** JSON 请求含 `id`、`task`、可选的 `title`、`summary`、`modelId` 或 `modelName`、`effort`、`tool`、`harnessId`、`harnessOther`、`harnessVersion`、`providerId`、`providerOther`；标题和模型名可从文件名建议值补齐。来源字段遵循 3.6 节规则；不填时 `tool` 为空，不写录入渠道。走现有草稿检查与投稿流程。缺省登记为 `unverified` 且两个门面均关闭；`publish: true` 时直接核验为 `verified`，缺省展览馆开启、竞技场关闭，可用 `show_gallery` / `show_arena` 指定。成功 `200`：`{ "work": <管理员作品视图> }`，移除收件箱文件并写 `inbox-register` audit；无效或已移除的 `id` 返回 `404`。
+- **`POST /api/admin/inbox/register`** JSON 请求含 `id`、`task`、可选的 `title`、`summary`、`modelId` 或 `modelName`、`effort`、`tool`、`harnessId`、`harnessOther`、`harnessVersion`、`providerId`；标题和模型名可从文件名建议值补齐。来源字段遵循 3.6 节规则；不填时 `tool` 为空，不写录入渠道。走现有草稿检查与投稿流程。缺省登记为 `unverified` 且两个门面均关闭；`publish: true` 时直接核验为 `verified`，缺省展览馆开启、竞技场关闭，可用 `show_gallery` / `show_arena` 指定。成功 `200`：`{ "work": <管理员作品视图> }`，移除收件箱文件并写 `inbox-register` audit；无效或已移除的 `id` 返回 `404`。
 - **`DELETE /api/admin/inbox?id=<收件箱 ID>`** 移除暂存文件，成功 `200`：`{ "ok": true }`，写 `inbox-remove` audit；文件不存在返回 `404`。
-- **`POST /api/admin/works/:task/:id/meta`** 仅编辑 SQLite 投稿，不编辑馆藏。JSON 请求可含 `title`、`summary`、`modelName`、`modelId`、`effort`、`harnessId`、`harnessOther`、`harnessVersion`、`providerId`、`providerOther`；至少提供一个允许字段。标题不能为空，`modelId` 须存在于目录。来源字段按 3.6 节校验；同一维度设置 ID 会清空「其他」，反之亦然，清空 Harness 同时清空版本。成功 `200`：`{ "work": <管理员作品视图> }`，写 `meta` audit；无效字段或内容返回 `400`，投稿不存在或目标为馆藏返回 `404 not_found`。
+- **`POST /api/admin/works/:task/:id/meta`** 仅编辑 SQLite 投稿，不编辑馆藏。JSON 请求可含 `title`、`summary`、`modelName`、`modelId`、`effort`、`harnessId`、`harnessOther`、`harnessVersion`、`providerId`；至少提供一个允许字段。标题不能为空，`modelId` 须存在于目录。来源字段按 3.6 节校验；设置 Harness ID 会清空「其他」，反之亦然，清空 Harness 同时清空版本。成功 `200`：`{ "work": <管理员作品视图> }`，写 `meta` audit；无效字段或内容返回 `400`，投稿不存在或目标为馆藏返回 `404 not_found`。
 - **`POST /api/admin/works/:task/:id/nominate`** 仅对已核验、尚未收录、且题目在当前数据包内的投稿有效。生成有效期 14 天的随机导出令牌；重复提名会换发令牌，数据库仅存 SHA-256。返回 `{ "exportUrl": "<当前来源>/api/curate/export/<令牌>", "command": "npm run intake:from-server -- <exportUrl>" }`。提名不改变作品的公开展示状态。管理员列表以 `nominatedAt` 标记提名，以 `curatedAs` 标记已收录。
 - **`DELETE /api/admin/works/:task/:id/nominate`** 撤回提名并使令牌立即失效，返回 `{ "ok": true }`；已收录返回 `409`。提名和撤回均写审计记录。
-- **`GET /api/curate/export/:token`** 无需登录，返回 `task`、`id`、`title`、`summary`、`modelId`、`modelName`、`vendor`、`effort`、`tool`、`harnessId`、`harnessOther`、`harnessVersion`、`providerId`、`providerOther`、`note`、`createdAt`、`root`、`entry`、`digest` 及 `files: [{ path, size, sha256 }]`。**`GET /api/curate/export/:token/file?path=<相对路径>`** 返回原始文件。两者按令牌每分钟限流 2000 次，另有每 IP 每分钟 10000 次兜底；命中返回 `429` 和 `Retry-After`。无效、过期、撤回或已被数据包接管的令牌返回 `404`，非法文件路径返回 `404`。
+- **`GET /api/curate/export/:token`** 无需登录，返回 `task`、`id`、`title`、`summary`、`modelId`、`modelName`、`vendor`、`effort`、`tool`、`harnessId`、`harnessOther`、`harnessVersion`、`providerId`、`providerOther`、`note`、`createdAt`、`root`、`entry`、`digest` 及 `files: [{ path, size, sha256 }]`；`providerId` 为两类或 null，导出兼容字段 `providerOther` 恒为空串。**`GET /api/curate/export/:token/file?path=<相对路径>`** 返回原始文件。两者按令牌每分钟限流 2000 次，另有每 IP 每分钟 10000 次兜底；命中返回 `429` 和 `Retry-After`。无效、过期、撤回或已被数据包接管的令牌返回 `404`，非法文件路径返回 `404`。
 - 数据包中某馆藏结果带 `sourceUpload: "up-…"` 时，后端在数据包版本变化后异步设置对应投稿的 `curated_as`、清除提名字段、继承投稿的展览馆与竞技场开关（已有馆藏 override 不覆盖），并以系统身份写审计；成功接管的版本不重复更新，失败会记录并在下次刷新时重试。
 
 ### 3.20 Show1 猜模型接口
@@ -816,7 +819,7 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 
 **模型（model）**：`{ "id", "name", "vendor", "logo", "brandUrl", "brandName" }`。
 
-**Harness / 服务商注册表**：顶层 `harnesses`、`providers` 均含完整条目与 `listed`，停用 ID 仍可解析历史作品。旧包缺少数组时服务端按 `[]` 读取。注册表条目含 `id`、`name`、`kind`、`maker`（Harness）或 `operator`（服务商）、`url`、`logo`、`aliases`、`listed`。服务端 `catalog.model()` 查完整 `modelPool`（含停用模型），同 ID 的 `models` 条目优先；`catalog.models()` 仍只返回展示列表。缺少 `modelPool` 的旧包只查 `models`。Harness 与服务商查询接纳注册表中全部 ID。
+**Harness / 服务商注册表**：数据包顶层 `harnesses` 含完整条目与 `listed`，停用 ID 仍可解析历史作品；旧包缺少 Harness 数组时服务端按 `[]` 读取。Harness 条目含 `id`、`name`、`kind`、`maker`、`url`、`logo`、`aliases`、`listed`。`providers` 公开构建仅列 `official` / `unofficial`，均为 `listed: true`；服务端目录及 bootstrap 固定这两项，旧包其余服务商引用读取为 `unofficial`。服务端 `catalog.model()` 查完整 `modelPool`（含停用模型），同 ID 的 `models` 条目优先；`catalog.models()` 仍只返回展示列表。缺少 `modelPool` 的旧包只查 `models`。
 
 **题目（task）**：
 
@@ -838,7 +841,7 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 | `id` | 题目内唯一 |
 | `model` | 模型 ID（对应 `models[].id`） |
 | `effort` / `sourceLabel` | 档位 / 来源标签（服务端映射为 `tool`） |
-| `harness` / `harnessVersion` / `provider` | Harness ID 或 null / 版本字符串（缺省 `""`）/ 服务商 ID 或 null；缺省即未注明 |
+| `harness` / `harnessVersion` / `provider` | Harness ID 或 null / 版本字符串（缺省 `""`）/ `official`、`unofficial` 或 null；缺省即未注明 |
 | `title` / `summary` / `addedAt` | 标题 / 简介 / 收录时间 |
 | `scene` | 作品目录相对路径（如 `results/grok-4.6/`），画廊前端按其静态部署路径加载；后端按其 `DIST_DIR` 副本供盲评使用 |
 | `source` / `readme` | 源码 / 说明链接 |

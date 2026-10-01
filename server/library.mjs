@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync }
 import { dirname, join, resolve, sep } from 'node:path';
 import { EFFORTS, EMOJIS } from './config.mjs';
 import { transaction } from './db.mjs';
+import { providerOf } from './catalog.mjs';
 import { fail } from './http.mjs';
 import { inspectUpload } from './inspect.mjs';
 import { templatesOf } from './categories.mjs';
@@ -164,8 +165,8 @@ export function createLibrary({ db, catalog, config, limits }) {
       harnessId: row.harness_id,
       harnessOther: row.harness_other,
       harnessVersion: row.harness_version,
-      providerId: row.provider_id,
-      providerOther: row.provider_other,
+      providerId: providerOf(row.provider_id, row.provider_other),
+      providerOther: '',
       modelVersion: row.model_version,
       generationMode: row.generation_mode,
       humanIntervention: row.human_intervention,
@@ -306,15 +307,15 @@ export function createLibrary({ db, catalog, config, limits }) {
   function provenance(body, current = {}) {
     const next = {
       harnessId: current.harnessId ?? null, harnessOther: current.harnessOther ?? '',
-      harnessVersion: current.harnessVersion ?? '', providerId: current.providerId ?? null,
-      providerOther: current.providerOther ?? '',
+      harnessVersion: current.harnessVersion ?? '', providerId: providerOf(current.providerId, current.providerOther),
+      providerOther: '',
     };
     const fieldText = (value, label) => {
       const text = String(value ?? '').normalize('NFKC').trim();
       if ([...text].length > 40) fail(400, `${label}不能超过 40 字`);
       return text;
     };
-    for (const [prefix, lookup, label] of [['harness', 'harness', 'Harness'], ['provider', 'provider', '服务商']]) {
+    for (const [prefix, lookup, label] of [['harness', 'harness', 'Harness']]) {
       const idField = `${prefix}Id`, otherField = `${prefix}Other`;
       const hasId = Object.hasOwn(body, idField), hasOther = Object.hasOwn(body, otherField);
       if (!hasId && !hasOther) continue;
@@ -326,6 +327,11 @@ export function createLibrary({ db, catalog, config, limits }) {
       if (id) { next[idField] = id; next[otherField] = ''; }
       else if (hasOther && other) { next[idField] = null; next[otherField] = other; }
       else { next[idField] = null; next[otherField] = ''; }
+    }
+    if (Object.hasOwn(body, 'providerId')) {
+      const id = body.providerId === '' ? null : body.providerId;
+      if (id !== null && (typeof id !== 'string' || !catalog.provider(id))) fail(400, '所选服务商不存在');
+      next.providerId = id;
     }
     if (Object.hasOwn(body, 'harnessVersion')) next.harnessVersion = fieldText(body.harnessVersion, 'Harness 版本');
     if (!next.harnessId && !next.harnessOther) {
@@ -349,8 +355,7 @@ export function createLibrary({ db, catalog, config, limits }) {
     harness: work.harnessId ?? null,
     harnessName: work.harnessId ? (catalog.harness(work.harnessId)?.name ?? work.harnessId) : (work.harnessOther || null),
     harnessVersion: work.harnessVersion ?? '',
-    provider: work.providerId ?? null,
-    providerName: work.providerId ? (catalog.provider(work.providerId)?.name ?? work.providerId) : (work.providerOther || null),
+    provider: providerOf(work.providerId, work.providerOther),
   });
 
   const effortOf = (value) => {
@@ -668,7 +673,7 @@ export function createLibrary({ db, catalog, config, limits }) {
       if (!admin && work.status !== 'unverified') fail(409, '作品已核验，信息不能再修改；如有错误请删除后重新上传');
       if (!plainObject(body) || !Object.keys(body).length ||
         Object.keys(body).some((key) => !['title', 'summary', 'note', 'modelName', 'modelId', 'vendor', 'effort', 'promptVariant',
-          'harnessId', 'harnessOther', 'harnessVersion', 'providerId', 'providerOther', ...GENERATION_FIELDS].includes(key))) fail(400, '没有可修改的内容');
+          'harnessId', 'harnessOther', 'harnessVersion', 'providerId', ...GENERATION_FIELDS].includes(key))) fail(400, '没有可修改的内容');
       const title = body.title === undefined ? work.title : clip(body.title, 40);
       if (!title) fail(400, '请填写作品标题');
       const summary = body.summary === undefined ? work.summary : clip(body.summary, 200);

@@ -10,6 +10,7 @@ import { templatesOf } from './categories.mjs';
 export const effortKey = (effort) => String(effort ?? '').normalize('NFKC').trim().toLowerCase();
 export const modelKey = (work) => work.modelId ?? `x:${work.modelName.normalize('NFKC').trim().toLowerCase()}`;
 export const entityKey = (work, by = 'config') => (by === 'model' ? modelKey(work) : `${modelKey(work)}|${effortKey(work.effort)}`);
+export const providerOf = (id, other = '') => id === 'official' ? 'official' : id || other ? 'unofficial' : null;
 
 function readSnapshot(root) {
   const file = join(root, 'data.json');
@@ -28,7 +29,10 @@ function readSnapshot(root) {
   const version = commit ? `${root}|${commit}` : `${root}|dev:${catalogDigest}`;
   const models = new Map([...(data.modelPool ?? []), ...data.models].map((model) => [model.id, model]));
   const harnesses = new Map((data.harnesses ?? []).map((item) => [item.id, item]));
-  const providers = new Map((data.providers ?? []).map((item) => [item.id, item]));
+  const providers = new Map([
+    { id: 'official', name: '官方', listed: true },
+    { id: 'unofficial', name: '非官方', listed: true },
+  ].map((item) => [item.id, item]));
   const tasks = new Map(data.tasks.map((task) => [task.id, {
     id: task.id, title: task.title, summary: task.summary, prompt: task.prompt,
     arenaId: task.arenaId ?? null, kind: task.kind ?? 'web', category: task.category ?? '',
@@ -45,7 +49,7 @@ function readSnapshot(root) {
         effort: result.effort ?? '', tool: result.sourceLabel ?? '', ownerId: null,
         ...(result.promptVariant ? { promptVariant: result.promptVariant } : {}),
         harnessId: result.harness ?? null, harnessOther: '', harnessVersion: result.harnessVersion ?? '',
-        providerId: result.provider ?? null, providerOther: '',
+        providerId: providerOf(result.provider, result.providerName), providerOther: '',
         ...generationOf(result),
         scene: result.scene, dir: result.scene ? join(root, result.scene) : null,
         cover: Object.values(result.captures ?? {})[0] ?? result.gallery?.[0]?.src ?? null,

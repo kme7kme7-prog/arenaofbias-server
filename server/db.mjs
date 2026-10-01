@@ -375,6 +375,13 @@ const MIGRATIONS = [
     ALTER TABLE email_codes_v24 RENAME TO email_codes;
     CREATE INDEX email_codes_expiry ON email_codes(expires_at);`);
   },
+  // Collapse registered and free-text providers into the two supported categories.
+  (db) => {
+    db.exec(`UPDATE works SET provider_id = CASE
+      WHEN provider_id = 'official' THEN 'official'
+      WHEN COALESCE(provider_id, '') <> '' OR provider_other <> '' THEN 'unofficial'
+      ELSE NULL END, provider_other = ''`);
+  },
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

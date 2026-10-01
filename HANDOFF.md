@@ -1,5 +1,13 @@
 # HANDOFF.md · 当前状态
 
+## 本轮：四仓整理中的后端分支核对（2026-10-01 Brisbane，本地完成，待统一推送，不部署）
+
+- 用户授权本轮合并、提交、推送和保留有效工作后的目录清理，明确不部署。后端主工作区与三个旧 worktree 均无待提交源码；fetch 后 `origin/main` 为 `e81cb4e`，main 另有注册邮箱绑定提交 `55e3288` 待推送。既有提交作者保持原样，本轮身份经 GitHub `/user` 核对为 wsnxxxs。
+- `codex/luna-flex-moderation@2ead072`、`show1-vote-processing@4f00ac3` 已完整进入 main。`codex/shared-question-intake@7d87557` 仅有旧文档补记，有效内容已在 main 的对应归档保留；本轮以 ours 合并登记其祖先关系，保留较新的现状文档，不改变实现。
+- 当前验证：Windows Node 24.16.0，`npm run check` 73 文件 / 0 错，`npm test` 173/173（0 失败/取消/跳过），`git diff --check` 通过。仓库只有 `.github/workflows/check.yml`，main push 只触发 Node 22 检查与测试，不触发部署；本轮未运行 Node 22、生产、邮件、Turnstile 或前端联调。
+- worktree 清理候选：上述三个旧 worktree 的代码均可从 main 恢复。luna 的 `output/`（37 文件，2751142 字节）与 vote 的 `output/`（2620 文件，159813720 字节）含历史验收、隔离库及发布证据，删除 checkout 前须另行保留；luna 的 `node_modules` 是指向 Desktop/same-prompt-gallery/node_modules 的 junction，不能递归删除其目标。intake 无忽略文件。
+- 主目录 `.data/`（含 SQLite/WAL、作品与媒体）、`.datapack/` 和 `output/` 保留；当前数据包指针仍为旧 `92f8ab9`，本轮不更新 pin 或本地包。统一推送与实际目录清理由主会话完成，本文不宣称已经推送或清理。归档：[repository-housekeeping](docs/archive/2026-10-01-repository-housekeeping-wsnxxxs.md)。
+
 ## 本轮：注册强制绑定邮箱（2026-10-01 Brisbane，已本地提交，未推送、未部署）
 
 - 按 Gallery `register-email-binding` 契约实现匿名 `purpose: register` 发码、邮箱格式 / 占用校验、原 Turnstile 与 IP / 邮箱限流、注册验证邮件。注册必填 email/code，不再要求 Turnstile token；保留注册 auth 限流。异步密码哈希后校验 register 验证码，在同一事务消费验证码、创建用户并写入 email/email_verified_at，插入失败保留验证码可重试。bind/reset 行为保留。

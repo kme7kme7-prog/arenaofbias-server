@@ -15,8 +15,9 @@ try {
 const site = createServer(platform.handleSite);
 const content = createServer(platform.handleContent);
 let ready = 0;
-const started = () => {
+const started = async () => {
   if (++ready < 2) return;
+  await platform.capturer.initialize();
   const shown = config.host === '127.0.0.1' || config.host === '0.0.0.0' ? 'localhost' : config.host;
   console.log(`同题异答 · 平台已启动
   站点  http://${shown}:${config.port}/

@@ -48,7 +48,7 @@ function readSnapshot(root) {
         modelName: model?.name ?? result.model, vendor: model?.vendor ?? '',
         effort: result.effort ?? '', tool: result.sourceLabel ?? '', ownerId: null,
         ...(result.promptVariant ? { promptVariant: result.promptVariant } : {}),
-        harnessId: result.harness ?? null, harnessOther: '', harnessVersion: result.harnessVersion ?? '',
+        harnessId: result.harness ?? null, harnessOther: '',
         providerId: providerOf(result.provider, result.providerName), providerOther: '',
         ...generationOf(result),
         scene: result.scene, dir: result.scene ? join(root, result.scene) : null,

@@ -253,6 +253,8 @@ describe('community question and sample review lifecycle', () => {
     assert.ok((await call('root', 'GET', '/api/bootstrap')).data.review.questions >= 1);
     assert.equal((await call('root', 'POST', `/api/works/${question.id}/${work.id}/moderation`, { status: 'approved', reason: 'Safe sample' })).status, 200);
     assert.equal((await call('root', 'POST', `/api/works/${question.id}/${work.id}/review`, { status: 'verified', show_gallery: true, show_arena: true })).status, 200);
+    assert.ok(!(await call('guest', 'GET', '/api/bootstrap')).data.works.some(w => w.id === work.id));
+    assert.equal(await fetchScene(platform.library.originOf(platform.library.work(question.id, work.id).contentKey)), 410);
     const unverifiedBeforeQuestionApproval = (await call('root', 'GET', '/api/bootstrap')).data.review.unverified;
     assert.ok(!(await call('guest', 'GET', '/api/show1/works')).data.works.some(w => w.id === work.id));
     assert.equal((await call('other', 'POST', `/api/drafts?task=${question.id}&name=x.html`, '<html>test</html>', true)).status, 404);
@@ -261,6 +263,11 @@ describe('community question and sample review lifecycle', () => {
     boot = (await call('guest', 'GET', '/api/bootstrap')).data;
     assert.ok(boot.questions.some(q => q.id === question.id)); assert.ok(boot.works.some(w => w.id === work.id));
     assert.ok(!Object.hasOwn(boot.questions.find(q => q.id === question.id), 'moderation'));
+    const ownerView = (await call('author', 'GET', '/api/me')).data.questions.find(q => q.id === question.id);
+    assert.deepEqual(Object.keys(ownerView.moderation).sort(), ['at', 'status']);
+    const fullView = (await call('root', 'GET', '/api/admin/questions')).data.questions.find(q => q.id === question.id);
+    assert.equal(fullView.moderation.source, 'human');
+    assert.equal(fullView.moderation.reviewer, 'root');
     const publicScene = boot.works.find(w => w.id === work.id).scene;
     assert.match(new URL(publicScene).hostname, /^w/);
     assert.equal(await fetchScene(publicScene), 200);
@@ -274,6 +281,20 @@ describe('community question and sample review lifecycle', () => {
     assert.equal(await fetchScene(publicScene), 410);
   });
 
+  test('unverified queue excludes approved samples until their question is public', async () => {
+    const before = (await call('root', 'GET', '/api/bootstrap')).data.review.unverified;
+    const { question, work } = await create('author');
+    const catalog = createCatalog(join(root, 'dist'), createQuestions(platform.db));
+    assert.equal(catalog.task(question.id), null);
+    assert.equal(catalog.task(question.id, { role: 'admin' }).id, question.id);
+    assert.equal((await call('root', 'POST', `/api/works/${question.id}/${work.id}/moderation`, { status: 'approved' })).status, 200);
+    assert.equal(platform.library.work(question.id, work.id).status, 'unverified');
+    assert.equal((await call('root', 'GET', '/api/bootstrap')).data.review.unverified, before);
+    assert.equal((await moderate(question.id, 'approved')).status, 200);
+    assert.equal(catalog.task(question.id).id, question.id);
+    assert.equal((await call('root', 'GET', '/api/bootstrap')).data.review.unverified, before + 1);
+  });
+
   test('human moderation validates reasons and writes an audit', async () => {
     const { question } = await create('other');
     assert.equal((await call('other', 'POST', `/api/questions/${question.id}/moderation`, { status: 'approved' })).status, 403);
@@ -283,6 +304,8 @@ describe('community question and sample review lifecycle', () => {
     assert.equal((await moderate('q-missing', 'approved')).status, 404);
     const decided = await moderate(question.id, 'rejected', '请补充有意义的测试目标');
     assert.equal(decided.status, 200); assert.equal(decided.data.question.moderation.source, 'human');
+    const ownerQuestion = (await call('other', 'GET', '/api/me')).data.questions.find(q => q.id === question.id);
+    assert.deepEqual(ownerQuestion.moderation, { status: 'rejected', reason: '请补充有意义的测试目标', at: decided.data.question.moderation.at });
     const audit = platform.db.prepare('SELECT * FROM audit WHERE task_id = ? AND action = ?').get(question.id, 'question-review');
     assert.ok(audit); assert.match(audit.detail, /请补充/);
   });

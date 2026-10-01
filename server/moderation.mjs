@@ -24,7 +24,7 @@ function inputFor(work, library, capture) {
     .replace(/<!--[\s\S]*?-->/g, ' ').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
   const text = JSON.stringify({ title: work.title, summary: work.summary, note: work.note,
     model: work.modelName, effort: work.effort, harnessOther: work.harnessOther,
-    harnessVersion: work.harnessVersion, providerOther: work.providerOther,
+    providerOther: work.providerOther,
     modelVersion: work.modelVersion, generationMode: work.generationMode,
     humanIntervention: work.humanIntervention, generatedOn: work.generatedOn, evidenceUrl: work.evidenceUrl,
     pageText: staticText, renderedText: capture.texts });

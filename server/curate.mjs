@@ -80,7 +80,7 @@ export function createCurator({ db, catalog, library, onTakeover = () => {} }) {
       task: work.taskId, id: work.id, title: work.title, summary: work.summary,
       modelId: work.modelId, modelName: work.modelName, vendor: work.vendor,
       effort: work.effort, tool: work.tool, note: work.note,
-      harnessId: work.harnessId, harnessOther: work.harnessOther, harnessVersion: work.harnessVersion,
+      harnessId: work.harnessId, harnessOther: work.harnessOther,
       providerId: work.providerId, providerOther: work.providerOther,
       ...generationOf(work),
       createdAt: new Date(work.createdAt).toISOString(), root: work.root,

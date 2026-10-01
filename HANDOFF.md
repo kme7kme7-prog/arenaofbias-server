@@ -1,5 +1,16 @@
 # HANDOFF.md · 当前状态
 
+## 本轮：上传审核链路收口与移除 Harness 版本（2026-10-01 Brisbane，实现与验证完成，未部署）
+
+- 用户最初要求仅本地实现，现已明确把数据仓配套纳入本轮，数据仓单独一条 commit，再与后端修改一起推送远端；不部署、不切换消费者 pin。已按指定 GPT-6.1 Sol medium 分工；GitHub `/user` 核对负责人为 wsnxxxs（269096463），提交使用对应 noreply 身份。本轮不新增迁移，不清空 `harness_version` 存量值，只停止读写和输出，保留已发布迁移及数据库列。
+- 已实现：截图启动实际探测并打印能力状态，导入/启动失败后冷却五分钟由新作品重试，视口失败用新 context 再试一次；`site.autoModeration` 随开关、密钥与当前截图能力变化。作者作品和题目只见 status / at、拒绝时 reason；管理员保持完整审核结果。`review.unverified` 只算内容已放行的未核验作品，`review.content` 只算 review，pending / rejected 不计入。人工通过理由选填，空白保存「人工复核通过」，通过/拒绝/重试保留审计与 arena 刷新；后台禁用未放行内容的核验按钮并提示，版本表单与展示已删除。
+- 用户最终指定：管理员直传与收件箱 `publish:true` 等同人工内容审核，登记时记录 approved / human、管理员名、「管理员上传」及时间，写 `content-review` 审计后核验 verified，不送 Luna（仍可生成截图）。仅登记收件箱照常自动审核。内容未放行的 409 检查只在普通 `POST /api/works/:task/:id/review` API。此前暂定未验证登记方案已被此规则替代。
+- Harness 版本在上传、PATCH、review/meta、inbox 均忽略（含旧空串、非空及其它类型），不再出现在作品 DTO、catalog 作品、arena 身份、收录导出或送审文字中；版本单独 PATCH/meta 为成功空操作。测试覆盖旧数据库值不变、旧数据包/快照读取剥离、忽略版本不触发重新审核、作者裁剪、队列计数、三种未放行状态 409、人工理由默认及审计、管理员两路径审核开启时一步发布且不送 Luna、示例内容先通过后随题目通过自动公开。契约及部署文档已同步。
+- 验证环境 Windows Node 24.16.0：`npm run check` 74 文件 / 0 错；最终 `npm test` 连续两轮 183/183（0 失败、取消、跳过），`git diff --check` 通过。首轮 182/184：新增截图测试的测试器反序列化错误（六项断言均通过），以及既有安全测试随机端口被 fetch 拒绝；第二轮 183/184 仅剩前者。统一捕获截图夹具常规日志后完整测试通过；安全定向 4/4 通过，未修改无关安全测试。SQLite/邮件/relay 故障日志为既有故障注入断言输出。
+- 实际 `server/index.mjs` 用系统临时目录、隔离库和随机监听端口验证 CAPTURE=0、CAPTURE=1 且本检出缺 Playwright：均只有一条能力日志并正常启动，临时进程及目录已清理。未安装组件、未跑真实 Chrome/外部 Luna、生产 Node 22 或 Gallery/后台浏览器联调；未操作生产、本地业务库、后端数据包或消费者 pin。用户已授权本轮提交和推送，归档及源码一起纳入每仓一条英文提交；最终版本及远端检查结果以 Git / Actions 为准。
+- 后续收口：`review.unverified` 再要求不传 viewer 的 `catalog.task(work.taskId)` 可查到公开题目，待审题目的已放行示例不计入，题目通过后自动计入。已确认 catalog 的 viewer 缺省为 null，社区题目经 questions.get 仅公开 legacy / approved 且未删除记录；回归同时断言待审题目仅管理员 viewer 可查到。新增测试先复现旧计数 1 ≠ 0，修复后 `npm run check` 74/0、`npm test` 184/184（0 失败、取消、跳过）、`git diff --check` 通过，契约同步；仍未提交、推送或部署。
+- 数据仓配套已同轮完成：intake/provenance 忽略旧 Harness 版本，收录记录、README 来源说明和新构建不再输出；无需改原作或存量 manifest/task（实际无该字段）。data check 30/0、test 16/16、完整 build:data 182 件 / 20 题、check:intake 0 错 / 9 条既有提示；字段计数为 0，77 官方 / 1 非官方 / 104 未填保持。当前后端直接只读该新包验证 20 题 / 182 件及两项 providers 通过，不替换后端 dist 或 pin。data 独立一条 commit，与本仓一起按用户授权推送 main；既有 data CI 会发布不可变数据包，消费者不自动切换。完整归档：[upload-moderation-harness](docs/archive/2026-10-01-upload-moderation-harness-wsnxxxs.md)。
+
 ## 服务商二值联调与推送收尾（2026-10-01 Brisbane，未部署）
 
 - 用户授权完成 Gallery 前端提交、隔离联调、文档与三个仓库的推送。保留后端功能提交 bd7744e 和数据仓功能提交 0f68eca，本轮后端仅补交接与归档，使用 wsnxxxs 的 GitHub noreply 身份提交并推送 origin/main；最终提交号与 Node 22 CI 结果见 Git / Actions。

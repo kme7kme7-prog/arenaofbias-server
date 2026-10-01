@@ -100,7 +100,7 @@ describe('admin inbox', () => {
     const listed = await call('root', 'GET', '/api/admin/inbox');
     const entry = listed.data.entries[0];
     const registered = await call('root', 'POST', '/api/admin/inbox/register', {
-      id: entry.id, task: 'one', summary: '水乡', modelId: 'm-a',
+      id: entry.id, task: 'one', summary: '水乡', modelId: 'm-a', harnessVersion: 'ignored-version',
     });
     assert.equal(registered.status, 200);
     const work = registered.data.work;
@@ -108,6 +108,8 @@ describe('admin inbox', () => {
     assert.equal(work.title, '江南水乡');
     assert.equal(work.modelName, 'Model A');
     assert.equal(work.tool, '');
+    assert.equal('harnessVersion' in work, false);
+    assert.equal(platform.db.prepare('SELECT harness_version FROM works WHERE id = ?').get(work.id).harness_version, '');
     // Per-face review: registration decides nothing — both faces wait off.
     assert.deepEqual([work.show_gallery, work.show_arena], [false, false]);
     assert.equal((await call('root', 'GET', '/api/admin/inbox')).data.entries.length, 0);
@@ -115,10 +117,11 @@ describe('admin inbox', () => {
     // Second file, registered with publish → straight into the verified pool.
     await call('root', 'POST', `/api/admin/inbox?name=published.html`, PAGE, { raw: true });
     const second = (await call('root', 'GET', '/api/admin/inbox')).data.entries[0];
-    const direct = await call('root', 'POST', '/api/admin/inbox/register', { id: second.id, task: 'one', publish: true, modelName: '手工模型', show_gallery: true, show_arena: false });
+    const direct = await call('root', 'POST', '/api/admin/inbox/register', { id: second.id, task: 'one', publish: true, modelName: '手工模型', show_gallery: true, show_arena: false, harnessVersion: '' });
     assert.equal(direct.status, 200);
     assert.equal(direct.data.work.status, 'verified');
     assert.equal(direct.data.work.modelName, '手工模型');
+    assert.equal('harnessVersion' in direct.data.work, false);
 
     const missing = await call('root', 'POST', '/api/admin/inbox/register', { id: 'f'.repeat(16), task: 'one', modelName: 'x' });
     assert.equal(missing.status, 404);

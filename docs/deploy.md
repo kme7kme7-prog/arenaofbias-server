@@ -286,13 +286,21 @@ Environment="MODERATION_MODEL=gpt-6-luna"
 Environment="MODERATION_API_KEY=<server-only-key>"
 ```
 
-截图仍需已有的 Playwright ≥ 1.48 与 Chrome，服务不新增 npm 依赖。先在隔离环境确认两档截图及 Responses API 的 Flex 结构化响应；真实调用会计费，本地回归可使用模拟接口。配置后 daemon-reload 并重启，在 bootstrap 核对 `site.contentModeration`；用测试投稿确认公开列表/原作品源/媒体均被限制，作者与管理员可预览，自动通过后公开，疑似与错误转人工。后台人工决定需填写理由。
+生产启用截图和自动审核时，必须安装能被后端进程 `import('playwright')` 解析的 Playwright 及 Chrome，并保证服务账号可以启动浏览器；只在其他前端目录安装 Playwright 不保证后端可用。本服务不新增 npm 依赖声明，截图所需组件作为部署环境单独准备。`CAPTURE_BROWSER` 默认 `chrome`，对应本机 Chrome；所装 Playwright 必须支持 `routeWebSocket`。启动会实际探测导入和浏览器启动，并打印一次「自动截图可用」「自动截图不可用」或「自动截图已关闭」。
+
+浏览器启动失败后 `site.capture=false`，冷却五分钟后的下一件作品再尝试启动，恢复成功后变回 true；单个视口截图失败会用新 context 重试一次，两档仍需齐备才能送 Luna。`CAPTURE=0` 始终关闭截图。配置后 daemon-reload 并重启，在 bootstrap 同时核对 `site.capture`、`site.contentModeration` 和 `site.autoModeration`：后者只有审核开启、密钥已配置且截图当前可用时才为 true。审核开启但自动能力为 false 时，新作品转人工，前端应提示「管理员检查内容」。
+
+先在隔离环境确认两档截图及 Responses API 的 Flex 结构化响应；真实调用会计费，本地回归可使用模拟接口。用测试投稿确认公开列表/原作品源/媒体均被限制，作者与管理员可预览，自动通过后公开，疑似与错误转人工。后台人工通过内容理由选填，空白保存「人工复核通过」；拒绝理由必填。
+
+管理员直传与收件箱「登记并发布」视为管理员已完成人工内容审核：保存 approved / human、管理员名与「管理员上传」理由，写审计后一步核验发布，不送 Luna。仅登记收件箱仍走自动内容审核。普通作品核验接口在内容未放行时返回 409「请先完成内容审核」。
 
 截图机器需能显示中文；Debian 可安装 `fonts-noto-cjk`，用 `fc-list :lang=zh` 确认可用，并用实际截图核对。缺少中文字体时，页面 innerText 仍可能正确，但图片中的文字会显示为方框，导致模型交人工；安装后需让截图浏览器重新启动。
 
 Flex 固定为唯一计费档，不自动改用标准档。密钥缺失、`CAPTURE=0`、浏览器不可用、容量不足或超时均会进入人工队列；不要以「上传成功」判断审查完成。旧作品标记 legacy，默认不批量重审。送审涵盖声明、页面文字、封面和两档首屏，不覆盖整包及全部交互。
 
 关闭 `CONTENT_MODERATION` 会停止自动队列，新作品走旧流程，已有待审/拒绝作品仍保持限制。退回不理解 v19 内容状态的旧代码会公开这些作品，不能直接只回滚代码；须先停写并按备份流程恢复兼容数据库及文件，或保留支持内容访问限制的版本。
+
+本轮上传审核收口可先发布后端，再发布 Gallery；新前端对缺少 `autoModeration` / `review.content` 有兜底，旧前端发送的 `harnessVersion` 会被忽略，因此前端也可先发布。不新增数据库清理迁移，`harness_version` 列和存量值保留；私有数据仓同轮更新来源脚本，后续构建不输出 Harness 版本。消费者 pin 仍按不可变数据包发布流程另行切换。
 
 ### 6.1 独立审查服务器与 SSH 连接
 

@@ -159,6 +159,7 @@ const ACTIONS = { submit: '提交作品', verified: '通过验证', questioned: 
 // carry explicit show_gallery/show_arena.
 const AUDIENCE_FACE = { gallery: ['show2', 'both'], arena: ['show1', 'both'] };
 const contentHeld = (w) => ['pending', 'review', 'rejected'].includes(w.moderation?.status);
+const contentReady = (w) => w.source === 'curated' || ['legacy', 'approved'].includes(w.moderation?.status);
 const faceOn = (w, face = state.system) => !contentHeld(w) && Boolean(w[`show_${face}`] ?? AUDIENCE_FACE[face].includes(w.audience));
 const CONTENT_STATUS = { pending: '内容审查中', approved: '内容审查通过', review: '内容需人工复核', rejected: '内容审查拒绝', legacy: '历史作品，未自动审查' };
 const contentBadge = (w) => w.moderation && w.moderation.status !== 'legacy' ? `<span class="badge">${esc(CONTENT_STATUS[w.moderation.status])}</span>` : '';
@@ -167,7 +168,7 @@ function contentPanel(w) {
   return `<section class="content-review"><h4>${esc(CONTENT_STATUS[w.moderation.status])}</h4>
     <p class="review-text">${esc(w.moderation.reason || '正在后台检查文字、封面和页面截图。完成前仅作者和管理员可预览。')}</p>
     ${w.moderation.error ? `<p class="fine">自动审查未完成：${esc(w.moderation.error)}</p>` : ''}
-    <label class="field"><span class="field-label">人工内容审查理由</span><textarea class="input" data-content-reason rows="2" maxlength="500"></textarea></label>
+    <label class="field"><span class="field-label">人工内容审查理由<small>拒绝时必填，通过时选填</small></span><textarea class="input" data-content-reason rows="2" maxlength="500"></textarea></label>
     <p class="fine">内容审查决定能否公开，作品核验仍决定是否进入盲测。</p><p class="form-error" data-content-error role="alert"></p>
     <div class="actions"><button class="btn sm" data-content-decide="retry">重新自动审查</button>
       <button class="btn sm danger ghost" data-content-decide="rejected">内容不通过</button>
@@ -177,7 +178,9 @@ const FACE_LABEL = { gallery: '展览馆', arena: '竞技场' };
 const REVIEW_TABS = { pending: '待审', questions: '题目审核', shown: '已展示', questioned: '存疑', log: '记录' };
 const QUESTION_STATUS = { pending: '等待人工审核', approved: '已通过', rejected: '已拒绝', legacy: '历史题目' };
 const pendingQuestions = () => state.adminQuestions?.filter((q) => q.moderation.status === 'pending').length ?? state.reviewCounts?.questions ?? 0;
-const reviewCount = (face) => (state.works?.filter((w) => w.status !== 'questioned' && !faceOn(w, face)).length ?? state.reviewCounts?.unverified ?? 0) + pendingQuestions();
+const reviewCount = (face) => (state.works?.filter((w) => w.moderation?.status === 'review' ||
+  (contentReady(w) && w.status !== 'questioned' && !faceOn(w, face))).length ??
+  ((state.reviewCounts?.unverified ?? 0) + (state.reviewCounts?.content ?? 0))) + pendingQuestions();
 const skeleton = (count = 4, kind = 'row') => `<div class="skeleton-list" aria-label="正在载入" role="status">${Array.from({ length: count }, () => `<div class="skeleton skeleton-${kind}"></div>`).join('')}</div>`;
 function busy(button, text = '处理中…') {
   if (!button) return () => {};
@@ -285,9 +288,9 @@ function thumb(w) {
 
 function workRow(w) {
   const face = state.system;
-  const quick = w.status === 'questioned' || contentHeld(w) ? '' : faceOn(w, face)
+  const quick = w.status === 'questioned' ? '' : faceOn(w, face)
     ? `<button class="btn sm" data-face-off="${esc(w.id)}" title="本面撤下，不影响另一面">${icon('close')}撤下</button>`
-    : `<button class="btn sm primary" data-verify="${esc(w.id)}" title="${w.source === 'curated' ? '让这件馆藏作品' : '内容核验通过并'}${face === 'gallery' ? '上展览馆' : '进入正式盲测'}">${icon('check')}${face === 'gallery' ? '上展览馆' : '进盲测'}</button>`;
+    : `<button class="btn sm primary" data-verify="${esc(w.id)}"${contentReady(w) ? '' : ' disabled'} title="${contentReady(w) ? `${w.source === 'curated' ? '让这件馆藏作品' : '作品核验通过并'}${face === 'gallery' ? '上展览馆' : '进入正式盲测'}` : '请先完成内容审查并确认通过'}">${icon('check')}${face === 'gallery' ? '上展览馆' : '进盲测'}</button>`;
   const source = w.source === 'curated' ? ['精选馆藏', esc(provenanceText(w))] : [esc(provenanceText(w) || w.tool)];
   const meta = [taskTitle(w.task), ...source, formatDate(w.addedAt), w.owner ? `投稿者 ${esc(w.owner)}` : ''].filter(Boolean).join(' · ');
   return `<article class="work-row" data-status="${esc(w.status)}">
@@ -330,7 +333,7 @@ const PROVIDER_CHOICES = { official: '官方', unofficial: '非官方' };
 const providerChoice = (w) => w?.provider === 'official' ? 'official' : w?.provider || w?.providerName ? 'unofficial' : '';
 const providerLabel = (w) => PROVIDER_CHOICES[providerChoice(w)] ?? '未注明';
 const registry = (type) => state.data?.[PROVENANCE[type].list] ?? [];
-const provenanceText = (w) => [w.harnessName && `${w.harnessName}${w.harnessVersion ? ` ${w.harnessVersion}` : ''}`, providerChoice(w) && providerLabel(w)].filter(Boolean).join(' · ');
+const provenanceText = (w) => [w.harnessName, providerChoice(w) && providerLabel(w)].filter(Boolean).join(' · ');
 const nameKey = (value) => String(value ?? '').normalize('NFKC').toLowerCase().replace(/[\s-]/g, '');
 const suggestEntry = (type, text) => {
   const key = nameKey(text);
@@ -371,7 +374,7 @@ function effortField(value = '') {
   return `<label class="field"><span class="field-label">推理档位<small>可选择常用值或手填；留空表示未注明</small></span><input class="input" name="effort" list="${id}" maxlength="20" value="${esc(value)}" placeholder="未注明"><datalist id="${id}">${['Default', 'Low', 'Medium', 'High', 'XHigh', 'Max'].map((effort) => `<option value="${effort}">${effort === 'Default' ? '默认档位（明确使用默认设置）' : effort}</option>`).join('')}</datalist></label>`;
 }
 
-function provenanceFields({ harness = { choice: '', other: '' }, provider = { choice: '' }, version = '' } = {}) {
+function provenanceFields({ harness = { choice: '', other: '' }, provider = { choice: '' } } = {}) {
   const field = (type, { choice, other }) => {
     const entries = registry(type).filter((entry) => entry.listed || entry.id === choice);
     const known = !choice || choice === OTHER || entries.some((entry) => entry.id === choice);
@@ -385,9 +388,7 @@ function provenanceFields({ harness = { choice: '', other: '' }, provider = { ch
       <label class="field" data-provenance-other="${type}"${choice === OTHER ? '' : ' hidden'}><span class="field-label">其他${PROVENANCE[type].label}名称</span><input class="input" name="${type}Other" maxlength="40" value="${esc(other)}">
         <span class="provenance-suggestion" data-provenance-suggestion="${type}"${suggestion ? '' : ' hidden'}>${suggestion}</span></label>`;
   };
-  return `<div class="field-row">${field('harness', harness)}
-      <label class="field"><span class="field-label">Harness 版本<small>选填</small></span><input class="input" name="harnessVersion" maxlength="40" value="${esc(version)}" placeholder="例如 2.1.3"${harness.choice ? '' : ' disabled'}></label>
-    </div>
+  return `<div class="field-row">${field('harness', harness)}</div>
     <div class="field-row"><label class="field"><span class="field-label">服务商</span><select class="input" name="providerChoice"><option value="">未注明</option>${Object.entries(PROVIDER_CHOICES).map(([value, label]) => `<option value="${value}"${provider.choice === value ? ' selected' : ''}>${label}</option>`).join('')}</select></label></div>`;
 }
 
@@ -401,8 +402,6 @@ function refreshProvenance(form) {
     suggestion.innerHTML = suggestionHtml(type, choice.value, other);
     suggestion.hidden = !suggestion.innerHTML;
   }
-  const version = form.elements.namedItem('harnessVersion');
-  if (version) version.disabled = !form.elements.namedItem('harnessChoice').value;
 }
 
 // With `work`, only changed fields are sent. Harness id and free text are sent together.
@@ -421,12 +420,10 @@ function provenanceBody(get, work = null) {
   }
   const provider = get('providerChoice') ?? '';
   if (work ? provider !== providerChoice(work) : provider) body.providerId = provider;
-  const version = get('harnessChoice') ? String(get('harnessVersion') ?? '').trim() : '';
-  if (work ? version !== (work.harnessVersion ?? '') : version) body.harnessVersion = version;
   return body;
 }
 
-const provenanceFacts = (w) => `<div><dt>Harness</dt><dd>${esc(w.harnessName ? `${w.harnessName}${w.harnessVersion ? ` ${w.harnessVersion}` : ''}` : '未注明')}</dd></div>
+const provenanceFacts = (w) => `<div><dt>Harness</dt><dd>${esc(w.harnessName || '未注明')}</dd></div>
   <div><dt>服务商</dt><dd>${esc(providerLabel(w))}</dd></div>`;
 
 // Curated works are repo-managed: reviewing one only decides the current face's flag.
@@ -523,7 +520,7 @@ function openReview(w) {
         <label class="field"><span class="field-label">作品标题</span><input class="input" name="title" maxlength="40" value="${esc(w.title)}" required></label>
         <label class="field"><span class="field-label">模型名称<small>展签显示的名字</small></span><input class="input" name="modelName" maxlength="60" value="${esc(w.modelName)}" required></label>
         <label class="field"><span class="field-label">作品摘要</span><textarea class="input" name="summary" maxlength="200" rows="2">${esc(w.summary)}</textarea></label>
-        ${provenanceFields({ harness: currentProvenance(w, 'harness'), provider: currentProvenance(w, 'provider'), version: w.harnessVersion ?? '' })}
+        ${provenanceFields({ harness: currentProvenance(w, 'harness'), provider: currentProvenance(w, 'provider') })}
         ${generationFields(w)}
         <div class="face-decision">
           <p class="face-state">${faceOn(w) ? `${FACE_LABEL[face]}：已${face === 'gallery' ? '展示' : '进正式盲测池'}` : `${FACE_LABEL[face]}：未${face === 'gallery' ? '展示' : '进盲测'}`}</p>
@@ -538,8 +535,9 @@ function openReview(w) {
           <button type="button" class="btn" data-decide="questioned">${icon('alert')}标记存疑</button>
           ${faceOn(w)
             ? `<button type="button" class="btn" data-decide="hide">从${FACE_LABEL[face]}${face === 'gallery' ? '撤下' : '移出'}</button>`
-            : `<button type="button" class="btn primary" data-decide="show">${icon('check')}${contentHeld(w) ? '保存核验，内容通过后展示' : face === 'gallery' ? '通过并上展览馆' : '通过并进盲测'}</button>`}
+            : `<button type="button" class="btn primary" data-decide="show"${contentReady(w) ? '' : ' disabled'}>${icon('check')}${face === 'gallery' ? '通过并上展览馆' : '通过并进盲测'}</button>`}
         </div>
+        ${contentReady(w) ? '' : '<p class="fine">请先完成内容审查并确认通过，再核验作品和开启展示。</p>'}
       </form>
     </div>`,
   });
@@ -550,7 +548,7 @@ function openReview(w) {
       const mode = contentDecision.dataset.contentDecide;
       const panel = $('.content-review', sheet.el);
       const reason = $('[data-content-reason]', panel).value.trim();
-      if (mode !== 'retry' && !reason) { $('[data-content-error]', panel).textContent = '请填写人工审查理由'; return; }
+      if (mode === 'rejected' && !reason) { $('[data-content-error]', panel).textContent = '内容不通过时请填写人工审查理由'; return; }
       const done = busy(contentDecision, '正在保存…');
       try {
         await api(`works/${workKey(w)}/moderation${mode === 'retry' ? '/retry' : ''}`, { method: 'POST', ...(mode === 'retry' ? {} : { body: { status: mode, reason } }) });
@@ -593,7 +591,7 @@ function openReview(w) {
     } catch (error) {
       $('.form-error', form).textContent = error.message;
       doneBusy();
-      $$('[data-decide]', form).forEach((b) => { b.disabled = false; });
+      $$('[data-decide]', form).forEach((b) => { b.disabled = b.dataset.decide === 'show' && !contentReady(w); });
     }
   });
 }
@@ -678,7 +676,7 @@ function inboxPanel() {
     const form = state.inboxForms[entry.id] ??= {
       task: store.get('admin-inbox-task') ?? '', title: entry.suggest.title, summary: '',
       modelId: '', modelName: entry.suggest.model, effort: '',
-      harnessChoice: '', harnessOther: '', harnessVersion: '', providerChoice: '',
+      harnessChoice: '', harnessOther: '', providerChoice: '',
       ...Object.fromEntries(GENERATION_FIELDS.map((key) => [key, ''])) };
     const value = (name) => esc(String(form[name] ?? ''));
     return `<article class="inbox-card" data-inbox-id="${esc(entry.id)}">
@@ -695,7 +693,7 @@ function inboxPanel() {
           <label class="field"><span class="field-label">模型名称<small>展签显示的名字，选了档案会自动回填</small></span><input class="input" name="modelName" maxlength="60" value="${value('modelName')}" placeholder="如 Claude 4.5"></label>
         </div>
         <label class="field"><span class="field-label">摘要</span><input class="input" name="summary" maxlength="200" value="${value('summary')}"></label>
-        ${provenanceFields({ harness: { choice: form.harnessChoice, other: form.harnessOther }, provider: { choice: form.providerChoice }, version: form.harnessVersion })}
+        ${provenanceFields({ harness: { choice: form.harnessChoice, other: form.harnessOther }, provider: { choice: form.providerChoice } })}
         ${generationFields(form)}
         <p class="fine">登记只是入库，不决定展示：作品会同时出现在两边的审核队列——展览馆系统审「上不上展览馆」，竞技场系统审「进不进盲测」，两边各审一次。</p>
         <p class="form-error" role="alert"></p>
@@ -907,7 +905,7 @@ function editDialog(w) {
     </div>
     <label class="field"><span class="field-label">登记为模型</span><select class="input" name="modelId"><option value="">不登记（保持自由文本）</option>${models.map((m) => `<option value="${esc(m.id)}"${m.id === w.model ? ' selected' : ''}>${esc(m.name)}</option>`).join('')}</select></label>
     <label class="field"><span class="field-label">作品摘要</span><textarea class="input" name="summary" maxlength="200" rows="2">${esc(w.summary)}</textarea></label>
-    ${provenanceFields({ harness: currentProvenance(w, 'harness'), provider: currentProvenance(w, 'provider'), version: w.harnessVersion ?? '' })}
+    ${provenanceFields({ harness: currentProvenance(w, 'harness'), provider: currentProvenance(w, 'provider') })}
     ${generationFields(w)}
     <p class="form-error" role="alert"></p><button class="btn primary" type="submit">保存</button></form>` });
   const form = $('form', sheet.el);
@@ -1406,7 +1404,7 @@ document.addEventListener('click', async (e) => {
     const doneBusy = busy(verifyBtn, '正在通过…');
     try {
       // Quick approve: current face on. Curated works go through face-settings
-      // (their content is repo-vetted); uploads also get content-verified here.
+      // (their content is repo-vetted); uploads must already pass content review.
       if (work.source === 'curated') {
         await api(`admin/works/${workKey(work)}/face-settings`, { method: 'POST', body: { [`show_${state.system}`]: true } });
       } else {

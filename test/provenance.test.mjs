@@ -71,6 +71,7 @@ test('catalog tolerates an old pack with no registries', () => {
     assert.deepEqual(catalog.harnesses(), []);
     assert.deepEqual(catalog.providers(), PROVIDERS);
     assert.equal(catalog.harness('codex'), null);
+    assert.equal('harnessVersion' in catalog.work('one', 'a1'), false, 'old pack versions are stripped');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -201,12 +202,13 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
     await verifiedUser(platform.auth, 'alice');
     assert.equal((await call('alice', 'POST', '/api/auth/login', { name: 'alice', password: 'correct horse' })).status, 200);
     const curated = platform.library.toPublic(platform.library.work('one', 'a1'));
-    assert.deepEqual([curated.harness, curated.harnessName, curated.harnessVersion, curated.provider],
-      ['codex', 'Codex', '1', 'official']);
+    assert.deepEqual([curated.harness, curated.harnessName, curated.provider],
+      ['codex', 'Codex', 'official']);
+    assert.equal('harnessVersion' in curated, false);
     assert.equal('providerName' in curated, false);
     const baseBody = { draftId: await draft(), confirmed: true, title: 'Candidate', modelId: 'm-a' };
     for (const bad of [{}, { harnessId: 'missing' }, { harnessId: 'codex', harnessOther: 'Other' },
-      { harnessVersion: '1' }, ...['missing', 'openrouter', 'third-party', 'other', 1, false].map((providerId) => ({ providerId, tool: 'CLI' }))]) {
+      ...['missing', 'openrouter', 'third-party', 'other', 1, false].map((providerId) => ({ providerId, tool: 'CLI' }))]) {
       const response = await call('alice', 'POST', '/api/works', { ...baseBody, ...bad });
       assert.equal(response.status, 400, JSON.stringify(bad));
     }
@@ -220,12 +222,26 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
     }
     const first = await call('alice', 'POST', '/api/works', { ...baseBody, harnessId: 'codex', harnessVersion: '2', providerId: 'official', ...generation });
     assert.equal(first.status, 200);
+    assert.equal('harnessVersion' in first.data.work, false);
     const id = first.data.work.id;
+    platform.db.prepare('UPDATE works SET harness_version = ? WHERE id = ?').run('stored-old-version', id);
     assert.equal(platform.db.prepare('SELECT model_other FROM works WHERE id = ?').get(id).model_other, '');
     for (const [key, value] of Object.entries(generation)) assert.equal(first.data.work[key], value);
     assert.deepEqual([first.data.work.harness, first.data.work.harnessName, first.data.work.provider, first.data.work.tool],
       ['codex', 'Codex', 'official', 'Codex']);
     const editPath = `/api/works/one/${id}`;
+    for (const harnessVersion of ['', 'ignored-version']) {
+      for (const [who, method, path, extra] of [
+        ['alice', 'PATCH', editPath, {}],
+        ['root', 'POST', `/api/admin/works/one/${id}/meta`, {}],
+        ['root', 'POST', `${editPath}/review`, { status: 'unverified' }],
+      ]) {
+        const ignored = await call(who, method, path, { ...extra, harnessVersion });
+        assert.equal(ignored.status, 200);
+        assert.equal('harnessVersion' in ignored.data.work, false);
+        assert.equal(platform.db.prepare('SELECT harness_version FROM works WHERE id = ?').get(id).harness_version, 'stored-old-version');
+      }
+    }
     for (const body of [{ providerId: 'openrouter' }, { providerId: 'missing' }, { providerOther: 'Local service' }, { providerName: 'Local service' }])
       assert.equal((await call('alice', 'PATCH', editPath, body)).status, 400);
     for (const value of ['unofficial', null, 'official']) {
@@ -235,10 +251,11 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
       assert.equal('providerName' in edited.data.work, false);
     }
     const other = await call('alice', 'POST', '/api/works', { ...baseBody, draftId: await draft(), harnessOther: ' 自制工具 ',
-      providerId: 'unofficial', providerOther: ' 本地服务 ', providerName: 'Ignored' });
+      providerId: 'unofficial', providerOther: ' 本地服务 ', providerName: 'Ignored', harnessVersion: '' });
     assert.equal(other.status, 200);
     assert.deepEqual([other.data.work.harnessName, other.data.work.provider, other.data.work.tool], ['自制工具', 'unofficial', '自制工具']);
     assert.equal('providerName' in other.data.work, false);
+    assert.equal('harnessVersion' in other.data.work, false);
     assert.equal(platform.db.prepare('SELECT provider_other FROM works WHERE id = ?').get(other.data.work.id).provider_other, '');
     const legacy = await call('alice', 'POST', '/api/works', { ...baseBody, draftId: await draft(), tool: '原始工具',
       providerOther: 'Ignored', providerName: 'Ignored' });
@@ -258,8 +275,9 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
     assert.equal((await call('root', 'POST', meta, { providerOther: '其他服务' })).status, 400);
     assert.equal((await call('root', 'POST', meta, { harnessOther: '备用工具' })).data.work.harnessName, '备用工具');
     const cleared = await call('root', 'POST', meta, { harnessId: null, providerId: null });
-    assert.deepEqual([cleared.data.work.harness, cleared.data.work.harnessName, cleared.data.work.harnessVersion,
-      cleared.data.work.provider], [null, null, '', null]);
+    assert.deepEqual([cleared.data.work.harness, cleared.data.work.harnessName,
+      cleared.data.work.provider], [null, null, null]);
+    assert.equal('harnessVersion' in cleared.data.work, false);
     for (const providerId of ['openrouter', 'missing'])
       assert.equal((await call('root', 'POST', `/api/works/one/${id}/review`, { status: 'verified', providerId })).status, 400);
     const unofficialReview = await call('root', 'POST', `/api/works/one/${id}/review`,
@@ -270,7 +288,8 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
       { status: 'verified', show_gallery: true, harnessId: 'codex', harnessVersion: '3', providerId: 'official' });
     assert.equal(reviewed.status, 200);
     assert.equal(reviewed.data.work.reviewer, 'root');
-    assert.equal(platform.library.work('one', id).harnessVersion, '3');
+    assert.equal('harnessVersion' in platform.library.work('one', id), false);
+    assert.equal(platform.db.prepare('SELECT harness_version FROM works WHERE id = ?').get(id).harness_version, 'stored-old-version');
     assert.equal(platform.library.work('one', id).humanIntervention, 'code-edited', 'review preserves generation metadata');
     const bootstrap = await call('alice', 'GET', '/api/bootstrap');
     assert.equal(bootstrap.status, 200);
@@ -306,8 +325,9 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
     assert.equal(nomination.status, 200);
     const exported = await call('alice', 'GET', new URL(nomination.data.exportUrl).pathname);
     assert.equal(exported.status, 200);
-    assert.deepEqual([exported.data.harnessId, exported.data.harnessOther, exported.data.harnessVersion,
-      exported.data.providerId, exported.data.providerOther], ['codex', '', '3', 'official', '']);
+    assert.deepEqual([exported.data.harnessId, exported.data.harnessOther,
+      exported.data.providerId, exported.data.providerOther], ['codex', '', 'official', '']);
+    assert.equal('harnessVersion' in exported.data, false);
     assert.equal(exported.data.modelVersion, 'snapshot-2');
     assert.equal(exported.data.evidenceUrl, generation.evidenceUrl);
     const clear = await call('root', 'POST', meta, { evidenceUrl: '' });
@@ -319,8 +339,9 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
     const match = await platform.arena.createMatch(alice, 'one');
     const saved = platform.db.prepare('SELECT a_identity, b_identity FROM matches WHERE id = ?').get(match.id);
     const identity = JSON.parse(saved.a_identity);
-    assert.deepEqual([identity.harnessId, identity.harnessVersion, identity.providerId],
-      identity.id === 'a1' ? ['codex', '1', 'official'] : [null, '', null]);
+    assert.deepEqual([identity.harnessId, identity.providerId],
+      identity.id === 'a1' ? ['codex', 'official'] : [null, null]);
+    assert.equal('harnessVersion' in identity, false);
     assert.equal(identity.configKey, `${identity.modelKey}|${identity.effortKey}`);
     assert.equal(identity.modelVersion, identity.id === 'a1' ? 'v1' : '');
     assert.equal(platform.arena.vote(alice, match.id, 'a').counted, true);

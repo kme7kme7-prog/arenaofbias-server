@@ -124,7 +124,7 @@ export function createInbox({ library, config, limits }) {
           modelId: body.modelId || undefined,
           effort: body.effort || undefined,
           tool: body.tool ?? '',
-          ...Object.fromEntries(['harnessId', 'harnessOther', 'harnessVersion', 'providerId',
+          ...Object.fromEntries(['harnessId', 'harnessOther', 'providerId',
             'modelVersion', 'generationMode', 'humanIntervention', 'generatedOn', 'evidenceUrl']
             .filter((key) => Object.hasOwn(body, key)).map((key) => [key, body[key]])),
         });
@@ -133,6 +133,7 @@ export function createInbox({ library, config, limits }) {
         throw error;
       }
       if (body.publish) {
+        work = library.reviewContent(admin, work.taskId, work.id, { status: 'approved', reason: '管理员上传' });
         work = library.review(admin, work.taskId, work.id, { status: 'verified',
           show_gallery: body.show_gallery === undefined ? true : Boolean(body.show_gallery),
           show_arena: Boolean(body.show_arena) });

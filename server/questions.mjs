@@ -8,6 +8,7 @@ import { compatibleTemplates, defaultTemplates, requireCategory } from './catego
 
 const tagName = (value) => String(value).normalize('NFKC').trim().replace(/^#+/, '').trim();
 const tagKey = (value) => tagName(value).toLowerCase();
+const authorModeration = ({ status, reason, at }) => ({ status, ...(status === 'rejected' ? { reason } : {}), at });
 
 function required(value, label, max) {
   if (typeof value !== 'string' || !value.trim()) fail(400, `请填写${label}`);
@@ -50,7 +51,7 @@ export function createQuestions(db) {
     owner: row.owner_name, ownerAvatar: avatarOf({ id: row.owner_id, avatar: row.owner_avatar }), version: row.version, community: true,
     createdAt: new Date(row.created_at).toISOString(),
     date: new Date(row.created_at).toISOString().slice(0, 10),
-    ...(privateView ? { moderation: JSON.parse(row.moderation) } : {}),
+    ...(privateView ? { moderation: privateView === 'admin' ? JSON.parse(row.moderation) : authorModeration(JSON.parse(row.moderation)) } : {}),
   } : null;
 
   return {
@@ -58,14 +59,14 @@ export function createQuestions(db) {
     get(id, viewer = null) {
       const row = one.get(id);
       const privileged = row && (viewer?.id === row.owner_id || viewer?.role === 'admin');
-      return row && (publicRow(row) || privileged) ? fromRow(row, privileged) : null;
+      return row && (publicRow(row) || privileged) ? fromRow(row, viewer?.role === 'admin' ? 'admin' : privileged) : null;
     },
-    byOwner: (id) => owned.all(id).map((row) => fromRow(row, true)),
+    byOwner: (id, viewer = null) => owned.all(id).map((row) => fromRow(row, viewer?.role === 'admin' ? 'admin' : true)),
     pendingCount: () => all.all().filter((row) => JSON.parse(row.moderation).status === 'pending').length,
     adminAll() {
       return all.all().map((row) => {
         const samples = works.all(row.id).map((work) => ({ id: work.id, taskId: work.task_id }));
-        return { ...fromRow(row, true), ownerId: row.owner_id, ownerName: row.owner_name, works: samples.length, samples };
+        return { ...fromRow(row, 'admin'), ownerId: row.owner_id, ownerName: row.owner_name, works: samples.length, samples };
       });
     },
     create(user, body, existingTags = []) {
@@ -81,7 +82,7 @@ export function createQuestions(db) {
       const now = Date.now();
       insert.run(id, user.id, title, summary, prompt, JSON.stringify(tags), JSON.stringify(templates), now, JSON.stringify({ status: 'pending', at: now }), category);
       audit.run(now, user.id, user.name, 'question-create', id, null, title);
-      return fromRow(one.get(id), true);
+      return fromRow(one.get(id), user.role === 'admin' ? 'admin' : true);
     },
     review(actor, id, body) {
       if (actor.role !== 'admin') fail(403, '仅管理员可以操作');
@@ -108,7 +109,7 @@ export function createQuestions(db) {
         setModeration.run(JSON.stringify(moderation), category, JSON.stringify(templates), JSON.stringify(tags), id);
         audit.run(moderation.at, actor.id, actor.name, 'question-review', id, null, JSON.stringify(detail));
       });
-      return fromRow(one.get(id), true);
+      return fromRow(one.get(id), 'admin');
     },
     remove(actor, id) {
       const row = one.get(id);

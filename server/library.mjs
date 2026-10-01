@@ -19,7 +19,8 @@ const clip = (value, max) => String(value ?? '').normalize('NFKC').trim().slice(
 const plainObject = (value) => value && typeof value === 'object' && !Array.isArray(value);
 const pendingModeration = () => ({ status: 'pending', revision: token('r'), at: Date.now() });
 const moderationText = (work) => JSON.stringify([work.title, work.summary, work.modelName, work.effort, work.note,
-  work.harnessOther, work.harnessVersion, work.providerOther, ...GENERATION_FIELDS.map((key) => work[key])]);
+  work.harnessOther, work.providerOther, ...GENERATION_FIELDS.map((key) => work[key])]);
+const authorModeration = ({ status, reason, at }) => ({ status, ...(status === 'rejected' ? { reason } : {}), at });
 const noteWithVendor = (note, modelId, vendor) => {
   const name = modelId ? '' : clip(vendor, 40);
   const line = name ? `手填模型厂商：${name}` : '';
@@ -100,12 +101,12 @@ export function createLibrary({ db, catalog, config, limits }) {
     worksOfOwner: db.prepare(`${WORK} WHERE works.owner_id = ? AND ${liveWork} ORDER BY works.created_at DESC`),
     pendingOf: db.prepare("SELECT COUNT(*) AS n FROM works WHERE owner_id = ? AND status = 'unverified' AND deleted_at IS NULL"),
     insertWork: db.prepare(`INSERT INTO works (id, task_id, owner_id, title, summary, model_id, model_other, effort,
-      harness_id, harness_other, harness_version, provider_id, provider_other, note, content_key,
+      harness_id, harness_other, provider_id, provider_other, note, content_key,
       source_name, root, entry, file_count, bytes, digest, checks, trial, cover, created_at, updated_at,
       model_version, generation_mode, human_intervention, generated_on, evidence_url, moderation, prompt_variant, show_gallery, show_arena)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`),
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`),
     review: db.prepare(`UPDATE works SET status = ?, status_reason = ?, model_id = ?, model_other = ?, effort = ?,
-      harness_id = ?, harness_other = ?, harness_version = ?, provider_id = ?, provider_other = ?,
+      harness_id = ?, harness_other = ?, provider_id = ?, provider_other = ?,
       model_version = ?, generation_mode = ?, human_intervention = ?, generated_on = ?, evidence_url = ?,
       show_gallery = ?, show_arena = ?, title = ?, summary = ?, note = ?, reviewed_at = ?, updated_at = ? WHERE id = ?`),
     remove: db.prepare('UPDATE works SET deleted_at = ?, updated_at = ? WHERE id = ?'),
@@ -116,7 +117,7 @@ export function createLibrary({ db, catalog, config, limits }) {
     arenaCalibration: db.prepare('UPDATE works SET calibration_arena = ?, updated_at = ? WHERE id = ?'),
     faceSettings: db.prepare('UPDATE works SET show_gallery = ?, show_arena = ?, updated_at = ? WHERE id = ?'),
     meta: db.prepare(`UPDATE works SET title = ?, summary = ?, model_id = ?, model_other = ?, effort = ?,
-      harness_id = ?, harness_other = ?, harness_version = ?, provider_id = ?, provider_other = ?,
+      harness_id = ?, harness_other = ?, provider_id = ?, provider_other = ?,
       model_version = ?, generation_mode = ?, human_intervention = ?, generated_on = ?, evidence_url = ?,
       prompt_variant = ?, note = ?, updated_at = ? WHERE id = ?`),
     curatedAs: db.prepare('UPDATE works SET curated_as = ?, updated_at = ? WHERE id = ?'),
@@ -164,7 +165,6 @@ export function createLibrary({ db, catalog, config, limits }) {
       tool: row.harness_id ? (archive.harness(row.harness_id)?.name ?? row.harness_id) : row.harness_other,
       harnessId: row.harness_id,
       harnessOther: row.harness_other,
-      harnessVersion: row.harness_version,
       providerId: providerOf(row.provider_id, row.provider_other),
       providerOther: '',
       modelVersion: row.model_version,
@@ -307,7 +307,7 @@ export function createLibrary({ db, catalog, config, limits }) {
   function provenance(body, current = {}) {
     const next = {
       harnessId: current.harnessId ?? null, harnessOther: current.harnessOther ?? '',
-      harnessVersion: current.harnessVersion ?? '', providerId: providerOf(current.providerId, current.providerOther),
+      providerId: providerOf(current.providerId, current.providerOther),
       providerOther: '',
     };
     const fieldText = (value, label) => {
@@ -333,11 +333,6 @@ export function createLibrary({ db, catalog, config, limits }) {
       if (id !== null && (typeof id !== 'string' || !catalog.provider(id))) fail(400, '所选服务商不存在');
       next.providerId = id;
     }
-    if (Object.hasOwn(body, 'harnessVersion')) next.harnessVersion = fieldText(body.harnessVersion, 'Harness 版本');
-    if (!next.harnessId && !next.harnessOther) {
-      if (next.harnessVersion && Object.hasOwn(body, 'harnessVersion')) fail(400, '填写 Harness 后才能填写版本');
-      next.harnessVersion = '';
-    }
     return next;
   }
 
@@ -354,7 +349,6 @@ export function createLibrary({ db, catalog, config, limits }) {
     ...generationOf(work),
     harness: work.harnessId ?? null,
     harnessName: work.harnessId ? (catalog.harness(work.harnessId)?.name ?? work.harnessId) : (work.harnessOther || null),
-    harnessVersion: work.harnessVersion ?? '',
     provider: providerOf(work.providerId, work.providerOther),
   });
 
@@ -428,7 +422,7 @@ export function createLibrary({ db, catalog, config, limits }) {
         ...(work.promptVariant ? { promptVariant: work.promptVariant } : {}),
         note: work.note,
         status: work.status,
-        ...(privileged ? { moderation: work.moderation } : {}),
+        ...(privileged ? { moderation: viewer.role === 'admin' ? work.moderation : authorModeration(work.moderation) } : {}),
         ...(privileged ? { audience: work.audience } : {}),
         reason: work.reason,
         owner: work.ownerName,
@@ -643,7 +637,7 @@ export function createLibrary({ db, catalog, config, limits }) {
             taskId = question.id;
           } else if (!templatesOf(catalog.task(taskId, user)).includes(format)) fail(400, '该题不支持此提交格式');
           q.insertWork.run(id, taskId, user.id, title, clip(body.summary, 200), who.modelId, who.modelId ? '' : who.modelName,
-            effortOf(body.effort), source.harnessId, source.harnessOther, source.harnessVersion, source.providerId,
+            effortOf(body.effort), source.harnessId, source.harnessOther, source.providerId,
             source.providerOther, noteWithVendor(clip(body.note, 1000), who.modelId, body.vendor), token('w'), draft.source_name, draft.root, draft.entry, draft.file_count,
             draft.bytes, draft.digest, draft.checks, JSON.stringify(sanitizeTrial(body.trial)), coverName, now, now,
             ...GENERATION_FIELDS.map((key) => generation[key]), JSON.stringify(config.moderation?.enabled ? pendingModeration() : { status: 'legacy' }), promptVariant);
@@ -674,6 +668,7 @@ export function createLibrary({ db, catalog, config, limits }) {
       if (!plainObject(body) || !Object.keys(body).length ||
         Object.keys(body).some((key) => !['title', 'summary', 'note', 'modelName', 'modelId', 'vendor', 'effort', 'promptVariant',
           'harnessId', 'harnessOther', 'harnessVersion', 'providerId', ...GENERATION_FIELDS].includes(key))) fail(400, '没有可修改的内容');
+      if (Object.keys(body).every((key) => key === 'harnessVersion')) return admin ? this.adminWork(work) : this.toPublic(work, actor);
       const title = body.title === undefined ? work.title : clip(body.title, 40);
       if (!title) fail(400, '请填写作品标题');
       const summary = body.summary === undefined ? work.summary : clip(body.summary, 200);
@@ -686,7 +681,7 @@ export function createLibrary({ db, catalog, config, limits }) {
       const note = noteWithVendor(body.note === undefined ? work.note : clip(body.note, 1000), who.modelId, body.vendor);
       transaction(db, () => {
         q.meta.run(title, summary, who.modelId, who.modelId ? '' : who.modelName, effort,
-          source.harnessId, source.harnessOther, source.harnessVersion, source.providerId, source.providerOther,
+          source.harnessId, source.harnessOther, source.providerId, source.providerOther,
           ...GENERATION_FIELDS.map((key) => generation[key]), promptVariant, note, Date.now(), id);
         audit(actor, 'meta', work, `编辑信息${generationAudit(work, generation)}`);
         const next = upload(taskId, id);
@@ -711,7 +706,7 @@ export function createLibrary({ db, catalog, config, limits }) {
       const work = upload(taskId, id);
       if (!work) fail(404, '作品不存在');
       if (!['approved', 'rejected'].includes(body.status)) fail(400, '内容审查结果无效');
-      const reason = clip(body.reason, 500);
+      const reason = clip(body.reason, 500) || (body.status === 'approved' ? '人工复核通过' : '');
       if (!reason) fail(400, '请填写人工审查理由');
       this.finishModeration(work, { status: body.status, reason, source: 'human', reviewer: admin.name }, admin);
       return upload(taskId, id);
@@ -755,7 +750,7 @@ export function createLibrary({ db, catalog, config, limits }) {
       const labels = { verified: '通过验证', questioned: '标记存疑', unverified: '退回未验证' };
       transaction(db, () => {
         q.review.run(status, status === 'verified' ? '' : reason, who.modelId, who.modelId ? '' : who.modelName, effort,
-          source.harnessId, source.harnessOther, source.harnessVersion, source.providerId, source.providerOther,
+          source.harnessId, source.harnessOther, source.providerId, source.providerOther,
           ...GENERATION_FIELDS.map((key) => generation[key]), Number(gallery), Number(arena), title, summary,
           noteWithVendor(work.note, who.modelId, body.vendor), now, now, id);
         audit(admin, status, work, [labels[status], reason].filter(Boolean).join('：') + generationAudit(work, generation));

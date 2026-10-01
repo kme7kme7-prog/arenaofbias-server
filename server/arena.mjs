@@ -28,13 +28,13 @@ const identityOf = (work, digest = work.digest ?? null) => ({
   taskId: work.taskId, id: work.id, curated: work.curated, digest,
   title: work.title, modelId: work.modelId, modelName: work.modelName,
   vendor: work.vendor, effort: work.effort, effortKey: effortKey(work.effort),
-  harnessId: work.harnessId ?? null, harnessVersion: work.harnessVersion ?? '', providerId: providerOf(work.providerId, work.providerOther),
+  harnessId: work.harnessId ?? null, providerId: providerOf(work.providerId, work.providerOther),
   ...generationOf(work),
   modelKey: modelKey(work), configKey: entityKey(work), ownerId: work.ownerId,
 });
 const fromIdentity = (text) => {
   if (!text) return null;
-  const { providerOther, providerName, ...identity } = JSON.parse(text);
+  const { harnessVersion, providerOther, providerName, ...identity } = JSON.parse(text);
   return { ...identity, providerId: providerOf(identity.providerId, providerOther || providerName) };
 };
 

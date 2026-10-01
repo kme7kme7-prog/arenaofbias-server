@@ -111,6 +111,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         cdn: config.cdn,
         capture: capturer.available,
         contentModeration: moderator.enabled,
+        autoModeration: moderator.enabled && Boolean(config.moderation?.apiKey) && capturer.available,
         efforts: EFFORTS,
         emojis: EMOJIS,
         avatars: AVATARS,
@@ -123,7 +124,8 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       totals: (await arena.leaderboard()).totals,
       me: user ? { votes: arena.votesBy(user.id), pending: library.pendingCount(user.id) } : null,
       review: user?.role === 'admin' ? {
-        unverified: uploads.filter((work) => work.status === 'unverified' || !['legacy', 'approved'].includes(work.moderation.status)).length,
+        unverified: uploads.filter((work) => work.status === 'unverified' && ['legacy', 'approved'].includes(work.moderation.status) && catalog.task(work.taskId)).length,
+        content: uploads.filter((work) => work.moderation.status === 'review').length,
         questions: questions.pendingCount(),
       } : null,
     };
@@ -247,7 +249,10 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   router.on('POST', '/api/works/:task/:id/review', async (ctx) => {
     const admin = adminOnly(ctx);
     limit.write(admin.id);
-    const work = library.review(admin, ctx.params.task, ctx.params.id, await readJson(ctx.req));
+    const body = await readJson(ctx.req);
+    const current = library.work(ctx.params.task, ctx.params.id);
+    if (body.status === 'verified' && current && !['legacy', 'approved'].includes(current.moderation?.status)) fail(409, '请先完成内容审核');
+    const work = library.review(admin, ctx.params.task, ctx.params.id, body);
     moderator.enqueue(work);
     arena.invalidate();
     return { work: library.toPublic(work, admin) };
@@ -300,7 +305,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
 
   router.on('GET', '/api/me', (ctx) => {
     const user = signedIn(ctx);
-    return { questions: questions.byOwner(user.id), works: publicList(library.uploadsOf(user.id), user), votes: arena.votesBy(user.id), ...profile.summary(user) };
+    return { questions: questions.byOwner(user.id, user), works: publicList(library.uploadsOf(user.id), user), votes: arena.votesBy(user.id), ...profile.summary(user) };
   });
   // Registered after the calibration route, whose path has the same shape.
   router.on('PATCH', '/api/works/:task/:id', async (ctx) => {
@@ -396,7 +401,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       submitted = library.submit(admin, {
         draftId: draft.id, confirmed: true, title: params.get('title'), summary: params.get('summary'),
         modelId: params.get('modelId'), modelName: params.get('modelName'), effort: params.get('effort'), tool: params.get('tool') || '',
-        ...Object.fromEntries(['harnessId', 'harnessOther', 'harnessVersion', 'providerId',
+        ...Object.fromEntries(['harnessId', 'harnessOther', 'providerId',
           'modelVersion', 'generationMode', 'humanIntervention', 'generatedOn', 'evidenceUrl', 'promptVariant']
           .filter((key) => params.has(key)).map((key) => [key, params.get(key)])),
       });
@@ -404,6 +409,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       library.discardDraft(admin, draft.id);
       throw error;
     }
+    library.reviewContent(admin, task, submitted.id, { status: 'approved', reason: '管理员上传' });
     const work = library.review(admin, task, submitted.id, { status: 'verified',
       show_gallery: gallery === null ? true : gallery === '1', show_arena: arenaFace === null ? false : arenaFace === '1' });
     queueWork(work);
@@ -603,6 +609,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     auth,
     library,
     arena,
+    capturer,
     moderator,
     handleSite,
     handleContent: createContentHandler({ config, library, arena, siteOrigins: config.siteOrigins, readGuard }),

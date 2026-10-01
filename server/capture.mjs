@@ -1,6 +1,7 @@
 // Uniform screenshots of submitted works, taken like the archive's own captures: a fresh
 // browser context at 1440×900 and a 390×844 touch phone, default state, light scheme.
-// Needs Playwright and a local Chrome; without them uploads simply show a text cover.
+// Needs Playwright and a local Chrome; without them automatic content checks wait
+// for manual review and uploads show a text cover.
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
@@ -51,17 +52,20 @@ export async function guardCaptureContext(context, { origin, cdn }) {
   });
 }
 
-export function createCapturer({ config, library }) {
+export function createCapturer({ config, library, loadChromium = async () => (await import('playwright')).chromium, now = Date.now }) {
   let browser = null;
   let networkBlocker = null;
-  let available = config.capture;
+  let available = false;
+  let failedAt = null;
+  let launching = null;
+  let reported = false;
   let running = null;
   let closed = false;
   const queue = [];
 
   async function launch() {
     if (!browser) {
-      const { chromium } = await import('playwright');
+      const chromium = await loadChromium();
       // Unrouted browser traffic has no network path. Permitted resources are
       // fetched by route.fetch(), which does not use Chromium's proxy flags.
       networkBlocker = createServer((socket) => socket.destroy());
@@ -74,35 +78,79 @@ export function createCapturer({ config, library }) {
           args: [`--proxy-server=http://127.0.0.1:${networkBlocker.address().port}`, '--proxy-bypass-list=<-loopback>',
             '--force-webrtc-ip-handling-policy=disable_non_proxied_udp'] });
       } catch (error) {
-        networkBlocker.close();
+        await new Promise((resolve) => networkBlocker.close(resolve));
+        networkBlocker = null;
         throw error;
       }
+      const instance = browser;
+      browser.on('disconnected', () => {
+        if (browser !== instance) return;
+        browser = null;
+        available = false;
+        if (networkBlocker?.listening) networkBlocker.close();
+        networkBlocker = null;
+      });
     }
     return browser;
   }
 
+  async function initialize() {
+    if (closed || !config.capture) {
+      if (!reported) {
+        console.info('自动截图已关闭。');
+        reported = true;
+      }
+      return false;
+    }
+    if (available) return true;
+    if (launching) return launching;
+    if (failedAt !== null && now() - failedAt < 5 * 60e3) return false;
+    launching = (async () => {
+      try {
+        await launch();
+        available = !closed;
+        failedAt = null;
+        if (!reported) console.info('自动截图可用。');
+      } catch (error) {
+        available = false;
+        failedAt = now();
+        console.warn(`自动截图不可用（${error.message.split('\n')[0]}）。上传作品将显示文字封面，自动内容审查转人工；五分钟后新任务将重试。`);
+      } finally {
+        reported = true;
+      }
+      return available;
+    })();
+    try { return await launching; }
+    finally { launching = null; }
+  }
+
   async function capture(work) {
-    const instance = await launch();
+    if (!await initialize()) return null;
     const origin = library.contentAllowed(work) ? library.originOf(work.contentKey) : library.previewOrigin(work);
     const captures = {};
     const texts = [];
     for (const shot of SHOTS) {
-      if (closed) break;
-      const context = await instance.newContext({ viewport: shot.viewport, deviceScaleFactor: 1, isMobile: shot.mobile, hasTouch: shot.mobile, colorScheme: 'light', serviceWorkers: 'block' });
-      try {
-        await guardCaptureContext(context, { origin, cdn: config.cdn });
-        const page = await context.newPage();
-        const response = await page.goto(`${origin}/`, { waitUntil: 'load', timeout: 30000 });
-        if (!response?.ok()) throw new Error('作品页面未成功加载');
-        await page.waitForTimeout(3500);
-        mkdirSync(join(library.mediaDir, work.id), { recursive: true });
-        await page.screenshot({ path: join(library.mediaDir, work.id, `${shot.id}.jpg`), type: 'jpeg', quality: 84 });
-        texts.push(await page.locator('body').innerText());
-        captures[shot.id] = `${shot.id}.jpg`;
-      } catch (error) {
-        console.warn(`截图失败 ${work.id} ${shot.id}：${error.message.split('\n')[0]}`);
-      } finally {
-        await context.close();
+      for (let attempt = 0; attempt < 2 && !closed; attempt++) {
+        let context;
+        try {
+          if (!await initialize()) break;
+          context = await browser.newContext({ viewport: shot.viewport, deviceScaleFactor: 1, isMobile: shot.mobile, hasTouch: shot.mobile, colorScheme: 'light', serviceWorkers: 'block' });
+          await guardCaptureContext(context, { origin, cdn: config.cdn });
+          const page = await context.newPage();
+          const response = await page.goto(`${origin}/`, { waitUntil: 'load', timeout: 30000 });
+          if (!response?.ok()) throw new Error('作品页面未成功加载');
+          await page.waitForTimeout(3500);
+          mkdirSync(join(library.mediaDir, work.id), { recursive: true });
+          await page.screenshot({ path: join(library.mediaDir, work.id, `${shot.id}.jpg`), type: 'jpeg', quality: 84 });
+          const text = await page.locator('body').innerText();
+          texts.push(text);
+          captures[shot.id] = `${shot.id}.jpg`;
+          break;
+        } catch (error) {
+          if (attempt === 1) console.warn(`截图失败 ${work.id} ${shot.id}：${error.message.split('\n')[0]}`);
+        } finally {
+          await context?.close().catch(() => {});
+        }
       }
     }
     if (!closed && Object.keys(captures).length && library.hasDirectory(work.id)) library.setCaptures(work.id, captures);
@@ -110,33 +158,43 @@ export function createCapturer({ config, library }) {
   }
 
   async function drain() {
-    while (queue.length && available && !closed) {
+    while (queue.length && !closed) {
       const { work, resolve } = queue.shift();
       try {
         resolve(await capture(work));
       } catch (error) {
-        available = false;
         resolve(null);
-        console.warn(`自动截图不可用（${error.message.split('\n')[0]}）。上传作品将显示文字封面。`);
+        console.warn(`截图失败 ${work.id}：${error.message.split('\n')[0]}`);
       }
     }
     for (const item of queue.splice(0)) item.resolve(null);
   }
 
+  function start() {
+    if (running) return;
+    running = drain().finally(() => {
+      running = null;
+      if (queue.length && !closed) start();
+    });
+  }
+
   return {
     get available() { return available; },
+    initialize,
     enqueue(work) {
-      if (!available || closed) return Promise.resolve(null);
+      if (!config.capture || closed || (failedAt !== null && now() - failedAt < 5 * 60e3)) return Promise.resolve(null);
       return new Promise((resolve) => {
         queue.push({ work, resolve });
-        if (!running) running = drain().finally(() => { running = null; });
+        start();
       });
     },
     async close() {
       closed = true;
+      available = false;
       for (const item of queue.splice(0)) item.resolve(null);
       await browser?.close().catch(() => {});
       await running;
+      await launching;
       // A launch already in flight can finish after close() starts.
       await browser?.close().catch(() => {});
       if (networkBlocker?.listening) await new Promise((resolve) => networkBlocker.close(resolve));

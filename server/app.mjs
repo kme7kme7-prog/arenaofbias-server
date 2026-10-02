@@ -21,7 +21,7 @@ import { createAdmin } from './admin.mjs';
 import { createInbox } from './inbox.mjs';
 import { createCurator } from './curate.mjs';
 import { createQuestions } from './questions.mjs';
-import { requireCategory } from './categories.mjs';
+import { DOMAINS, requireCategory } from './categories.mjs';
 import { createProfile } from './profile.mjs';
 import { registerShow1Compat } from './show1compat.mjs';
 import { registerShow1Guess } from './show1/guess.mjs';
@@ -107,6 +107,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       apiVersion: 1,
       serverVersion,
       providers: snapshot.providers(),
+      domains: DOMAINS,
       user: user ? { ...auth.public(user), emailBound: Boolean(user.email) } : null,
       site: {
         content: config.contentTemplate,
@@ -505,12 +506,14 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     if (task && !catalog.task(task)) fail(404, '题目不存在');
     const category = ctx.url.searchParams.get('category') || null;
     if (category && (task || !catalog.tasks().some((t) => t.category === category))) fail(400, '题型筛选无效', 'invalid_query');
+    const domain = ctx.url.searchParams.get('domain') || null;
+    if (domain && (task || !catalog.tasks().some((t) => t.domains?.includes(domain)))) fail(400, '领域筛选无效', 'invalid_query');
     const filters = Object.fromEntries(['harness', 'provider'].map((field) => {
       const value = ctx.url.searchParams.get(field) || null;
       if (value && value !== 'unset' && !catalog[field](value)) fail(400, `${field === 'harness' ? 'Harness' : '服务商'}筛选无效`, 'invalid_query');
       return [field, value];
     }));
-    return arena.leaderboard({ task, category, by: ctx.url.searchParams.get('by') === 'model' ? 'model' : 'config', ...filters });
+    return arena.leaderboard({ task, category, domain, by: ctx.url.searchParams.get('by') === 'model' ? 'model' : 'config', ...filters });
   });
 
   // Show1 娱乐面兼容层（fusion/show1-adapter/DESIGN.md）：快照 + live 合并的同形状端点。

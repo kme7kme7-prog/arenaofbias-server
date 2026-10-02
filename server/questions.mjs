@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { avatarOf } from './auth.mjs';
 import { transaction } from './db.mjs';
 import { fail } from './http.mjs';
-import { compatibleTemplates, defaultTemplates, requireCategory } from './categories.mjs';
+import { compatibleTemplates, defaultTemplates, requireCategory, requireDomains } from './categories.mjs';
 
 const tagName = (value) => String(value).normalize('NFKC').trim().replace(/^#+/, '').trim();
 const tagKey = (value) => tagName(value).toLowerCase();
@@ -38,16 +38,16 @@ export function createQuestions(db) {
   const one = db.prepare(`${select} WHERE questions.id = ? AND questions.deleted_at IS NULL`);
   const owned = db.prepare(`${select} WHERE questions.owner_id = ? AND questions.deleted_at IS NULL ORDER BY questions.created_at DESC, questions.id`);
   const pending = db.prepare(`SELECT COUNT(*) AS n FROM questions WHERE owner_id = ? AND deleted_at IS NULL AND json_extract(moderation, '$.status') = 'pending'`);
-  const insert = db.prepare(`INSERT INTO questions (id, owner_id, title, summary, prompt, tags, templates, created_at, moderation, category) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const insert = db.prepare(`INSERT INTO questions (id, owner_id, title, summary, prompt, tags, templates, created_at, moderation, category, domains) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const audit = db.prepare('INSERT INTO audit (at, actor_id, actor_name, action, task_id, work_id, detail) VALUES (?, ?, ?, ?, ?, ?, ?)');
   const works = db.prepare('SELECT id, owner_id, task_id FROM works WHERE task_id = ? AND deleted_at IS NULL ORDER BY created_at, id');
   const votes = db.prepare('SELECT COUNT(*) AS n FROM votes WHERE task_id = ?');
   const deleteWork = db.prepare('UPDATE works SET deleted_at = ?, updated_at = ? WHERE id = ?');
   const deleteQuestion = db.prepare('UPDATE questions SET deleted_at = ? WHERE id = ?');
-  const setModeration = db.prepare('UPDATE questions SET moderation = ?, category = ?, templates = ?, tags = ? WHERE id = ?');
+  const setModeration = db.prepare('UPDATE questions SET moderation = ?, category = ?, templates = ?, tags = ?, domains = ? WHERE id = ?');
   const fromRow = (row, privateView = false) => row ? {
     id: row.id, title: row.title, summary: row.summary, prompt: row.prompt,
-    category: row.category, tags: JSON.parse(row.tags), templates: JSON.parse(row.templates),
+    category: row.category, domains: JSON.parse(row.domains), tags: JSON.parse(row.tags), templates: JSON.parse(row.templates),
     owner: row.owner_name, ownerAvatar: avatarOf({ id: row.owner_id, avatar: row.owner_avatar }), version: row.version, community: true,
     createdAt: new Date(row.created_at).toISOString(),
     date: new Date(row.created_at).toISOString().slice(0, 10),
@@ -71,6 +71,8 @@ export function createQuestions(db) {
     },
     create(user, body, existingTags = []) {
       const category = requireCategory(body.category);
+      // Older clients send no domains; the question then waits for the reviewer to add them.
+      const domains = body.domains === undefined ? [] : requireDomains(body.domains);
       const title = required(body.title, '题目标题', 70);
       const summary = required(body.summary, '测试简述', 400);
       const prompt = required(body.prompt, '完整提示词', 20000);
@@ -80,7 +82,7 @@ export function createQuestions(db) {
       if (pending.get(user.id).n >= 3) fail(429, '你已有 3 道题目在等待审核');
       const id = `q-${randomBytes(8).toString('hex')}`;
       const now = Date.now();
-      insert.run(id, user.id, title, summary, prompt, JSON.stringify(tags), JSON.stringify(templates), now, JSON.stringify({ status: 'pending', at: now }), category);
+      insert.run(id, user.id, title, summary, prompt, JSON.stringify(tags), JSON.stringify(templates), now, JSON.stringify({ status: 'pending', at: now }), category, JSON.stringify(domains));
       audit.run(now, user.id, user.name, 'question-create', id, null, title);
       return fromRow(one.get(id), user.role === 'admin' ? 'admin' : true);
     },
@@ -95,6 +97,9 @@ export function createQuestions(db) {
       if (body.status === 'rejected' && !reason) fail(400, '请填写拒绝理由');
       const category = body.status === 'approved'
         ? requireCategory(Object.hasOwn(body, 'category') ? body.category : row.category) : row.category;
+      const previousDomains = JSON.parse(row.domains);
+      const domains = body.status === 'approved' && body.domains !== undefined ? requireDomains(body.domains) : previousDomains;
+      const changedDomains = domains.join('|') !== previousDomains.join('|');
       const previousTemplates = JSON.parse(row.templates);
       const changedCategory = category !== row.category;
       const templates = changedCategory && !compatibleTemplates(category, previousTemplates)
@@ -103,10 +108,11 @@ export function createQuestions(db) {
       const moderation = { status: body.status, source: 'human', reason, reviewer: actor.name, at: Date.now() };
       const detail = { ...moderation,
         ...(changedCategory ? { category: { from: row.category, to: category } } : {}),
+        ...(changedDomains ? { domains: { from: previousDomains, to: domains } } : {}),
         ...(templates !== previousTemplates ? { templates: { from: previousTemplates, to: templates } } : {}),
       };
       transaction(db, () => {
-        setModeration.run(JSON.stringify(moderation), category, JSON.stringify(templates), JSON.stringify(tags), id);
+        setModeration.run(JSON.stringify(moderation), category, JSON.stringify(templates), JSON.stringify(tags), JSON.stringify(domains), id);
         audit.run(moderation.at, actor.id, actor.name, 'question-review', id, null, JSON.stringify(detail));
       });
       return fromRow(one.get(id), 'admin');

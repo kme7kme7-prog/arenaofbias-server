@@ -35,7 +35,7 @@ function readSnapshot(root) {
   ].map((item) => [item.id, item]));
   const tasks = new Map(data.tasks.map((task) => [task.id, {
     id: task.id, title: task.title, summary: task.summary, prompt: task.prompt,
-    arenaId: task.arenaId ?? null, kind: task.kind ?? 'web', category: task.category ?? '',
+    arenaId: task.arenaId ?? null, kind: task.kind ?? 'web', category: task.category ?? '', domains: task.domains ?? [],
     templates: templatesOf(task),
     promptVariants: (task.promptVariants ?? []).map(({ id, label, prompt }) => ({ id, label, prompt })),
     acceptsUploads: !task.promptPending,

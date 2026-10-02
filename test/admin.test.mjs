@@ -306,7 +306,7 @@ test('editorial validates weights, traffic aggregates, and arena switches remove
   assert.deepEqual((await call('voter', 'GET', '/api/prompts')).data, baseline.prompts);
   assert.deepEqual((await call('voter', 'GET', '/api/works')).data, baseline.works);
   assert.equal((await call('voter', 'GET', '/api/bootstrap')).data.apiVersion, baseline.bootstrap.apiVersion);
-  assert.deepEqual((await call('voter', 'GET', '/api/leaderboard?task=one')).data.totals, { ...baseline.board.totals, votes: 1, voters: 1, entries: 2 });
+  assert.deepEqual((await call('voter', 'GET', '/api/leaderboard?task=one')).data.totals, { ...baseline.board.totals, votes: 1, voters: 1, entries: 2, tasks: 1 });
 }));
 
 test('the entertainment switch opts uploads and curated works into the Show1 pool', async () => withPlatform(async ({ platform, call }) => {

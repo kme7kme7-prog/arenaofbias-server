@@ -168,6 +168,34 @@ describe('community question and sample review lifecycle', () => {
     assert.equal(rejected.data.question.category, '静态网页');
   });
 
+  test('domains are optional on create, checked when sent and corrected on approval', async () => {
+    for (const domains of [[], ['UI'], ['数学', '化学', '物理'], '数学']) {
+      assert.equal((await call('categories', 'POST', '/api/questions', { ...questionBody, domains })).status, 400, JSON.stringify(domains));
+    }
+    const older = await call('categories', 'POST', '/api/questions', questionBody);
+    assert.deepEqual(older.data.question.domains, [], 'clients that send no domains still publish');
+    await moderate(older.data.question.id, 'rejected', '测试');
+    const created = await call('categories', 'POST', '/api/questions', { ...questionBody, domains: ['数学', '数学'] });
+    assert.equal(created.status, 200, JSON.stringify(created.data));
+    const id = created.data.question.id;
+    assert.deepEqual(created.data.question.domains, ['数学']);
+    assert.equal((await call('root', 'POST', `/api/questions/${id}/moderation`, { status: 'approved', domains: ['UI'] })).status, 400);
+    const decision = await call('root', 'POST', `/api/questions/${id}/moderation`, { status: 'approved', domains: ['数学', '物理'] });
+    assert.equal(decision.status, 200, JSON.stringify(decision.data));
+    assert.deepEqual(decision.data.question.domains, ['数学', '物理']);
+    const detail = JSON.parse(platform.db.prepare("SELECT detail FROM audit WHERE task_id = ? AND action = 'question-review' ORDER BY rowid DESC LIMIT 1").get(id).detail);
+    assert.deepEqual(detail.domains, { from: ['数学'], to: ['数学', '物理'] });
+    const boot = (await call('guest', 'GET', '/api/bootstrap')).data;
+    assert.ok(boot.domains.includes('化学'));
+    assert.deepEqual(boot.questions.find(q => q.id === id).domains, ['数学', '物理']);
+    const board = await call('guest', 'GET', `/api/leaderboard?domain=${encodeURIComponent('物理')}`);
+    assert.equal(board.status, 200, JSON.stringify(board.data));
+    assert.equal(board.data.domain, '物理');
+    for (const query of ['domain=化学', `domain=${encodeURIComponent('物理')}&task=${id}`]) {
+      assert.equal((await call('guest', 'GET', `/api/leaderboard?${query}`)).status, 400, query);
+    }
+  });
+
   test('reserved drafts recover and cannot be submitted as ordinary works; validation preserves the draft', async () => {
     const staged = await draft('author');
     assert.equal((await call('author', 'GET', '/api/drafts?task=__new__')).data.draft.id, staged.id);

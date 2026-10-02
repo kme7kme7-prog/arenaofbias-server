@@ -470,7 +470,7 @@ describe('platform lifecycle', () => {
       title: 'test',
       models: [{ id: 'm-a', name: 'Model A', vendor: 'VA' }, { id: 'm-b', name: 'Model B', vendor: 'VB' }],
       tasks: [
-        { id: 'one', title: 'One', category: '建模', tags: ['Three.js'], promptPending: false, results: results.map(([id, model, effort]) => ({ id, model, effort, title: id.toUpperCase(), summary: '', scene: `results/one/${id}/`, captures: {}, gallery: [], generationMode: 'single-turn', humanIntervention: 'none' })) },
+        { id: 'one', title: 'One', category: '建模', domains: ['建筑'], tags: ['Three.js'], promptPending: false, results: results.map(([id, model, effort]) => ({ id, model, effort, title: id.toUpperCase(), summary: '', scene: `results/one/${id}/`, captures: {}, gallery: [], generationMode: 'single-turn', humanIntervention: 'none' })) },
         { id: 'closed', title: 'Closed', promptPending: true, results: [] },
         { id: 'literature', title: 'Literature', category: '文学', results: [] },
         { id: 'literature-empty', title: 'Literature empty', category: '文学', templates: [], results: [] },
@@ -664,6 +664,17 @@ describe('platform lifecycle', () => {
     assert.deepEqual(combined.standings, { 建模: Object.fromEntries(scoped.rows.map((row) => [row.key, row.rank])) });
     for (const query of ['category=无效', 'category=建模&task=one']) {
       assert.equal((await call('alice', 'GET', `/api/leaderboard?${query}`)).status, 400);
+    }
+
+    // A domain narrows the board alone or with a category; the combined board stays the only one with standings.
+    for (const query of ['domain=建筑', 'category=建模&domain=建筑']) {
+      const board = (await call('alice', 'GET', `/api/leaderboard?${encodeURI(query)}`)).data;
+      assert.deepEqual([board.domain, board.totals.votes, board.totals.tasks, board.standings], ['建筑', 1, 1, undefined], query);
+    }
+    for (const query of ['domain=化学', 'domain=建筑&task=one', 'category=文学&domain=建筑']) {
+      const response = await call('alice', 'GET', `/api/leaderboard?${encodeURI(query)}`);
+      assert.equal(response.status, query.startsWith('category=文学') ? 200 : 400, query);
+      if (response.status === 200) assert.equal(response.data.totals.votes, 0, 'no literature task names 建筑');
     }
   });
 

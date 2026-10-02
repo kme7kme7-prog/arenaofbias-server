@@ -1,5 +1,15 @@
 # HANDOFF.md · 当前状态
 
+## 本轮：题目领域与排行榜领域范围（2026-10-02，本地提交，未推送）
+
+- categories.mjs 新增 DOMAINS（11 个）与 requireDomains（1–2 个、在词表内、去重）。v29 只追加幂等列 `questions.domains TEXT NOT NULL DEFAULT '[]'`，不回填。社区题创建时 `domains` 选填（旧 Gallery 不传仍可发起），带上即校验；管理员通过时可替换，audit detail 记 `domains: {from, to}`。题目视图输出 `domains`，bootstrap 新增顶层 `domains` 词表；馆藏题目从数据包 task.domains 读取。
+- 排行榜新增 `domain` 参数：只取 domains 含该领域的题目的票重新拟合，可与 category 叠加，不能与 task 同用，未被任何题目使用返回 400；缓存键含 domain，响应回显 domain，有 domain 时不出 standings。`totals.votes/voters` 改为只数实际计分的比较（同一配置或按模型时同一模型两件作品之间的票剔除），新增 `totals.tasks`；修正此前「按模型」有效比较偏多。
+- 测试：questions 增领域创建/通过/audit/bootstrap/榜单参数；platform 增领域与形式叠加、非法组合；blind-pool 增同配置票不计入 totals；admin 旧断言补 `tasks: 1`。最终全量 `npm test` 213/213、`npm run check` 81/0，本轮文件 diff --check 通过。未连接生产、未迁移本地或线上业务库、未部署。api-contract 已同步（3.1、3.10、3.14、v29）。
+- 期间工作区有另一会话的未提交改动（auth/capture/moderation 等与红队加固相关，以及 admin、deploy、部分测试），本轮未改这些文件；提交时须分开。
+- 上线顺序（均未执行，需用户授权）：① 数据仓提交并发布含 `domains` 的数据包；② 后台与 Gallery 的 `datapack.json` 改 pin 到新包；③ 后台部署后自动执行 v29 迁移（只加列、幂等，社区题旧数据为 `[]`）；④ Gallery 构建发布。前端对缺 `domains` 的包和旧后台都能降级（不显示领域分组、领域榜提示后端不支持），所以 ③④ 顺序可以互换。
+- 已上线社区题目没有领域，需管理员在后台补（通过时可修正领域）；或另行写一次性脚本，本轮未做。
+
+
 ## 审核流程统一与按面决定（2026-10-02，本地提交，未推送）
 
 - 三名 GPT-6.1 Sol / medium 子代理并行完成 Gallery 合入、后端按面核验与浏览器验收。纳入已完成的管理台审核整理：admin 待处理为题目 / 内容 / 作品，已处理不计数，馆藏不进审核队列；内容独立弹窗、示例就地处理、登记信息先保存再提交决定、同队列下一件。修正 reviewed 缺本面时间却因开关已开启被算作已展示的问题。

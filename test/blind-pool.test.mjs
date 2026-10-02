@@ -236,3 +236,15 @@ test('a day without any qualifying works is persisted and never refitted that da
     assert.equal(calls, 1);
   } finally { await service?.close(); f.close(); }
 });
+
+test('board totals count only comparisons the fit scored', async () => {
+  const f = fixture();
+  try {
+    f.enable();
+    f.vote('a1', 'b1');
+    f.vote('a1', 'a2');
+    for (const by of ['config', 'model']) {
+      assert.deepEqual((await f.arena.leaderboard({ by })).totals, { votes: 1, voters: 1, entries: 2, tasks: 1 }, by);
+    }
+  } finally { f.close(); }
+});

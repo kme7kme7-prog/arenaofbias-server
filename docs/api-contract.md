@@ -247,6 +247,7 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
   },
   "works": [ /* 全部未删除投稿的公开视图，按创建时间倒序 */ ],
   "questions": [ /* 未删除且 legacy/approved 的社区题目公开视图，见 3.14 */ ],
+  "domains": [ "数学", "物理", "化学", "生物", "天文", "建筑", "自然景观", "交通与机械", "产品与品牌", "文学艺术", "游戏娱乐" ],
   "reactions": {
     "counts": { "task-id/work-id": { "🔥": 3 } },
     "mine": { "task-id/work-id": ["🔥"] }
@@ -560,7 +561,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 **认证**：无。**限流**：无。
 
-查询参数：`task=<题目id>`（缺省为全部题目合计）；`category=<题型>`（数据包题目的 `category`，如 `建模`、`文学`、`静态网页`；只统计该题型的题目，不能与 `task` 同用）；`by=config`（默认，按「模型+档位」）或 `by=model`（按模型跨档位合计）；可选 `harness`（注册表 ID 或 `unset`）及 `provider=official|unofficial|unset`（`unset` 表示未注明）。
+查询参数：`task=<题目id>`（缺省为全部题目合计）；`category=<题型>`（数据包题目的 `category`，如 `建模`、`文学`、`静态网页`；只统计该题型的题目，不能与 `task` 同用）；`domain=<领域>`（只统计 `domains` 含该领域的题目，可与 `category` 叠加，不能与 `task` 同用；一道题有两个领域时在两个领域里都完整计入）；`by=config`（默认，按「模型+档位」）或 `by=model`（按模型跨档位合计）；可选 `harness`（注册表 ID 或 `unset`）及 `provider=official|unofficial|unset`（`unset` 表示未注明）。
 
 来源筛选只缩小计入的票和作品池，**不改变计分维度**（仍是「模型+档位」或模型）：
 - 一张票只有两侧的身份快照（有更正时取更正）都满足全部筛选条件时才计入；只满足一侧的是跨来源比较，不计入。
@@ -568,7 +569,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 - `unranked` 与 `works` 计数按作品当前的来源字段筛选。
 - 带筛选时响应多一个 `"filters": { "harness": …, "provider": … }`；不带筛选时响应形状、计票范围与缓存键都与不支持筛选时完全相同。
 
-题型：响应回显 `category`（未指定为 `null`）。既无 `task` 也无 `category` 的综合榜多一个 `standings`：`{ [题型]: { [key]: 该题型内名次 } }`，只列已有排名的题型，沿用同一计分单位与来源筛选。已公开的社区题目按 `category` 进入对应题型；迁移后分类仍为空的旧题只计入综合榜。
+题型与领域：响应回显 `category`、`domain`（未指定为 `null`）。`totals.votes` / `totals.voters` 只计实际参与拟合的比较：同一计分单位（按配置为同一配置，按模型为同一模型）两件作品之间的票不计入；`totals.tasks` 为这些比较涉及的题目数，前端据此在领域榜少于 2 题或 50 次比较时提示样本不足。既无 `task`、`category` 也无 `domain` 的综合榜多一个 `standings`：`{ [题型]: { [key]: 该题型内名次 } }`，只列已有排名的题型，沿用同一计分单位与来源筛选。已公开的社区题目按 `category` 进入对应题型；迁移后分类仍为空的旧题只计入综合榜。
 
 ```json
 {
@@ -593,7 +594,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 非文字题的单件作品分供代表作选择使用，不改变上述配置榜响应与算法。先以当前两件作品均 `isEligible` 的 arena 票计算该题原配置级 Bradley–Terry 强度，再以作品为单位拟合，先验为 N(配置 logit 强度, 0.5²)。同配置内不同作品的票也参与作品拟合；旧快照或显式更正中的配置键保持原计分口径。内部 `arena.workScores(taskId)` 返回 `{ id, score, interval, games }[]`；`score` 在配置分的 Elo 刻度上估计作品偏差，保持配置中心，不按作品数量再次归零；`interval` 仍为 95% 后验不确定区间半宽（以配置先验均值为锚）。超过现有 200 条目阈值时沿用 worker。文字题不计算作品分。
 
-错误：`404 题目不存在`（`task` 参数无效）；`400 invalid_query`（`harness` 既不是当前注册表 ID 也不是 `unset`，或 `provider` 不在上述三项中；`category` 不是当前题目的题型，或与 `task` 同时出现）。
+错误：`404 题目不存在`（`task` 参数无效）；`400 invalid_query`（`harness` 既不是当前注册表 ID 也不是 `unset`，或 `provider` 不在上述三项中；`category` 不是当前题目的题型，或与 `task` 同时出现；`domain` 没有任何当前题目使用，或与 `task` 同时出现）。
 
 ### 3.11 `/media/*` —— 投稿媒体
 
@@ -629,19 +630,21 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 ### 3.14 社区题目与人工审核（schema v23）
 
-**`POST /api/questions`**：认证登录；限流 write 桶；请求体上限 6 MB。示例作品选填，无作品请求 `{ "title": "…", "summary": "…", "category": "静态网页", "prompt": "…", "tags": ["UI"], "templates": ["static", "vite"] }`，完全不带 `draftId`、`work`、`confirmed`。附示例时在该请求中加入 `{ "draftId": "…", "confirmed": true, "work": { "title": "示例结果", "modelId": "…", "effort": "High", "harnessId": "…", "trial": { "loaded": true }, "cover": "data:image/png;base64,…" } }`。`draftId` 必须属于本人、未过期且 `task=__new__`；`work` 复用 `POST /api/works` 的作品字段、Harness、封面及生成信息校验，所选提交格式必须允许草稿的实际格式。只要带了 `draftId` 或 `work` 中任一字段，就须同时提供两者并确认试加载，否则返回中文 `400`；仅带 `confirmed` 也返回 `400`。标题、测试简述、完整提示词必填，最多 70 / 400 / 20000 字；提示词除首尾空白外保留原文。`category` 必填，固定为 `文学` / `静态网页` / `建模`，缺少或无效返回 `400 请选择题目分类`。标签选填、缺省 `[]`，0–6 个，每个 1–24 字，按 NFKC 与大小写归一去重，已有标签沿用其名称；写入时丢弃与分类同名的标签。`templates` 必填：文学固定 `["text"]`，静态网页与建模必须为 `static` / `vite` 的非空子集，不匹配返回 `400 提交格式与题目分类不匹配`。
+**`POST /api/questions`**：认证登录；限流 write 桶；请求体上限 6 MB。示例作品选填，无作品请求 `{ "title": "…", "summary": "…", "category": "静态网页", "prompt": "…", "tags": ["UI"], "templates": ["static", "vite"] }`，完全不带 `draftId`、`work`、`confirmed`。附示例时在该请求中加入 `{ "draftId": "…", "confirmed": true, "work": { "title": "示例结果", "modelId": "…", "effort": "High", "harnessId": "…", "trial": { "loaded": true }, "cover": "data:image/png;base64,…" } }`。`draftId` 必须属于本人、未过期且 `task=__new__`；`work` 复用 `POST /api/works` 的作品字段、Harness、封面及生成信息校验，所选提交格式必须允许草稿的实际格式。只要带了 `draftId` 或 `work` 中任一字段，就须同时提供两者并确认试加载，否则返回中文 `400`；仅带 `confirmed` 也返回 `400`。标题、测试简述、完整提示词必填，最多 70 / 400 / 20000 字；提示词除首尾空白外保留原文。`category` 必填，固定为 `文学` / `静态网页` / `建模`，缺少或无效返回 `400 请选择题目分类`。`domains` 选填（新版 Gallery 必传）：带上时须为 1–2 个、在 `bootstrap.domains` 词表内的字符串，重复项合并，`[]` 或非数组返回 `400 请选择所属领域`，超出或不在词表返回 `400`；不带时存为 `[]`，等管理员通过时补充。标签选填、缺省 `[]`，0–6 个，每个 1–24 字，按 NFKC 与大小写归一去重，已有标签沿用其名称；写入时丢弃与分类同名的标签。`templates` 必填：文学固定 `["text"]`，静态网页与建模必须为 `static` / `vite` 的非空子集，不匹配返回 `400 提交格式与题目分类不匹配`。
 
 成功 `200`：无作品返回 `{ "question": { "id": "q-<16hex>", "title": "…", "summary": "…", "prompt": "…", "tags": ["UI"], "templates": ["static", "vite"], "owner": "作者昵称", "ownerAvatar": "…", "version": 1, "community": true, "createdAt": "…ISO…", "date": "YYYY-MM-DD", "moderation": { "status": "pending" } } }`，不含 `work` 字段；附示例时返回 `{ "question": <同上题目视图>, "work": <作者示例作品视图> }`。作者从会话读取；题目始终人工审核，不送自动审查，示例作品照常走内容审核并保持 `unverified`。无作品时题目与 `question-create` 审计在同一事务落库；附示例时题目、示例作品和审计同时落库，失败不保留题目或作品，草稿保持可重试。每位作者最多 3 道未删除的 pending 题目（含无作品题目），超限 `429`。其它错误：`401` / `400` / `404`（草稿不属于本人、不存在或过期）/ `429`。人工通过前题目及其作品不进入公开 bootstrap、Show1 列表、排行榜或盲评池；`me.questions` 可读本人全部未删除题目及审核状态。
 
 **`GET /api/admin/questions`**：仅管理员，返回 `{ "questions": [...] }`，包含全部未删除社区题目。每项为题目 DTO，加 `moderation`、`ownerName`、`works`（未删除关联投稿数量）和 `samples`（作者自己上传的示例作品；无示例时为 `[]`）。每份示例含 `id`、`task`、`title`、`modelName`、`effort`、`status`、`moderation`、`scene`；`scene` 使用有效一小时的私密 `p` 预览令牌，不能作为公开作品地址分发。匿名 `401`，非管理员 `403`。
 
-题目公开视图、`GET /api/me` 的我的题目与 `GET /api/admin/questions` 的每道题均含 `category`（旧题可能为 null）与 `templates`。
+题目公开视图、`GET /api/me` 的我的题目与 `GET /api/admin/questions` 的每道题均含 `category`（旧题可能为 null）、`domains`（旧题为 `[]`）与 `templates`。
 
-**`POST /api/questions/:id/moderation`**：仅管理员，write 限流，请求 `{ "status": "approved" | "rejected", "reason": "…", "category": "文学" | "静态网页" | "建模" }`；通过可省略理由，拒绝必须填非空理由，最多 500 字。通过时 `category` 可选，用来补充或修改分类；现有分类为空且请求未带分类，或请求分类无效，返回 `400 请选择题目分类`。拒绝时忽略 `category`。改分类后原格式不兼容时重置为该分类默认值：文学 `["text"]`，其余 `["static","vite"]`。成功 `{ "question": <含 moderation 的题目视图> }`，人工结果含 `source: "human"`、审核人、时间与理由，写 `question-review` audit；分类与格式改变时 detail 增加对应 `{ from, to }`。题目通过不改变示例作品自身的审核与核验状态。错误 `400` / `401` / `403` / `404` / `429`。
+**`POST /api/questions/:id/moderation`**：仅管理员，write 限流，请求 `{ "status": "approved" | "rejected", "reason": "…", "category": "文学" | "静态网页" | "建模", "domains": ["数学"] }`；通过可省略理由，拒绝必须填非空理由，最多 500 字。通过时 `category` 可选，用来补充或修改分类；现有分类为空且请求未带分类，或请求分类无效，返回 `400 请选择题目分类`。拒绝时忽略 `category`。改分类后原格式不兼容时重置为该分类默认值：文学 `["text"]`，其余 `["static","vite"]`。成功 `{ "question": <含 moderation 的题目视图> }`，人工结果含 `source: "human"`、审核人、时间与理由，写 `question-review` audit；分类、领域与格式改变时 detail 增加对应 `{ from, to }`。通过时 `domains` 可选，带上即按创建时的规则校验并替换；拒绝时忽略。题目通过不改变示例作品自身的审核与核验状态。错误 `400` / `401` / `403` / `404` / `429`。
 
 **`DELETE /api/questions/:id`**：登录，write 限流，成功 `{ "ok": true }`。作者可删除本人 pending/rejected 题目及本人关联作品；公开 legacy/approved 题目还须没有其他作者的未删除作品、没有 Gallery 或 Show1 投票。管理员可连同全部关联作品软删除题目，但有投票仍返回 `409`。删除设置 `questions.deleted_at` 和关联 `works.deleted_at`，写 `question-delete` audit；公开与本人/管理员题目列表随后不返回该题。错误 `401` / `403`（非本人且非管理员）/ `404` / `409` / `429`。
 
 v22 只在 `questions` 追加 `moderation` JSON 与可空 `deleted_at`。已有题目默认 `{ "status": "legacy" }`，保持公开；新题目为 pending。
+
+v29 追加 `questions.domains TEXT NOT NULL DEFAULT '[]'`，幂等，不回填；数据包题目的 `domains` 由数据仓 `task.json` 提供。
 
 v23 追加可空 `questions.category`，无分类旧题按标签顺序取第一个三项分类名，否则仅有 `text` 格式时回填文学，其余留 null 待管理员补充。迁移幂等，不覆盖已有分类；数据包分类不写入此表，读取时保持原值。
 

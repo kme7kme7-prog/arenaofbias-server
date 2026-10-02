@@ -5,7 +5,7 @@
 // public capture after load, then a review-only shot after scrolling, a click and a wait,
 // so pages that hold back content for a few seconds or until input still get seen.
 import { createHash } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
 
@@ -90,23 +90,35 @@ export function createCapturer({ config, library, loadChromium = async () => (aw
   async function launch() {
     if (!browser) {
       const chromium = await loadChromium();
-      // Unrouted browser traffic has no network path. Permitted resources are
-      // fetched by route.fetch(), which does not use Chromium's proxy flags.
-      networkBlocker = createServer((socket) => socket.destroy());
-      await new Promise((resolve, reject) => {
-        networkBlocker.once('error', reject);
-        networkBlocker.listen(0, '127.0.0.1', resolve);
-      });
-      try {
-        // The OS sandbox needs a non-root service user; CAPTURE_SANDBOX=1 turns it on.
-        browser = await chromium.launch({ ...(config.captureChannel ? { channel: config.captureChannel } : {}),
-          chromiumSandbox: Boolean(config.captureSandbox),
-          args: [`--proxy-server=http://127.0.0.1:${networkBlocker.address().port}`, '--proxy-bypass-list=<-loopback>',
-            '--force-webrtc-ip-handling-policy=disable_non_proxied_udp'] });
-      } catch (error) {
-        await new Promise((resolve) => networkBlocker.close(resolve));
-        networkBlocker = null;
-        throw error;
+      if (config.captureEndpointFile) {
+        // The worker owns Chrome and its rejecting proxy. Read anew after every
+        // disconnect because a restarted worker publishes a fresh endpoint.
+        const endpoint = readFileSync(config.captureEndpointFile, 'utf8').trim();
+        try {
+          browser = await chromium.connect(endpoint, { timeout: 30000 });
+        } catch {
+          // The endpoint includes a capability token; keep it out of logs.
+          throw new Error('独立截图服务连接失败');
+        }
+      } else {
+        // Unrouted browser traffic has no network path. Permitted resources are
+        // fetched by route.fetch(), which does not use Chromium's proxy flags.
+        networkBlocker = createServer((socket) => socket.destroy());
+        await new Promise((resolve, reject) => {
+          networkBlocker.once('error', reject);
+          networkBlocker.listen(0, '127.0.0.1', resolve);
+        });
+        try {
+          // The OS sandbox needs a non-root service user; CAPTURE_SANDBOX=1 turns it on.
+          browser = await chromium.launch({ ...(config.captureChannel ? { channel: config.captureChannel } : {}),
+            chromiumSandbox: Boolean(config.captureSandbox),
+            args: [`--proxy-server=http://127.0.0.1:${networkBlocker.address().port}`, '--proxy-bypass-list=<-loopback>',
+              '--force-webrtc-ip-handling-policy=disable_non_proxied_udp'] });
+        } catch (error) {
+          await new Promise((resolve) => networkBlocker.close(resolve));
+          networkBlocker = null;
+          throw error;
+        }
       }
       const instance = browser;
       browser.on('disconnected', () => {

@@ -1,5 +1,15 @@
 # HANDOFF.md · 当前状态
 
+## 截图服务隔离与喷泉截图核对（2026-10-02，本地完成，未推送、未部署）
+
+- 按用户授权，由三名 GPT-6.1 Sol / high 分工截图连接、systemd 部署与真实浏览器验收。平台改用 `arenaofbias`，Chrome 改用独立 `aob-capture` 用户和 systemd 文件系统沙盒；不是 Docker。独立 worker 固定开启 Chromium OS sandbox，不读取平台业务库或密钥，不继承平台环境；仅发布环回控制端点，平台连接后在自己进程写图片和数据库。没有新增 npm 依赖或数据库迁移。
+- 新增 `scripts/capture-browser.mjs` 和 `deploy/systemd/` 两份配置；`CAPTURE_ENDPOINT_FILE` 配置后只连接 worker，故障不退回本地 Chrome，重连时重新读端点。端点文件 0640、目录 0750，含控制令牌，不公开、不输出日志。更新 `docs/deploy.md` 7.2–7.3 的安装、验收与回滚步骤；原本本地开发路径保留。
+- 验证：生产基线 83e43fe 加本轮改动的干净源码，Windows check 83/0、test 233/233；VPS Node 22.23.2 check 83/0、test 233/233。首次 Linux 导出的一项 shell 测试因 Windows CRLF 失败，只修正隔离导出的换行后全过。最终共享工作区（另轮 b93a807 登录保护已提交）check 87/0、test 244/244；diff --check 通过。三项新增回归覆盖远程连接/本地图片路径、端点刷新及连接失败无本地回退/令牌日志。
+- VPS 临时服务与合成页面验收：非 root 平台和独立 worker UID 分离；`chrome://sandbox` 显示 namespace、PID/network namespace、seccomp 正常；桌面/移动首屏和延迟图、中文及同源 iframe 文字正常，禁止外站 HTTP/WebSocket 命中为 0；worker 不能读取生产 DB、平台 drop-in、root SSH 文件与合成私有数据；停止 worker 后截图不可用，重启后连接恢复。未创建生产投稿，未调用 SMTP、自动审核或改生产数据。
+- 用户要求先核对“古典庭园喷泉”，本轮没有改变等待时间：公开首屏仍为 load 后 3.5 秒，滚动/点击后再等 8.5 秒的延迟图仅供审核。馆藏 Opus 的记录注明 GPU/字体预热后等 25 秒；两件馆藏已有封面是完整场景。服务器隔离 worker 对 Gemini、Opus 和投稿 up-ccnksbcp 分别在 3.5/8/15/25 秒取图，三者 `navigator.gpu` 存在但 `requestAdapter()` 为 null，25 秒图为 WebGPU 错误提示；按现有 root 启动参数另做合成页能力检查，结果也没有适配器。增加延迟不能单独解决此例。已有投稿封面同样显示适配器错误；重启或周期复查不会替换现有公开封面，馆藏封面属于不可变数据包。
+- 生产最终只读复核仍为 83e43fe、平台 root 运行且 active；正式源码、unit 和 `.data` owner 未改。临时平台服务已停，临时截图 service 已停并移除其 runtime unit。本轮新建两个系统用户，保留只含本轮演练的 `/opt/arenaofbias-capture/isolation-rehearsal-01a0fb12`、`/var/lib/arenaofbias/isolation-rehearsal` 与 root 私有备份 `/root/aob-capture-isolation-20261002-01a0fb12`；原 `.data` 的 1859 条混合 owner/mode 已备份供精确回滚，不能统一 chown root。证据在忽略目录 `output/capture-isolation-20261002-01a0fb12/`。
+- 后续先处理截图环境的 WebGPU 能力，再调整首屏等待并决定需重截的投稿；不启用未经核验的实验 GPU 参数，不手改数据包。本轮代码按用户指示仅本地提交；未 push 或上线。共享 main 另有 b93a807 登录保护（v32、配套前端）和 1177461 调查记录，发布时必须核对整体范围，不能仅凭本轮截图演练部署整个 HEAD。完整记录见 [归档](docs/archive/2026-10-02-capture-isolation-wsnxxxs.md)。
+
 ## 红队复核与登录保护（2026-10-02，本地完成，未推送、未部署）
 
 - 按用户指定，三名 GPT-6.1 Sol / high 并行负责认证、匿名 TTL、三个登录入口；主会话集成与生产只读核查。正式 API / 版本文件同为 83e43fe，Node 22.23.2、数据库 v31、4 个 DB 管理员，ADMIN_USERNAMES 未配置，Turnstile 双密钥已配置。没有调整真实账号角色或写入测试 canary。

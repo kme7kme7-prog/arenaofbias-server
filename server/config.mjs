@@ -33,6 +33,8 @@ export const config = {
   // Headless screenshots of submitted works (Playwright + a local Chrome); off with CAPTURE=0.
   capture: env.CAPTURE !== '0',
   captureChannel: env.CAPTURE_BROWSER ?? 'chrome',
+  // A separate capture service publishes its loopback Playwright endpoint here.
+  captureEndpointFile: env.CAPTURE_ENDPOINT_FILE || '',
   // Chromium's OS sandbox for captures; needs the service to run as a non-root user.
   captureSandbox: env.CAPTURE_SANDBOX === '1',
   // New uploads stay private until the Flex check passes, and off the public work host until a human review.

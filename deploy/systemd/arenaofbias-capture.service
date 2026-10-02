@@ -1,0 +1,41 @@
+[Unit]
+Description=Arena of Bias isolated screenshot browser
+After=network.target
+
+[Service]
+Type=notify
+NotifyAccess=all
+TimeoutStartSec=45
+User=aob-capture
+Group=aob-capture
+WorkingDirectory=/opt/arenaofbias-capture
+ExecStart=/usr/bin/node /opt/arenaofbias-capture/capture-browser.mjs
+Environment=HOME=/var/lib/aob-capture
+Environment=CAPTURE_BROWSER=chrome
+Environment=CAPTURE_ENDPOINT_FILE=/run/aob-capture/endpoint
+StateDirectory=aob-capture
+StateDirectoryMode=0700
+RuntimeDirectory=aob-capture
+RuntimeDirectoryMode=0750
+UMask=0027
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectProc=invisible
+InaccessiblePaths=/www
+InaccessiblePaths=-/etc/arenaofbias-review.env -/etc/systemd/system/arenaofbias-server.service.d -/var/lib/arenaofbias
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+# Chromium's sandbox needs user namespaces; do not restrict them here.
+# route.fetch() needs the content listener and approved CDNs on the host network.
+MemoryMax=1G
+CPUQuota=100%
+TasksMax=256
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

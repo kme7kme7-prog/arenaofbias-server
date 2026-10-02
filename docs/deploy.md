@@ -351,40 +351,28 @@ findtime = 10m
 bantime = 1d
 ```
 
-### 7.2 平台服务改为非 root 用户
+### 7.2 平台与截图分别降权和隔离
 
-截图会在本机 Chrome 中执行投稿页面。`CAPTURE_SANDBOX=1` 打开 Chromium 系统沙盒，但 root 下 Chrome 无法带沙盒启动，所以先换运行用户。
+平台用 `arenaofbias` 用户写业务库；执行投稿脚本的 Chrome 用独立的 `aob-capture` 用户，在 systemd 文件系统沙盒中运行。截图服务不挂载平台数据，不继承 SMTP、审核或 Turnstile 环境；它只返回截图字节与页面文字，仍由平台写 `.data/media` 和数据库。这里不要求安装 Docker。
 
-1. 确认现状：`systemctl show arenaofbias-server -p User`，空值即 root。
-2. `useradd --system --home /var/lib/arenaofbias --shell /usr/sbin/nologin arenaofbias`
-3. `chown -R arenaofbias: /www/wwwroot/arenaofbias-server/.data`；代码目录、`.datapack` 保持 root 所有、对该用户可读。
-4. 写入 `/etc/systemd/system/arenaofbias-server.service.d/hardening.conf`：
+部署顺序如下，先完成第 0 节版本门禁、备份原配置和源码，并在临时目录验收：
 
-```
-[Service]
-User=arenaofbias
-Group=arenaofbias
-StateDirectory=arenaofbias
-Environment=HOME=/var/lib/arenaofbias
-NoNewPrivileges=yes
-ProtectSystem=strict
-ReadWritePaths=/www/wwwroot/arenaofbias-server/.data
-ProtectHome=yes
-PrivateTmp=yes
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectControlGroups=yes
-```
+1. 创建两个无登录 shell 的系统用户和对应同名组：`arenaofbias` 的 HOME 为 `/var/lib/arenaofbias`，`aob-capture` 的 HOME 为 `/var/lib/aob-capture`。保留已有账号，不重建。
+2. 保持 `/opt/arenaofbias-capture/node_modules` 的既有 Playwright 运行时；把本次已合入 main 的 `scripts/capture-browser.mjs` 安装为 root 所有的 `/opt/arenaofbias-capture/capture-browser.mjs`。平台的 `node_modules` 仍指向相同运行时，客户端与服务端 Playwright 版本必须一致。Chrome 使用系统 `/opt/google/chrome`，不依赖 `/root` 缓存。
+3. 将 `deploy/systemd/arenaofbias-capture.service` 安装为 `/etc/systemd/system/arenaofbias-capture.service`。此服务绑定环回，开启 Chromium 系统沙盒，隐藏 `/www`、平台 drop-in 和平台 HOME；限制 1 GiB 内存、1 CPU 和 256 tasks。不要增加 `RestrictNamespaces` 或 `MemoryDenyWriteExecute`，Chrome 沙盒和 V8 需要相应能力。保留主机网络供受控 `route.fetch()` 读取作品和批准的 CDN。
+4. `systemctl daemon-reload && systemctl enable --now arenaofbias-capture`。服务在发布 `/run/aob-capture/endpoint` 后才通知 ready；该文件为 `aob-capture:aob-capture 0640`，目录为 0750。端点含浏览器控制令牌，不打印、不写入日志或仓库，不公开控制端口。
+5. 停止平台后，把 `.data` 的所有者改为 `arenaofbias:arenaofbias`，根目录权限改为 0700；源码和 `.datapack` 仍由 root 持有、平台用户可读。将 `deploy/systemd/arenaofbias-server-hardening.conf` 安装到平台服务 drop-in 的 `hardening.conf`，保留现有 SMTP、审核、Turnstile 配置，daemon-reload 后启动平台。
+6. 配置 `CAPTURE_ENDPOINT_FILE=/run/aob-capture/endpoint` 时，平台只连接独立服务；连接失败转人工，不退回本地 Chrome。未配置此项时保留开发环境的本地截图路径；本地路径的 `CAPTURE_SANDBOX=1` 仍要求非 root 用户。
 
-不要加 `RestrictNamespaces`：Chrome 沙盒依赖用户命名空间（Debian 12 默认允许）。
+验收实际进程 UID、Chrome 不带 `--no-sandbox`、`chrome://sandbox` 的 namespace/seccomp 状态、两档首屏与延迟截图、页面/iframe 文字、外站 HTTP/WebSocket 阻断，以及截图用户无法读取业务库、平台密钥配置与平台进程环境。先用合成页面和临时媒体目录，不为验收创建生产投稿。
 
-5. `systemctl daemon-reload && systemctl restart arenaofbias-server`，`journalctl -u arenaofbias-server -n 50` 确认无权限错误并出现「自动截图可用」。
-6. 现场核对：root 的 cron（数据包同步、`archive-backup.sh`）新建的文件该用户能读；审查 relay 的 SSH tunnel 是独立服务不受影响；截图使用系统安装的 Chrome（`/opt/google/chrome`），不能依赖 `/root` 下的 Playwright 浏览器缓存。
-7. 回滚：删除 `hardening.conf`，daemon-reload、restart，把 `.data` 所有者改回 root。
+root 的备份 cron 与审核 SSH tunnel 保持独立。确认备份快照能读取降权后的数据库；后续 root 停服维护若产生 SQLite WAL/SHM，重新核对 owner。数据包目录与 root 同步任务生成的文件应允许平台读取，使用 `umask 022`，不得为此给平台开放 `/root`。
+
+回滚时先停平台和截图服务，恢复本轮备份的源码、版本标记和 drop-in，再重启平台；保留当前数据库与后续业务写入，不恢复旧数据库。若恢复 root 本地截图，同时恢复旧 `CAPTURE_SANDBOX` 设置。按备份恢复 `.data` owner 和根目录权限，避免只撤销一半配置。
 
 ### 7.3 截图沙盒与 Chrome 更新
 
-- 7.2 生效后，在 `moderation.conf` 加 `Environment=CAPTURE_SANDBOX=1`，daemon-reload、restart；`ps -o user,args -C chrome` 应显示非 root 用户且没有 `--no-sandbox`。若启动失败，日志会提示截图不可用，新投稿全部转人工、不会放行；删掉该行即可恢复。
+- 独立截图服务固定开启 Chromium 沙盒；用 `systemctl status arenaofbias-capture` 和实际 Chrome 进程核对。截图服务故障由 systemd 重启，平台保留五分钟重试冷却与人工审核路径，不自动降级为无沙盒执行。
 - `apt update && apt install --only-upgrade google-chrome-stable`；在 unattended-upgrades 的 `Origins-Pattern` 加入 Google 源，保持 Chrome 自动更新。
 
 ### 7.4 上线本轮代码前

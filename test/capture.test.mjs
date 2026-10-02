@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createCapturer } from '../server/capture.mjs';
@@ -39,7 +39,7 @@ function fixture(t, options = {}) {
   const capturer = createCapturer({ config: { capture: true, cdn: [], ...options.config }, library,
     loadChromium: options.loadChromium ?? (async () => ({ launch: async (settings) => { f.launches.push(settings); return browser; } })), now: options.now });
   t.after(async () => { await capturer.close(); rmSync(mediaDir, { recursive: true, force: true }); });
-  f = { capturer, browser, contexts, saved, launches: [], work: { id: 'work', contentKey: 'key' } };
+  f = { capturer, browser, mediaDir, contexts, saved, launches: [], work: { id: 'work', contentKey: 'key' } };
   return f;
 }
 
@@ -150,3 +150,46 @@ test('a failed late shot keeps the public capture and leaves the review material
   assert.equal(f.saved.length, 1);
   assert.equal(f.launches[0].chromiumSandbox, false);
 });
+
+test('remote capture rereads the endpoint after disconnect and writes screenshots on the platform', async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'capture-endpoint-'));
+  const endpointFile = join(directory, 'endpoint');
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  writeFileSync(endpointFile, 'ws://127.0.0.1:1234/first-token\n');
+  const connections = [];
+  let browser;
+  const f = fixture(t, { config: { captureEndpointFile: endpointFile }, loadChromium: async () => ({
+    launch: async () => assert.fail('remote capture must not launch locally'),
+    connect: async (endpoint, settings) => { connections.push({ endpoint, settings }); return browser; },
+  }) });
+  browser = f.browser;
+  assert.deepEqual((await f.capturer.enqueue(f.work)).captures, { first: 'first.jpg', mobile: 'mobile.jpg' });
+  assert.ok(f.contexts.every((context) => context.shots.every((path) => path.startsWith(join(f.mediaDir, 'work')))));
+  assert.equal(f.saved.length, 1);
+  writeFileSync(endpointFile, 'ws://127.0.0.1:2345/second-token\n');
+  browser.emit('disconnected');
+  assert.equal(await f.capturer.initialize(), true);
+  assert.deepEqual(connections, [
+    { endpoint: 'ws://127.0.0.1:1234/first-token', settings: { timeout: 30000 } },
+    { endpoint: 'ws://127.0.0.1:2345/second-token', settings: { timeout: 30000 } },
+  ]);
+});
+
+for (const failure of ['missing endpoint', 'connection']) {
+  test(`remote ${failure} failure does not fall back to local Chrome or log the endpoint token`, async (t) => {
+    const directory = mkdtempSync(join(tmpdir(), 'capture-endpoint-'));
+    const endpointFile = join(directory, 'endpoint');
+    t.after(() => rmSync(directory, { recursive: true, force: true }));
+    if (failure === 'connection') writeFileSync(endpointFile, 'ws://127.0.0.1:1234/private-token\n');
+    const f = fixture(t, { config: { captureEndpointFile: endpointFile }, loadChromium: async () => ({
+      launch: async () => assert.fail('remote failure must not launch locally'),
+      connect: async () => { throw new Error('Failed ws://127.0.0.1:1234/private-token'); },
+    }) });
+    const warn = t.mock.method(console, 'warn', () => {});
+    assert.equal(await f.capturer.initialize(), false);
+    assert.equal(await f.capturer.enqueue(f.work), null);
+    assert.equal(f.capturer.available, false);
+    assert.equal(warn.mock.callCount(), 1);
+    assert.doesNotMatch(warn.mock.calls[0].arguments[0], /private-token/);
+  });
+}

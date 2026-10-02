@@ -1,5 +1,14 @@
 # HANDOFF.md · 当前状态
 
+## Gallery 表情改为原创贴纸 id 并清空互动（2026-10-03，已提交，未推送、未部署）
+
+- 配合 Gallery 前端把 emoji 换成原创动图贴纸（前端 HANDOFF 同日条目）。server/config.mjs：EMOJIS 改为 `lick, lol, press, luck, yes, drool, knock, stare, no`；旧 emoji 提交返回 400「不支持这个表情」。
+- server/db.mjs：追加一条迁移，reactions 表存在时整表清空；工作区里未提交的 model_vendor 迁移顺延到它之后，提交只含本条。用户确认 Show1 的 👍/👀/🤯 表态一并清零；show1compat 的 up/down/laugh 映射与写入不变，上线后 Show1 从零重新计数。
+- server/profile.mjs：收到的表情只计 EMOJIS 内的 id，Show1 表态不再混入 total。docs/api-contract.md 示例同步；test/platform.test.mjs 改用新 id 并断言旧 emoji 被拒。
+- 本地库若已跑过未提交的 model_vendor 迁移，user_version 会越过本条清空迁移；生产库未跑过，不受影响。Gallery 前端必须同时上线。
+- 验证：check 87 / 0，test 248/248。未在生产库执行迁移，未部署。
+
+
 ## 四仓协调发布完成（2026-10-02）
 
 - 2026-10-02T10:04:51Z 上线：后端 7a46d71、Show1 22bb6b3、Gallery 3e441a3；数据产物 9356c7057c9898ace07cc86d6d8a852d5f7eeb75（来源 623bfeb）。后端与 Gallery 固定同一包；后续文档提交不自动更换消费 pin。完整记录见[发布归档](docs/archive/2026-10-02-shared-session-release-wsnxxxs.md)。

@@ -542,7 +542,7 @@ describe('platform lifecycle', () => {
     for (const [method, path, body] of [
       ['POST', '/api/questions', {}], ['POST', '/api/drafts?task=one&name=test.html', {}],
       ['GET', '/api/drafts?task=one'], ['DELETE', '/api/drafts/none'],
-      ['POST', '/api/works', {}], ['POST', '/api/works/one/a1/reactions', { emoji: '🔥' }],
+      ['POST', '/api/works', {}], ['POST', '/api/works/one/a1/reactions', { emoji: 'press' }],
     ]) {
       const result = await call('legacy', method, path, body);
       assert.equal(result.status, 403, path);
@@ -694,11 +694,12 @@ describe('platform lifecycle', () => {
       await call('bob', 'POST', `/api/arena/matches/${match.data.id}/vote`, { choice: 'tie' });
     }
     assert.equal((await call('bob', 'GET', '/api/leaderboard?task=one')).data.totals.votes, 4);
-    assert.equal((await call('bob', 'POST', `/api/works/one/${upload.id}/reactions`, { emoji: '🔥' })).data.counts['🔥'], 1);
+    assert.equal((await call('bob', 'POST', `/api/works/one/${upload.id}/reactions`, { emoji: 'press' })).data.counts.press, 1);
+    assert.equal((await call('bob', 'POST', `/api/works/one/${upload.id}/reactions`, { emoji: '🔥' })).status, 400, 'legacy emoji are gone');
 
     assert.equal((await call('root', 'POST', `/api/works/one/${upload.id}/review`, { status: 'questioned' })).status, 400);
     assert.equal((await call('root', 'POST', `/api/works/one/${upload.id}/review`, { status: 'questioned', reason: '无法核实' })).status, 200);
-    assert.equal((await call('bob', 'POST', `/api/works/one/${upload.id}/reactions`, { emoji: '👀' })).status, 409);
+    assert.equal((await call('bob', 'POST', `/api/works/one/${upload.id}/reactions`, { emoji: 'stare' })).status, 409);
     assert.equal((await call('bob', 'GET', '/api/leaderboard?task=one')).data.totals.votes, 2, 'votes involving the questioned work drop out');
   });
 
@@ -969,18 +970,18 @@ describe('platform lifecycle', () => {
     const workPath = `/api/works/${task}/${submitted.data.work.id}`;
     const match = await call('charlie', 'POST', '/api/arena/matches', { task: 'one' });
     assert.equal((await call('charlie', 'POST', `/api/arena/matches/${match.data.id}/vote`, { choice: 'tie' })).status, 200);
-    assert.equal((await call('charlie', 'POST', '/api/works/one/a1/reactions', { emoji: '👍' })).status, 200);
-    assert.equal((await call('charlie', 'POST', `${workPath}/reactions`, { emoji: '🔥' })).status, 200);
-    assert.equal((await call('bob', 'POST', `${workPath}/reactions`, { emoji: '🔥' })).status, 200);
-    assert.equal((await call('alice', 'POST', `${workPath}/reactions`, { emoji: '❤️' })).status, 200);
+    assert.equal((await call('charlie', 'POST', '/api/works/one/a1/reactions', { emoji: 'yes' })).status, 200);
+    assert.equal((await call('charlie', 'POST', `${workPath}/reactions`, { emoji: 'press' })).status, 200);
+    assert.equal((await call('bob', 'POST', `${workPath}/reactions`, { emoji: 'press' })).status, 200);
+    assert.equal((await call('alice', 'POST', `${workPath}/reactions`, { emoji: 'lick' })).status, 200);
     const mine = (await call('charlie', 'GET', '/api/me')).data;
     assert.equal(mine.activity.total, 5);
     assert.equal(mine.activity.activeDays, 1);
     assert.equal(mine.activity.days[0].date, mine.activity.to);
     assert.equal((Date.parse(mine.activity.to) - Date.parse(mine.activity.from)) / 86400000, 364);
-    assert.deepEqual(mine.receivedReactions, { counts: { '❤️': 1, '🔥': 1 }, total: 2 });
+    assert.deepEqual(mine.receivedReactions, { counts: { lick: 1, press: 1 }, total: 2 });
     assert.equal((await call('bob', 'GET', '/api/me')).data.receivedReactions.total, 0);
-    await call('bob', 'POST', `${workPath}/reactions`, { emoji: '🔥' });
+    await call('bob', 'POST', `${workPath}/reactions`, { emoji: 'press' });
     assert.equal((await call('charlie', 'GET', '/api/me')).data.receivedReactions.total, 1);
 
     platform.db.prepare('UPDATE questions SET created_at = ? WHERE id = ?').run(Date.now() - 366 * 86400000, task);
@@ -1002,7 +1003,7 @@ describe('platform lifecycle', () => {
     const path = `/api/works/one/${id}`;
     assert.ok(!(await call('guest', 'GET', '/api/bootstrap')).data.works.some((work) => work.id === id));
     assert.ok(!(await call('guest', 'GET', '/api/show1/works')).data.works.some((work) => work.id === id));
-    assert.equal((await call('bob', 'POST', `${path}/reactions`, { emoji: '👍' })).status, 409);
+    assert.equal((await call('bob', 'POST', `${path}/reactions`, { emoji: 'yes' })).status, 409);
     assert.equal((await call('guest', 'GET', `${path}/comments`)).status, 404);
     const verified = await call('root', 'POST', `${path}/review`, { status: 'verified' });
     assert.equal(verified.status, 200);

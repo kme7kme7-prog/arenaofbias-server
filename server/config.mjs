@@ -76,7 +76,9 @@ export const limits = {
 
 // Effort levels offered on the upload form; curated works keep their own labels.
 export const EFFORTS = ['Low', 'Medium', 'High', 'XHigh', 'Max'];
-export const EMOJIS = ['👍', '❤️', '🔥', '🤯', '👏', '👀'];
+// Gallery reaction sticker ids; each frontend ships the art. Show1's legacy 👍/👀/🤯 votes share
+// the reactions table but are not in this list, so Gallery neither accepts nor counts them.
+export const EMOJIS = ['lick', 'lol', 'press', 'luck', 'yes', 'drool', 'knock', 'stare', 'no'];
 // Avatar ids; each frontend ships an image per id. Append new ones only: an account that has
 // not picked one gets a default hashed over the first 16, so that set must never change.
 export const AVATARS = ['teapot', 'bunny', 'cube', 'cursor', 'ghost', 'donut', 'brackets', 'frame',

@@ -446,6 +446,11 @@ const MIGRATIONS = [
     if (!columns.has('last_seen_at')) db.exec('ALTER TABLE sessions ADD COLUMN last_seen_at INTEGER');
     db.exec('UPDATE sessions SET last_seen_at = created_at WHERE last_seen_at IS NULL');
   },
+  // Gallery reactions moved from emoji to sticker ids; every earlier reaction, Show1 votes
+  // included, is cleared once.
+  (db) => {
+    if (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'reactions'").get()) db.exec('DELETE FROM reactions');
+  },
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

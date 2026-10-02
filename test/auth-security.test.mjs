@@ -62,17 +62,17 @@ test('member and effective admin sessions expire when idle and retain absolute e
 test('the session idle migration preserves creation and absolute expiry and is idempotent', () => {
   const db = new DatabaseSync(':memory:');
   try {
-    for (const migration of MIGRATIONS.slice(0, -1)) {
+    for (const migration of MIGRATIONS.slice(0, 31)) {
       if (typeof migration === 'function') migration(db);
       else db.exec(migration);
     }
     db.exec("INSERT INTO users (id, name, name_key, role, salt, hash, created_at) VALUES ('u', 'reader', 'reader', 'member', 's', 'h', 100)");
     db.exec("INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES ('token', 'u', 200, 300)");
-    MIGRATIONS.at(-1)(db);
+    MIGRATIONS[31](db); // v32 tracks session idle expiry.
     assert.deepEqual({ ...db.prepare('SELECT created_at, expires_at, last_seen_at FROM sessions').get() },
       { created_at: 200, expires_at: 300, last_seen_at: 200 });
     db.exec('UPDATE sessions SET last_seen_at = 250');
-    MIGRATIONS.at(-1)(db);
+    MIGRATIONS[31](db);
     assert.equal(db.prepare('SELECT last_seen_at FROM sessions').get().last_seen_at, 250);
   } finally { db.close(); }
 });

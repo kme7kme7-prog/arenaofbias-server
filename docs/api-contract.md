@@ -245,15 +245,15 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
     "contentModeration": true,
     "autoModeration": true,
     "efforts": ["Low", "Medium", "High", "XHigh", "Max"],
-    "emojis": ["👍", "❤️", "🔥", "🤯", "👏", "👀"],
+    "emojis": ["lick", "lol", "press", "luck", "yes", "drool", "knock", "stare", "no"],
     "limits": { "uploadBytes": 31457280, "coverBytes": 3145728, "pendingPerUser": 5, "provisionalGames": 30 }
   },
   "works": [ /* 全部未删除投稿的公开视图，按创建时间倒序 */ ],
   "questions": [ /* 未删除且 legacy/approved 的社区题目公开视图，见 3.14 */ ],
   "domains": [ "数学", "物理", "化学", "生物", "天文", "建筑", "自然景观", "交通与机械", "产品与品牌", "文学艺术", "游戏娱乐" ],
   "reactions": {
-    "counts": { "task-id/work-id": { "🔥": 3 } },
-    "mine": { "task-id/work-id": ["🔥"] }
+    "counts": { "task-id/work-id": { "press": 3 } },
+    "mine": { "task-id/work-id": ["press"] }
   },
   "arena": { "chinese-architecture": { "works": 40, "entries": 33, "uploads": true } },
   "featured": { "chinese-architecture": { "cover": "work-id", "models": { "model-id": "work-id", "x:custom model": "up-work-id" } } },
@@ -465,12 +465,12 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 **`POST /api/works/:task/:id/reactions`** —— 表情反应（开关式）
 
-**认证**：登录。**限流**：write 桶。请求体：`{ "emoji": "🔥" }`。
+**认证**：登录。**限流**：write 桶。请求体：`{ "emoji": "press" }`（表情贴纸 id，图形由前端提供）。
 
 同一用户对同一作品的同一表情**再次提交即取消**（toggle）。响应：
 
 ```json
-{ "counts": { "🔥": 3, "👍": 1 }, "mine": ["🔥"] }
+{ "counts": { "press": 3, "yes": 1 }, "mine": ["press"] }
 ```
 
 错误：`401`；`404 作品不存在`；`409 存疑作品仅供参考，不能再互动`；`400 不支持这个表情`（表情须在 `bootstrap.site.emojis` 白名单内）。馆藏作品同样可互动。
@@ -486,11 +486,11 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
   "reviewStats": { "medianHours": 18.5 },
   "joinedAt": "…ISO…",
   "activity": { "from": "YYYY-MM-DD", "to": "YYYY-MM-DD", "days": [ { "date": "YYYY-MM-DD", "count": 2 } ], "total": 12, "activeDays": 5 },
-  "receivedReactions": { "counts": { "🔥": 2 }, "total": 2 }
+  "receivedReactions": { "counts": { "press": 2 }, "total": 2 }
 }
 ```
 
-活跃统计按 UTC+8 的近 365 天汇总本人发布题目、投稿、有效落库投票和当前表情记录；历史投稿删除后仍计入活跃。收到的表情仅统计本人当前未删除投稿且排除自评。
+活跃统计按 UTC+8 的近 365 天汇总本人发布题目、投稿、有效落库投票和当前表情记录；历史投稿删除后仍计入活跃。收到的表情仅统计本人当前未删除投稿且排除自评，只计 `site.emojis` 内的贴纸（Show1 的 👍/👀/🤯 表态不计）。
 
 `queueAhead` 仅对当前展览馆核验队列中 `status=unverified` 的作品返回：内容已放行、题目已公开、未收录且 `reviewed.gallery` 为空。它是该队列中排在该作品前面的件数，与 bootstrap 的 `review.unverified` 同口径（包含竞技场已核验、展览馆尚无决定的投稿），按 `created_at` 升序、同时间按作品 ID 升序；其它作品省略字段。
 

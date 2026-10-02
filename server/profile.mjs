@@ -1,5 +1,7 @@
 // Personal activity comes from participation records, including past submissions.
 // Received reactions count other people on the member's currently published works.
+import { EMOJIS } from './config.mjs';
+
 const DAY = 86400000;
 
 export function createProfile(db) {
@@ -25,7 +27,7 @@ export function createProfile(db) {
       const since = until - 365 * DAY;
       const from = new Date(since + 8 * 3600000).toISOString().slice(0, 10);
       const days = activity.all({ owner: user.id, since, until });
-      const counts = Object.fromEntries(reactions.all(user.id, user.id).map((row) => [row.emoji, row.count]));
+      const counts = Object.fromEntries(reactions.all(user.id, user.id).filter((row) => EMOJIS.includes(row.emoji)).map((row) => [row.emoji, row.count]));
       return {
         joinedAt: new Date(user.created_at).toISOString(),
         activity: { from, to, days, total: days.reduce((sum, day) => sum + day.count, 0), activeDays: days.length },

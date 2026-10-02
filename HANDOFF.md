@@ -1,5 +1,15 @@
 # HANDOFF.md · 当前状态
 
+## 红队复核与登录保护（2026-10-02，本地完成，未推送、未部署）
+
+- 按用户指定，三名 GPT-6.1 Sol / high 并行负责认证、匿名 TTL、三个登录入口；主会话集成与生产只读核查。正式 API / 版本文件同为 83e43fe，Node 22.23.2、数据库 v31、4 个 DB 管理员，ADMIN_USERNAMES 未配置，Turnstile 双密钥已配置。没有调整真实账号角色或写入测试 canary。
+- 配置 Turnstile 后所有密码登录在验密前验证一次性 token，避免管理员用户名分流与正确密码探测；管理员、Gallery、game 登录表单配套支持 token 和失败后重置。密码失败按账号跨 IP / 来源 IP 各 5 次 / 15 分钟，触发临时封禁登录 15 分钟；全站最多 32 个在途登录流程，429 带 Retry-After。管理员失败 audit、封禁 audit + journal，不保存密码/token，不仅凭用户名永久封禁。
+- 登录/注册撤销请求中的旧会话；普通闲置 24h、管理员 30min、绝对 30 天。末尾幂等 v32 sessions.last_seen_at，旧会话按 created_at 回填，可能需重登。ADMIN_USERNAMES 固定管理员直接降权409，避免成功响应与有效权限不一致。
+- 匿名对局3h有效期，启动+每分钟清理过期无正式票引用行，全站无票匿名对局最多10000；正式票及关联对局保留。练习局原本只存内存且限5000，新增3h TTL，保留匿名体验。后台track paths 已esc转义；已有cookie绝对过期和新token、内存练习、Nginx nodelay均纠正报告表述。
+- Nginx候选补主域/game/gallery安全头和按host CSP，补自带add_header的location、429错误页及game错误CORS，隐藏文件/robots与未知静态路径不再SPA返回200；game XFF覆盖真实来源。完整候选在VPS隔离目录nginx -t通过，正式配置尚未更改。发布步骤在docs/deploy.md第8节。
+- 验证：Windows混合工作区check86/0、test244/244；从已提交基线加本轮文件的LF导出排除他轮截图改动，VPS Node22 check86/0、test241/241。初次Windows旧迁移夹具漏sessions表，补齐夹具后过；初次Linux导出中的旧shell CRLF导致一项失败，仅对隔离导出转LF后全过。源码与迁移安全定向回归、三个入口浏览器关键场景均通过，前端完整结果见各仓本轮归档。
+- 他轮截图服务未提交文件capture/config/test-capture、deploy/systemd、scripts/capture-browser保留，不纳入本轮。期间1177461仅追加他轮盲评池调查HANDOFF，本轮保留。未push/上线、未迁移真实业务库、未调用生产SMTP/自动审核或尝试真实管理员错误密码。SSH仍允许root密码登录、服务仍以root运行，后续变更需先核实运维通道与截图权限。完整记录见[归档](docs/archive/2026-10-02-redteam-login-hardening-wsnxxxs.md)。
+
 ## 小红帽作品可见但盲评池为零的调查（2026-10-02）
 
 - 本轮用户要求调查完整链路。公网 API 当前 `serverVersion=83e43fe072a0280d86c76379d9964bd4a32eb4bd`，Gallery 源码 `ef7b0a5bb240a518033a1ce78bb29a36d5205cdc`；两端数据 pin 均为 `53ab3e7caae664a520a231ef4fb715c493f1baa0`，catalogDigest 均为 `95f4979445a2528dccd866a1f2e1ca72d2b431943d295fea53ceb0e8ddbdec4a`，排除本次数据版本不一致。

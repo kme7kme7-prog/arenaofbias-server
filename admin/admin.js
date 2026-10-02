@@ -1247,6 +1247,21 @@ function usersView() {
 }
 
 // -- login / forbidden --
+let turnstileLoader;
+function loadTurnstile() {
+  if (globalThis.turnstile) return Promise.resolve();
+  if (!turnstileLoader) {
+    turnstileLoader = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+      script.async = true;
+      script.onload = () => globalThis.turnstile ? resolve() : script.onerror();
+      script.onerror = () => { script.remove(); reject(new Error('人机验证加载失败，请刷新页面重试。')); };
+      document.head.append(script);
+    }).catch((error) => { turnstileLoader = null; throw error; });
+  }
+  return turnstileLoader;
+}
 function loginView() {
   app().innerHTML = `<main class="gate">
     <div class="gate-panel">
@@ -1257,6 +1272,8 @@ function loginView() {
       <form class="gate-form" novalidate>
         <label class="field"><span class="field-label">用户名</span><input class="input" name="name" autocomplete="username" maxlength="24" required></label>
         <label class="field"><span class="field-label">密码</span><input class="input" name="password" type="password" autocomplete="current-password" maxlength="128" required></label>
+        <div class="auth-turnstile" hidden></div>
+        <p class="auth-turnstile-status" role="status"></p>
         <p class="form-error" role="alert"></p>
         <button class="btn primary full" type="submit">登录</button>
       </form>
@@ -1264,16 +1281,50 @@ function loginView() {
     </div>
   </main>`;
   const form = $('form', app());
+  let token = '';
+  let widget;
+  let challengeError;
+  const ready = (async () => {
+    const { siteKey } = await api('auth/turnstile');
+    if (siteKey !== null && (typeof siteKey !== 'string' || !siteKey)) throw new Error('人机验证加载失败，请刷新页面重试。');
+    if (!siteKey) return;
+    await loadTurnstile();
+    if (!form.isConnected) return;
+    const host = $('.auth-turnstile', form);
+    host.hidden = false;
+    widget = globalThis.turnstile.render(host, {
+      sitekey: siteKey,
+      size: 'flexible',
+      callback(value) { token = value; $('.auth-turnstile-status', form).textContent = ''; },
+      'expired-callback'() { token = ''; globalThis.turnstile.reset(widget); },
+      'error-callback'() { token = ''; $('.auth-turnstile-status', form).textContent = '人机验证暂时失败，请稍候重试。'; },
+    });
+    if (widget === undefined || widget === null) throw new Error('人机验证无法显示，请刷新页面重试。');
+  })().catch((error) => {
+    challengeError = error;
+    if (form.isConnected) $('.form-error', form).textContent = error.message;
+  });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
+    if ($('[type="submit"]', form).disabled) return;
     const doneBusy = busy($('[type="submit"]', form), '正在登录…');
+    let sent = false;
     try {
-      await api('auth/login', { method: 'POST', body: { name: form.name.value, password: form.password.value } });
+      await ready;
+      if (challengeError) throw challengeError;
+      if (widget !== undefined && !token) throw new Error('请先完成人机验证。');
+      const body = { name: form.name.value, password: form.password.value, turnstileToken: token };
+      token = '';
+      sent = true;
+      await api('auth/login', { method: 'POST', body });
+      if (widget !== undefined) { globalThis.turnstile.remove(widget); widget = undefined; }
       await boot();
       toast('欢迎回来');
     } catch (error) {
       $('.form-error', form).textContent = error.message;
       doneBusy();
+    } finally {
+      if (sent && widget !== undefined && form.isConnected) globalThis.turnstile.reset(widget);
     }
   });
   setTimeout(() => form.name.focus());

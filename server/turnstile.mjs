@@ -1,5 +1,5 @@
 // Cloudflare Turnstile verification with Node's built-in fetch.
-// Guards registration and the email-code sending endpoint.
+// Guards password login and the email-code sending endpoint.
 // Without both keys the feature is disabled and /api/auth/turnstile returns null.
 // 环境变量：
 //   TURNSTILE_SITE_KEY     站点密钥（公开，前端 widget 用，经下方接口下发）

@@ -6,6 +6,7 @@ import { createArena } from './arena.mjs';
 import { createFeatured } from './featured.mjs';
 import { avatarOf, createAuth } from './auth.mjs';
 import { createEmailAuth } from './auth-email.mjs';
+import { createLoginSecurity } from './login-security.mjs';
 import { createCapturer } from './capture.mjs';
 import { createModerator } from './moderation.mjs';
 import { createCatalog } from './catalog.mjs';
@@ -25,7 +26,7 @@ import { DOMAINS, requireCategory, requireDomains } from './categories.mjs';
 import { createProfile } from './profile.mjs';
 import { registerShow1Compat } from './show1compat.mjs';
 import { registerShow1Guess } from './show1/guess.mjs';
-import { turnstileEnabled, turnstileSiteKey } from './turnstile.mjs';
+import { turnstileEnabled, turnstileSiteKey, verifyTurnstile } from './turnstile.mjs';
 import { createReadGuard } from './read-guard.mjs';
 
 export function createPlatform({ config, limits, captureFactory = createCapturer, mailer }) {
@@ -41,11 +42,14 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const catalog = createCatalog(config.dist, questions);
   catalog.refresh();
   const auth = createAuth(db, { admins: config.admins, secureCookies: config.secureCookies, cookieSameSite: config.cookieSameSite, sessionTtl: limits.sessionTtl });
+  const loginSecurity = createLoginSecurity(db, { isAdminName: auth.isAdminName });
   const emailAuth = createEmailAuth(db, auth, { mailer });
   const library = createLibrary({ db, catalog, config, limits });
   const adminService = createAdmin({ db, catalog, library });
   const inbox = createInbox({ library, config, limits });
   const arena = createArena({ db, catalog, library, limits });
+  const matchCleanup = setInterval(() => arena.cleanupExpiredMatches(), 60e3);
+  matchCleanup.unref();
   const featured = createFeatured({ db, catalog, library, arena });
   const curator = createCurator({ db, catalog, library, onTakeover: () => arena.invalidate() });
   catalog.onChange(curator.takeover);
@@ -67,12 +71,12 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   };
   const siteCsp = [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline'",
+    "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
-    "connect-src 'self'",
-    `frame-src 'self' ${config.contentTemplate.replace('{token}', '*')}`,
+    "connect-src 'self' https://challenges.cloudflare.com",
+    `frame-src 'self' https://challenges.cloudflare.com ${config.contentTemplate.replace('{token}', '*')}`,
     "worker-src 'self' blob:",
     "object-src 'none'",
     "base-uri 'self'",
@@ -180,15 +184,29 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     limit.auth(ctx.ip);
     const body = await readJson(ctx.req);
     const user = await emailAuth.register(body);
-    auth.startSession(ctx.res, user.id);
+    auth.startSession(ctx.res, user.id, ctx.req);
     return { user: compatUser(user) };
   });
   router.on('POST', '/api/auth/login', async (ctx) => {
     limit.auth(ctx.ip);
     const body = await readJson(ctx.req);
-    const user = await auth.login(body.name ?? body.username, body.password);
-    auth.startSession(ctx.res, user.id);
-    return { user: compatUser(user) };
+    const name = body.name ?? body.username;
+    const attempt = loginSecurity.begin(name, ctx.ip);
+    try {
+      // Every account follows the same challenge flow, before checking credentials.
+      const verdict = await verifyTurnstile(body.turnstileToken, ctx.ip);
+      if (verdict === 'fail') fail(400, '人机验证未通过，请重试。');
+      if (verdict === 'down') fail(503, '人机验证服务暂时不可用，请稍后重试。');
+      let user;
+      try { user = await auth.login(name, body.password); }
+      catch (error) {
+        if (error instanceof HttpError && error.status === 401) loginSecurity.failure(attempt);
+        throw error;
+      }
+      loginSecurity.success(attempt);
+      auth.startSession(ctx.res, user.id, ctx.req);
+      return { user: compatUser(user) };
+    } finally { loginSecurity.finish(attempt); }
   });
   router.on('GET', '/api/auth/me', (ctx) => ({
     user: ctx.user ? { id: ctx.user.id, username: ctx.user.name, role: ctx.user.role === 'admin' ? 'admin' : null, email: ctx.user.email ?? null, avatar: avatarOf(ctx.user) } : null,
@@ -721,6 +739,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     handleSite,
     handleContent: createContentHandler({ config, library, arena, siteOrigins: config.siteOrigins, readGuard }),
     async close() {
+      clearInterval(matchCleanup);
       await emailAuth.drain();
       await Promise.all([moderator.close(), capturer.close()]);
       await featured.close();

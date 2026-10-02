@@ -439,6 +439,13 @@ const MIGRATIONS = [
     const columns = new Set(db.prepare('PRAGMA table_info(users)').all().map((column) => column.name));
     if (!columns.has('works_seen_at')) db.exec('ALTER TABLE users ADD COLUMN works_seen_at INTEGER');
   },
+  // Idle expiry supplements the existing absolute expiry. Old sessions use their
+  // creation time until authenticated again; no expired session gets a new lease.
+  (db) => {
+    const columns = new Set(db.prepare('PRAGMA table_info(sessions)').all().map((column) => column.name));
+    if (!columns.has('last_seen_at')) db.exec('ALTER TABLE sessions ADD COLUMN last_seen_at INTEGER');
+    db.exec('UPDATE sessions SET last_seen_at = created_at WHERE last_seen_at IS NULL');
+  },
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

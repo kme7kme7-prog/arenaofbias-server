@@ -49,6 +49,14 @@ export function registerShow1Guess(router, { db, limit }) {
   // 练习局全在内存：重启即失效（前端收到 game-expired 会开新局），不落库。
   const practiceGames = new Map(); // gameId → { answer, createdAt }
   const PRACTICE_MAX_GAMES = 5000;
+  const PRACTICE_TTL = 3 * 3600e3;
+  const cleanupPractice = (now) => {
+    // Map entries stay in creation order; stop at the first live game.
+    for (const [id, game] of practiceGames) {
+      if (game.createdAt + PRACTICE_TTL > now) break;
+      practiceGames.delete(id);
+    }
+  };
 
   const insertResult = db.prepare(
     `INSERT INTO guess_results (id, day_key, difficulty, answer_id, won, attempts, ip_hash, user_id, created_at)
@@ -79,6 +87,7 @@ export function registerShow1Guess(router, { db, limit }) {
     const gameId = typeof body?.gameId === 'string' ? body.gameId : null;
     let answer;
     if (gameId) {
+      cleanupPractice(Date.now());
       const game = practiceGames.get(gameId);
       if (!game) fail(404, '这局练习已过期，开一把新的吧', 'game-expired');
       answer = game.answer;
@@ -108,6 +117,8 @@ export function registerShow1Guess(router, { db, limit }) {
     const groups = [...slots.values()];
     const slot = groups[randomInt(groups.length)];
     const answer = slot[randomInt(slot.length)];
+    const now = Date.now();
+    cleanupPractice(now);
     // 容量兜底：超上限时从最老的开始清（Map 迭代即插入序）
     if (practiceGames.size >= PRACTICE_MAX_GAMES) {
       const excess = practiceGames.size - PRACTICE_MAX_GAMES + 1;
@@ -118,7 +129,7 @@ export function registerShow1Guess(router, { db, limit }) {
       }
     }
     const gameId = randomBytes(12).toString('hex');
-    practiceGames.set(gameId, { answer, createdAt: Date.now() });
+    practiceGames.set(gameId, { answer, createdAt: now });
     return { gameId };
   });
 

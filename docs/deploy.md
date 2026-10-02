@@ -435,3 +435,18 @@ add_header X-Frame-Options "SAMEORIGIN" always;
 | `curl -sI https://arenaofbias.icu/xxx` | 404 |
 | 主域、game 响应头 | 含 HSTS、nosniff |
 | DoH 查询 `_dmarc` TXT | 有 DMARC 记录 |
+
+## 8. 2026-10-02 红队复核与登录加固
+
+以下是候选修复的发布步骤，不表示已上线。先按第 0 节核实现场版本并确保目标提交进入上游 main。后端、管理端与两个前端必须配套发布：生产配置 Turnstile 后，所有密码登录都需提交 `turnstileToken`，服务端在验密前校验，验证不可用时返回 503。沿用现有 `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY`，不得在仓库保存密钥。管理员页面 CSP 已放行 `challenges.cloudflare.com`，两个前端也须保留脚本与 iframe 许可。
+
+- 同一账号跨 IP、同一 IP 跨账号 15 分钟内 5 次错误密码后，登录临时封禁 15 分钟；全站最多 32 个在途登录流程，超额立即返回 429 与 Retry-After。管理员失败与触发封禁记入 audit，封禁同时写 journal。封禁状态为进程内状态，重启清除；不自动给任何管理员降权，也不按用户名永久封禁。
+- 登录撤销请求中唯一的旧会话 Cookie；普通账号闲置 24 小时、管理员 30 分钟失效，绝对有效期仍为 30 天。上线前备份 SQLite；启动自动追加 v32 `sessions.last_seen_at`，旧会话按原创建时间回填，部分用户需重新登录。回滚代码时保留新库与之后写入，不恢复旧业务库。
+- 匿名对局已有 3 小时过期时间，改为启动与每分钟确定清理无正式票引用的过期行，匿名无票对局最多 10000 条。练习模式始终只存内存，原有 5000 局上限，新增 3 小时 TTL；不强制练习登录。
+- 部署 `deploy/nginx/security-headers.conf`、`static-private-paths.conf` 与更新的 `read-zones.conf` / `read-server.conf`。主域、game、gallery、API 在 server 级加入 security-headers include；自带 `add_header` 的 location 同样加入，避免丢失 HSTS / nosniff / CSP。CSP 按 host 在 read-zones 中定义，API / 作品域不叠加前端 CSP。作品沙箱保持原策略。
+- 三个静态站在其他正则 location 之前 include `static-private-paths.conf`，隐藏文件与仓库配置返回 404，ACME 路径保留。Gallery 使用 hash 路由，`try_files $uri $uri/ =404`；game 静态导出用 `try_files $uri $uri/ $uri.html =404`，保留实际导出页面。`robots.txt` 仅返回真实文件，不回退 HTML。主域到 game 的既有旧路径跳转按原用途保留。
+- game API 反代覆盖 XFF 为 `$remote_addr`。现有读取限流均带 `nodelay`，后端固定窗口也直接拒绝；本次不因报告中超时现象猜测并调整限流额度。429 错误 CORS 补齐 game 来源，安全头同时覆盖限流错误页。
+
+每次改 Nginx 前备份原 vhost 与 game 反代 include，`nginx -t` 成功才 reload。发布验收应包含三个首屏、安全头、game 合法静态路由、未知路径 / `.git` / `.env` / `robots.txt` 的状态码，以及三个登录 UI 的 token 获取、失败后重置、正常登录。不得用生产管理员错误密码或批量请求做压测。
+
+复核报告的实际差异：会话原先已有绝对过期和新 token，只缺旧会话撤销及闲置超时；练习局不落库；后台 traffic paths 已通过 `esc()` 输出，报告的 canary 不会作为 HTML 渲染。服务仍以 root 运行、SSH 允许 root 密码登录属于独立基础设施风险；修改它们前须确认新的运维登录通道与截图服务权限，不能直接关闭现有唯一通道。

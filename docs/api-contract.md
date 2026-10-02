@@ -36,6 +36,7 @@
 - 认证基于 **Cookie 会话**。注册 / 登录成功后，响应头种下：
   `COOKIE_SECURE=1` 时为 `Set-Cookie: __Host-sp_session=<token>; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000; Secure`（无 Domain）；未启用 Secure 的本地环境仍用 `sp_session`。
 - 会话 Cookie 为 HttpOnly，前端脚本不可读；服务端只存其 SHA-256。重名会话 Cookie 按未登录处理。
+- 登录与注册生成新会话并撤销请求中唯一的旧会话 Cookie。绝对有效期仍为 30 天；服务端闲置有效期普通账号为 24 小时，管理员为 30 分钟，以有效认证请求刷新。v32 为 sessions 追加 last_seen_at，旧会话从创建时间计算闲置期，不延长原过期时间。
 - 前端请求需携带 Cookie（`fetch` 使用 `credentials: 'include'`，XHR 使用 `withCredentials = true`）。`COOKIE_SAME_SITE` 支持 `Lax`（默认）、`Strict`、`None`；跨站 HTTPS 部署设 `None` 并开启 `COOKIE_SECURE=1`，否则服务拒绝启动。第三方 Cookie 仍受浏览器设置限制，建议前端与 API 使用同站域名。
 - 登出（`POST /api/auth/logout`）删除服务端会话并下发 `Max-Age=0` 的清空 Cookie。
 - 角色：`member`（默认）与 `admin`。管理员账号只能经 CLI 新建（`npm run admin -- --create <用户名>`，密码从标准输入读取、不回显），或将已有普通账号提权（`npm run admin -- <用户名>` 或管理员角色接口）。公开注册拒绝 `ADMIN_USERNAMES` 中的保留用户名；已有账号登录时仍按该配置同步管理员角色。
@@ -292,9 +293,11 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 ### 3.3 `POST /api/auth/login` —— 登录
 
-**认证**：无。**限流**：auth 桶。请求体 `{ "name": "…", "password": "…" }`（兼容 `username`）。旧账号无需先绑定邮箱即可登录。
+**认证**：无。**限流**：auth 桶及登录失败预算。请求体 `{ "name": "…", "password": "…", "turnstileToken": "…" }`（兼容 `username`）。旧账号无需先绑定邮箱即可登录。配置 Turnstile 时，所有账号必须提交有效的一次性 token；服务端在密码校验前验证，不按用户名区别验证流程。未配置密钥的本地环境沿用密码登录。
 
 成功 `200`：`{ "user": … }` 并种下会话 Cookie。错误：`401 用户名或密码不正确`（对不存在的账号同样执行哈希比较，不泄露账号是否存在）；其余同 3.2。
+
+人机验证失败返回 `400`，验证服务不可用返回 `503`，均不执行密码哈希，也不增加密码失败计数。同一归一化账号跨 IP、同一来源 IP 跨账号各自最多 5 次密码失败 / 15 分钟，触发后临时封禁登录 15 分钟；并发尝试也占预算，全站最多 32 个在途登录流程，超限返回 `429 login_limited` 与 `Retry-After`。成功登录清空该账号失败计数，来源 IP 仍保留其失败预算。管理员密码失败写 `admin-login-failed` 审计，触发封禁写 `login-blocked` 审计与服务日志；不记录密码或 token，不永久封禁管理员用户名。
 
 ### 3.4 `POST /api/auth/logout` —— 登出
 
@@ -533,11 +536,13 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 成功 `200`：`{ "user": { "id": "…", "name": "bob", "role": "admin" } }`，并写审计日志（`action` 为 `role`，`detail` 形如 `bob → 管理员`，无关联题目 / 作品）。
 
-错误：`401` / `403 仅管理员可以操作`；`400 角色无效`；`404 用户不存在`；`409 不能修改自己的角色，避免把自己锁在管理端之外`（防自降权，自己的角色只能由另一名管理员调整）。
+错误：`401` / `403 仅管理员可以操作`；`400 角色无效`；`404 用户不存在`；`409 不能修改自己的角色，避免把自己锁在管理端之外`（防自降权，自己的角色只能由另一名管理员调整）；由 `ADMIN_USERNAMES` 固定的管理员须先修改服务器配置，直接降权返回 `409`。
 
 ### 3.8 `POST /api/arena/matches` —— 创建盲投对战
 
 **认证**：无（匿名可创建，但不计票）。**限流**：matches 桶（60 次/分钟）。
+
+对局有效期 3 小时。服务启动及每分钟清理过期且没有正式票引用的记录，保留正式票及其对局；匿名无票对局全站最多 10000 条，容量已满返回 `429 anonymous-capacity` 与 `Retry-After: 60`。猜模型练习局只存内存，已有 5000 局容量上限，另加 3 小时有效期，过期返回 `404 game-expired`。
 
 请求体：`{ "task": "chinese-architecture", "previous": "<上一场对局id，选填>" }`
 

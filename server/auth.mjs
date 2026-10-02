@@ -21,7 +21,8 @@ export function avatarOf(user) {
   return AVATARS[hash % 16];
 }
 
-export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', sessionTtl }) {
+export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', sessionTtl,
+  sessionIdleTtl = 24 * 3600e3, adminSessionIdleTtl = 30 * 60e3 }) {
   if (!['Lax', 'Strict', 'None'].includes(cookieSameSite)) throw new Error('COOKIE_SAME_SITE must be Lax, Strict or None');
   if (cookieSameSite === 'None' && !secureCookies) throw new Error('COOKIE_SAME_SITE=None requires COOKIE_SECURE=1');
   const q = {
@@ -38,8 +39,9 @@ export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', 
     setEmail: db.prepare('UPDATE users SET email = ?, email_verified_at = ? WHERE id = ?'),
     resetPassword: db.prepare('UPDATE users SET salt = ?, hash = ?, hash_params = NULL WHERE id = ?'),
     deleteUserSessions: db.prepare('DELETE FROM sessions WHERE user_id = ?'),
-    insertSession: db.prepare('INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)'),
-    session: db.prepare('SELECT users.* FROM sessions JOIN users ON users.id = sessions.user_id WHERE token_hash = ? AND expires_at > ?'),
+    insertSession: db.prepare('INSERT INTO sessions (token_hash, user_id, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?)'),
+    session: db.prepare('SELECT users.*, sessions.last_seen_at FROM sessions JOIN users ON users.id = sessions.user_id WHERE token_hash = ? AND expires_at > ?'),
+    touchSession: db.prepare('UPDATE sessions SET last_seen_at = ? WHERE token_hash = ?'),
     deleteSession: db.prepare('DELETE FROM sessions WHERE token_hash = ?'),
     purgeSessions: db.prepare('DELETE FROM sessions WHERE expires_at <= ?'),
   };
@@ -73,6 +75,11 @@ export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', 
 
   return {
     public: (user) => (user ? { id: user.id, name: user.name, nickname: user.nickname || user.name, avatar: avatarOf(user), role: user.role } : null),
+    isAdminName(rawName) {
+      const key = nameKey(String(rawName ?? ''));
+      const user = q.userByKey.get(key);
+      return admins.includes(key) || user?.role === 'admin';
+    },
 
     // Either field may be sent alone; a body with neither still asks for a nickname.
     updateProfile(user, body) {
@@ -168,11 +175,15 @@ export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', 
       return syncRole(q.userById.get(user.id));
     },
 
-    startSession(res, userId) {
+    startSession(res, userId, req) {
       const token = randomBytes(32).toString('base64url');
       const now = Date.now();
-      q.purgeSessions.run(now);
-      q.insertSession.run(sha256(token), userId, now, now + sessionTtl);
+      const previous = uniqueCookie(req?.headers.cookie, cookieName);
+      transaction(db, () => {
+        if (previous) q.deleteSession.run(sha256(previous));
+        q.purgeSessions.run(now);
+        q.insertSession.run(sha256(token), userId, now, now + sessionTtl, now);
+      });
       res.setHeader('Set-Cookie', `${cookieName}=${token}; Path=/; HttpOnly; SameSite=${cookieSameSite}; Max-Age=${Math.floor(sessionTtl / 1000)}${secureCookies ? '; Secure' : ''}`);
     },
 
@@ -185,8 +196,18 @@ export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', 
     userFrom(req) {
       const token = uniqueCookie(req.headers.cookie, cookieName);
       if (!token) return null;
-      const user = q.session.get(sha256(token), Date.now());
-      return user ? syncRole(user) : null;
+      const tokenHash = sha256(token);
+      const now = Date.now();
+      const user = q.session.get(tokenHash, now);
+      if (!user) return null;
+      const idleTtl = roleFor(user) === 'admin' ? adminSessionIdleTtl : sessionIdleTtl;
+      if (now - user.last_seen_at >= idleTtl) {
+        q.deleteSession.run(tokenHash);
+        return null;
+      }
+      q.touchSession.run(now, tokenHash);
+      delete user.last_seen_at;
+      return syncRole(user);
     },
 
     promote(rawName, role = 'admin') {
@@ -206,6 +227,7 @@ export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', 
       const user = q.userById.get(String(userId ?? ''));
       if (!user) fail(404, '用户不存在');
       if (user.id === actor.id) fail(409, '不能修改自己的角色，避免把自己锁在管理端之外');
+      if (admins.includes(user.name_key) && role !== 'admin') fail(409, '该账号由 ADMIN_USERNAMES 固定为管理员，请先修改服务器配置');
       q.setRole.run(role, user.id);
       return { id: user.id, name: user.name, role };
     },

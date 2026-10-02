@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
+import { Readable } from 'node:stream';
 import { after, before, describe, test } from 'node:test';
 import { HttpError, createRouter, fail, sendJson } from '../server/http.mjs';
 import { MIGRATIONS, openDatabase } from '../server/db.mjs';
@@ -27,6 +28,30 @@ import { registerShow1Guess } from '../server/show1/guess.mjs';
 const GOLDEN = JSON.parse(
   readFileSync(new URL('./fixtures/show1-golden/guess_today.json', import.meta.url), 'utf8'),
 );
+
+test('anonymous practice expires after three hours without writing results', async (t) => {
+  const db = openDatabase(':memory:');
+  const router = createRouter();
+  registerShow1Guess(router, { db, limit: {} });
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  const call = (path, body) => {
+    const req = Readable.from([Buffer.from(JSON.stringify(body))]);
+    req.headers = { 'content-type': 'application/json' };
+    return router.match('POST', path).handler({ req, user: null, ip: '203.0.113.7' });
+  };
+  try {
+    const { gameId } = await call('/api/guess/practice/start', { difficulty: 1 });
+    now += 3 * 3600e3 - 1;
+    assert.ok((await call('/api/guess/check', { guessId: 'glm-5', gameId, final: true })).answer);
+    now++;
+    await assert.rejects(call('/api/guess/check', { guessId: 'glm-5', gameId }),
+      (error) => error.status === 404 && error.code === 'game-expired');
+    const next = await call('/api/guess/practice/start', { difficulty: 1 });
+    assert.ok((await call('/api/guess/check', { guessId: 'glm-5', gameId: next.gameId, final: true })).answer);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM guess_results').get().n, 0);
+  } finally { db.close(); }
+});
 
 test('guess result migration preserves rows and marks later IP/day or user/day records', () => {
   const db = new DatabaseSync(':memory:');

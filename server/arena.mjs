@@ -12,12 +12,13 @@ import { randomBytes } from 'node:crypto';
 import { Worker } from 'node:worker_threads';
 import { effortKey, entityKey, modelKey, providerOf } from './catalog.mjs';
 import { transaction } from './db.mjs';
-import { fail } from './http.mjs';
+import { fail, HttpError } from './http.mjs';
 import { rankEntries, rankWorks } from './ranking.mjs';
 import { generationOf } from './generation.mjs';
 import { isTextTask } from './categories.mjs';
 
 const MATCH = { tierWidth: 150, sameTierRate: 0.9, blowoutGap: 400, rerolls: 2 };
+const ANONYMOUS_MATCH_MAX = 10000;
 // The dense solver grows roughly cubically with entry count: 40 entries took
 // 112–128 ms locally, while 1000 blocked the main thread for 2.45 s. Use a
 // conservative 200-entry cutoff so small boards avoid worker startup overhead.
@@ -46,7 +47,8 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     lastMatch: db.prepare('SELECT * FROM matches WHERE user_id = ? AND task_id = ? ORDER BY created_at DESC LIMIT 1'),
     matchByToken: db.prepare('SELECT * FROM matches WHERE (a_token = ? OR b_token = ?) AND expires_at > ?'),
     decide: db.prepare('UPDATE matches SET choice = ?, decided_at = ? WHERE id = ? AND choice IS NULL'),
-    purge: db.prepare('DELETE FROM matches WHERE expires_at < ? AND id NOT IN (SELECT match_id FROM votes)'),
+    purge: db.prepare('DELETE FROM matches WHERE expires_at <= ? AND id NOT IN (SELECT match_id FROM votes)'),
+    anonymousMatches: db.prepare('SELECT COUNT(*) AS n FROM matches WHERE user_id IS NULL AND id NOT IN (SELECT match_id FROM votes)'),
     insertVote: db.prepare("INSERT INTO votes (id, match_id, user_id, task_id, a_work, b_work, pair_key, choice, created_at, a_identity, b_identity, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'arena')"),
     votedPair: db.prepare('SELECT 1 FROM votes WHERE user_id = ? AND pair_key = ?'),
     votedPairs: db.prepare('SELECT pair_key, a_work, b_work FROM votes WHERE user_id = ? AND task_id = ?'),
@@ -58,6 +60,14 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     vote: db.prepare('SELECT * FROM votes WHERE id = ?'),
     audit: db.prepare('INSERT INTO audit (at, actor_id, actor_name, action, task_id, work_id, detail) VALUES (?, ?, ?, ?, ?, ?, ?)'),
   };
+
+  let lastCleanup = 0;
+  const cleanupExpiredMatches = (now = Date.now()) => {
+    const result = q.purge.run(now);
+    lastCleanup = now;
+    return result.changes;
+  };
+  cleanupExpiredMatches();
 
   // The leaderboard only changes when votes or work states change; callers invalidate.
   let cache = new Map();
@@ -276,13 +286,14 @@ export function createArena({ db, catalog, library, limits, random = Math.random
 
   return {
     invalidate,
+    cleanupExpiredMatches,
     leaderboard,
     workScores,
     poolStats,
 
     async createMatch(user, taskId, previousId, snapshot = catalog.snapshot()) {
       if (!snapshot.task(taskId) && !catalog.task(taskId)) fail(404, '题目不存在');
-      if (random() < 0.02) q.purge.run(Date.now() - 24 * 3600e3);
+      if (Date.now() - lastCleanup >= 60e3) cleanupExpiredMatches();
       const groups = new Map();
       for (const work of library.eligible(taskId, snapshot)) {
         if (user && work.ownerId === user.id) continue;
@@ -306,6 +317,13 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       const id = randomBytes(12).toString('hex');
       const now = Date.now();
       const tokens = [token(), token()];
+      // Check immediately before inserting: concurrent draws can await the leaderboard.
+      // Count only disposable anonymous rounds, preserving every recorded ballot.
+      if (!user && q.anonymousMatches.get().n >= ANONYMOUS_MATCH_MAX) {
+        const error = new HttpError(429, '当前体验人数较多，请稍后再试', 'anonymous-capacity');
+        error.retryAfter = 60;
+        throw error;
+      }
       q.insertMatch.run(id, user?.id ?? null, taskId, a.id, b.id, tokens[0], tokens[1], now, now + limits.matchTtl,
         snapshot.root, snapshot.version, JSON.stringify(identityOf(a, a.curated ? snapshot.entryDigest(a) : a.digest)),
         JSON.stringify(identityOf(b, b.curated ? snapshot.entryDigest(b) : b.digest)));

@@ -94,7 +94,7 @@ test('client-supplied forwarded prefixes cannot reset the login rate limit', asy
       statuses.push(response.status);
       await response.arrayBuffer();
     }
-    assert.deepEqual(statuses, [...Array(10).fill(401), 429]);
+    assert.deepEqual(statuses, [...Array(5).fill(401), ...Array(6).fill(429)]);
   }, true);
   assert.equal(clientIp({ headers: { 'x-forwarded-for': '198.51.100.1' },
     socket: { remoteAddress: '203.0.113.5' } }, true), '203.0.113.5', 'direct clients cannot supply proxy identities');

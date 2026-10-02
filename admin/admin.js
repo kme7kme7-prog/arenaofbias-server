@@ -513,6 +513,112 @@ function newQuestionDialog() {
     } catch (error) { $('.form-error', form).textContent = error.message; done(); }
   });
 }
+const PROVENANCE = { harness: { label: 'Harness', list: 'harnesses' }, provider: { label: '服务商', list: 'providers' } };
+const OTHER = '__other';
+const PROVIDER_CHOICES = { official: '官方', unofficial: '非官方' };
+const providerChoice = (w) => w?.provider === 'official' ? 'official' : w?.provider || w?.providerName ? 'unofficial' : '';
+const providerLabel = (w) => PROVIDER_CHOICES[providerChoice(w)] ?? '未注明';
+const registry = (type) => state.data?.[PROVENANCE[type].list] ?? [];
+const provenanceText = (w) => [w.harnessName, providerChoice(w) && providerLabel(w)].filter(Boolean).join(' · ');
+const nameKey = (value) => String(value ?? '').normalize('NFKC').toLowerCase().replace(/[\s-]/g, '');
+const suggestEntry = (type, text) => {
+  const key = nameKey(text);
+  return key ? registry(type).find((entry) => [entry.name, ...(entry.aliases ?? [])].some((name) => nameKey(name) === key)) ?? null : null;
+};
+// The stored choice of a work: registry id, OTHER (free text only) or ''.
+const currentProvenance = (w, type) => type === 'provider' ? { choice: providerChoice(w) } : ({ choice: w?.[type] ?? (w?.[`${type}Name`] ? OTHER : ''), other: w?.[type] ? '' : w?.[`${type}Name`] ?? '' });
+
+function suggestionHtml(type, choice, other) {
+  const match = choice === OTHER ? suggestEntry(type, other) : null;
+  return match ? `可能是 ${esc(match.name)}<button type="button" class="btn sm" data-pick-provenance="${type}" data-id="${esc(match.id)}">改选 ${esc(match.name)}</button>` : '';
+}
+
+const GENERATION_FIELDS = ['generationMode', 'humanIntervention'];
+const GENERATION_CHOICES = {
+  generationMode: { 'single-turn': '单轮', 'multi-turn': '多轮' },
+  humanIntervention: { none: '仅初始提示，未修改代码', 'prompt-guided': '人工提示与指导（未改代码）', 'code-edited': '人工修改了代码' },
+};
+const GENERATION_LABELS = { generationMode: '生成方式', humanIntervention: '人工介入程度' };
+function generationFields(work = {}) {
+  const select = (key) => `<label class="field"><span class="field-label">${GENERATION_LABELS[key]}</span><select class="input" name="${key}"><option value="">未注明</option>${Object.entries(GENERATION_CHOICES[key]).map(([value, label]) => `<option value="${value}"${work[key] === value ? ' selected' : ''}>${label}</option>`).join('')}</select></label>`;
+  return `<details class="generation-fields"${GENERATION_FIELDS.some((key) => work[key]) ? ' open' : ''}><summary>生成信息（选填）</summary>
+    <div class="field-row">${select('generationMode')}${select('humanIntervention')}</div>
+    <p class="fine">用户只发一次提示词即为单轮，智能体自主迭代也算单轮。仅单轮且无人工介入的作品可进盲评池；未注明与没有人工介入是不同含义。</p></details>`;
+}
+const generationBody = (get, work = {}) => Object.fromEntries(GENERATION_FIELDS
+  .map((key) => [key, String(get(key) ?? '').trim()]).filter(([key, value]) => value !== (work[key] ?? '')));
+const generationFacts = (work) => Object.keys(GENERATION_CHOICES).map((key) => `<div><dt>${GENERATION_LABELS[key]}</dt><dd>${esc(GENERATION_CHOICES[key][work[key]] || '未注明')}</dd></div>`).join('');
+let effortInputId = 0;
+function effortField(value = '') {
+  const id = `admin-efforts-${++effortInputId}`;
+  return `<label class="field"><span class="field-label">推理档位<i>*</i><small>请选择常用值或手填，使用默认设置填 Default</small></span><input class="input" name="effort" list="${id}" required maxlength="20" value="${esc(value)}" placeholder="选择或填写档位"><datalist id="${id}">${['Default', 'Low', 'Medium', 'High', 'XHigh', 'Max'].map((effort) => `<option value="${effort}">${effort === 'Default' ? '默认档位（明确使用默认设置）' : effort}</option>`).join('')}</datalist></label>`;
+}
+
+function provenanceFields({ harness = { choice: '', other: '' }, provider = { choice: '' } } = {}) {
+  const field = (type, { choice, other }) => {
+    const entries = registry(type).filter((entry) => entry.listed || entry.id === choice);
+    const known = !choice || choice === OTHER || entries.some((entry) => entry.id === choice);
+    const suggestion = suggestionHtml(type, choice, other);
+    return `<label class="field"><span class="field-label">${PROVENANCE[type].label}</span><select class="input" name="${type}Choice" data-provenance-choice="${type}">
+        <option value="">未注明</option>
+        ${entries.map((entry) => `<option value="${esc(entry.id)}"${entry.id === choice ? ' selected' : ''}>${esc(entry.name)}${entry.listed ? '' : '（已停用）'}</option>`).join('')}
+        ${known ? '' : `<option value="${esc(choice)}" selected>${esc(choice)}（不在当前数据包）</option>`}
+        <option value="${OTHER}"${choice === OTHER ? ' selected' : ''}>其他（手动填写）</option>
+      </select></label>
+      <label class="field" data-provenance-other="${type}"${choice === OTHER ? '' : ' hidden'}><span class="field-label">其他${PROVENANCE[type].label}名称</span><input class="input" name="${type}Other" maxlength="40" value="${esc(other)}">
+        <span class="provenance-suggestion" data-provenance-suggestion="${type}"${suggestion ? '' : ' hidden'}>${suggestion}</span></label>`;
+  };
+  return `<div class="field-row">${field('harness', harness)}</div>
+    <div class="field-row"><label class="field"><span class="field-label">服务商<i>*</i></span><select class="input" name="providerChoice" required><option value="">选择服务商</option>${Object.entries(PROVIDER_CHOICES).map(([value, label]) => `<option value="${value}"${provider.choice === value ? ' selected' : ''}>${label}</option>`).join('')}</select></label></div>`;
+}
+
+function refreshProvenance(form) {
+  for (const type of ['harness']) {
+    const choice = form.elements.namedItem(`${type}Choice`);
+    if (!choice) continue;
+    const other = form.elements.namedItem(`${type}Other`).value;
+    $(`[data-provenance-other="${type}"]`, form).hidden = choice.value !== OTHER;
+    const suggestion = $(`[data-provenance-suggestion="${type}"]`, form);
+    suggestion.innerHTML = suggestionHtml(type, choice.value, other);
+    suggestion.hidden = !suggestion.innerHTML;
+  }
+}
+
+// With `work`, only changed fields are sent. Harness id and free text are sent together.
+function provenanceBody(get, work = null) {
+  const body = {};
+  for (const type of ['harness']) {
+    const choice = get(`${type}Choice`) ?? '';
+    const other = String(get(`${type}Other`) ?? '').trim();
+    if (choice === OTHER && !other) throw new Error(`请填写${PROVENANCE[type].label}名称，或改选「未注明」`);
+    const next = choice === OTHER ? { id: null, other } : { id: choice || null, other: '' };
+    const before = currentProvenance(work, type);
+    const initial = { id: before.choice && before.choice !== OTHER ? before.choice : null, other: before.other };
+    if (work ? next.id === initial.id && next.other === initial.other : !next.id && !next.other) continue;
+    body[`${type}Id`] = next.id;
+    body[`${type}Other`] = next.other;
+  }
+  const provider = get('providerChoice') ?? '';
+  if (!provider) throw new Error('请选择服务商');
+  if (!String(get('effort') ?? '').trim()) throw new Error('请选择或填写推理档位');
+  if (work ? provider !== providerChoice(work) : provider) body.providerId = provider;
+  return body;
+}
+
+const provenanceFacts = (w) => `<div><dt>Harness</dt><dd>${esc(w.harnessName || '未注明')}</dd></div>
+  <div><dt>服务商</dt><dd>${esc(providerLabel(w))}</dd></div>`;
+
+const auditList = (limit) => {
+  const titles = new Map([...(state.works ?? []), ...(state.adminQuestions ?? [])].map((w) => [w.id, w.title]));
+  return state.audit.length
+    ? `<ol class="audit">${state.audit.slice(0, limit).map((row) => {
+      const target = row.action.startsWith('question-') ? row.task : row.work;
+      return `<li><time>${formatTime(row.at)}</time><span class="audit-actor">${esc(row.actor)}</span><b>${esc(ACTIONS[row.action] ?? row.action)}</b><span class="audit-work">${target ? esc(titles.get(target) ?? `${target}（已删除）`) : ''}${row.detail ? ` · ${esc(row.detail)}` : ''}</span></li>`;
+    }).join('')}</ol>`
+    : '<p class="muted">还没有记录。</p>';
+};
+
+
 function editDialog(w) {
   const curated = w.source === 'curated';
   const models = state.data?.models ?? [];

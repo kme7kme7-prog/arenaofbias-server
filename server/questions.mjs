@@ -45,6 +45,7 @@ export function createQuestions(db) {
   const deleteWork = db.prepare('UPDATE works SET deleted_at = ?, updated_at = ? WHERE id = ?');
   const deleteQuestion = db.prepare('UPDATE questions SET deleted_at = ? WHERE id = ?');
   const setModeration = db.prepare('UPDATE questions SET moderation = ?, category = ?, templates = ?, tags = ?, domains = ? WHERE id = ?');
+  const setMeta = db.prepare('UPDATE questions SET title = ?, summary = ?, prompt = ?, category = ?, templates = ?, tags = ?, domains = ? WHERE id = ?');
   const fromRow = (row, privateView = false) => row ? {
     id: row.id, title: row.title, summary: row.summary, prompt: row.prompt,
     category: row.category, domains: JSON.parse(row.domains), tags: JSON.parse(row.tags), templates: JSON.parse(row.templates),
@@ -85,6 +86,41 @@ export function createQuestions(db) {
       insert.run(id, user.id, title, summary, prompt, JSON.stringify(tags), JSON.stringify(templates), now, JSON.stringify({ status: 'pending', at: now }), category, JSON.stringify(domains));
       audit.run(now, user.id, user.name, 'question-create', id, null, title);
       return fromRow(one.get(id), user.role === 'admin' ? 'admin' : true);
+    },
+    edit(actor, id, body) {
+      if (actor.role !== 'admin') fail(403, '仅管理员可以操作');
+      const row = one.get(id);
+      if (!row) fail(404, '题目不存在');
+      const fields = ['title', 'summary', 'prompt', 'category', 'domains'];
+      if (!body || typeof body !== 'object' || Array.isArray(body)
+        || !fields.some((field) => Object.hasOwn(body, field))) fail(400, '请提供要修改的题目信息');
+      const title = Object.hasOwn(body, 'title') ? required(body.title, '题目标题', 70) : row.title;
+      const summary = Object.hasOwn(body, 'summary') ? required(body.summary, '测试简述', 400) : row.summary;
+      const prompt = Object.hasOwn(body, 'prompt') ? required(body.prompt, '完整提示词', 20000) : row.prompt;
+      const category = Object.hasOwn(body, 'category') ? requireCategory(body.category) : row.category;
+      const previousDomains = JSON.parse(row.domains);
+      const domains = Object.hasOwn(body, 'domains') ? requireDomains(body.domains) : previousDomains;
+      const previousTemplates = JSON.parse(row.templates);
+      const templates = category !== row.category && !compatibleTemplates(category, previousTemplates)
+        ? defaultTemplates(category) : previousTemplates;
+      const items = works.all(id);
+      if (prompt !== row.prompt && publicRow(row) && items.length) fail(409, '已有作品的题目不能修改提示词');
+      if (templates !== previousTemplates && items.length) fail(409, '已有作品的题目不能修改提交格式');
+      const previousTags = JSON.parse(row.tags);
+      const tags = category !== row.category ? previousTags.filter((tag) => tagKey(tag) !== tagKey(category)) : previousTags;
+      const detail = {};
+      for (const [field, from, to] of [
+        ['title', row.title, title], ['summary', row.summary, summary], ['category', row.category, category],
+        ['domains', previousDomains, domains], ['templates', previousTemplates, templates], ['tags', previousTags, tags],
+      ]) {
+        if (JSON.stringify(from) !== JSON.stringify(to)) detail[field] = { from, to };
+      }
+      if (prompt !== row.prompt) detail.prompt = { changed: '已修改', fromLength: row.prompt.length, toLength: prompt.length };
+      transaction(db, () => {
+        setMeta.run(title, summary, prompt, category, JSON.stringify(templates), JSON.stringify(tags), JSON.stringify(domains), id);
+        audit.run(Date.now(), actor.id, actor.name, 'question-edit', id, null, JSON.stringify(detail));
+      });
+      return fromRow(one.get(id), 'admin');
     },
     review(actor, id, body) {
       if (actor.role !== 'admin') fail(403, '仅管理员可以操作');

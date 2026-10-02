@@ -352,8 +352,8 @@ test('stale results cannot replace human review or edits, and a new worker resum
     assert.equal(platform.library.work('one', work.id).moderation.source, 'human');
     assert.equal(platform.library.work('one', work.id).moderation.status, 'rejected');
     const stale = platform.library.work('one', work.id);
-    const admin = platform.db.prepare("SELECT id, name FROM users WHERE name = 'admin'").get();
-    const edited = platform.library.setMeta(admin, 'one', work.id, { title: '修改后的标题' });
+    const owner = platform.db.prepare("SELECT id, name FROM users WHERE name = 'owner'").get();
+    const edited = platform.library.setMeta(owner, 'one', work.id, { title: '修改后的标题' }, { author: true });
     assert.equal(edited.moderation.status, 'pending');
     assert.equal(platform.library.finishModeration(stale, { status: 'approved', reason: '过期结果' }), false);
     assert.equal(platform.library.work('one', work.id).moderation.status, 'pending');

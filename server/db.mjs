@@ -434,6 +434,11 @@ const MIGRATIONS = [
       reviewed_arena_at = COALESCE(reviewed_arena_at, reviewed_at, updated_at)
       WHERE status IN ('verified', 'questioned')`);
   },
+  // Authors acknowledge work review and moderation updates from their own work list.
+  (db) => {
+    const columns = new Set(db.prepare('PRAGMA table_info(users)').all().map((column) => column.name));
+    if (!columns.has('works_seen_at')) db.exec('ALTER TABLE users ADD COLUMN works_seen_at INTEGER');
+  },
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

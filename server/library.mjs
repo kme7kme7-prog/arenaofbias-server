@@ -87,6 +87,9 @@ export function createLibrary({ db, catalog, config, limits }) {
     LEFT JOIN users reviewer ON reviewer.id = review_audit.actor_id`;
   const liveWork = `works.deleted_at IS NULL AND NOT EXISTS (
     SELECT 1 FROM questions WHERE questions.id = works.task_id AND questions.deleted_at IS NOT NULL)`;
+  const changedAt = `MAX(COALESCE(works.reviewed_at, 0), CASE
+    WHEN json_extract(works.moderation, '$.status') IN ('approved', 'rejected')
+    THEN COALESCE(json_extract(works.moderation, '$.at'), 0) ELSE 0 END)`;
   const q = {
     draft: db.prepare('SELECT * FROM drafts WHERE id = ?'),
     draftByToken: db.prepare('SELECT * FROM drafts WHERE token = ? AND expires_at > ?'),
@@ -111,7 +114,21 @@ export function createLibrary({ db, catalog, config, limits }) {
     works: db.prepare(`${WORK} WHERE ${liveWork} ORDER BY works.created_at DESC`),
     worksOfTask: db.prepare(`${WORK} WHERE works.task_id = ? AND ${liveWork}`),
     worksOfOwner: db.prepare(`${WORK} WHERE works.owner_id = ? AND ${liveWork} ORDER BY works.created_at DESC`),
-    pendingOf: db.prepare("SELECT COUNT(*) AS n FROM works WHERE owner_id = ? AND status = 'unverified' AND deleted_at IS NULL"),
+    pendingOf: db.prepare(`SELECT COUNT(*) AS n FROM works WHERE owner_id = ? AND status = 'unverified'
+      AND ${liveWork} AND COALESCE(json_extract(works.moderation, '$.status'), '') != 'rejected'
+      AND NOT EXISTS (SELECT 1 FROM questions WHERE questions.id = works.task_id
+        AND json_extract(questions.moderation, '$.status') = 'rejected')`),
+    trustOf: db.prepare(`SELECT
+      COUNT(*) FILTER (WHERE status = 'verified' AND deleted_at IS NULL) AS verified,
+      COUNT(*) FILTER (WHERE status = 'questioned' AND reviewed_at >= ?) +
+        (SELECT COUNT(*) FROM audit JOIN works questioned ON questioned.id = audit.work_id
+          WHERE questioned.owner_id = ? AND audit.action = 'questioned' AND audit.at >= ?) AS questioned
+      FROM works WHERE owner_id = ?`),
+    worksSeen: db.prepare('SELECT works_seen_at FROM users WHERE id = ?'),
+    markWorksSeen: db.prepare('UPDATE users SET works_seen_at = ? WHERE id = ?'),
+    updatesOf: db.prepare(`SELECT COUNT(*) AS n FROM works WHERE owner_id = ? AND deleted_at IS NULL AND ${changedAt} > ?`),
+    recentReviews: db.prepare(`SELECT (reviewed_at - created_at) / 3600000.0 AS hours FROM works
+      WHERE status = 'verified' AND deleted_at IS NULL AND reviewed_at >= ? ORDER BY hours`),
     insertWork: db.prepare(`INSERT INTO works (id, task_id, owner_id, title, summary, model_id, model_other, effort,
       harness_id, harness_other, provider_id, provider_other, note, content_key,
       source_name, root, entry, file_count, bytes, digest, checks, trial, cover, created_at, updated_at,
@@ -207,6 +224,23 @@ export function createLibrary({ db, catalog, config, limits }) {
       cover: row.cover,
       createdAt: row.created_at,
     };
+  }
+
+  function seenAt(userId) {
+    return q.worksSeen.get(userId)?.works_seen_at ?? Date.now() - 7 * 24 * 3600e3;
+  }
+
+  function workChangedAt(work) {
+    return Math.max(work.reviewedAt ?? 0,
+      ['approved', 'rejected'].includes(work.moderation.status) ? work.moderation.at ?? 0 : 0);
+  }
+
+  function pendingLimit(user) {
+    if (user.role === 'admin') return null;
+    const since = Date.now() - 90 * 24 * 3600e3;
+    const credit = q.trustOf.get(since, user.id, since, user.id);
+    return credit.verified >= limits.trustedMinVerified && credit.questioned === 0
+      ? limits.trustedPendingPerUser : limits.pendingPerUser;
   }
 
   function audit(actor, action, work, detail = '') {
@@ -424,6 +458,26 @@ export function createLibrary({ db, catalog, config, limits }) {
     },
     uploadsOf(userId) {
       return q.worksOfOwner.all(userId).map((row) => fromRow(row));
+    },
+    // Gallery's queue also includes arena-verified uploads awaiting a gallery decision.
+    reviewQueue() {
+      return this.uploads().filter((work) => !work.curatedAs && work.status !== 'questioned' && !work.reviewedGalleryAt
+        && contentAllowed(work)).sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+    },
+    authorWorks(user) {
+      const seen = seenAt(user.id);
+      const queue = new Map(this.reviewQueue().map((work, index) => [work.id, index]));
+      return this.uploadsOf(user.id).map((work) => ({
+        ...this.toPublic(work, user),
+        ...(work.status === 'unverified' && queue.has(work.id) ? { queueAhead: queue.get(work.id) } : {}),
+        ...(workChangedAt(work) > seen ? { changed: true } : {}),
+      }));
+    },
+    reviewStats() {
+      const samples = q.recentReviews.all(Date.now() - 30 * 24 * 3600e3).map((row) => row.hours);
+      if (samples.length < 5) return { medianHours: null };
+      const middle = Math.floor(samples.length / 2);
+      return { medianHours: samples.length % 2 ? samples[middle] : (samples[middle - 1] + samples[middle]) / 2 };
     },
 
     toPublic(work, viewer) {
@@ -653,7 +707,9 @@ export function createLibrary({ db, catalog, config, limits }) {
       const cover = coverFrom(body.cover);
       // Admins stage inbox registrations as unverified works in bulk; the per-user
       // pending cap only exists to throttle regular submitters.
-      if (user.role !== 'admin' && q.pendingOf.get(user.id).n >= limits.pendingPerUser) fail(429, `你已有 ${limits.pendingPerUser} 件作品在等待核验，请等核验后再上传`);
+      const cap = pendingLimit(user);
+      const pending = q.pendingOf.get(user.id).n;
+      if (cap !== null && pending >= cap) fail(429, `你已有 ${pending} 件作品在等待核验（上限 ${cap} 件），核验完成或删除作品后名额会释放`);
 
       let id = workId();
       while (q.work.get(id)) id = workId();
@@ -704,7 +760,7 @@ export function createLibrary({ db, catalog, config, limits }) {
     },
 
     // Admins edit any upload; authors edit their own until it has been reviewed.
-    setMeta(actor, taskId, id, body, { author = false } = {}) {
+    setMeta(actor, taskId, id, body, { author = false, inTransaction = false } = {}) {
       const work = upload(taskId, id);
       if (!work) fail(404, '作品不存在', 'not_found');
       const admin = !author;
@@ -735,7 +791,7 @@ export function createLibrary({ db, catalog, config, limits }) {
       const generation = generationFrom(body, work);
       const promptVariant = promptVariantFrom(taskId, body, work.promptVariant, !admin);
       const note = noteWithVendor(body.note === undefined ? work.note : clip(body.note, 1000), who.modelId, body.vendor);
-      transaction(db, () => {
+      const apply = () => {
         if (moved) {
           q.moveWorkTask.run(moved.to, Date.now(), id);
           q.moveVotes.run(moved.to, moved.from, id, id);
@@ -748,8 +804,10 @@ export function createLibrary({ db, catalog, config, limits }) {
           ...GENERATION_FIELDS.map((key) => generation[key]), promptVariant, note, Date.now(), id);
         audit(actor, 'meta', work, `编辑信息${generationAudit(work, generation)}${moved ? `；归属题目 ${moved.from} → ${moved.to}` : ''}`);
         const next = upload(moved ? moved.to : taskId, id);
-        if (config.moderation?.enabled && moderationText(work) !== moderationText(next)) q.moderation.run(JSON.stringify(pendingModeration()), id);
-      });
+        if (author && config.moderation?.enabled && moderationText(work) !== moderationText(next)) q.moderation.run(JSON.stringify(pendingModeration()), id);
+      };
+      if (inTransaction) apply();
+      else transaction(db, apply);
       return admin ? this.adminWork(upload(moved ? moved.to : taskId, id)) : this.toPublic(upload(moved ? moved.to : taskId, id), actor);
     },
 
@@ -786,11 +844,12 @@ export function createLibrary({ db, catalog, config, limits }) {
     },
 
     // ---- review and removal -----------------------------------------------------------
-    review(admin, taskId, id, body) {
+    review(admin, taskId, id, body, { inTransaction = false } = {}) {
       const work = upload(taskId, id);
       if (!work) fail(404, '作品不存在');
       const status = String(body.status ?? '');
       if (!['verified', 'questioned', 'unverified'].includes(status)) fail(400, '审核结果无效');
+      if (status === 'verified' && !['legacy', 'approved'].includes(work.moderation?.status)) fail(409, '请先完成内容审核');
       const reason = clip(body.reason, 500);
       if (status === 'questioned' && !reason) fail(400, '标记存疑时请写明原因，作者和访客都会看到');
       const who = body.modelId !== undefined || body.modelName !== undefined ? identity(body) : work;
@@ -813,17 +872,24 @@ export function createLibrary({ db, catalog, config, limits }) {
       const summary = body.summary === undefined ? work.summary : clip(body.summary, 200);
       const now = Date.now();
       const labels = { verified: '通过验证', questioned: '标记存疑', unverified: '退回未验证' };
-      transaction(db, () => {
+      const apply = () => {
         q.review.run(status, status === 'verified' ? '' : reason, who.modelId, who.modelId ? '' : who.modelName, effort,
           source.harnessId, source.harnessOther, source.providerId, source.providerOther,
           ...GENERATION_FIELDS.map((key) => generation[key]), Number(gallery), Number(arena), title, summary,
           noteWithVendor(work.note, who.modelId, body.vendor), now,
           typeof body.show_gallery === 'boolean' ? now : null, typeof body.show_arena === 'boolean' ? now : null, now, id);
         audit(admin, status, work, [labels[status], reason].filter(Boolean).join('：') + generationAudit(work, generation));
-        const next = upload(taskId, id);
-        if (config.moderation?.enabled && moderationText(work) !== moderationText(next)) q.moderation.run(JSON.stringify(pendingModeration()), id);
-      });
+      };
+      if (inTransaction) apply();
+      else transaction(db, apply);
       return upload(taskId, id);
+    },
+
+    reviewWithMeta(admin, taskId, id, body) {
+      return transaction(db, () => {
+        if (body.meta && Object.keys(body.meta).length) this.setMeta(admin, taskId, id, body.meta, { inTransaction: true });
+        return this.review(admin, taskId, id, body, { inTransaction: true });
+      });
     },
 
     remove(user, taskId, id) {
@@ -864,6 +930,9 @@ export function createLibrary({ db, catalog, config, limits }) {
     },
 
     pendingCount: (userId) => q.pendingOf.get(userId).n,
+    pendingLimit,
+    updatesCount: (userId) => q.updatesOf.get(userId, seenAt(userId)).n,
+    markWorksSeen(userId) { q.markWorksSeen.run(Date.now(), userId); },
     auditLog(limit = 200) {
       return q.auditLog.all(limit).map((row) => ({ at: iso(row.at), actor: row.actor_name, action: row.action, task: row.task_id, work: row.work_id, detail: generationAuditView(row.detail) }));
     },

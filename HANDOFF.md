@@ -1,5 +1,27 @@
 # HANDOFF.md · 当前状态
 
+## 四仓整理：后台源码收口（2026-10-02，已验证，提交并推送）
+
+- 本轮用户已授权四仓整理、提交、合并、推送与部署；将下方作者进度、管理员编辑/批量审核两轮完整未提交实现合并收口，保留文本公式/表格等此前提交。
+- origin/main fetch 后仍为 343ed64；main 原领先 8 条，无 open PR，两个本地工作树分支均已合入 main。本轮使用本人 GitHub 身份 wsnxxxs/noreply，未删除分支或工作树。
+- Windows Node 24.16.0：check 82/0，test 230/230，diff --check 通过；无新代码修复。主会话已只读核对生产 343ed64 与本地同 SHA 163 文件一致，生产数据库 v27；本轮需要追加 v28–v31，部署前备份。
+- 本次保留现有 ba442b61 数据 pin；数据源 0291105 已推送、CI 产物构建中，最终不可变 pin、Linux/浏览器联调及生产发布结果由主会话后续记录。本代理未连接或改动服务器/业务库。下方“未提交/未推送”属于原功能轮当时状态，由本节提交收口覆盖。
+- [完整归档](docs/archive/2026-10-02-server-cleanup-wsnxxxs.md)。
+
+
+## 本轮：管理员编辑保留内容决定、审核批量接口与题目编辑（2026-10-02，实现与验证完成，未提交、未推送、未部署）
+
+- 按用户指定用三名 GPT-6.1 Sol / medium 子代理分工 library/首轮回归、题目服务/测试、API 文档，主会话集成路由与批量作品测试。先完成管理员编辑修复，再接批量核验。开始前已读 AGENTS/HANDOFF 与完整已有 diff；保留作者进度/等待名额的所有未提交段落及 `test/author-progress.test.mjs`。期间另一会话完成文本公式/表格改动与独立提交，本轮未修改这些源码或其 HANDOFF/API 文档段落。
+- 管理员 `setMeta` 与 `review` 顺带修改标题、说明、模型、档位等时保持完整 moderation；作者 PATCH 仍在送审文字变化时重置 pending 并 enqueue。管理员 meta、review、管理员 PATCH 不再 enqueue；现 moderator.enqueue 本身也仅处理 pending。`verified` 内容 approved/legacy 的 409 校验移入 library.review，单件与批量复用。现有 meta/核验 audit 照常写。
+- 新增 `POST /api/admin/works/batch-moderation`（works 1–100）、`POST /api/admin/works/batch-review`（works 1–100）、`POST /api/admin/questions/batch-moderation`（ids 1–50）、`POST /api/admin/questions/:id/meta`。全部仅管理员、write 每请求一次；批次预校验失败整体 400 不写入，逐件独立事务/结果/audit，一件失败继续后续项目，每批结束 invalidate 一次。作品成功项为 `{task,id,ok:true,work}`，题目成功项为 `{id,ok:true,question}`，失败项均带 `error:{status,code,message}`；HTTP 200 的 results 按请求顺序。字段无改名；特此明确题目成功视图字段名为 `question`。无 code 的业务错误统一补 invalid_request/forbidden/not_found/conflict，意外内部错误返回单项 500/internal_error 与通用中文原因。
+- 批量核验 meta 仅 effort/providerId/harnessId/harnessOther；每件在同事务先 setMeta 再 review，失败连 meta/audit 一起回滚。verified 强制 show_gallery=true，最终档位/服务商必填、内容须放行；questioned 理由必填且可处理待审内容。管理员修改不重置内容状态，因此批量核验无需 enqueue。批量题目通过不补分类/领域，缺分类或领域返回该题 400，须先单独编辑。
+- 题目 meta 支持 title/summary/prompt/category/domains，复用创建的长度、分类与领域校验，保持 moderation；公开 approved/legacy 且有未删除作品时锁定提示词，任何状态下有未删除作品且改分类须重置 templates 时返回 409。question-edit audit 记录变化字段 `{from,to}`，prompt 只记 `{changed:"已修改",fromLength,toLength}`，不存全文。公开题目从数据库实时读取；arena.invalidate 清领域/题型/综合榜缓存，HTTP 回归已核对 bootstrap 与领域榜更新。
+- 拆分提交定位（行号以本轮完成时文件为准）：`server/library.mjs` 仅 setMeta（763 行起，author 条件在 807 行）、review（847 行起）、reviewWithMeta（888 行起）；此前 changedAt/pendingOf/trustOf/authorWorks/pendingLimit 等段落仍属作者进度轮。`server/app.mjs` 仅 categories import、93 行起批次辅助函数、242/260 行起题目新路由、309 行起 review 校验/去 enqueue、377 行起 PATCH 的管理员不排队、424/436 行起作品批量路由、574 行起管理员 meta 去 enqueue；bootstrap/me/seen 原改动属作者进度轮。`server/questions.mjs` 48 行 setMeta SQL、90 行起 edit；不改现有 review/rejected 行为。
+- 测试拆分定位：`test/admin.test.mjs` 45/59 行 helper 配置参数、156 行起 withModeratedUpload 与 6 项管理员编辑/作者回归/作品批量测试；88 行附近旧 v30 迁移夹具索引改动属作者进度轮。`test/questions.test.mjs` 61 行起服务校验用例、408/437 行起 HTTP 编辑/批量题目用例。`test/moderation.test.mjs` 355–356 行仅把旧声明变更夹具从管理员改为作者 `{author:true}`，保留过期结果保护与重启恢复 pending 的原验证目的。`docs/api-contract.md` 仅 3.6 作者 PATCH 描述、3.7 管理员编辑及两项作品批量接口、3.14 两项题目接口、3.19 管理员 meta、3.24 作者重送审范围；原作者进度新增字段及另一会话文本公式描述保留。HANDOFF 只新增本节。没有修改 config/db、迁移、Gallery/admin 页面、依赖、数据包或业务库。
+- 已执行：Windows Node 24.16.0，最终 `npm run check` 82 文件 / 0 错，`npm test` 230/230，0 失败/取消/跳过，`git diff --check` 通过。最终测试包含作者进度与文本公式/表格的共享工作区改动。首轮 admin 单文件 15/15、题目单文件 17/17；首次全量 229/230，唯一旧 moderation 夹具仍期待管理员修改重置 pending，按作者路径修正后全过。批量作品夹具初次因投稿必填档位与 provider_id 的 CHECK 约束失败，已按正常投稿后模拟历史缺字段（provider_id=NULL）修正。
+- 已检查但不改行为：对 approved/legacy 且已有作品或投票的题目调用原单件 moderation rejected 仍允许成功；只写题目决定及 question-review audit，不删除作品、votes 或 matches，作品自身核验/内容决定和开关不变。catalog 随即不再公开该题，bootstrap/公开作品列表/公开作品源/媒体撤下，作者与管理员仍能私有查看和预览。历史正式竞技场票留库，但因作品失去当前资格而从综合/题型/领域排行榜计分移除，单题榜返回 404，新盲评配对返回 404；既有 match 的源撤下，已绑定用户再提交非 skip 选择时保存 match 决定但不新增票，返回 counted=false、reason=changed。个人历史 votesBy/profile 计数仍保留。代表作读取立即过滤失效作品。重新 approved 后符合原资格的作品与历史票重新参与；娱乐池使用 Show1 旧 roundByTask 映射，通常社区题原本就不在其池内。此结论来自现有 questions/catalog/library/arena/featured/show1compat 源码检查，未另行操作真实有票题目。
+- 未执行：浏览器/Gallery 联调、生产 Node 22、真实截图/自动审核/SMTP、生产部署或业务库操作；未 commit、push 或部署，未写推送归档。本轮无需迁移，工作区已有 v31 属作者进度轮。
+
 ## 文本作品支持公式与表格（2026-10-02，本地提交，未推送）
 
 - server/text.mjs：Markdown 新增 GFM 管道表格（列对齐、横向滚动）和 TeX 公式（行内 `$…$`、`\(…\)`、`$$…$$`；独占行或跨行的 `$$…$$`、`\[…\]`）。`$` 按 Pandoc 规则，`$5 和 $10` 不误判；`\$` 为字面美元；代码内不解析；未闭合块公式退回段落；粗体/斜体内可含公式；单词内 `_` 不再触发斜体。公式输出转义后的 TeX，只有含公式的页面加载固定版本 KaTeX 0.16.47（jsdelivr /npm/，带 SRI），KaTeX 不可用时显示 TeX 原文。`.txt` 不变。
@@ -7,6 +29,16 @@
 - 验证：text.test 5/5（新增公式、表格、价格 `$`、转义、代码、未闭合、无公式不加载 KaTeX、.txt 不解析）；HEAD + 本轮三文件的独立检出 check 81/0、test 217/217。当前混合工作区 226 项中 1 项失败（moderation「stale results cannot replace human review…」），来自他人未提交的 library/questions/db 等改动，与本轮无关。浏览器以与作品页相同的 CSP 打开样例页：7 个公式全部由 KaTeX 渲染、0 个 katex-error、表格可横向滚动、console 0 错。
 - 已上传的文本作品保留上传时生成的页面，不会自动重新排版；目前线上文本题无作品，影响为零。
 
+## 本轮：作者核验进度与等待核验名额（2026-10-02，实现与验证完成，未提交、未推送、未部署）
+
+- 按用户指定由 GPT-6.1 Sol / medium 子代理分工实现 library、配置迁移、文档与测试，主会话集成路由。初始工作区干净；本轮任务明确未经同意不提交，保持未提交供审阅。不改前端、管理员页面、核验流程、公开展示规则或数据包。
+- 新增环境变量 `PENDING_PER_USER=5`、`TRUSTED_PENDING_PER_USER=20`、`TRUSTED_MIN_VERIFIED=3`，均沿现有配置解析方式取至少 1 的整数。管理员不受限制。迁移 v31 仅在 MIGRATIONS 末尾幂等追加可空 `users.works_seen_at INTEGER`。
+- 名额排除内容被拒或所属社区题目被拒的未核验作品；内容待审与题目待审仍占名额。信用档要求未删除 verified 作品达到门槛，且近 90 天无存疑记录（审计保留删除、恢复状态前的决定），不建新表。bootstrap 展示与作品/建题附示例提交使用同一计数和实际限额。
+- 接口增加 bootstrap `me.pendingLimit`（管理员 null）与 `me.updates`；GET `/api/me` 增加作品 `queueAhead` / `changed: true` 与 `reviewStats.medianHours`；POST `/api/me/works/seen` 登录、write 限流，记录当前时间并返回 `{ ok: true }`。核验队列沿现 Gallery 与 bootstrap.review.unverified 口径，含竞技场已核验但展览馆未决定的投稿；只给队列内 unverified 作者作品输出位置。通知只算核验时间与 approved/rejected 内容决定时间，首次未读回看 7 天。
+- `reviewStats.medianHours` 使用全站未删除、当前 verified 且最近 30 天核验的投稿，从 created_at 到 reviewed_at 的小时数计算中位数；少于 5 件为 null。queueAhead 按 created_at 升序，同时间按作品 ID 排序。429 返回当前 N 与实际 M：`你已有 N 件作品在等待核验（上限 M 件），核验完成或删除作品后名额会释放`。API 契约已同步，前端可直接消费新增字段；显示作品变化后调用 seen 清除红点与高亮。
+- 可选邮件通知未实现：现 mail.mjs 服务注册/绑定/重置邮件，10 分钟合并通知还需额外调度及生命周期处理；本轮交付站内提醒，未新增 `NOTIFY_REVIEW_EMAIL` 开关。每日上传数限制未加；现有上传和 write 限流继续生效，本轮不建议另加每日限额。
+- 已执行（Windows Node 24.16.0）：`npm run check` 82 文件 / 0 错；全量 `npm test` 220/220，0 失败/取消/跳过；`git diff --check` 通过。4 项新增集成测试覆盖被拒作品/题目释放名额与两提交接口一致、信用档/90 天存疑历史、队列 created_at/ID 排序与竞技场先核验、首次 7 天变化/seen 归零/新变化和中位数奇偶样本。旧 v30 迁移夹具固定对应迁移索引，v31 的列可空、幂等执行与环境变量默认/覆盖已在临时内存库验证。
+- 未执行：生产 Node 22、浏览器与真实前端联调、外部邮件/截图/自动审核验证；未连接生产、未迁移本地或线上业务库、未改数据包或 pin。业务库上线迁移留待后续部署；本轮按任务要求不提交、不推送、不部署，未写推送归档。
 
 ## 四仓整理与远端合并（2026-10-02，本地提交，未推送）
 

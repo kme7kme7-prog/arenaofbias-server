@@ -21,7 +21,7 @@ import { createAdmin } from './admin.mjs';
 import { createInbox } from './inbox.mjs';
 import { createCurator } from './curate.mjs';
 import { createQuestions } from './questions.mjs';
-import { DOMAINS, requireCategory } from './categories.mjs';
+import { DOMAINS, requireCategory, requireDomains } from './categories.mjs';
 import { createProfile } from './profile.mjs';
 import { registerShow1Compat } from './show1compat.mjs';
 import { registerShow1Guess } from './show1/guess.mjs';
@@ -90,6 +90,32 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   };
   const adminOnly = (ctx) => (signedIn(ctx).role === 'admin' ? ctx.user : fail(403, '仅管理员可以操作'));
   const publicList = (works, viewer) => works.map((work) => library.toPublic(work, viewer));
+  const batchDecision = (body, statuses, reasonRequired) => {
+    if (!body || typeof body !== 'object' || !statuses.includes(body.status)) fail(400, '审核结果无效');
+    if (body.reason != null && typeof body.reason !== 'string') fail(400, '审核理由格式不正确');
+    const reason = (body.reason ?? '').trim();
+    if (reason.length > 500) fail(400, '审核理由最多 500 字');
+    if (body.status === reasonRequired && !reason) fail(400, reasonRequired === 'questioned' ? '标记存疑时请写明原因，作者和访客都会看到' : '请填写拒绝理由');
+  };
+  const batchItems = (items, max, questionsOnly = false) => {
+    const validId = (id) => typeof id === 'string' && Boolean(id.trim());
+    if (!Array.isArray(items) || items.length < 1 || items.length > max
+      || items.some((item) => questionsOnly ? !validId(item) : !item || !validId(item.task) || !validId(item.id))) {
+      fail(400, `请选择 1–${max} ${questionsOnly ? '道题目' : '件作品'}`, questionsOnly ? 'invalid_question_list' : 'invalid_work_list');
+    }
+  };
+  const batchResult = (identity, run) => {
+    try { return { ...identity, ok: true, ...run() }; }
+    catch (error) {
+      if (!(error instanceof HttpError)) {
+        console.error(error);
+        return { ...identity, ok: false, error: { status: 500, code: 'internal_error', message: '服务器出错了，请稍后再试' } };
+      }
+      return { ...identity, ok: false, error: { status: error.status,
+        code: error.code || ({ 400: 'invalid_request', 403: 'forbidden', 404: 'not_found', 409: 'conflict' }[error.status] ?? 'request_failed'),
+        message: error.message } };
+    }
+  };
   const checkDatapack = (ctx, taskId) => {
     const snapshot = catalog.snapshot();
     if (!snapshot.task(taskId)) return snapshot; // Community questions are independent of the curated package.
@@ -126,12 +152,14 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       arena: Object.fromEntries(catalog.tasks().map((task) => [task.id, { ...arena.poolStats(task.id), uploads: task.acceptsUploads }])),
       featured: featured.read(),
       totals: (await arena.leaderboard()).totals,
-      me: user ? { votes: arena.votesBy(user.id), pending: library.pendingCount(user.id) } : null,
+      me: user ? {
+        votes: arena.votesBy(user.id), pending: library.pendingCount(user.id),
+        pendingLimit: library.pendingLimit(user), updates: library.updatesCount(user.id),
+      } : null,
       review: user?.role === 'admin' ? {
         // Same queue as the Gallery review page: released content on a public question that the
         // gallery has not decided yet, which includes uploads already verified for the arena.
-        unverified: uploads.filter((work) => !work.curatedAs && work.status !== 'questioned' && !work.reviewedGalleryAt
-          && ['legacy', 'approved'].includes(work.moderation.status) && catalog.task(work.taskId)).length,
+        unverified: library.reviewQueue().length,
         content: uploads.filter((work) => work.moderation.status === 'review').length,
         questions: questions.pendingCount(),
       } : null,
@@ -211,6 +239,31 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     arena.invalidate();
     return { question };
   });
+  router.on('POST', '/api/admin/questions/batch-moderation', async (ctx) => {
+    const admin = adminOnly(ctx);
+    limit.write(admin.id);
+    const body = await readJson(ctx.req);
+    batchDecision(body, ['approved', 'rejected'], 'rejected');
+    batchItems(body.ids, 50, true);
+    const results = body.ids.map((id) => batchResult({ id }, () => {
+      if (body.status === 'approved') {
+        const question = questions.get(id, admin);
+        if (!question) fail(404, '题目不存在');
+        requireCategory(question.category);
+        requireDomains(question.domains);
+      }
+      return { question: questions.review(admin, id, { status: body.status, reason: body.reason }) };
+    }));
+    arena.invalidate();
+    return { results };
+  });
+  router.on('POST', '/api/admin/questions/:id/meta', async (ctx) => {
+    const admin = adminOnly(ctx);
+    limit.write(admin.id);
+    const question = questions.edit(admin, ctx.params.id, await readJson(ctx.req));
+    arena.invalidate();
+    return { question };
+  });
   router.on('DELETE', '/api/questions/:id', (ctx) => {
     const user = signedIn(ctx);
     limit.write(user.id);
@@ -257,10 +310,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     const admin = adminOnly(ctx);
     limit.write(admin.id);
     const body = await readJson(ctx.req);
-    const current = library.work(ctx.params.task, ctx.params.id);
-    if (body.status === 'verified' && current && !['legacy', 'approved'].includes(current.moderation?.status)) fail(409, '请先完成内容审核');
     const work = library.review(admin, ctx.params.task, ctx.params.id, body);
-    moderator.enqueue(work);
     arena.invalidate();
     return { work: library.toPublic(work, admin) };
   });
@@ -312,14 +362,23 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
 
   router.on('GET', '/api/me', (ctx) => {
     const user = signedIn(ctx);
-    return { questions: questions.byOwner(user.id, user), works: publicList(library.uploadsOf(user.id), user), votes: arena.votesBy(user.id), ...profile.summary(user) };
+    return {
+      questions: questions.byOwner(user.id, user), works: library.authorWorks(user),
+      reviewStats: library.reviewStats(), votes: arena.votesBy(user.id), ...profile.summary(user),
+    };
+  });
+  router.on('POST', '/api/me/works/seen', (ctx) => {
+    const user = signedIn(ctx);
+    limit.write(user.id);
+    library.markWorksSeen(user.id);
+    return { ok: true };
   });
   // Registered after the calibration route, whose path has the same shape.
   router.on('PATCH', '/api/works/:task/:id', async (ctx) => {
     const user = signedIn(ctx);
     limit.write(user.id);
     const work = library.setMeta(user, ctx.params.task, ctx.params.id, await readJson(ctx.req), { author: user.role !== 'admin' });
-    moderator.enqueue(library.work(ctx.params.task, ctx.params.id));
+    if (user.role !== 'admin') moderator.enqueue(library.work(ctx.params.task, ctx.params.id));
     arena.invalidate();
     return { work };
   });
@@ -361,6 +420,35 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     const works = library.batchSetFaceSettings(admin, items, settings);
     arena.invalidate();
     return { works };
+  });
+  router.on('POST', '/api/admin/works/batch-moderation', async (ctx) => {
+    const admin = adminOnly(ctx);
+    limit.write(admin.id);
+    const body = await readJson(ctx.req);
+    batchDecision(body, ['approved', 'rejected'], 'rejected');
+    batchItems(body.works, 100);
+    const results = body.works.map(({ task, id }) => batchResult({ task, id }, () => ({
+      work: library.adminWork(library.reviewContent(admin, task, id, { status: body.status, reason: body.reason })),
+    })));
+    arena.invalidate();
+    return { results };
+  });
+  router.on('POST', '/api/admin/works/batch-review', async (ctx) => {
+    const admin = adminOnly(ctx);
+    limit.write(admin.id);
+    const body = await readJson(ctx.req);
+    batchDecision(body, ['verified', 'questioned'], 'questioned');
+    batchItems(body.works, 100);
+    if (body.meta !== undefined && (!body.meta || typeof body.meta !== 'object' || Array.isArray(body.meta)
+      || Object.keys(body.meta).some((key) => !['effort', 'providerId', 'harnessId', 'harnessOther'].includes(key)))) fail(400, '批量核验信息无效');
+    const results = body.works.map(({ task, id }) => batchResult({ task, id }, () => ({
+      work: library.adminWork(library.reviewWithMeta(admin, task, id, {
+        status: body.status, reason: body.reason, meta: body.meta,
+        ...(body.status === 'verified' ? { show_gallery: true } : {}),
+      })),
+    })));
+    arena.invalidate();
+    return { results };
   });
   router.on('POST', '/api/admin/works/:task/:id/face-settings', async (ctx) => {
     const admin = adminOnly(ctx);
@@ -487,7 +575,6 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     const admin = adminOnly(ctx);
     limit.write(admin.id);
     const work = library.setMeta(admin, ctx.params.task, ctx.params.id, await readJson(ctx.req));
-    moderator.enqueue(library.work(ctx.params.task, ctx.params.id));
     arena.invalidate();
     return { work };
   });

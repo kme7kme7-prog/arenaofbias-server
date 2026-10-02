@@ -58,6 +58,62 @@ test('v23 backfills categories from tags before text templates and preserves exi
   } finally { db.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
+test('admin question edits validate metadata, preserve decisions and protect existing answers', () => {
+  const db = openDatabase(':memory:');
+  try {
+    db.prepare('INSERT INTO users (id, name, name_key, salt, hash, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run('owner', 'owner', 'owner', 'unused', 'unused', 1);
+    const questions = createQuestions(db);
+    const owner = { id: 'owner', name: 'owner', role: 'member' };
+    const admin = { id: 'admin', name: 'root', role: 'admin' };
+    const body = { title: 'Question', summary: 'Summary', prompt: 'Original\nprompt', category: '静态网页', templates: ['static'], tags: ['建模', 'UI'] };
+    const question = questions.create(owner, body);
+    const row = () => db.prepare('SELECT * FROM questions WHERE id = ?').get(question.id);
+    const failure = (data, status = 400, actor = admin) => assert.throws(() => questions.edit(actor, question.id, data), error => error.status === status);
+    failure({ title: 'Title' }, 403, owner);
+    assert.throws(() => questions.edit(admin, 'q-missing', { title: 'Title' }), error => error.status === 404);
+    for (const data of [{}, { tags: [] }, { title: '' }, { title: 'x'.repeat(71) }, { summary: 'x'.repeat(401) },
+      { prompt: 'x'.repeat(20001) }, { category: '其他' }, { domains: [] }, { domains: ['未知'] },
+      { domains: ['数学', '物理', '化学'] }]) failure(data);
+    const originalModeration = row().moderation;
+    let edited = questions.edit(admin, question.id, { title: ' New title ', summary: ' New summary ', prompt: ' New\nprompt ', domains: ['数学', '数学'] });
+    assert.equal(edited.title, 'New title'); assert.equal(edited.summary, 'New summary'); assert.equal(edited.prompt, 'New\nprompt');
+    assert.deepEqual(edited.domains, ['数学']); assert.equal(row().moderation, originalModeration);
+    const audit = JSON.parse(db.prepare("SELECT detail FROM audit WHERE task_id = ? AND action = 'question-edit' ORDER BY id DESC").get(question.id).detail);
+    assert.deepEqual(audit.title, { from: body.title, to: edited.title });
+    assert.deepEqual(audit.summary, { from: body.summary, to: edited.summary });
+    assert.deepEqual(audit.domains, { from: [], to: ['数学'] });
+    assert.deepEqual(audit.prompt, { changed: '已修改', fromLength: body.prompt.length, toLength: edited.prompt.length });
+    assert.ok(!JSON.stringify(audit).includes('Original')); assert.ok(!JSON.stringify(audit).includes('New\\nprompt'));
+    db.prepare(`INSERT INTO works (id, task_id, owner_id, title, model_other, content_key, source_name, root,
+      entry, file_count, bytes, digest, checks, trial, created_at, updated_at)
+      VALUES ('sample', ?, 'owner', 'Sample', 'Model', 'sample-key', 'sample.html', '', 'index.html', 1, 100, 'digest', '[]', '{}', 1, 1)`).run(question.id);
+    for (const status of ['pending', 'rejected', 'approved', 'legacy']) {
+      const moderation = JSON.stringify({ status, reason: 'Keep decision', at: 123 });
+      db.prepare('UPDATE questions SET moderation = ? WHERE id = ?').run(moderation, question.id);
+      questions.edit(admin, question.id, { title: status, summary: `Summary ${status}`, domains: ['物理'] });
+      assert.equal(row().moderation, moderation);
+      if (['approved', 'legacy'].includes(status)) {
+        assert.throws(() => questions.edit(admin, question.id, { prompt: `Prompt ${status}` }),
+          error => error.status === 409 && error.message === '已有作品的题目不能修改提示词');
+        questions.edit(admin, question.id, { prompt: row().prompt });
+      } else questions.edit(admin, question.id, { prompt: `Prompt ${status}` });
+      failure({ category: '文学' }, 409);
+    }
+    edited = questions.edit(admin, question.id, { category: '建模' });
+    assert.deepEqual(edited.templates, ['static']); assert.deepEqual(edited.tags, ['UI']);
+    db.prepare('UPDATE works SET deleted_at = 1 WHERE id = ?').run('sample');
+    edited = questions.edit(admin, question.id, { category: '文学', prompt: 'New text prompt' });
+    assert.deepEqual(edited.templates, ['text']); assert.equal(edited.prompt, 'New text prompt');
+    const resetAudit = JSON.parse(db.prepare("SELECT detail FROM audit WHERE task_id = ? AND action = 'question-edit' ORDER BY id DESC").get(question.id).detail);
+    assert.deepEqual(resetAudit.templates, { from: ['static'], to: ['text'] });
+    assert.deepEqual(resetAudit.category, { from: '建模', to: '文学' });
+    db.exec("CREATE TRIGGER fail_edit_audit BEFORE INSERT ON audit WHEN NEW.action = 'question-edit' BEGIN SELECT RAISE(ABORT, 'audit failed'); END");
+    assert.throws(() => questions.edit(admin, question.id, { title: 'Should roll back' }), /audit failed/);
+    assert.equal(row().title, 'legacy');
+  } finally { db.close(); }
+});
+
 describe('community question and sample review lifecycle', () => {
   let root, platform, site, content, base;
   const cookies = new Map();
@@ -103,7 +159,7 @@ describe('community question and sample review lifecycle', () => {
     await Promise.all([site, content].map(server => new Promise(resolve => server.once('listening', resolve))));
     base = `http://127.0.0.1:${site.address().port}`;
     config.contentTemplate = `http://{token}.localhost:${content.address().port}`;
-    for (const name of ['author', 'other', 'quota', 'deletion', 'categories']) {
+    for (const name of ['author', 'other', 'quota', 'deletion', 'categories', 'editing', 'batch']) {
       await verifiedUser(platform.auth, name);
       assert.equal((await call(name, 'POST', '/api/auth/login', { name, password: 'correct horse' })).status, 200);
     }
@@ -347,6 +403,61 @@ describe('community question and sample review lifecycle', () => {
     const first = (await call('quota', 'GET', '/api/me')).data.questions[0];
     await moderate(first.id, 'rejected', 'Test quota release');
     assert.equal((await call('quota', 'POST', '/api/questions', { ...questionBody, draftId: staged.id, confirmed: true, work: workBody })).status, 200);
+  });
+
+  test('admin metadata edits preserve decisions, update bootstrap and invalidate domain boards', async () => {
+    const { question, work } = await create('editing', { domains: ['化学'], work: { ...workBody, generationMode: 'single-turn', humanIntervention: 'none' } });
+    const path = `/api/admin/questions/${question.id}/meta`;
+    assert.equal((await call('editing', 'POST', path, { title: 'Owner edit' })).status, 403);
+    const pending = await call('root', 'POST', path, { prompt: 'Pending\nprompt update' });
+    assert.equal(pending.status, 200); assert.equal(pending.data.question.prompt, 'Pending\nprompt update');
+    assert.deepEqual(pending.data.question.moderation, question.moderation);
+    await moderate(question.id, 'approved');
+    await call('root', 'POST', `/api/works/${question.id}/${work.id}/moderation`, { status: 'approved' });
+    await call('root', 'POST', `/api/works/${question.id}/${work.id}/review`, { status: 'verified', show_arena: true });
+    const anchor = await call('editing', 'POST', '/api/questions', { ...questionBody, domains: ['化学'] });
+    assert.equal(anchor.status, 200); await moderate(anchor.data.question.id, 'approved');
+    const board = (domain) => call('guest', 'GET', `/api/leaderboard?domain=${encodeURIComponent(domain)}`);
+    assert.equal((await board('化学')).data.unranked.length, 1);
+    const before = (await call('root', 'GET', '/api/admin/questions')).data.questions.find(item => item.id === question.id).moderation;
+    const edit = await call('root', 'POST', path, { title: 'Edited public question', domains: ['天文'] });
+    assert.equal(edit.status, 200); assert.deepEqual(edit.data.question.moderation, before);
+    const publicQuestion = (await call('guest', 'GET', '/api/bootstrap')).data.questions.find(item => item.id === question.id);
+    assert.equal(publicQuestion.title, 'Edited public question'); assert.deepEqual(publicQuestion.domains, ['天文']);
+    assert.equal((await board('化学')).data.unranked.length, 0);
+    assert.equal((await board('天文')).data.unranked.length, 1);
+    const locked = await call('root', 'POST', path, { prompt: 'Public prompt update' });
+    assert.equal(locked.status, 409); assert.match(JSON.stringify(locked.data), /已有作品的题目不能修改提示词/);
+    const audit = JSON.parse(platform.db.prepare("SELECT detail FROM audit WHERE task_id = ? AND action = 'question-edit' ORDER BY id DESC").get(question.id).detail);
+    assert.deepEqual(audit.domains, { from: ['化学'], to: ['天文'] });
+    await moderate(question.id, 'rejected', 'Finish edit fixture');
+    await moderate(anchor.data.question.id, 'rejected', 'Finish domain fixture');
+  });
+
+  test('batch question moderation reports individual failures and validates rejection before writes', async () => {
+    const empty = await call('batch', 'POST', '/api/questions', questionBody);
+    const valid = await call('batch', 'POST', '/api/questions', { ...questionBody, domains: ['数学'] });
+    assert.equal(empty.status, 200); assert.equal(valid.status, 200);
+    const ids = [empty.data.question.id, valid.data.question.id, 'q-missing'];
+    const endpoint = '/api/admin/questions/batch-moderation';
+    assert.equal((await call('batch', 'POST', endpoint, { ids, status: 'approved' })).status, 403);
+    const response = await call('root', 'POST', endpoint, { ids, status: 'approved' });
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.data.results.map(item => item.ok), [false, true, false]);
+    assert.deepEqual(response.data.results.filter(item => !item.ok).map(item => item.error.status), [400, 404]);
+    assert.equal(response.data.results[1].question.moderation.status, 'approved');
+    assert.equal(platform.db.prepare("SELECT count(*) AS n FROM audit WHERE task_id = ? AND action = 'question-review'").get(ids[0]).n, 0);
+    assert.equal(platform.db.prepare("SELECT count(*) AS n FROM audit WHERE task_id = ? AND action = 'question-review'").get(ids[1]).n, 1);
+    const rows = platform.db.prepare('SELECT id, moderation FROM questions WHERE id IN (?, ?) ORDER BY id').all(...ids.slice(0, 2));
+    const audits = platform.db.prepare('SELECT count(*) AS n FROM audit').get().n;
+    const invalid = await call('root', 'POST', endpoint, { ids: ids.slice(0, 2), status: 'rejected' });
+    assert.equal(invalid.status, 400);
+    assert.deepEqual(platform.db.prepare('SELECT id, moderation FROM questions WHERE id IN (?, ?) ORDER BY id').all(...ids.slice(0, 2)), rows);
+    assert.equal(platform.db.prepare('SELECT count(*) AS n FROM audit').get().n, audits);
+    const rejected = await call('root', 'POST', endpoint, { ids: ids.slice(0, 2), status: 'rejected', reason: 'Batch rejection' });
+    assert.deepEqual(rejected.data.results.map(item => item.ok), [true, true]);
+    const audit = JSON.parse(platform.db.prepare("SELECT detail FROM audit WHERE task_id = ? AND action = 'question-review' ORDER BY id DESC").get(ids[1]).detail);
+    assert.equal(audit.status, 'rejected'); assert.equal(audit.reason, 'Batch rejection');
   });
 
   test('deletion checks ownership, other authors and votes, and soft deletes attached works', async () => {

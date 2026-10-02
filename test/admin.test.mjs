@@ -42,7 +42,7 @@ test('v9 backfills both switches from every v8 audience and reopens without data
   }
 });
 
-async function withPlatform(run) {
+async function withPlatform(run, configOptions = {}) {
   const root = mkdtempSync(join(tmpdir(), 'admin-api-'));
   const dist = join(root, 'dist');
   mkdirSync(join(dist, 'results', 'one', 'a'), { recursive: true });
@@ -56,7 +56,7 @@ async function withPlatform(run) {
   ] }, { id: 'two', title: '第二题', results: [] }] }));
   const platform = createPlatform({ config: { dist, dataDir: join(root, 'state'), admin: join(process.cwd(), 'admin'),
     contentTemplate: 'http://{token}.localhost', siteOrigins: [], admins: ['root'], cdn: [], capture: false,
-    secureCookies: false, trustProxy: false }, limits });
+    secureCookies: false, trustProxy: false, ...configOptions }, limits });
   const server = createServer(platform.handleSite).listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -88,11 +88,11 @@ test('face review migration preserves old decisions and leaves unverified upload
   const file = join(root, 'platform.db');
   try {
     const old = new DatabaseSync(file);
-    for (const migration of MIGRATIONS.slice(0, -1)) {
+    for (const migration of MIGRATIONS.slice(0, 29)) {
       if (typeof migration === 'function') migration(old);
       else old.exec(migration);
     }
-    old.exec(`PRAGMA user_version = ${MIGRATIONS.length - 1}`);
+    old.exec('PRAGMA user_version = 29');
     const insert = old.prepare(`INSERT INTO works
       (id, task_id, title, model_other, content_key, source_name, root, entry, file_count, bytes, digest, checks, trial, created_at, updated_at, status, reviewed_at)
       VALUES (?, 'one', '作品', '模型', ?, 'a.html', '', 'index.html', 1, 100, ?, '[]', '{}', 1, 2000, ?, ?)`);
@@ -105,7 +105,7 @@ test('face review migration preserves old decisions and leaves unverified upload
       const decisions = () => db.prepare('SELECT id, reviewed_gallery_at, reviewed_arena_at FROM works ORDER BY id').all()
         .map(({ id, reviewed_gallery_at, reviewed_arena_at }) => [id, reviewed_gallery_at, reviewed_arena_at]);
       assert.deepEqual(decisions(), [['questioned', 2000, 2000], ['unverified', null, null], ['verified', 1000, 1000]]);
-      MIGRATIONS.at(-1)(db);
+      MIGRATIONS[29](db);
       assert.deepEqual(decisions(), [['questioned', 2000, 2000], ['unverified', null, null], ['verified', 1000, 1000]]);
     } finally { db.close(); }
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -151,6 +151,139 @@ test('the gallery review count waits for a gallery decision even after the arena
   assert.equal(await pending(), before + 1);
   assert.equal((await call('root', 'POST', `/api/admin/works/one/${id}/face-settings`, { show_gallery: false })).status, 200);
   assert.equal(await pending(), before);
+}));
+
+async function withModeratedUpload(run) {
+  return withPlatform(async ({ platform, call }) => {
+    const queued = [];
+    platform.moderator.enqueue = (work) => queued.push(work);
+    const draft = await call('voter', 'POST', '/api/drafts?task=one&name=work.html', html, true);
+    const submitted = await call('voter', 'POST', '/api/works', {
+      draftId: draft.data.draft.id, confirmed: true, title: '待核验作品', modelName: '模型丙',
+      effort: 'Default', providerId: 'official', harnessOther: '测试工具',
+    });
+    assert.equal(submitted.status, 200, JSON.stringify(submitted.data));
+    const id = submitted.data.work.id;
+    assert.equal((await call('root', 'POST', `/api/works/one/${id}/moderation`, {
+      status: 'approved', reason: '人工检查通过',
+    })).status, 200);
+    const work = () => platform.library.work('one', id);
+    const moderation = work().moderation;
+    queued.length = 0;
+    await run({ platform, call, id, work, moderation, queued });
+  }, { moderation: { enabled: true } });
+}
+
+test('admin metadata corrections preserve approved content and allow verification', async () => withModeratedUpload(async ({ call, id, work, moderation }) => {
+  const edited = await call('root', 'POST', `/api/admin/works/one/${id}/meta`, { effort: 'High', modelId: 'ma' });
+  assert.equal(edited.status, 200, JSON.stringify(edited.data));
+  assert.deepEqual(work().moderation, moderation);
+  assert.equal(work().status, 'unverified');
+  assert.equal((await call('root', 'POST', `/api/works/one/${id}/review`, { status: 'verified', show_gallery: true })).status, 200);
+}));
+
+test('admin title and summary edits retain the complete moderation result', async () => withModeratedUpload(async ({ call, id, work, moderation }) => {
+  assert.equal((await call('root', 'POST', `/api/admin/works/one/${id}/meta`, { title: '修正标题', summary: '修正摘要' })).status, 200);
+  assert.deepEqual(work().moderation, moderation);
+}));
+
+test('author summary edits reset approved content and enqueue another review', async () => withModeratedUpload(async ({ call, id, work, queued }) => {
+  assert.equal((await call('voter', 'PATCH', `/api/works/one/${id}`, { summary: '作者新摘要' })).status, 200);
+  assert.equal(work().moderation.status, 'pending');
+  assert.equal(queued.length, 1);
+  assert.equal(queued[0].id, id);
+  assert.equal(queued[0].moderation.status, 'pending');
+}));
+
+test('admin verification with an effort correction preserves approved content', async () => withModeratedUpload(async ({ call, id, work, moderation }) => {
+  const reviewed = await call('root', 'POST', `/api/works/one/${id}/review`, { status: 'verified', effort: 'High', show_gallery: true });
+  assert.equal(reviewed.status, 200, JSON.stringify(reviewed.data));
+  assert.equal(work().effort, 'High');
+  assert.equal(work().status, 'verified');
+  assert.deepEqual(work().moderation, moderation);
+}));
+
+test('batch content review returns ordered partial results and rejects invalid requests before writing', async () => withModeratedUpload(async ({ platform, call, id, work }) => {
+  const items = [{ task: 'one', id }, { task: 'one', id: 'missing' }];
+  const count = () => platform.db.prepare("SELECT COUNT(*) AS n FROM audit WHERE action = 'content-review'").get().n;
+  const before = count();
+  const reviewed = await call('root', 'POST', '/api/admin/works/batch-moderation', { works: items, status: 'approved' });
+  assert.equal(reviewed.status, 200, JSON.stringify(reviewed.data));
+  assert.deepEqual(reviewed.data.results.map(({ task, id: workId, ok }) => ({ task, id: workId, ok })), items.map((item, i) => ({ ...item, ok: i === 0 })));
+  assert.equal(reviewed.data.results[0].work.moderation.reason, '人工复核通过');
+  assert.deepEqual(reviewed.data.results[1].error, { status: 404, code: 'not_found', message: '作品不存在' });
+  assert.equal(count(), before + 1);
+  const row = platform.db.prepare('SELECT * FROM works WHERE id = ?').get(id);
+  for (const body of [
+    { works: items, status: 'rejected' }, { works: 'wrong', status: 'approved' },
+    { works: [...items, {}], status: 'approved' }, { works: Array(101).fill(items[0]), status: 'approved' },
+    { works: items, status: 'pending' },
+  ]) assert.equal((await call('root', 'POST', '/api/admin/works/batch-moderation', body)).status, 400);
+  assert.equal(count(), before + 1);
+  assert.deepEqual(platform.db.prepare('SELECT * FROM works WHERE id = ?').get(id), row);
+  assert.equal(work().moderation.status, 'approved');
+  assert.equal((await call('voter', 'POST', '/api/admin/works/batch-moderation', { works: items, status: 'approved' })).status, 403);
+}));
+
+test('batch verification supplements metadata and rolls back only failed items', async () => withModeratedUpload(async ({ platform, call, id, work, moderation, queued }) => {
+  const create = async () => {
+    const draft = await call('voter', 'POST', '/api/drafts?task=one&name=work.html', html, true);
+    const response = await call('voter', 'POST', '/api/works', {
+      draftId: draft.data.draft.id, confirmed: true, title: '批量作品', modelId: 'mb', harnessOther: '测试工具',
+      effort: 'Default', providerId: 'official',
+    });
+    assert.equal(response.status, 200, JSON.stringify(response.data));
+    return response.data.work.id;
+  };
+  const pending = await create();
+  const incomplete = await create();
+  await call('root', 'POST', `/api/works/one/${incomplete}/moderation`, { status: 'approved' });
+  // Old registrations can lack the fields now required at submission.
+  platform.db.prepare("UPDATE works SET effort = '', provider_id = NULL WHERE id IN (?, ?)").run(pending, incomplete);
+  const auditCount = () => platform.db.prepare('SELECT COUNT(*) AS n FROM audit').get().n;
+  const row = (workId) => platform.db.prepare('SELECT * FROM works WHERE id = ?').get(workId);
+  const pendingBefore = row(pending), incompleteBefore = row(incomplete);
+  let before = auditCount();
+  queued.length = 0;
+  const first = await call('root', 'POST', '/api/admin/works/batch-review', {
+    works: [{ task: 'one', id: pending }, { task: 'one', id }, { task: 'one', id: incomplete }],
+    status: 'verified', meta: { effort: 'High' },
+  });
+  assert.equal(first.status, 200, JSON.stringify(first.data));
+  assert.deepEqual(first.data.results.map((result) => result.ok), [false, true, false]);
+  assert.equal(first.data.results[0].error.status, 409);
+  assert.equal(first.data.results[0].error.message, '请先完成内容审核');
+  assert.equal(first.data.results[2].error.status, 400);
+  assert.equal(first.data.results[2].error.message, '请选择服务商');
+  assert.deepEqual(row(pending), pendingBefore);
+  assert.deepEqual(row(incomplete), incompleteBefore);
+  assert.equal(auditCount(), before + 2, 'only the successful meta and verified audits survive');
+  assert.equal(first.data.results[1].work.show_gallery, true);
+  assert.equal(work().effort, 'High');
+  assert.deepEqual(work().moderation, moderation);
+  assert.equal(queued.length, 0, 'administrator decisions do not enqueue moderation');
+  before = auditCount();
+  for (const body of [
+    { works: [{ task: 'one', id: incomplete }], status: 'questioned', meta: { effort: 'Max' } },
+    { works: [{ task: 'one', id: incomplete }], status: 'verified', meta: { title: '不允许的字段' } },
+  ]) assert.equal((await call('root', 'POST', '/api/admin/works/batch-review', body)).status, 400);
+  assert.equal(auditCount(), before);
+  assert.deepEqual(row(incomplete), incompleteBefore);
+  const second = await call('root', 'POST', '/api/admin/works/batch-review', {
+    works: [{ task: 'one', id: incomplete }], status: 'verified', meta: { effort: 'High', providerId: 'official' },
+  });
+  assert.equal(second.status, 200);
+  assert.equal(second.data.results[0].ok, true, JSON.stringify(second.data));
+  assert.equal(second.data.results[0].work.status, 'verified');
+  assert.equal(second.data.results[0].work.provider, 'official');
+  assert.equal(second.data.results[0].work.show_gallery, true);
+  assert.equal(second.data.results[0].work.moderation.status, 'approved');
+  assert.equal(auditCount(), before + 2);
+  const questioned = await call('root', 'POST', '/api/admin/works/batch-review', {
+    works: [{ task: 'one', id: pending }], status: 'questioned', reason: '声明待核对',
+  });
+  assert.equal(questioned.data.results[0].ok, true);
+  assert.equal(questioned.data.results[0].work.status, 'questioned');
 }));
 
 test('admin API merges curated and upload works, applies face settings, calibration and audit', async () => withPlatform(async ({ platform, call }) => {

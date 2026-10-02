@@ -255,7 +255,7 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
   "arena": { "chinese-architecture": { "works": 40, "entries": 33, "uploads": true } },
   "featured": { "chinese-architecture": { "cover": "work-id", "models": { "model-id": "work-id", "x:custom model": "up-work-id" } } },
   "totals": { "votes": 128, "voters": 17, "entries": 33 },
-  "me": { "votes": 12, "pending": 1 },
+  "me": { "votes": 12, "pending": 1, "pendingLimit": 5, "updates": 0 },
   "review": null
 }
 ```
@@ -269,6 +269,9 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
 - 匿名：`user`、`me` 为 `null`，`reactions.mine` 为 `{}`；`review` 仅管理员非 null（`{ "unverified": <所属题目已公开、内容已放行、未存疑且展览馆尚无面决定（reviewed.gallery 为 null）的投稿数，含已在竞技场核验的投稿>, "content": <moderation.status=review 的作品数>, "questions": <未删除的 pending 题目数> }`）。`unverified` 使用不传 viewer 的 `catalog.task(id)` 判断公开题目，待审题目的示例结果不计入，题目通过后自动计入。`pending` 仍在自动队列、`rejected` 已有决定，均不计入 `content`。
 - `site.capture` 表示截图当前是否可用；浏览器启动失败后为 false，冷却五分钟后的下一件作品会尝试恢复。`site.contentModeration` 表示内容审核开关；`site.autoModeration` 为 `moderator.enabled && Boolean(apiKey) && capturer.available`，只有开关、密钥与截图能力齐备时为 true，截图恢复后自动变回 true。前端在内容审核开启且 autoModeration=false 时显示「管理员检查内容」；旧后端缺少该字段时按 true 兼容。
 - `user.emailBound` 仅当前会话用户在 bootstrap 中返回，反映是否绑定邮箱；不加入 `auth.public`，评论等公开用户数据不包含该字段。
+- `me.pending` 只统计本人未删除、仍为 `unverified` 的投稿，排除内容已拒绝或所属社区题目已拒绝的作品；内容 `pending` / `review` 与题目待审的示例仍占名额。上传作品和创建题目附示例共用此计数。
+- `me.pendingLimit` 为本人实际等待核验上限；基础上限由 `PENDING_PER_USER` 配置（默认 5），`site.limits.pendingPerUser` 保留此基础值。未删除的 `verified` 作品至少 `TRUSTED_MIN_VERIFIED` 件（默认 3），且近 90 天没有被标为存疑的作品，采用 `TRUSTED_PENDING_PER_USER`（默认 20）。存疑检查包括当前状态与存疑审计记录，删除作品或后来恢复为已验证不会消除该次存疑。管理员不受限制，返回 `null`。
+- `me.updates` 为本人未删除投稿中，最近一次核验（`reviewed_at`）或内容审核决定（`moderation.at`）晚于 `users.works_seen_at` 的件数；内容排队 `pending` / `review` 不算决定。尚未标记已读时只统计最近 7 天的变化。调用 `POST /api/me/works/seen` 后已发生的变化归零。
 - `providers` 固定返回上述两项，不依赖数据包中的历史登记表。作品公开、作者与管理员视图的 `provider` 只为 `official`、`unofficial` 或 null，不再返回 `providerName`。
 
 ### 3.2 `POST /api/auth/register` —— 注册
@@ -410,11 +413,11 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 截图浏览器只允许当前作品源的文档，以及该源和 HTTPS CDN 白名单内的 GET/HEAD 资源。请求逐跳检查重定向，跨源导航、WebSocket、Service Worker 及未经过路由的浏览器连接被阻断；截图环境须预配置 Playwright ≥ 1.48 和 Chrome。
 
-错误：`401`；`404 试加载已过期`；`400`（未确认 / 缺标题 / 缺 Harness 与 tool / 模型不存在或缺失 / 来源字段无效 / 封面无效）；`413 封面图片不能超过 3 MB`；`429 你已有 5 件作品在等待核验`（`pendingPerUser`）。
+错误：`401`；`404 试加载已过期`；`400`（未确认 / 缺标题 / 缺 Harness 与 tool / 模型不存在或缺失 / 来源字段无效 / 封面无效）；`413 封面图片不能超过 3 MB`；等待核验满额时 `429`，文案为 `你已有 N 件作品在等待核验（上限 M 件），核验完成或删除作品后名额会释放`，N 与 bootstrap 的 `me.pending` 相同，M 为 `me.pendingLimit`。
 
 **`PATCH /api/works/:task/:id`** —— 作者修改投稿信息
 
-**认证**：登录，作者本人；管理员调用时等同 `/api/admin/works/:task/:id/meta`。**限流**：write 桶。请求体可含 `title`、`summary`、`note`、`modelId` / `modelName` / `vendor`、`effort`、`promptVariant`、Harness 与服务商字段及生成信息五个字段，未出现的保持原值，规则同 `POST /api/works`。作者只能在 `status` 为 `unverified` 时修改，已核验或存疑返回 `409`；多版本题目不能清空 `promptVariant`，也不能清空 Harness。文字变化且开启内容审查时重新置为 `pending` 并排队。成功 `200`：`{ "work": <作者作品视图> }`，写 `meta` audit。错误：`401` / `403 只能修改自己上传的作品` / `404` / `409` / `400`（没有可修改的内容或字段无效）/ `429`。
+**认证**：登录，作者本人；管理员调用时等同 `/api/admin/works/:task/:id/meta`。**限流**：write 桶。请求体可含 `title`、`summary`、`note`、`modelId` / `modelName` / `vendor`、`effort`、`promptVariant`、Harness 与服务商字段及生成信息五个字段，未出现的保持原值，规则同 `POST /api/works`。作者只能在 `status` 为 `unverified` 时修改，已核验或存疑返回 `409`；多版本题目不能清空 `promptVariant`，也不能清空 Harness。作者修改送审声明且开启内容审查时重新置为 `pending` 并排队；管理员通过此接口修改等同管理员 meta，保持现有 `moderation`。成功 `200`：`{ "work": <作者作品视图> }`，写 `meta` audit。错误：`401` / `403 只能修改自己上传的作品` / `404` / `409` / `400`（没有可修改的内容或字段无效）/ `429`。
 
 **`DELETE /api/works/:task/:id`** —— 删除投稿
 
@@ -437,11 +440,23 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 - `status` 取值 `verified` / `questioned` / `unverified`；`questioned` 必须给 `reason`（`400` 否则）；置为 `verified` 会清空理由。
 - 仅当请求体出现 `modelId` / `modelName` 键时才重取模型身份，否则保持原值；`effort` 同理。
-- `title`、`summary` 与两个布尔门面开关均可选；审核通过时可同时修改。兼容旧的 `audience` 参数，将其换算为两个开关；响应中的 `audience` 由最终开关计算。审核状态和 audit 在同一事务写入。
+- `title`、`summary` 与两个布尔门面开关均可选；审核通过时可同时修改。兼容旧的 `audience` 参数，将其换算为两个开关；响应中的 `audience` 由最终开关计算。审核状态和 audit 在同一事务写入。管理员在审核中修改声明保持现有 `moderation`，不重新置为 `pending` 或排队。
 - 审核可选 `harnessId`、`harnessOther`、`providerId`；按 3.6 节的 Harness 与服务商规则校验，只更新请求中出现的维度。旧 `harnessVersion` 忽略。
 - 内容尚未放行（`moderation.status` 不为 `legacy` / `approved`）时提交 `status: "verified"` 返回 `409 请先完成内容审核`。`questioned` / `unverified` 不受此限制。
 
 成功 `200`：`{ "work": <作品公开视图（管理员视角，含特权字段）> }`。错误：`401` / `403 仅管理员可以操作`；`404`；`400 审核结果无效`。
+
+**`POST /api/admin/works/batch-moderation`** —— 批量内容决定
+
+认证：管理员；每批消耗一次 write 限流。请求 `{ "works": [{ "task": "…", "id": "…" }], "status": "approved" | "rejected", "reason": "…" }`，`works` 为 1–100 件。理由规则与单件内容决定一致：通过省略或空白理由时保存「人工复核通过」，拒绝必须提供非空理由，最多 500 字。列表、状态或理由无效时整体 `400`，不执行任何项目。
+
+每件在独立事务内复用 `reviewContent`，写 `content-review` audit；单件失败不影响其它项。成功请求返回 `200`：`{ "results": [...] }`，结果保持请求顺序，每项为 `{ "task": "…", "id": "…", "ok": true, "work": <管理员作品视图> }` 或 `{ "task": "…", "id": "…", "ok": false, "error": { "status": 404, "code": "…", "message": "…" } }`。每批只刷新一次缓存。认证、同源与限流错误为 `401` / `403` / `429`。
+
+**`POST /api/admin/works/batch-review`** —— 批量来源核验
+
+认证：管理员；每批消耗一次 write 限流。请求 `{ "works": [{ "task": "…", "id": "…" }], "status": "verified" | "questioned", "reason": "…", "meta": { "effort": "High", "providerId": "official", "harnessId": "…", "harnessOther": "…" } }`，`works` 为 1–100 件，`meta` 选填且仅允许这四个字段，字段校验同单件 meta。列表、状态或理由无效时整体 `400`，不执行任何项目；`questioned` 必须提供非空理由，最多 500 字。
+
+每件在独立事务中先调用 `setMeta`（有修改时写 `meta` audit），再调用 review 并写核验 audit。`verified` 要求内容已为 `approved` / `legacy`，否则单件 `409 请先完成内容审核`；最终推理档位与服务商必须齐全，否则单件 `400`。核验通过强制 `show_gallery: true`。单件失败回滚该件全部修改，包括 meta 与 audit；管理员修改声明保持现有 `moderation`。响应 `200` 的 `results` 顺序与成功/失败项结构同 batch-moderation，每批只刷新一次缓存。认证、同源与限流错误为 `401` / `403` / `429`。
 
 **`POST /api/works/:task/:id/reactions`** —— 表情反应（开关式）
 
@@ -462,7 +477,8 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 ```json
 {
   "questions": [ <本人未删除社区题目视图，含 moderation（pending / approved / rejected / legacy）> ],
-  "works": [ <本人投稿公开视图，含特权字段> ], "votes": 12,
+  "works": [ <本人投稿公开视图，含特权字段，符合条件时含 queueAhead / changed> ], "votes": 12,
+  "reviewStats": { "medianHours": 18.5 },
   "joinedAt": "…ISO…",
   "activity": { "from": "YYYY-MM-DD", "to": "YYYY-MM-DD", "days": [ { "date": "YYYY-MM-DD", "count": 2 } ], "total": 12, "activeDays": 5 },
   "receivedReactions": { "counts": { "🔥": 2 }, "total": 2 }
@@ -470,6 +486,14 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 ```
 
 活跃统计按 UTC+8 的近 365 天汇总本人发布题目、投稿、有效落库投票和当前表情记录；历史投稿删除后仍计入活跃。收到的表情仅统计本人当前未删除投稿且排除自评。
+
+`queueAhead` 仅对当前展览馆核验队列中 `status=unverified` 的作品返回：内容已放行、题目已公开、未收录且 `reviewed.gallery` 为空。它是该队列中排在该作品前面的件数，与 bootstrap 的 `review.unverified` 同口径（包含竞技场已核验、展览馆尚无决定的投稿），按 `created_at` 升序、同时间按作品 ID 升序；其它作品省略字段。
+
+`reviewStats.medianHours` 为全站未删除、当前为 `verified` 且近 30 天有核验时间的作品，从创建至核验的耗时中位数，单位为小时；少于 5 个样本返回 `null`。`changed: true` 仅在本件作品有晚于已读时间的核验或内容审核决定时返回；首次读取同样只看最近 7 天。其它作品省略 `changed`。
+
+**`POST /api/me/works/seen`** —— 标记作品状态变化已读
+
+认证：登录；限流：write 桶，遵循同源校验。无需请求体，将当前用户的 `works_seen_at`（可空毫秒时间，v31 迁移新增）设为当前时间，成功 `200`：`{ "ok": true }`。错误：`401` / `403`（Origin 不受信任）/ `429`。后续发生的决定仍会产生 `me.updates` 和 `changed: true`。
 
 **`PATCH /api/me`** —— 更新昵称
 
@@ -630,6 +654,8 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 ### 3.14 社区题目与人工审核（schema v23）
 
+附示例作品时，还须满足 3.1 的个人等待核验名额；名额计数、实际信用档上限与满额 429 文案均与 `POST /api/works` 一致（见 3.6）。不附示例的题目不占作品名额。
+
 **`POST /api/questions`**：认证登录；限流 write 桶；请求体上限 6 MB。示例作品选填，无作品请求 `{ "title": "…", "summary": "…", "category": "静态网页", "prompt": "…", "tags": ["UI"], "templates": ["static", "vite"] }`，完全不带 `draftId`、`work`、`confirmed`。附示例时在该请求中加入 `{ "draftId": "…", "confirmed": true, "work": { "title": "示例结果", "modelId": "…", "effort": "High", "harnessId": "…", "trial": { "loaded": true }, "cover": "data:image/png;base64,…" } }`。`draftId` 必须属于本人、未过期且 `task=__new__`；`work` 复用 `POST /api/works` 的作品字段、Harness、封面及生成信息校验，所选提交格式必须允许草稿的实际格式。只要带了 `draftId` 或 `work` 中任一字段，就须同时提供两者并确认试加载，否则返回中文 `400`；仅带 `confirmed` 也返回 `400`。标题、测试简述、完整提示词必填，最多 70 / 400 / 20000 字；提示词除首尾空白外保留原文。`category` 必填，固定为 `文学` / `静态网页` / `建模`，缺少或无效返回 `400 请选择题目分类`。`domains` 选填（新版 Gallery 必传）：带上时须为 1–2 个、在 `bootstrap.domains` 词表内的字符串，重复项合并，`[]` 或非数组返回 `400 请选择所属领域`，超出或不在词表返回 `400`；不带时存为 `[]`，等管理员通过时补充。标签选填、缺省 `[]`，0–6 个，每个 1–24 字，按 NFKC 与大小写归一去重，已有标签沿用其名称；写入时丢弃与分类同名的标签。`templates` 必填：文学固定 `["text"]`，静态网页与建模必须为 `static` / `vite` 的非空子集，不匹配返回 `400 提交格式与题目分类不匹配`。
 
 成功 `200`：无作品返回 `{ "question": { "id": "q-<16hex>", "title": "…", "summary": "…", "prompt": "…", "tags": ["UI"], "templates": ["static", "vite"], "owner": "作者昵称", "ownerAvatar": "…", "version": 1, "community": true, "createdAt": "…ISO…", "date": "YYYY-MM-DD", "moderation": { "status": "pending" } } }`，不含 `work` 字段；附示例时返回 `{ "question": <同上题目视图>, "work": <作者示例作品视图> }`。作者从会话读取；题目始终人工审核，不送自动审查，示例作品照常走内容审核并保持 `unverified`。无作品时题目与 `question-create` 审计在同一事务落库；附示例时题目、示例作品和审计同时落库，失败不保留题目或作品，草稿保持可重试。每位作者最多 3 道未删除的 pending 题目（含无作品题目），超限 `429`。其它错误：`401` / `400` / `404`（草稿不属于本人、不存在或过期）/ `429`。人工通过前题目及其作品不进入公开 bootstrap、Show1 列表、排行榜或盲评池；`me.questions` 可读本人全部未删除题目及审核状态。
@@ -639,6 +665,10 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 题目公开视图、`GET /api/me` 的我的题目与 `GET /api/admin/questions` 的每道题均含 `category`（旧题可能为 null）、`domains`（旧题为 `[]`）与 `templates`。
 
 **`POST /api/questions/:id/moderation`**：仅管理员，write 限流，请求 `{ "status": "approved" | "rejected", "reason": "…", "category": "文学" | "静态网页" | "建模", "domains": ["数学"] }`；通过可省略理由，拒绝必须填非空理由，最多 500 字。通过时 `category` 可选，用来补充或修改分类；现有分类为空且请求未带分类，或请求分类无效，返回 `400 请选择题目分类`。拒绝时忽略 `category`。改分类后原格式不兼容时重置为该分类默认值：文学 `["text"]`，其余 `["static","vite"]`。成功 `{ "question": <含 moderation 的题目视图> }`，人工结果含 `source: "human"`、审核人、时间与理由，写 `question-review` audit；分类、领域与格式改变时 detail 增加对应 `{ from, to }`。通过时 `domains` 可选，带上即按创建时的规则校验并替换；拒绝时忽略。题目通过不改变示例作品自身的审核与核验状态。错误 `400` / `401` / `403` / `404` / `429`。
+
+**`POST /api/admin/questions/batch-moderation`**：仅管理员，每批消耗一次 write 限流。请求 `{ "ids": ["q-…"], "status": "approved" | "rejected", "reason": "…" }`，`ids` 为 1–50 项；理由规则同单件题目审核。列表、状态或拒绝理由无效时整体 `400`，不执行任何项目。此接口不修改分类或领域；通过时分类为空返回单件 `400 请选择题目分类`，领域为 `[]` 返回单件 `400 请选择所属领域`。每题在独立事务中复用 `questions.review` 并写 `question-review` audit，失败不影响其它题。响应 `200`：`{ "results": [...] }`，按请求顺序返回 `{ "id": "q-…", "ok": true, "question": <管理员题目视图> }` 或 `{ "id": "q-…", "ok": false, "error": { "status": 400, "code": "…", "message": "…" } }`。每批只刷新一次缓存。认证、同源与限流错误为 `401` / `403` / `429`。
+
+**`POST /api/admin/questions/:id/meta`**：仅管理员，write 限流，请求可含 `title`、`summary`、`prompt`、`category`、`domains`，至少提供一项；长度、分类与领域规则同创建题目，提示词除首尾空白外保留原文。任何 moderation 状态均可编辑，保持现有 moderation。公开（`approved` / `legacy`）且已有未删除作品的题目，修改提示词返回 `409 已有作品的题目不能修改提示词`。改分类沿用单件审核的模板兼容规则；若须重置 templates 且已有未删除作品，返回 `409`。写 `question-edit` audit，变化字段记 `{ from, to }`，提示词只记录已修改及长度，不记录正文。成功 `200`：`{ "question": <管理员题目视图> }`，刷新缓存。错误 `400` / `401` / `403` / `404` / `409` / `429`。
 
 **`DELETE /api/questions/:id`**：登录，write 限流，成功 `{ "ok": true }`。作者可删除本人 pending/rejected 题目及本人关联作品；公开 legacy/approved 题目还须没有其他作者的未删除作品、没有 Gallery 或 Show1 投票。管理员可连同全部关联作品软删除题目，但有投票仍返回 `409`。删除设置 `questions.deleted_at` 和关联 `works.deleted_at`，写 `question-delete` audit；公开与本人/管理员题目列表随后不返回该题。错误 `401` / `403`（非本人且非管理员）/ `404` / `409` / `429`。
 
@@ -730,7 +760,7 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 - **`GET /admin/inbox/:id/...`** 是预览文件路径，不是 API；仅管理员可读取，其他用户或文件不存在时返回纯文本 `404`。`/file` 返回原始文件；ZIP 的预览路径由列表给出，响应使用 `no-store`。
 - **`POST /api/admin/inbox/register`** JSON 请求含 `id`、`task`、必填 `effort`、`providerId`，可选的 `title`、`summary`、`modelId` 或 `modelName`、`tool`、`harnessId`、`harnessOther`；标题和模型名可从文件名建议值补齐。来源字段遵循 3.6 节规则，旧 `harnessVersion` 忽略；不填时 `tool` 为空，不写录入渠道。缺省登记为 `unverified` 且两个门面均关闭，照常走内容审核；`publish: true` 时按管理员上传即人工内容审核，保存 `approved` / `human`、管理员名、理由「管理员上传」与时间并写 `content-review` 审计，然后直接核验为 `verified`，不送 Luna。缺省展览馆开启、竞技场关闭，可用 `show_gallery` / `show_arena` 指定。成功 `200`：`{ "work": <管理员作品视图> }`，移除收件箱文件并写 `inbox-register` audit；无效或已移除的 `id` 返回 `404`。
 - **`DELETE /api/admin/inbox?id=<收件箱 ID>`** 移除暂存文件，成功 `200`：`{ "ok": true }`，写 `inbox-remove` audit；文件不存在返回 `404`。
-- **`POST /api/admin/works/:task/:id/meta`** 仅编辑 SQLite 投稿，不编辑馆藏。JSON 请求可含 `title`、`summary`、`modelName`、`modelId`、`effort`、`harnessId`、`harnessOther`、`providerId`；至少提供一个允许字段（只有旧 `harnessVersion` 时成功返回原视图，不写 audit 或重新审核）。标题不能为空，`modelId` 须存在于目录。来源字段按 3.6 节校验；设置 Harness ID 会清空「其他」，反之亦然。成功 `200`：`{ "work": <管理员作品视图> }`，写 `meta` audit；无效字段或内容返回 `400`，投稿不存在或目标为馆藏返回 `404 not_found`。
+- **`POST /api/admin/works/:task/:id/meta`** 仅编辑 SQLite 投稿，不编辑馆藏。JSON 请求可含 `title`、`summary`、`modelName`、`modelId`、`effort`、`harnessId`、`harnessOther`、`providerId`；至少提供一个允许字段（只有旧 `harnessVersion` 时成功返回原视图，不写 audit 或重新审核）。标题不能为空，`modelId` 须存在于目录。来源字段按 3.6 节校验；设置 Harness ID 会清空「其他」，反之亦然。管理员编辑送审声明保持现有 `moderation`，不重新置为 `pending` 或排队。成功 `200`：`{ "work": <管理员作品视图> }`，写 `meta` audit；无效字段或内容返回 `400`，投稿不存在或目标为馆藏返回 `404 not_found`。
 - **`POST /api/admin/works/:task/:id/nominate`** 仅对已核验、尚未收录、且题目在当前数据包内的投稿有效。生成有效期 14 天的随机导出令牌；重复提名会换发令牌，数据库仅存 SHA-256。返回 `{ "exportUrl": "<当前来源>/api/curate/export/<令牌>", "command": "npm run intake:from-server -- <exportUrl>" }`。提名不改变作品的公开展示状态。管理员列表以 `nominatedAt` 标记提名，以 `curatedAs` 标记已收录。
 - **`DELETE /api/admin/works/:task/:id/nominate`** 撤回提名并使令牌立即失效，返回 `{ "ok": true }`；已收录返回 `409`。提名和撤回均写审计记录。
 - **`GET /api/curate/export/:token`** 无需登录，返回 `task`、`id`、`title`、`summary`、`modelId`、`modelName`、`vendor`、`effort`、`tool`、`harnessId`、`harnessOther`、`providerId`、`providerOther`、`note`、`createdAt`、`root`、`entry`、`digest` 及 `files: [{ path, size, sha256 }]`；`providerId` 为两类或 null，导出兼容字段 `providerOther` 恒为空串。**`GET /api/curate/export/:token/file?path=<相对路径>`** 返回原始文件。两者按令牌每分钟限流 2000 次，另有每 IP 每分钟 10000 次兜底；命中返回 `429` 和 `Retry-After`。无效、过期、撤回或已被数据包接管的令牌返回 `404`，非法文件路径返回 `404`。
@@ -799,7 +829,7 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 
 ### 3.24 自动内容审查（schema v19）
 
-追加幂等迁移，仅新增 `works.moderation` JSON 列；默认 `{ "status": "legacy" }`，既有作品保持原行为。`CONTENT_MODERATION=1` 时新投稿、管理员上传、收件箱登记均先设 `pending`。送审声明变更后重新设 `pending`，随机 revision 防止旧调用结果覆盖新版声明；人工决定也不会被较早的自动结果覆盖。启动恢复持久化的 pending 队列。内容状态与来源核验 `status` 独立。
+追加幂等迁移，仅新增 `works.moderation` JSON 列；默认 `{ "status": "legacy" }`，既有作品保持原行为。`CONTENT_MODERATION=1` 时普通新投稿与未发布的收件箱登记先设 `pending`；管理员直接上传或以 `publish: true` 登记按 3.18 / 3.19 人工通过。作者修改送审声明后重新设 `pending`，管理员 meta 与 review 修改保持现有 `moderation`，随机 revision 防止旧调用结果覆盖新版声明；人工决定也不会被较早的自动结果覆盖。启动恢复持久化的 pending 队列。内容状态与来源核验 `status` 独立。
 
 | `moderation.status` | 含义 | 可公开 |
 | --- | --- | --- |

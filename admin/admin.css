@@ -703,3 +703,27 @@ dialog.sheet.sheet-calib { width: min(1120px, calc(100% - 32px)); border-radius:
 .calib-mode { display: inline-flex; gap: 4px; }
 .calib-mode .btn.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 .work-pool-note { display: block; color: var(--ink-2); font-size: 12px; margin-top: 2px; }
+
+/* ---- review page: pending queues first, decided lists after ----------------------------- */
+.review-nav { display: flex; flex-wrap: wrap; gap: 10px 16px; margin-bottom: 14px; }
+.review-nav .review-tabs { margin-bottom: 0; align-items: center; }
+.seg-caption { padding: 0 8px 0 10px; color: var(--muted); font: 500 11px var(--mono); letter-spacing: 0.08em; }
+.review-lead { max-width: 52em; margin: 0 0 18px; color: var(--ink-2); font-size: 13px; line-height: 1.65; }
+.review-subhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 34px 0 10px; font-size: 15px; }
+.review-subhead small { color: var(--muted); font-size: 12.5px; font-weight: 400; }
+.work-list.is-muted .work-thumb { opacity: 0.72; }
+.review-history { margin-top: 28px; }
+.review-history > summary { cursor: pointer; margin-bottom: 12px; color: var(--ink-2); font-size: 13.5px; font-weight: 600; }
+.question-card .actions .fine { margin: 0 0 0 6px; }
+.review-meta { margin: 16px 0; padding: 12px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.review-meta > summary { cursor: pointer; font-weight: 600; }
+.review-meta > summary small { margin-left: 8px; color: var(--muted); font-size: 12px; font-weight: 400; }
+.review-meta[open] > summary { margin-bottom: 12px; }
+.review-blocked { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 16px 0 0; padding: 10px 12px; border-left: 2px solid var(--danger); background: color-mix(in srgb, var(--danger) 9%, transparent); font-size: 13px; }
+.review-blocked p { flex: 1 1 16em; margin: 0; color: var(--ink-2); }
+.review-blocked .i { width: 16px; height: 16px; color: var(--danger); }
+.content-shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+.content-shots a { display: block; border-radius: var(--radius-sm); overflow: hidden; background: var(--img-bg); box-shadow: 0 0 0 1px var(--line); }
+.content-shots img { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: top; }
+.work-list.is-muted .work-reason { border-left-color: var(--line); background: var(--surface-2); }
+.work-list.is-muted .work-reason .i { color: var(--muted); }

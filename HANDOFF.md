@@ -1,5 +1,12 @@
 # HANDOFF.md · 当前状态
 
+## 四仓协调发布完成（2026-10-02）
+
+- 2026-10-02T10:04:51Z 上线：后端 7a46d71、Show1 22bb6b3、Gallery 3e441a3；数据产物 9356c7057c9898ace07cc86d6d8a852d5f7eeb75（来源 623bfeb）。后端与 Gallery 固定同一包；后续文档提交不自动更换消费 pin。完整记录见[发布归档](docs/archive/2026-10-02-shared-session-release-wsnxxxs.md)。
+- Windows / Linux 后端 244/244、真实接口联调、双站及管理端 8 项隔离浏览器联调、公网 13 项只读验收通过；生产桌面 / 手机截图已目检。真实账号 + Cloudflare 挑战的两站登录互通仍需用户配合，已询问，没有把隔离桩当成生产登录。
+- v31 → v32，integrity ok；用户、作品、票、评论等数量保留，用户 / 票 / 评论 / 题目 / 反应逐行一致。只清理 87 个过期且无正式票引用对局。备份位于 /root/aob-shared-session-release-20261002/backup，旧静态目录保留。
+- 正式 Nginx 第 8 节候选已测试并 reload，服务与审核 tunnel active；game /api 和 game CORS 来源保留。截图独立降权基础设施未部署；Cookie 属性、账号角色和 SSH / DNS 未改。原 game 用户需重登一次，旧 Cookie 自然过期。观察时长待用户决定，移除反代另行按第 9 节授权。
+
 ## 固定数据包与联调完成（2026-10-02，生产切换待执行）
 
 - 固定 CI 36988885817 成功产物 9356c7057c9898ace07cc86d6d8a852d5f7eeb75（来源 623bfeb），Gallery 忽略配置同步。Windows / Linux 后端 244/244、真实接口 integration-smoke、Edge 双站及管理端 8 项隔离联调均通过。

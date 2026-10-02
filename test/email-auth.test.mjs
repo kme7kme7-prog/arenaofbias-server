@@ -159,8 +159,17 @@ test('registration codes are purpose-specific, one-use and roll back with failed
     .get(createHash('sha256').update(email).digest('hex')).n, 0);
   assert.equal('emailBound' in platform.auth.public(user), false);
   await assert.rejects(() => emailAuth.register({ ...body, name: 'another-user', email: 'unused@test.invalid', code }), { status: 400 });
-  await assert.rejects(() => emailAuth.send({ purpose: 'register', email }, null, 'core-ip'), { status: 409 });
-  await assert.rejects(() => emailAuth.register({ ...body, name: 'another-user', code }), { status: 409 });
+  // A taken address looks like any other send and gets a notice instead of a code.
+  const sent = delivered.length;
+  assert.deepEqual(await emailAuth.send({ purpose: 'register', email }, null, 'core-ip'), { sent: true, email });
+  assert.equal(delivered.length, sent + 1);
+  assert.deepEqual(delivered.at(-1), { to: email, code: null, purpose: 'registered' });
+  // Without a valid code nothing says whether the name or address is taken.
+  await assert.rejects(() => emailAuth.register({ ...body, name: 'another-user', code }), { status: 400 });
+  await assert.rejects(() => emailAuth.register({ ...body, email: 'unused@test.invalid', code: '123456' }), { status: 400 });
+  const fresh = 'fresh-registration@test.invalid';
+  await emailAuth.send({ purpose: 'register', email: fresh }, null, 'core-ip');
+  await assert.rejects(() => emailAuth.register({ ...body, email: fresh, code: delivered.at(-1).code }), { status: 409 });
 });
 
 test('registration send rejects bad emails, unavailable delivery, expired codes and shared limits', async () => {

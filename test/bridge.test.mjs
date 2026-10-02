@@ -98,7 +98,7 @@ test('content server injects per key type', async () => {
       byContentKey: (k) => workFor(k) ?? null,
       calibrationOf: (work, face) => work?.calibration?.[face] ?? null,
       isEligible: (work) => Boolean(work),
-      contentAllowed: (work) => Boolean(work),
+      publicContent: (work) => Boolean(work),
     },
     arena: { workForToken: (k) => workFor(k) ?? null },
   }));

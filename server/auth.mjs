@@ -104,14 +104,16 @@ export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', 
       const name = validName(rawName);
       const password = validPassword(rawPassword);
       const key = nameKey(name);
+      // Email registration proves the code before saying whether a name or address is taken.
+      registration?.verifyCode();
       if (admins.includes(key) || q.userByKey.get(key)) fail(409, '这个用户名已被使用');
+      if (registration && q.userByEmail.get(registration.email)) fail(409, '该邮箱已被其他账号绑定，请换一个。');
       const salt = randomBytes(16).toString('hex');
       const id = newId(8);
       const hash = await hashPassword(password, salt);
       if (q.userByKey.get(key)) fail(409, '这个用户名已被使用');
       if (registration) {
         if (q.userByEmail.get(registration.email)) fail(409, '该邮箱已被其他账号绑定，请换一个。');
-        registration.verifyCode();
         transaction(db, () => {
           registration.consumeCode();
           const now = Date.now();

@@ -60,6 +60,10 @@ function writeTree(target, files) {
 export function createLibrary({ db, catalog, config, limits }) {
   const contentAllowed = (work) => Boolean(work && (work.curated ||
     (catalog.task(work.taskId) && ['legacy', 'approved'].includes(work.moderation?.status))));
+  // Public surfaces additionally wait for a human decision on uploads (a review status or a
+  // manual content approval): an automatic approval alone only reaches owner and admin previews.
+  const publicContent = (work) => Boolean(contentAllowed(work) &&
+    (work.curated || work.status !== 'unverified' || work.moderation?.source === 'human'));
   const dirs = { drafts: join(config.dataDir, 'drafts'), works: join(config.dataDir, 'works'), media: join(config.dataDir, 'media') };
   for (const dir of Object.values(dirs)) mkdirSync(dir, { recursive: true });
   const originOf = (key) => config.contentTemplate.replace('{token}', key);
@@ -252,7 +256,7 @@ export function createLibrary({ db, catalog, config, limits }) {
     }
     return { show_gallery: work.showGallery, show_arena: work.showArena, show_entertainment: Boolean(work.showEntertainment) };
   };
-  const visibleTo = (work, site = 'show2') => Boolean(contentAllowed(work) && (site === 'show1' ? flagsOf(work).show_arena : flagsOf(work).show_gallery));
+  const visibleTo = (work, site = 'show2') => Boolean(publicContent(work) && (site === 'show1' ? flagsOf(work).show_arena : flagsOf(work).show_gallery));
   // Text tasks keep their earlier rules; other works must be single-turn without human intervention.
   const generationQualified = (work) => isTextTask(catalog.task(work.taskId)) ||
     generationOf(work).generationMode === 'single-turn' && work.humanIntervention === 'none';
@@ -383,8 +387,9 @@ export function createLibrary({ db, catalog, config, limits }) {
     audit,
     mediaDir: dirs.media,
     contentAllowed,
+    publicContent,
     canRead(work, viewer) {
-      return Boolean(work && (contentAllowed(work) || viewer && (viewer.id === work.ownerId || viewer.role === 'admin')));
+      return Boolean(work && (publicContent(work) || viewer && (viewer.id === work.ownerId || viewer.role === 'admin')));
     },
     previewOrigin(work) { return originOf(previewKey(work)); },
     previewByKey(key) {
@@ -446,7 +451,7 @@ export function createLibrary({ db, catalog, config, limits }) {
         mine: Boolean(viewer && viewer.id === work.ownerId),
         addedAt: iso(work.createdAt),
         reviewedAt: iso(work.reviewedAt),
-        scene: `${!contentAllowed(work) && privileged ? originOf(previewKey(work)) : originOf(work.contentKey)}/`,
+        scene: `${!publicContent(work) && privileged ? originOf(previewKey(work)) : originOf(work.contentKey)}/`,
         captures: Object.fromEntries(Object.entries(work.captures).map(([id, file]) => [id, `media/${work.id}/${file}`])),
         cover: work.cover ? `media/${work.id}/${work.cover}` : null,
         files: work.files,

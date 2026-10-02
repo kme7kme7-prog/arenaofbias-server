@@ -35,7 +35,8 @@ function withHeadTags(buffer, tags) {
 const scriptTag = (path) => `<script src="${path}"></script>`;
 
 export function createContentHandler({ config, library, arena, siteOrigins, readGuard = createReadGuard(config) }) {
-  const cdn = config.cdn.map((host) => `https://${host}`).join(' ');
+  // jsdelivr is limited to npm: its GitHub paths follow a repository that can change after review.
+  const cdn = config.cdn.map((host) => (host === 'cdn.jsdelivr.net' ? 'https://cdn.jsdelivr.net/npm/' : `https://${host}`)).join(' ');
   const policy = [
     'sandbox allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-pointer-lock allow-downloads',
     "default-src 'self' data: blob:",
@@ -75,7 +76,7 @@ export function createContentHandler({ config, library, arena, siteOrigins, read
       if (work) target = { dir: work.dir, entry: work.entry ?? 'index.html', private: true };
     } else {
       work = library.byContentKey(key);
-      if (library.contentAllowed(work)) target = { dir: work.dir, entry: work.entry, private: work.moderation.status !== 'legacy' };
+      if (library.publicContent(work)) target = { dir: work.dir, entry: work.entry, private: work.moderation.status !== 'legacy' };
     }
     if (!target) return errorPage(res, 410, '作品已不可用', key[0] === 'm' ? '这一组比较已经结束，请开始新的一组。' : '作品尚未公开、已被删除，或预览地址已过期。');
 

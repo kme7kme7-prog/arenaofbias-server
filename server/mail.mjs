@@ -210,6 +210,17 @@ export async function sendMail({ to, subject, text }) {
 }
 
 export async function sendVerificationEmail({ to, code, purpose }) {
+  if (purpose === 'registered') {
+    await sendMail({ to, subject: 'Arena of Bias 注册提醒', text: [
+      '有人正在用这个邮箱注册新账号，但它已经绑定了一个现有账号，因此没有发送验证码。',
+      '',
+      '如果是你本人，请直接登录；忘记密码可以在登录页使用「找回密码」。',
+      '如果这不是你本人的操作，请忽略这封邮件。',
+      '',
+      '— Arena of Bias 偏见试验场',
+    ].join('\n') });
+    return { sent: true };
+  }
   const action = PURPOSE_TEXT[purpose] || '验证';
   const subject = `Arena of Bias ${action}验证码`;
   const text = [

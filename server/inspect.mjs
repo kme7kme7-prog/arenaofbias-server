@@ -200,7 +200,8 @@ export function inspectUpload(buffer, filename, { limits, cdn, template }) {
     if (/^(https?:)?\/\//i.test(url)) {
       const host = hostOf(url);
       if (!host) continue;
-      (cdn.includes(host) ? cdnHosts : external).add(host);
+      if (host === 'cdn.jsdelivr.net' && new URL(url, 'https://local.invalid/').pathname.startsWith('/gh/')) external.add('cdn.jsdelivr.net/gh');
+      else (cdn.includes(host) ? cdnHosts : external).add(host);
       continue;
     }
     if (/^[a-z][a-z0-9+.-]*:/i.test(url)) continue;

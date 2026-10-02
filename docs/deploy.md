@@ -324,3 +324,114 @@ SSH 使用独立 Ed25519 身份并固定主机公钥；远端授权公钥限制�
 先在正式服务器请求 `http://127.0.0.1:5280/health`，再用隔离作品跑实际截图和内容审查模块、确认 Luna Flex 响应。成功后将现有 moderation.conf 的 `MODERATION_BASE_URL` 改为 `http://127.0.0.1:5280/v1`，保留 Key 与审核/截图开关；daemon-reload、重启正式服务，再核对运行进程设置和公网 bootstrap。loopback HTTP 由上述 SSH 通道加密跨机传输。
 
 回滚该连接仅需恢复备份 moderation.conf 并重启平台，再停止专用 tunnel/relay；不涉及数据迁移，也不删除 Xray 或修改共享端口。当前部署、实际验证与备份位置以 HANDOFF 最新记录为准。
+
+## 7. 安全加固（2026-10-02 红队报告后续）
+
+以下步骤由站长在 VPS、DNS 控制台执行；仓库只提供代码开关和说明。每一步都先备份要改的文件，改完先校验语法再重载。
+
+### 7.1 SSH
+
+1. 本机 `ssh-keygen -t ed25519`，`ssh-copy-id root@<VPS>`，在新窗口确认免密码登录可用。
+2. 保持一个已登录会话，写入 `/etc/ssh/sshd_config.d/10-hardening.conf`：
+
+```
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin prohibit-password
+```
+
+3. `sshd -t` 无输出后 `systemctl restart ssh`，从新窗口确认仍可登录，再关闭旧会话。
+4. `apt install fail2ban`，`/etc/fail2ban/jail.d/sshd.local`：
+
+```
+[sshd]
+enabled = true
+maxretry = 3
+findtime = 10m
+bantime = 1d
+```
+
+### 7.2 平台服务改为非 root 用户
+
+截图会在本机 Chrome 中执行投稿页面。`CAPTURE_SANDBOX=1` 打开 Chromium 系统沙盒，但 root 下 Chrome 无法带沙盒启动，所以先换运行用户。
+
+1. 确认现状：`systemctl show arenaofbias-server -p User`，空值即 root。
+2. `useradd --system --home /var/lib/arenaofbias --shell /usr/sbin/nologin arenaofbias`
+3. `chown -R arenaofbias: /www/wwwroot/arenaofbias-server/.data`；代码目录、`.datapack` 保持 root 所有、对该用户可读。
+4. 写入 `/etc/systemd/system/arenaofbias-server.service.d/hardening.conf`：
+
+```
+[Service]
+User=arenaofbias
+Group=arenaofbias
+StateDirectory=arenaofbias
+Environment=HOME=/var/lib/arenaofbias
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/www/wwwroot/arenaofbias-server/.data
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+```
+
+不要加 `RestrictNamespaces`：Chrome 沙盒依赖用户命名空间（Debian 12 默认允许）。
+
+5. `systemctl daemon-reload && systemctl restart arenaofbias-server`，`journalctl -u arenaofbias-server -n 50` 确认无权限错误并出现「自动截图可用」。
+6. 现场核对：root 的 cron（数据包同步、`archive-backup.sh`）新建的文件该用户能读；审查 relay 的 SSH tunnel 是独立服务不受影响；截图使用系统安装的 Chrome（`/opt/google/chrome`），不能依赖 `/root` 下的 Playwright 浏览器缓存。
+7. 回滚：删除 `hardening.conf`，daemon-reload、restart，把 `.data` 所有者改回 root。
+
+### 7.3 截图沙盒与 Chrome 更新
+
+- 7.2 生效后，在 `moderation.conf` 加 `Environment=CAPTURE_SANDBOX=1`，daemon-reload、restart；`ps -o user,args -C chrome` 应显示非 root 用户且没有 `--no-sandbox`。若启动失败，日志会提示截图不可用，新投稿全部转人工、不会放行；删掉该行即可恢复。
+- `apt update && apt install --only-upgrade google-chrome-stable`；在 unattended-upgrades 的 `Origins-Pattern` 加入 Google 源，保持 Chrome 自动更新。
+
+### 7.4 上线本轮代码前
+
+本轮起，投稿要在人工作出决定（核验 / 存疑，或人工内容审查通过）后才出现在公开列表和公开作品源。部署前列出受影响的作品，建议先在后台处理：
+
+```sql
+SELECT task_id, id, title FROM works
+WHERE status = 'unverified' AND deleted_at IS NULL
+  AND json_extract(moderation, '$.status') IN ('approved', 'legacy')
+  AND json_extract(moderation, '$.source') IS NOT 'human';
+```
+
+本轮不涉及数据库迁移。定期复查默认每 24 小时，可用 `CONTENT_RECHECK_HOURS` 调整，0 关闭；只有内容变化的作品会再次调用 Luna。
+
+### 7.5 DNS 与 Nginx
+
+- **SPF / DMARC**：验证码发件地址不在本域时加 `TXT @ "v=spf1 -all"`；在本域时改为 `v=spf1 include:<SMTP 服务商给出的值> -all` 并按服务商说明加 DKIM。两种情况都加 `TXT _dmarc "v=DMARC1; p=quarantine; rua=mailto:<站长邮箱>"`，观察两周无误后改 `p=reject`。
+- **主域与 game 安全头**（gallery、api 同样补齐；带自己 `add_header` 的 location 不继承 server 层，需逐个补）：
+
+```nginx
+add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+add_header X-Content-Type-Options "nosniff" always;
+add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+add_header X-Frame-Options "SAMEORIGIN" always;
+```
+
+  CSP 先用 `Content-Security-Policy-Report-Only` 观察一周再改为正式头。
+- **主域只跳首页**：`114.66.27.88.conf` 中改为 `location = / { return 301 https://game.arenaofbias.icu/; }` 与 `location / { try_files $uri $uri/ =404; }`，以现有配置为准合并。
+- **埋点单独限流**：`http {}` 加 `limit_req_zone $binary_remote_addr zone=aob_track:10m rate=20r/m;`；api 的 server 块加 `location = /api/track { limit_req zone=aob_track burst=10 nodelay; <照抄现有 /api 的 proxy 配置> }`。后端自身上限为 600 次/分/IP，超限仍回 204。
+- 每次改完 `nginx -t` 再 `systemctl reload nginx`。
+
+### 7.6 管理员用户名
+
+`grep -r ADMIN_USERNAMES /etc/systemd/system/arenaofbias-server.service.d/` 查看保留名；本轮起没有有效验证码的注册请求不再暴露保留名或已有账号。若保留名是 `admin` 这类易猜名字，换成不易猜的用户名；若确有 `admin` 账号，按 `npm run admin` 建新管理员后删除旧号。
+
+### 7.7 验收
+
+| 检查 | 期望 |
+| --- | --- |
+| 密码方式 SSH | `Permission denied (publickey)` |
+| `systemctl show arenaofbias-server -p User` | `arenaofbias` |
+| `ps -o user,args -C chrome` | 非 root，无 `--no-sandbox` |
+| Luna 通过但未人工处理的投稿公开源 | 410 |
+| 人工核验或人工内容通过后 | 200 |
+| 带 `type="password"` 的测试投稿 | 转 review，理由列出命中信号 |
+| 已注册邮箱发注册验证码 | 与正常发码相同的响应，邮箱收到注册提醒 |
+| `curl -sI https://arenaofbias.icu/xxx` | 404 |
+| 主域、game 响应头 | 含 HSTS、nosniff |
+| DoH 查询 `_dmarc` TXT | 有 DMARC 记录 |

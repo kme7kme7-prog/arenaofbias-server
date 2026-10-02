@@ -206,7 +206,7 @@ unverified ──审核──▶ verified ──审核──▶ questioned
     └────── 审核退回 ────┴────── 审核退回 ◀───┘
 ```
 
-- `unverified`：初始状态，**不进入**盲投对战池，不进入排行；在作品列表中可见。
+- `unverified`：初始状态，**不进入**盲投对战池，不进入排行。投稿在人工作出决定（核验 / 存疑，或人工内容审查通过）前不进入公开作品列表，公开作品源返回 410；馆藏不受此限。
 - `verified`：可公开展示；非文字题还须内容放行、`show_arena` 开启、`generationMode=single-turn` 且 `humanIntervention=none` 才进入盲评池与排行。已转为馆藏的原投稿不重复进池。
 - `questioned`：存疑。必须填写理由（作者与访客均可见）；退出对战池与排行，且**不可再互动**（表情返回 `409`）。
 - 删除为软删除（`deleted_at`），馆藏作品不可经 API 删除（`409`，须在数据仓库移除）。
@@ -285,7 +285,7 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
 
 Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）。`GET /api/auth/me` 的 `user` 返回 `{ id, username, role, email }`，绑定后为真实归一化邮箱。
 
-错误：`400` 缺少邮箱或验证码、用户名 / 密码 / 邮箱不合规、验证码不正确或已过期；`409` 邮箱已占用（「该邮箱已被其他账号绑定，请换一个。」）、用户名已被使用或属于 `ADMIN_USERNAMES` 保留名；`415`；`429`。
+错误：`400` 缺少邮箱或验证码、用户名 / 密码 / 邮箱不合规、验证码不正确或已过期；`409` 邮箱已占用（「该邮箱已被其他账号绑定，请换一个。」）、用户名已被使用或属于 `ADMIN_USERNAMES` 保留名；`415`；`429`。格式检查之后先校验验证码，验证码有效才判断用户名和邮箱是否被占用，因此没有有效验证码时只会得到 400，不会暴露账号或保留名是否存在。
 
 ### 3.3 `POST /api/auth/login` —— 登录
 
@@ -303,11 +303,11 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 `GET /api/auth/turnstile` 返回 `{ "siteKey": string | null }`。只有 `TURNSTILE_SITE_KEY` 与 `TURNSTILE_SECRET_KEY` 都配置时才启用；发码请求校验 `turnstileToken`，注册提交无需 token。
 
-`POST /api/auth/email/send`：绑定请求 `{ "purpose": "bind", "email": "…", "turnstileToken": "…" }`，需登录，成功返回 `{ "sent": true, "email": "归一化邮箱" }`。重置请求 `{ "purpose": "reset", "username": "…", "turnstileToken": "…" }`，无论账号是否存在或是否绑定邮箱，成功响应均为 `{ "sent": true, "email": "" }`；不提供邮箱占用提示。发码按 IP 和目标邮箱每 15 分钟限流，另有同地址 60 秒冷却（可用 `MAIL_*` 调整）。SMTP 未配置时绑定返回 `503`；重置仍采用统一响应。
+`POST /api/auth/email/send`：绑定请求 `{ "purpose": "bind", "email": "…", "turnstileToken": "…" }`，需登录，成功返回 `{ "sent": true, "email": "归一化邮箱" }`；邮箱已被其他账号绑定时返回 `409`，该判断在限流与 Turnstile 之后。重置请求 `{ "purpose": "reset", "username": "…", "turnstileToken": "…" }`，无论账号是否存在或是否绑定邮箱，成功响应均为 `{ "sent": true, "email": "" }`；不提供邮箱占用提示。发码按 IP 和目标邮箱每 15 分钟限流，另有同地址 60 秒冷却（可用 `MAIL_*` 调整）。SMTP 未配置时绑定返回 `503`；重置仍采用统一响应。
 
 `POST /api/auth/email/verify`：`{ "purpose": "bind", "email": "…", "code": "六位数字" }` 或 `{ "purpose": "reset", "username": "…", "code": "六位数字" }`。成功 `{ "ok": true }`，不消耗验证码。验证码默认 10 分钟有效、输错 5 次作废；数据库只存哈希。
 
-注册发码：`POST /api/auth/email/send` 的 `{ "purpose": "register", "email": "…", "turnstileToken": "…" }` 无需登录；校验邮箱格式并拒绝任何账号已绑定的邮箱（`409`「该邮箱已被其他账号绑定，请换一个。」）。沿用上述 IP / 邮箱限流及 Turnstile gate；邮件未配置或发送失败为 `503`，成功 `{ "sent": true, "email": "归一化邮箱" }`，邮件说明为注册验证。注册验证码仅由注册接口校验消费，不能用于 bind/reset；v24 迁移扩展验证码表的 purpose 约束并保留现有验证码。
+注册发码：`POST /api/auth/email/send` 的 `{ "purpose": "register", "email": "…", "turnstileToken": "…" }` 无需登录；校验邮箱格式，沿用上述 IP / 邮箱限流及 Turnstile gate。邮箱已被绑定时不返回 409：响应与正常发码相同，但不生成验证码，改发一封注册提醒（mailer 收到 `{ to, code: null, purpose: "registered" }`），提示直接登录或找回密码；邮件未配置或发送失败为 `503`，成功 `{ "sent": true, "email": "归一化邮箱" }`，邮件说明为注册验证。注册验证码仅由注册接口校验消费，不能用于 bind/reset；v24 迁移扩展验证码表的 purpose 约束并保留现有验证码。
 
 测试与审计脚本可在隔离进程创建 `createPlatform({ config, limits, mailer })`，其中 `mailer` 提供 `ready: () => true` 和 `send: async ({ to, code, purpose }) => …`，捕获验证码后先调用 send 再 register。示例辅助函数见 `test/helpers/email.mjs`；HTTP 响应不包含验证码，也没有验证码读取端点。外部 smoke 脚本可使用本地测试 SMTP（如 `test/email-auth.test.mjs`）读取邮件内容。已有无邮箱账号测试可直接构建旧账号夹具再登录，不能通过 HTTP 绕过注册验证。
 
@@ -811,12 +811,16 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 
 `moderation` 仅返回作者/管理员。普通作者只收到 `{ status, at }`，且仅在 `rejected` 时附简短 `reason`；管理员保留完整结果，可含 `source: automatic|human`、中文 `reason`、风险 `categories`、`error` 代码、`model`、`serviceTier`、`responseId`、`usage`、`coverage` 或人工 `reviewer`。`at` 为毫秒时间，旧 legacy 记录可缺省。不含 API 密钥或服务商原始错误响应。题目作者视图采用相同裁剪规则；管理员题目视图保留完整结果。`bootstrap.site.autoModeration` 与管理员两类待办计数见 3.1。
 
-内容尚未通过时，公开 bootstrap、Show1 动态作品、盲评、评论/表情与收录导出均不可使用该作品；公开 `w<32hex>` 源返回 410，媒体请求仅允许作者/管理员，否则 404。作者/管理员作品 DTO 的 `scene` 是随机 `p<32hex>` 源，有效一小时、进程重启失效，返回 `Cache-Control: no-store`。该地址本身具有预览能力，不应公开转发。自动截图也使用此源。参与审查的已公开作品源与媒体使用 `no-store`，防止新审核状态被已有缓存跳过。
+内容尚未通过时，公开 bootstrap、Show1 动态作品、盲评、评论/表情与收录导出均不可使用该作品。自动通过（以及关闭审查时的 `legacy`）本身也不公开投稿：公开列表、评论/表情、公开 `w<32hex>` 源与媒体还要求人工已作决定，即 `status` 不为 `unverified`，或 `moderation.source` 为 `human`；在此之前作者/管理员继续使用下述预览源。公开 `w<32hex>` 源返回 410，媒体请求仅允许作者/管理员，否则 404。作者/管理员作品 DTO 的 `scene` 是随机 `p<32hex>` 源，有效一小时、进程重启失效，返回 `Cache-Control: no-store`。该地址本身具有预览能力，不应公开转发。自动截图也使用此源。参与审查的已公开作品源与媒体使用 `no-store`，防止新审核状态被已有缓存跳过。
 
 - **`POST /api/works/:task/:id/moderation`**：仅管理员；JSON `{ "status": "approved" | "rejected", "reason": "人工理由" }`。通过理由选填，省略或空白时保存「人工复核通过」；拒绝理由必填，理由保存最多 500 字；无效决定或拒绝缺理由 400，无权限 403，作品不存在 404。成功 200 `{ "work": <管理员作品视图> }`，写 `content-review` audit 并刷新竞技场缓存。内容通过不改变来源核验或门面开关；示例作品需题目也人工通过、进入 catalog 后才公开，无需再次操作作品。
 - **`POST /api/works/:task/:id/moderation/retry`**：仅管理员，无需请求体；仅开启自动审查时可用，否则 409。成功 200 `{ "work": <pending 作品视图> }`，写 `content-retry` audit 并刷新竞技场缓存，重新进入队列并暂不公开。
 
-送审使用 Responses API，`gpt-6-luna`、`service_tier: flex`、`store: false`、低推理档、严格 JSON schema。材料为投稿声明、入口静态文字、两档实际页面文字、可选封面及桌面/手机首屏。疑似风险返回 review，明确风险可返回 rejected。未遍历所有文件、滚动区域或交互；语境模糊交人工。缺密钥、截图不完整、超出材料限额、请求超过 15 分钟、429/其他错误、未完成/拒答/无效结构或未确认 Flex 均转 review，不自动重试或切换标准档。`CAPTURE=0` 无法完成自动审查。关闭开关不放行已有待审或被拒作品。
+送审使用 Responses API，`gpt-6-luna`、`service_tier: flex`、`store: false`、低推理档、严格 JSON schema。材料为投稿声明、入口静态文字、可选封面，以及桌面/手机两档各两次截图：加载后 3.5 秒的首屏（即公开 captures），和滚动、点击中央后约 12 秒的延迟截图（`first-late.jpg` / `mobile-late.jpg`，仅供审查，不进入 captures、不经 `/media/` 提供）；每次截图都收集主页面和全部 iframe 的文字，共四段。截图上下文隐藏 `navigator.webdriver`，并把 UA 中的 `HeadlessChrome` 改为 `Chrome`。四张截图或四段文字缺任何一项都按截图不完整转 review。疑似风险返回 review，明确风险可返回 rejected。未遍历所有交互；语境模糊交人工。
+
+静态信号：结果返回后扫描作品内全部 `.html/.htm/.js/.mjs/.cjs/.svg`（合计上限 64MB，超出记为「部分脚本过大未扫描」）。命中密码输入框、`navigator.webdriver` / `HeadlessChrome`、以字面外部地址赋值 `location` / `location.assign|replace` / `window.open`、meta refresh，或可在审查后更换内容的 CDN 地址（jsdelivr / esm.sh 的 `gh/` 路径，jsdelivr `npm/`、unpkg、esm.sh 上不带精确 `x.y.z` 版本的包）时，approved 改为 review，`reason` 追加命中项，`categories` 追加 `signal:<id>`，管理员结果另含 `signals`。混淆代码可以绕过这些规则，它们只保证明显信号由人工确认。作品 CSP 的 jsdelivr 来源收紧为 `https://cdn.jsdelivr.net/npm/`，`gh/` 等其他路径一律不加载；上传检查把 `cdn.jsdelivr.net/gh` 列为会被拦截的外部资源。
+
+定期复查：`CONTENT_RECHECK_HOURS`（默认 24，0 关闭）在开启审查时生效，进程启动一小时后每小时检查一次到期作品。范围为已公开（见上）且未转馆藏的投稿，在待审队列空闲时逐件重新截图（`recheck-*.jpg`，不更新 captures）。基线存于 `.data/media/<id>/baseline.json`：数字归一后的首屏文字摘要、全部 CDN 响应体的 SHA-256 及检查时间；自动审查截图完整时写入，没有基线的作品在首次复查时补建。截图不完整则跳过，下一轮重试。文字和 CDN 都未变时只更新检查时间。有变化时重新送审：通过则写 `content-recheck` audit 并保持公开；否则（含调用失败）以 `source: "recheck"`、理由前缀「定期复查发现内容变化：…」写入结果，作品立即撤下等待人工。缺密钥、截图不完整、超出材料限额、请求超过 15 分钟、429/其他错误、未完成/拒答/无效结构或未确认 Flex 均转 review，不自动重试或切换标准档。`CAPTURE=0` 无法完成自动审查。关闭开关不放行已有待审或被拒作品。
 
 ### 3.25 盲评资格维护与代表作持久化（schema v26）
 

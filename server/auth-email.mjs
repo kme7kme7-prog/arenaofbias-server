@@ -80,7 +80,6 @@ export function createEmailAuth(db, auth, { mailer = { ready: mailReady, send: s
       if (!body.email || !body.code) fail(400, '请填写邮箱和验证码。');
       const email = normalizeEmail(body.email);
       if (!validEmail(email)) fail(400, '请填写正确的邮箱地址。');
-      if (q.userByEmail.get(email)) fail(409, '该邮箱已被其他账号绑定，请换一个。');
       return auth.register(body.name ?? body.username, body.password, {
         email,
         verifyCode() { if (!match('register', email, body.code)) invalidCode(); },
@@ -93,18 +92,27 @@ export function createEmailAuth(db, auth, { mailer = { ready: mailReady, send: s
       if (purpose === 'bind' && !user) fail(401, '请先登录后再绑定邮箱。');
       const email = purpose !== 'reset' ? normalizeEmail(body.email) : q.userByName.get(nameKey(String(body.username ?? '')))?.email;
       if (purpose !== 'reset' && !validEmail(email)) fail(400, '请填写正确的邮箱地址。');
-      if (purpose !== 'reset') {
-        const owner = q.userByEmail.get(email);
-        if (owner && (purpose === 'register' || owner.id !== user.id)) fail(409, '该邮箱已被其他账号绑定，请换一个。');
-      }
       ipLimit(ip);
       emailLimit(digest(email || nameKey(String(body.username ?? ''))));
       await gate(body.turnstileToken, ip);
+      // Ownership is checked only after the limits and the human check. A taken address
+      // asking to register gets the ordinary response and a notice instead of a code.
+      const owner = purpose !== 'reset' ? q.userByEmail.get(email) : null;
+      if (owner && purpose === 'bind' && owner.id !== user.id) fail(409, '该邮箱已被其他账号绑定，请换一个。');
       if (!mailer.ready()) {
         if (purpose === 'reset') return resetResponse;
         fail(503, '邮件服务未配置，暂时无法发送验证码。');
       }
       if (!email) return resetResponse;
+      if (owner && purpose === 'register') {
+        try {
+          await mailer.send({ to: email, code: null, purpose: 'registered' });
+        } catch (error) {
+          console.error('Email delivery failed:', error);
+          fail(503, '验证码邮件发送失败，请稍后重试。');
+        }
+        return { sent: true, email };
+      }
       if (purpose === 'reset') {
         const delivery = issue(purpose, email).catch((error) => {
           console.error('Reset email delivery failed:', error);

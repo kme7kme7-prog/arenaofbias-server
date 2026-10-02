@@ -19,6 +19,16 @@
 - 隔离真实后端 + 合成数据浏览器跑通 Gallery 审核、375 宽、竞技场待作品到未进盲测，以及开启但未审核本面的回归。Gallery console 0；管理台合成作品 iframe 因验收服务未提供作品域路由产生资源 404，无页面 JS 异常。未验收真实作品执行、生产账号、自动审核、SMTP 或截图服务；临时服务已关闭。证据在相邻 Gallery output/playwright/review-redesign-current/。
 - 本轮仅本地提交，未推送、部署、操作业务库或私有配置；其他会话的领域、邮件及内容加固等改动保留。归档：[review-pipeline](docs/archive/2026-10-02-review-pipeline-wsnxxxs.md)。
 
+## 本轮：红队报告核对与上传内容加固（2026-10-02，本地提交，未推送、未部署）
+
+- 背景：用户提供的 2026-10-01 红队报告。核对结论、四项代码改动与服务器步骤见对话；服务器/DNS/Nginx 由站长按 `docs/deploy.md` 第 7 节执行，本轮未连接生产。
+- 公开需人工决定：新增 `library.publicContent`，即内容放行 + 馆藏或 `status≠unverified` 或 `moderation.source=human`。公开作品源、`visibleTo`（公开列表、评论/表情）、`canRead`（媒体）、截图来源与 `scene` 均改用它；Luna 通过或 legacy 的未核验投稿只在作者/管理员预览中可见。
+- 枚举：注册先校验验证码，再判断用户名、保留名和邮箱占用；注册发码遇到已绑定邮箱时返回相同响应并发注册提醒（`purpose: registered`）；绑定的 409 移到限流与 Turnstile 之后。
+- 审核加固：截图隐藏 webdriver/HeadlessChrome，加 3.5 秒后滚动+点击的约 12 秒延迟截图与全部 frame 文字，送审 5 张图 4 段文字；全部脚本静态信号命中即 approved→review；CSP 的 jsdelivr 限为 `/npm/`；`CAPTURE_SANDBOX=1` 开 Chromium 沙盒（需非 root）；`CONTENT_RECHECK_HOURS`（默认 24）定期复查文字与 CDN 响应哈希，变化后重新送审，不通过即撤下。基线在 `.data/media/<id>/baseline.json`，无迁移。
+- 验证（Windows Node 24.16.0）：在由「HEAD + 本轮改动」检出的干净工作树中，`npm run check` 81 文件 0 错，`npm test` 215/215 通过（0 fail/cancel/skip），`git diff --check` 通过。共享工作区里 `admin.test.mjs:255` 的 `totals.tasks` 失败来自他人未提交的 `server/arena.mjs`，与本轮无关。未做真实 Chrome 截图与真实 Luna 调用，按部署文档 7.7 节在线上验收。
+- 他人改动：本轮期间工作区出现非本轮的未提交改动（admin/admin.css、admin/admin.js、server/app.mjs、arena.mjs、catalog.mjs、categories.mjs、db.mjs、questions.mjs、test/questions.test.mjs），未改动，属另一会话（wsnxxxs / Codex），本轮提交只含本轮文件与段落。
+- 待决：SPF 写法取决于验证码 SMTP 服务商与发件域；举报入口需与前端一起另开一轮；作品独立注册域名暂不做。
+
 ## 本轮：盲评池资格、作品分与每日代表作（2026-10-02 Brisbane，本地提交，未推送未部署）
 
 - 用户后续授权本地提交，仍不推送、不部署；不自动维护生产数据。本轮只改本仓相关源码、测试、API 契约与本页，不改数据包、数据仓或 Gallery。初始工作区干净，无他人遗留源码改动。

@@ -1,7 +1,10 @@
 // Uniform screenshots of submitted works, taken like the archive's own captures: a fresh
 // browser context at 1440×900 and a 390×844 touch phone, default state, light scheme.
 // Needs Playwright and a local Chrome; without them automatic content checks wait
-// for manual review and uploads show a text cover.
+// for manual review and uploads show a text cover. Each viewport is shot twice: the
+// public capture after load, then a review-only shot after scrolling, a click and a wait,
+// so pages that hold back content for a few seconds or until input still get seen.
+import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
@@ -11,9 +14,27 @@ const SHOTS = [
   { id: 'mobile', viewport: { width: 390, height: 844 }, mobile: true },
 ];
 
+// Pages that cloak content from automation usually test these two properties.
+const DISGUISE = `(() => {
+  const proto = Navigator.prototype;
+  Object.defineProperty(proto, 'webdriver', { get: () => false, configurable: true });
+  for (const name of ['userAgent', 'appVersion']) {
+    const get = Object.getOwnPropertyDescriptor(proto, name).get;
+    Object.defineProperty(proto, name, { get() { return get.call(this).replace('HeadlessChrome', 'Chrome'); }, configurable: true });
+  }
+})();`;
+
+// Text of the page and every frame inside it; a frame's text is not part of body.innerText.
+async function pageText(page) {
+  const parts = [];
+  for (const frame of page.frames()) parts.push(await frame.locator('body').innerText({ timeout: 2000 }).catch(() => ''));
+  return parts.filter(Boolean).join('\n');
+}
+
 // Browser redirects are not all intercepted by route(). Fetch each permitted hop
 // ourselves so a CDN redirect can never send Chromium to another network target.
-export async function guardCaptureContext(context, { origin, cdn }) {
+// CDN bodies are hashed into resources so a later capture can tell when one changed.
+export async function guardCaptureContext(context, { origin, cdn, resources = null }) {
   const workOrigin = new URL(origin).origin;
   const cdnOrigins = new Set(cdn.map((host) => new URL(`https://${host}`).origin));
   const allowed = (url, document) => !url.username && !url.password &&
@@ -35,7 +56,10 @@ export async function guardCaptureContext(context, { origin, cdn }) {
         if (localWork) target.hostname = '127.0.0.1';
         response = await route.fetch({ url: target.href, ...(localWork ? { headers: { ...await request.allHeaders(), host: url.host } } : {}),
           maxRedirects: 0, timeout: 15000 });
-        if (response.status() < 300 || response.status() >= 400) return await route.fulfill({ response });
+        if (response.status() < 300 || response.status() >= 400) {
+          if (resources && url.origin !== workOrigin) resources.set(request.url(), createHash('sha256').update(await response.body()).digest('hex'));
+          return await route.fulfill({ response });
+        }
         const location = response.headers().location;
         if (!location) return await route.abort();
         url = new URL(location, url);
@@ -74,7 +98,9 @@ export function createCapturer({ config, library, loadChromium = async () => (aw
         networkBlocker.listen(0, '127.0.0.1', resolve);
       });
       try {
+        // The OS sandbox needs a non-root service user; CAPTURE_SANDBOX=1 turns it on.
         browser = await chromium.launch({ ...(config.captureChannel ? { channel: config.captureChannel } : {}),
+          chromiumSandbox: Boolean(config.captureSandbox),
           args: [`--proxy-server=http://127.0.0.1:${networkBlocker.address().port}`, '--proxy-bypass-list=<-loopback>',
             '--force-webrtc-ip-handling-policy=disable_non_proxied_udp'] });
       } catch (error) {
@@ -124,27 +150,47 @@ export function createCapturer({ config, library, loadChromium = async () => (aw
     finally { launching = null; }
   }
 
-  async function capture(work) {
+  // publish=false keeps the shots out of the work's public captures (periodic rechecks).
+  async function capture(work, { prefix = '', publish = true } = {}) {
     if (!await initialize()) return null;
-    const origin = library.contentAllowed(work) ? library.originOf(work.contentKey) : library.previewOrigin(work);
+    const origin = library.publicContent(work) ? library.originOf(work.contentKey) : library.previewOrigin(work);
     const captures = {};
+    const late = {};
     const texts = [];
+    const firstTexts = [];
+    const resources = new Map();
     for (const shot of SHOTS) {
       for (let attempt = 0; attempt < 2 && !closed; attempt++) {
         let context;
         try {
           if (!await initialize()) break;
           context = await browser.newContext({ viewport: shot.viewport, deviceScaleFactor: 1, isMobile: shot.mobile, hasTouch: shot.mobile, colorScheme: 'light', serviceWorkers: 'block' });
-          await guardCaptureContext(context, { origin, cdn: config.cdn });
+          await context.addInitScript(DISGUISE);
+          await guardCaptureContext(context, { origin, cdn: config.cdn, resources });
           const page = await context.newPage();
           const response = await page.goto(`${origin}/`, { waitUntil: 'load', timeout: 30000 });
           if (!response?.ok()) throw new Error('作品页面未成功加载');
           await page.waitForTimeout(3500);
           mkdirSync(join(library.mediaDir, work.id), { recursive: true });
-          await page.screenshot({ path: join(library.mediaDir, work.id, `${shot.id}.jpg`), type: 'jpeg', quality: 84 });
-          const text = await page.locator('body').innerText();
+          const name = `${prefix}${shot.id}.jpg`;
+          await page.screenshot({ path: join(library.mediaDir, work.id, name), type: 'jpeg', quality: 84 });
+          const text = await pageText(page);
           texts.push(text);
-          captures[shot.id] = `${shot.id}.jpg`;
+          firstTexts.push(text);
+          captures[shot.id] = name;
+          try {
+            const { width, height } = shot.viewport;
+            await page.mouse.move(width / 2, height / 2);
+            await page.mouse.wheel(0, height * 4);
+            await page.mouse.click(width / 2, height / 2);
+            await page.waitForTimeout(8500);
+            const lateName = `${prefix}${shot.id}-late.jpg`;
+            await page.screenshot({ path: join(library.mediaDir, work.id, lateName), type: 'jpeg', quality: 84 });
+            texts.push(await pageText(page));
+            late[shot.id] = lateName;
+          } catch (error) {
+            console.warn(`延迟截图失败 ${work.id} ${shot.id}：${error.message.split('\n')[0]}`);
+          }
           break;
         } catch (error) {
           if (attempt === 1) console.warn(`截图失败 ${work.id} ${shot.id}：${error.message.split('\n')[0]}`);
@@ -153,15 +199,15 @@ export function createCapturer({ config, library, loadChromium = async () => (aw
         }
       }
     }
-    if (!closed && Object.keys(captures).length && library.hasDirectory(work.id)) library.setCaptures(work.id, captures);
-    return { captures, texts };
+    if (publish && !closed && Object.keys(captures).length && library.hasDirectory(work.id)) library.setCaptures(work.id, captures);
+    return { captures, late, texts, firstTexts, resources: Object.fromEntries([...resources].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) };
   }
 
   async function drain() {
     while (queue.length && !closed) {
-      const { work, resolve } = queue.shift();
+      const { work, options, resolve } = queue.shift();
       try {
-        resolve(await capture(work));
+        resolve(await capture(work, options));
       } catch (error) {
         resolve(null);
         console.warn(`截图失败 ${work.id}：${error.message.split('\n')[0]}`);
@@ -181,10 +227,10 @@ export function createCapturer({ config, library, loadChromium = async () => (aw
   return {
     get available() { return available; },
     initialize,
-    enqueue(work) {
+    enqueue(work, options) {
       if (!config.capture || closed || (failedAt !== null && now() - failedAt < 5 * 60e3)) return Promise.resolve(null);
       return new Promise((resolve) => {
-        queue.push({ work, resolve });
+        queue.push({ work, options, resolve });
         start();
       });
     },

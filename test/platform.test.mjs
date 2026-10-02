@@ -615,7 +615,8 @@ describe('platform lifecycle', () => {
     assert.doesNotMatch(original.text, /__sp_fold\.js/);
     const boot = await call('bob', 'GET', '/api/bootstrap');
     assert.equal(boot.data.arena.one.works, 0, 'unverified uploads and unapproved curated works all stay out of blind comparisons');
-    assert.equal(boot.data.works[0].checks, undefined, 'upload reports are private');
+    assert.equal(boot.data.works.length, 0, 'uploads stay off public listings until a human decision');
+    assert.equal((await call('alice', 'GET', '/api/me')).data.works[0].id, upload.id);
   });
 
   test('blind matches reveal nothing until the vote, and each pair counts once per voter', async () => {
@@ -961,6 +962,8 @@ describe('platform lifecycle', () => {
     const created = await call('charlie', 'POST', '/api/questions', { title: 'Profile test', summary: 'A profile fixture', prompt: 'Make a page.', category: '静态网页', tags: ['UI'], templates: ['static'], draftId: staged.data.draft.id, confirmed: true, work: { title: 'Answer', modelId: 'm-a', effort: 'Default', providerId: 'official', tool: 'CLI' } });
     const task = created.data.question.id;
     await call('root', 'POST', `/api/questions/${task}/moderation`, { status: 'approved' });
+    // Reactions need a public work, which takes a human content decision.
+    assert.equal((await call('root', 'POST', `/api/works/${task}/${created.data.work.id}/moderation`, { status: 'approved' })).status, 200);
     const submitted = { status: created.status, data: { work: created.data.work } };
     assert.equal(submitted.status, 200);
     const workPath = `/api/works/${task}/${submitted.data.work.id}`;

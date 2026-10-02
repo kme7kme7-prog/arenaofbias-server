@@ -1,5 +1,10 @@
 # HANDOFF.md · 当前状态
 
+## 固定数据包与联调完成（2026-10-02，生产切换待执行）
+
+- 固定 CI 36988885817 成功产物 9356c7057c9898ace07cc86d6d8a852d5f7eeb75（来源 623bfeb），Gallery 忽略配置同步。Windows / Linux 后端 244/244、真实接口 integration-smoke、Edge 双站及管理端 8 项隔离联调均通过。
+- 两端使用干净 LF 固定源码，测试写入只进入临时 SQLite；Nginx 五份候选通过隔离 nginx -t，game /api 与 game CORS 保留。大数据包仍在传输，正式服务继续运行，实际发布结果另记。见[联调归档](docs/archive/2026-10-02-release-integration-wsnxxxs.md)。
+
 ## 四仓发布准备（2026-10-02，用户已授权提交、推送、部署）
 
 - 本轮整理既有七条待推送提交和三个未提交文档；当前只读门禁确认公网与 .server-version 同为 83e43fe，与个人 output/release-20261002/release.json 一致。数据库 v31、integrity ok，正式 Turnstile 已配置。

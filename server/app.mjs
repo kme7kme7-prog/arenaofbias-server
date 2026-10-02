@@ -128,7 +128,10 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       totals: (await arena.leaderboard()).totals,
       me: user ? { votes: arena.votesBy(user.id), pending: library.pendingCount(user.id) } : null,
       review: user?.role === 'admin' ? {
-        unverified: uploads.filter((work) => work.status === 'unverified' && ['legacy', 'approved'].includes(work.moderation.status) && catalog.task(work.taskId)).length,
+        // Same queue as the Gallery review page: released content on a public question that the
+        // gallery has not decided yet, which includes uploads already verified for the arena.
+        unverified: uploads.filter((work) => !work.curatedAs && work.status !== 'questioned' && !work.reviewedGalleryAt
+          && ['legacy', 'approved'].includes(work.moderation.status) && catalog.task(work.taskId)).length,
         content: uploads.filter((work) => work.moderation.status === 'review').length,
         questions: questions.pendingCount(),
       } : null,

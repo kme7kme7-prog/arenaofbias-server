@@ -137,6 +137,22 @@ test('upload review records only explicit face decisions and face settings prese
   assert.ok(curated.every((work) => !Object.hasOwn(work, 'reviewed')));
 }));
 
+test('the gallery review count waits for a gallery decision even after the arena verified', async () => withPlatform(async ({ call }) => {
+  const pending = async () => (await call('root', 'GET', '/api/bootstrap')).data.review.unverified;
+  const before = await pending();
+  const draft = await call('voter', 'POST', '/api/drafts?task=one&name=work.html', html, true);
+  const submitted = await call('voter', 'POST', '/api/works', {
+    draftId: draft.data.draft.id, confirmed: true, title: '竞技场先核验', modelName: '模型丙', effort: 'Default', providerId: 'official', harnessOther: '测试工具',
+  });
+  assert.equal(submitted.status, 200, JSON.stringify(submitted.data));
+  const id = submitted.data.work.id;
+  assert.equal(await pending(), before + 1);
+  assert.equal((await call('root', 'POST', `/api/works/one/${id}/review`, { status: 'verified', show_arena: true })).status, 200);
+  assert.equal(await pending(), before + 1);
+  assert.equal((await call('root', 'POST', `/api/admin/works/one/${id}/face-settings`, { show_gallery: false })).status, 200);
+  assert.equal(await pending(), before);
+}));
+
 test('admin API merges curated and upload works, applies face settings, calibration and audit', async () => withPlatform(async ({ platform, call }) => {
   const upload = await call('root', 'POST', '/api/admin/works/upload?effort=Default&providerId=official&task=one&name=work.html&title=代传作品&modelName=模型丙&show_gallery=1&show_arena=1', html, true);
   assert.equal(upload.status, 200, JSON.stringify(upload.data));

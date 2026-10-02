@@ -18,6 +18,7 @@
 - 当前混合工作区 check 81/0、test 215/215；独立导出的暂存源码 check 81/0、test 207/207；diff --check 通过。新增回归核对单面核验、明确关闭保留状态、娱乐开关不记录和旧行回填；旧 schema 夹具只作必要字段调整。
 - 隔离真实后端 + 合成数据浏览器跑通 Gallery 审核、375 宽、竞技场待作品到未进盲测，以及开启但未审核本面的回归。Gallery console 0；管理台合成作品 iframe 因验收服务未提供作品域路由产生资源 404，无页面 JS 异常。未验收真实作品执行、生产账号、自动审核、SMTP 或截图服务；临时服务已关闭。证据在相邻 Gallery output/playwright/review-redesign-current/。
 - 本轮仅本地提交，未推送、部署、操作业务库或私有配置；其他会话的领域、邮件及内容加固等改动保留。归档：[review-pipeline](docs/archive/2026-10-02-review-pipeline-wsnxxxs.md)。
+- 补充：bootstrap `review.unverified` 改为与 Gallery 核验队列同口径——内容已放行、题目已公开、未存疑且展览馆尚无面决定（`reviewed_gallery_at` 为空）的投稿，含已在竞技场核验的投稿；排除已收录投稿。此前只数 status=unverified，进审核页前后角标不一致。api-contract 同步，admin 测试新增「竞技场先核验仍计入、展览馆决定后移出」。check 81/0、test 216/216。
 
 ## 本轮：红队报告核对与上传内容加固（2026-10-02，本地提交，未推送、未部署）
 

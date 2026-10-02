@@ -459,10 +459,11 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     batchItems(body.works, 100);
     if (body.meta !== undefined && (!body.meta || typeof body.meta !== 'object' || Array.isArray(body.meta)
       || Object.keys(body.meta).some((key) => !['effort', 'providerId', 'harnessId', 'harnessOther'].includes(key)))) fail(400, '批量核验信息无效');
+    if (body.show_arena !== undefined && typeof body.show_arena !== 'boolean') fail(400, '门面开关无效', 'invalid_face_settings');
     const results = body.works.map(({ task, id }) => batchResult({ task, id }, () => ({
       work: library.adminWork(library.reviewWithMeta(admin, task, id, {
         status: body.status, reason: body.reason, meta: body.meta,
-        ...(body.status === 'verified' ? { show_gallery: true } : {}),
+        ...(body.status === 'verified' ? { show_gallery: true, ...(body.show_arena !== undefined ? { show_arena: body.show_arena } : {}) } : {}),
       })),
     })));
     arena.invalidate();

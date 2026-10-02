@@ -266,17 +266,19 @@ test('batch verification supplements metadata and rolls back only failed items',
   for (const body of [
     { works: [{ task: 'one', id: incomplete }], status: 'questioned', meta: { effort: 'Max' } },
     { works: [{ task: 'one', id: incomplete }], status: 'verified', meta: { title: '不允许的字段' } },
+    { works: [{ task: 'one', id: incomplete }], status: 'verified', show_arena: 'yes' },
   ]) assert.equal((await call('root', 'POST', '/api/admin/works/batch-review', body)).status, 400);
   assert.equal(auditCount(), before);
   assert.deepEqual(row(incomplete), incompleteBefore);
   const second = await call('root', 'POST', '/api/admin/works/batch-review', {
-    works: [{ task: 'one', id: incomplete }], status: 'verified', meta: { effort: 'High', providerId: 'official' },
+    works: [{ task: 'one', id: incomplete }], status: 'verified', meta: { effort: 'High', providerId: 'official' }, show_arena: true,
   });
   assert.equal(second.status, 200);
   assert.equal(second.data.results[0].ok, true, JSON.stringify(second.data));
   assert.equal(second.data.results[0].work.status, 'verified');
   assert.equal(second.data.results[0].work.provider, 'official');
   assert.equal(second.data.results[0].work.show_gallery, true);
+  assert.equal(second.data.results[0].work.show_arena, true, 'batch verification can open the arena face');
   assert.equal(second.data.results[0].work.moderation.status, 'approved');
   assert.equal(auditCount(), before + 2);
   const questioned = await call('root', 'POST', '/api/admin/works/batch-review', {

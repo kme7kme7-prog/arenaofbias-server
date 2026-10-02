@@ -1,5 +1,10 @@
 # HANDOFF.md · 当前状态
 
+## Gallery 审核接入盲评开关（2026-10-02，本地提交，未推送、未部署）
+
+- 承接下方小红帽调查：Gallery 审核改为同后台分面，单件核验显式发送 show_gallery / show_arena。本仓 batch-review 接受可选布尔 show_arena（仅 verified 时生效，非布尔 400）；admin.js 已验证提示改为「是否进入盲评以盲评开关为准」；admin.test 增加两条断言。
+- check 87/0、test 244/244；与 Gallery 配合的隔离合成数据 Browser 验证见 Gallery HANDOFF。未推送、未部署、未改生产数据。见 [归档](docs/archive/2026-10-02-arena-review-face-wsnxxxs.md)。
+
 ## 截图服务隔离与喷泉截图核对（2026-10-02，本地完成，未推送、未部署）
 
 - 按用户授权，由三名 GPT-6.1 Sol / high 分工截图连接、systemd 部署与真实浏览器验收。平台改用 `arenaofbias`，Chrome 改用独立 `aob-capture` 用户和 systemd 文件系统沙盒；不是 Docker。独立 worker 固定开启 Chromium OS sandbox，不读取平台业务库或密钥，不继承平台环境；仅发布环回控制端点，平台连接后在自己进程写图片和数据库。没有新增 npm 依赖或数据库迁移。

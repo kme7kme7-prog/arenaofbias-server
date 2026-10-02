@@ -1,5 +1,12 @@
 # HANDOFF.md · 当前状态
 
+## 四仓整理与远端合并（2026-10-02，本地提交，未推送）
+
+- 用户授权整理四仓并提交。fetch 后 main 领先 6 条、落后 1 条；合并远端 343ed64，保留本地六条提交及原作者。
+- 解决 admin/admin.js、admin/admin.css 冲突：保留本地 arena_eligible / arena_generation_ok 资格提示，同时保留远端逐行娱乐池开关与表头；删除已无引用的 work-pool-note 样式，保留审核样式。
+- 合并后 check 81/0、test 216/216、diff --check 通过。未重复浏览器或生产验收；未启动服务或迁移业务库。
+- 仅本地合并提交，未推送、部署或改 pin；其它 worktree、分支、配置及生成物保留。[归档](docs/archive/2026-10-02-project-cleanup-wsnxxxs.md)。下方旧记录为各轮当时状态。
+
 ## 本轮：题目领域与排行榜领域范围（2026-10-02，本地提交，未推送）
 
 - categories.mjs 新增 DOMAINS（11 个）与 requireDomains（1–2 个、在词表内、去重）。v29 只追加幂等列 `questions.domains TEXT NOT NULL DEFAULT '[]'`，不回填。社区题创建时 `domains` 选填（旧 Gallery 不传仍可发起），带上即校验；管理员通过时可替换，audit detail 记 `domains: {from, to}`。题目视图输出 `domains`，bootstrap 新增顶层 `domains` 词表；馆藏题目从数据包 task.domains 读取。

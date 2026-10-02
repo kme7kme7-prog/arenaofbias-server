@@ -1,5 +1,12 @@
 # HANDOFF.md · 当前状态
 
+## Gallery 内置作品 CSP 修复持久化（2026-10-03，源码就绪）
+
+- 用户要求修复再次出现的 iframe 拒绝连接。正式 read-zones.conf 已丢失此前仅在线上存在的路径例外；其 CRLF 字节哈希与 origin/main 的旧文件完全一致。线上 bootstrap 与版本文件均为 2915a49，已在 origin/main。
+- 从最新 origin/main 建独立工作区，仅保存 Gallery `/results/`、`/_sandtable/`、`/_scenes/` 同源嵌入例外和部署说明，其他 host CSP 原样保留。不合并主工作区的审核、模型厂商或数据库未提交改动。
+- 本轮候选 check 87/0、test 247/247、diff 检查通过；未改前端或作品数据，无需 Gallery build/intake。配置部署待此提交进入 origin/main 后进行：备份正式文件、只同步 read-zones.conf、nginx -t 后 reload，验收目标 Claude 黑洞及同类路径。完成结果追加到本节。
+- 归档：[gallery-csp-repair](docs/archive/2026-10-03-gallery-csp-repair-wsnxxxs.md)。
+
 ## 期F：一次核验双章，后台审核页改为外链（2026-10-02，本地提交，未推送、未部署）
 
 - `review()` 在作品变成 `verified` 时给还没有章的两面同时写入时间；已有章不改。开关和收件箱分流保持期E。迁移 v34 回填已验证但缺章的旧行，不改 `entertainment_route`。

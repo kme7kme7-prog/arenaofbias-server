@@ -933,8 +933,8 @@ export function createLibrary({ db, catalog, config, limits }) {
           source.harnessId, source.harnessOther, source.providerId, source.providerOther,
           ...GENERATION_FIELDS.map((key) => generation[key]), Number(gallery), Number(arena), Number(entertainment), route, title, summary,
           noteWithVendor(work.note, who.modelId, body.vendor), now,
-          inbox || publishAll || typeof body.show_gallery === 'boolean' ? now : null,
-          inbox || publishAll || typeof body.show_arena === 'boolean' ? now : null, now, id);
+          status === 'verified' && work.reviewedGalleryAt == null ? now : null,
+          status === 'verified' && work.reviewedArenaAt == null ? now : null, now, id);
         const routeNote = inbox ? '送进收件箱' : publishAll ? '三面公开' : firstVerify ? '娱乐盲测随首次核验开启' : '';
         audit(admin, status, work, [labels[status], reason, routeNote].filter(Boolean).join('：') + generationAudit(work, generation));
       };

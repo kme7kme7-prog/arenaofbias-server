@@ -62,8 +62,8 @@ test('member and effective admin sessions expire when idle and retain absolute e
 test('the session idle migration preserves creation and absolute expiry and is idempotent', () => {
   const db = new DatabaseSync(':memory:');
   try {
-    const idle = MIGRATIONS.at(-2);
-    for (const migration of MIGRATIONS.slice(0, -2)) {
+    const idle = MIGRATIONS.at(-3);
+    for (const migration of MIGRATIONS.slice(0, -3)) {
       if (typeof migration === 'function') migration(db);
       else db.exec(migration);
     }

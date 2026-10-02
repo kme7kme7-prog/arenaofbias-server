@@ -111,6 +111,26 @@ test('face review migration preserves old decisions and leaves unverified upload
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('v34 fills a missing arena stamp on verified works and leaves unverified rows alone', () => {
+  const root = mkdtempSync(join(tmpdir(), 'admin-stamp-backfill-'));
+  const file = join(root, 'platform.db');
+  const db = openDatabase(file);
+  try {
+    db.exec(`INSERT INTO users (id, name, name_key, role, salt, hash, created_at) VALUES ('u', 'reader', 'reader', 'member', 's', 'h', 1)`);
+    const insert = db.prepare(`INSERT INTO works (id, task_id, title, model_other, content_key, source_name, root, entry,
+      file_count, bytes, digest, checks, trial, created_at, updated_at, status, reviewed_gallery_at, reviewed_arena_at)
+      VALUES (?, 'one', '作品', '模型', ?, 'a.html', '', 'index.html', 1, 10, ?, '[]', '{}', 1, 80, ?, ?, ?)`);
+    insert.run('stamped', 'k1', 'd1', 'verified', 40, null);
+    insert.run('open', 'k2', 'd2', 'unverified', null, null);
+    MIGRATIONS.at(-1)(db);
+    const row = (id) => db.prepare('SELECT status, reviewed_gallery_at, reviewed_arena_at FROM works WHERE id = ?').get(id);
+    assert.deepEqual({ ...row('stamped') }, { status: 'verified', reviewed_gallery_at: 40, reviewed_arena_at: 40 });
+    assert.deepEqual({ ...row('open') }, { status: 'unverified', reviewed_gallery_at: null, reviewed_arena_at: null });
+    MIGRATIONS.at(-1)(db);
+    assert.deepEqual({ ...row('stamped') }, { status: 'verified', reviewed_gallery_at: 40, reviewed_arena_at: 40 });
+  } finally { db.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
 test('a first verification decides both faces and face settings preserve status', async () => withPlatform(async ({ call }) => {
   const draft = await call('voter', 'POST', '/api/drafts?task=one&name=work.html', html, true);
   assert.equal(draft.status, 200, JSON.stringify(draft.data));
@@ -125,7 +145,7 @@ test('a first verification decides both faces and face settings preserve status'
   assert.equal(review.status, 200, JSON.stringify(review.data));
   const galleryReviewed = await uploaded();
   assert.ok(galleryReviewed.reviewed.gallery);
-  assert.ok(galleryReviewed.reviewed.arena, 'verification publishes to the arena unless the request says otherwise');
+  assert.ok(galleryReviewed.reviewed.arena, 'verification stamps both faces even when the request names one');
   assert.equal(galleryReviewed.show_arena, true);
   assert.equal(galleryReviewed.show_entertainment, true, 'a first verification opens entertainment unless the request says otherwise');
   assert.equal(galleryReviewed.entertainment_route, 0);
@@ -140,6 +160,9 @@ test('a first verification decides both faces and face settings preserve status'
   assert.deepEqual(settings.data.work.arena, { state: 'off' });
   const again = await call('root', 'POST', `/api/works/one/${id}/review`, { status: 'verified' });
   assert.deepEqual(again.data.work.arena, { state: 'off' }, 'a repeated verification keeps an admin opt-out');
+  const restamped = await uploaded();
+  assert.equal(restamped.reviewed.gallery, galleryReviewed.reviewed.gallery);
+  assert.equal(restamped.reviewed.arena, settings.data.work.reviewed.arena);
   const curated = (await call('root', 'GET', '/api/admin/works?source=curated')).data.works;
   assert.ok(curated.every((work) => !Object.hasOwn(work, 'reviewed')));
 }));

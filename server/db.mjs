@@ -454,6 +454,13 @@ const MIGRATIONS = [
     const overrides = new Set(db.prepare('PRAGMA table_info(work_overrides)').all().map((column) => column.name));
     if (!overrides.has('display_json')) db.exec('ALTER TABLE work_overrides ADD COLUMN display_json TEXT');
   },
+  // One verification stamps both faces. Fill stamps that an earlier per-face review left empty.
+  (db) => {
+    db.exec(`UPDATE works SET reviewed_arena_at = COALESCE(reviewed_arena_at, COALESCE(reviewed_gallery_at, updated_at))
+      WHERE status = 'verified' AND reviewed_arena_at IS NULL AND deleted_at IS NULL`);
+    db.exec(`UPDATE works SET reviewed_gallery_at = COALESCE(reviewed_gallery_at, updated_at)
+      WHERE status = 'verified' AND reviewed_gallery_at IS NULL AND deleted_at IS NULL`);
+  },
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

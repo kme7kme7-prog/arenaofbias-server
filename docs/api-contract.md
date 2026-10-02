@@ -447,6 +447,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 - 仅当请求体出现 `modelId` / `modelName` 键时才重取模型身份，否则保持原值；`effort` 同理。
 - `title`、`summary` 与两个布尔门面开关均可选；审核通过时可同时修改。作品首次转为 `verified`（原状态非 `verified`）且请求未给开关、也未给 `audience` 时，两个开关都开启并记为本面决定：通过即公开，符合盲评条件的同时进池。已是 `verified` 的重复核验保持原开关。兼容旧的 `audience` 参数，将其换算为两个开关；响应中的 `audience` 由最终开关计算。审核状态和 audit 在同一事务写入。管理员在审核中修改声明保持现有 `moderation`，不重新置为 `pending` 或排队。
 - 可选布尔 `entertainment` 与两面开关使用同一缺省。首次核验且请求没有该字段时，`show_entertainment` 一并开启，`entertainment_route` 保持 0。显式 `false` 表示三面都公开并清空收件箱标记。显式 `true` 只在 `verified` 时有效，三个开关都关闭，`entertainment_route` 置 1，作品进入竞技场收件箱；此时公开列表、正式配对和娱乐花名册都看不到它。重复核验不带该字段时，保持原来的娱乐开关和收件箱标记。非布尔返回 `400`。
+- 作品转为 `verified` 时，`reviewed_gallery_at` 与 `reviewed_arena_at` 同时补上还没有的那一章；已有章不改。开关只决定 `show_gallery` / `show_arena`，不再决定盖哪一面。v34 用同样规则回填已验证但缺章的旧行，不改 `entertainment_route`。
 - 审核可选 `harnessId`、`harnessOther`、`providerId`；按 3.6 节的 Harness 与服务商规则校验，只更新请求中出现的维度。旧 `harnessVersion` 忽略。
 - 内容尚未放行（`moderation.status` 不为 `legacy` / `approved`）时提交 `status: "verified"` 返回 `409 请先完成内容审核`。`questioned` / `unverified` 不受此限制。
 

@@ -446,6 +446,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 - `status` 取值 `verified` / `questioned` / `unverified`；`questioned` 必须给 `reason`（`400` 否则）；置为 `verified` 会清空理由。
 - 仅当请求体出现 `modelId` / `modelName` 键时才重取模型身份，否则保持原值；`effort` 同理。
 - `title`、`summary` 与两个布尔门面开关均可选；审核通过时可同时修改。作品首次转为 `verified`（原状态非 `verified`）且请求未给开关、也未给 `audience` 时，两个开关都开启并记为本面决定：通过即公开，符合盲评条件的同时进池。已是 `verified` 的重复核验保持原开关。兼容旧的 `audience` 参数，将其换算为两个开关；响应中的 `audience` 由最终开关计算。审核状态和 audit 在同一事务写入。管理员在审核中修改声明保持现有 `moderation`，不重新置为 `pending` 或排队。
+- 可选布尔 `entertainment` 与两面开关使用同一缺省。首次核验且请求没有该字段时，`show_entertainment` 一并开启，`entertainment_route` 保持 0。显式 `false` 表示三面都公开并清空收件箱标记。显式 `true` 只在 `verified` 时有效，三个开关都关闭，`entertainment_route` 置 1，作品进入竞技场收件箱；此时公开列表、正式配对和娱乐花名册都看不到它。重复核验不带该字段时，保持原来的娱乐开关和收件箱标记。非布尔返回 `400`。
 - 审核可选 `harnessId`、`harnessOther`、`providerId`；按 3.6 节的 Harness 与服务商规则校验，只更新请求中出现的维度。旧 `harnessVersion` 忽略。
 - 内容尚未放行（`moderation.status` 不为 `legacy` / `approved`）时提交 `status: "verified"` 返回 `409 请先完成内容审核`。`questioned` / `unverified` 不受此限制。
 
@@ -456,6 +457,22 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 认证：管理员；每批消耗一次 write 限流。请求 `{ "works": [{ "task": "…", "id": "…" }], "status": "approved" | "rejected", "reason": "…" }`，`works` 为 1–100 件。理由规则与单件内容决定一致：通过省略或空白理由时保存「人工复核通过」，拒绝必须提供非空理由，最多 500 字。列表、状态或理由无效时整体 `400`，不执行任何项目。
 
 每件在独立事务内复用 `reviewContent`，写 `content-review` audit；单件失败不影响其它项。成功请求返回 `200`：`{ "results": [...] }`，结果保持请求顺序，每项为 `{ "task": "…", "id": "…", "ok": true, "work": <管理员作品视图> }` 或 `{ "task": "…", "id": "…", "ok": false, "error": { "status": 404, "code": "…", "message": "…" } }`。每批只刷新一次缓存。认证、同源与限流错误为 `401` / `403` / `429`。
+
+**`POST /api/admin/questions`** —— 管理员新建社区题
+
+认证：管理员；write 限流。请求字段与 `POST /api/questions` 相同（标题、简述、提示词、分类、领域、提交格式），不占每人 3 道待审名额，也不写 `arenaId`。创建时内容决定直接为 `approved` / `human`。成功 `200`：`{ "question": <管理员题目视图> }`。题目随即出现在题目列表和收件箱归属目标里。
+
+**`GET /api/admin/inbox/works`** —— 竞技场收件箱
+
+认证：管理员。返回 `{ "works": [<管理员作品视图>] }`，只含 `entertainment_route = 1` 的投稿。`entertainment_route`：`0` 常规，`1` 收件箱待处理，`2` 已归属。
+
+**`POST /api/admin/works/batch-inbox`** —— 收件箱归属
+
+认证：管理员；write 限流。请求 `{ "works": [{ "task": "…", "id": "…" }], "task": "目标题", "entertainment": false }`，1–200 件，同一事务。`task` 可省略，省略时只记审计、作品留在收件箱。给出 `task` 时复用归属迁移，并把 `entertainment_route` 从 1 改为 2。`entertainment: true` 同时打开 `show_entertainment`。不在收件箱的作品使整批 `404`。成功 `200`：`{ "works": [<管理员作品视图>] }`。
+
+**`POST /api/admin/works/:task/:id/display`** —— 馆藏显示覆写
+
+认证：管理员；write 限流。只接受馆藏作品。请求白名单：`title`、`summary`、`modelName`、`effort`、`harnessId`、`harnessOther`、`providerId`、`generationMode`、`humanIntervention`。写入 `work_overrides.display_json`，`library.work()`、`adminWork()` 和 `toPublic()` 读取时合并。计分仍用数据包里的模型 id，数据包文件不改。成功 `200`：`{ "work": <管理员作品视图> }`。
 
 **`POST /api/admin/works/batch-review`** —— 批量来源核验
 

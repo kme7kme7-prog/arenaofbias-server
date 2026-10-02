@@ -1,5 +1,13 @@
 # HANDOFF.md · 当前状态
 
+## 期E：收件箱、编辑面板与精选退役（2026-10-02，本地完成，未推送、未部署）
+
+- 审核增加 `entertainment`。首次核验没给这个字段时，娱乐开关跟两面一起打开；显式 false 三面公开；显式 true 三面关闭并进入收件箱（`entertainment_route=1`）。重复核验不带该字段则保持原状。
+- 竞技场后台新增「收件箱 · 娱乐作品」。归属题目与可选开启娱乐盲测在同一事务里把 route 改为 2，作品自动出箱。社区题上已核验、内容放行、`show_entertainment=1` 的作品进入娱乐花名册；作品门槛没放宽。
+- 投稿和馆藏共用编辑面板。「进入展览馆」同时写 `show_gallery` 与 `show_arena`。馆藏显示覆写存在 `work_overrides.display_json`，不改数据包，也不改计分用的模型 id。行内开关和「精选/投稿」来源列已去掉。上传入口改为跳到 `https://gallery.arenaofbias.icu/#/submit`。管理员可新建已通过的社区题。
+- 迁移 v33，只加列，不回填。`npm run check` 87 个文件 0 错，`npm test` 246/246。未 push、未部署、未连接生产库。
+- 待确认：投稿页地址目前用上面的展览馆链接。
+
 ## 四仓协调发布完成（2026-10-02）
 
 - 2026-10-02T10:04:51Z 上线：后端 7a46d71、Show1 22bb6b3、Gallery 3e441a3；数据产物 9356c7057c9898ace07cc86d6d8a852d5f7eeb75（来源 623bfeb）。后端与 Gallery 固定同一包；后续文档提交不自动更换消费 pin。完整记录见[发布归档](docs/archive/2026-10-02-shared-session-release-wsnxxxs.md)。

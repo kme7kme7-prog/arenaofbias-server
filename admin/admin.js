@@ -212,7 +212,7 @@ const state = { user: undefined, data: null, works: null, audit: [], users: null
   sidebarCollapsed: store.get('admin-sidebar-collapsed') === '1',
   workPage: 1, workTask: '', workStatus: '', workShow: '', workHarness: '', workProvider: '', workSearch: '', traffic: null,
   workModel: '', workEffort: '', workGenerationMode: '', workHumanIntervention: '', workEfforts: [],
-  inbox: null, inboxForms: {}, adminQuestions: null, reviewCounts: null };
+  inbox: null, inboxForms: {}, intake: null, adminQuestions: null, reviewCounts: null };
 const taskTitle = (id) => [...(state.data?.tasks ?? []), ...(state.questions ?? []), ...(state.adminQuestions ?? [])].find((t) => t.id === id)?.title ?? id;
 
 async function loadCatalog() {
@@ -425,22 +425,21 @@ const provenanceFacts = (w) => `<div><dt>Harness</dt><dd>${esc(w.harnessName || 
 function openCuratedReview(w) {
   const face = state.system;
   const sheet = openDialog({
-    title: `${FACE_LABEL[face]}审核 · 精选馆藏`,
+    title: `${FACE_LABEL[face]}审核 · 已验证`,
     className: 'review-sheet',
     body: `<div class="review solo">
       <div class="review-facts">
-        <div class="review-head">${thumb(w)}<div><h3>${esc(w.title)}</h3><p class="work-model"><span class="badge">精选馆藏</span><span>${esc(taskTitle(w.task))}</span></p></div></div>
+        <div class="review-head">${thumb(w)}<div><h3>${esc(w.title)}</h3><p class="work-model"><span class="badge">已验证</span><span>${esc(taskTitle(w.task))}</span></p></div></div>
         <dl class="facts">
           <div><dt>声明的模型</dt><dd>${esc(w.modelName)}${w.vendor ? ` · ${esc(w.vendor)}` : ''}</dd></div>
           <div><dt>推理档位</dt><dd>${esc(w.effort || '未注明')}</dd></div>
           ${provenanceFacts(w)}
           ${generationFacts(w)}
         </dl>
-        <p class="fine">馆藏作品的标题与信息由仓库收录流程管理，这里只决定它在${esc(FACE_LABEL[face])}的展示。</p>
+        <p class="fine">标题和登记信息在「编辑」里修改。这里只决定它在${esc(FACE_LABEL[face])}的展示。</p>
         <div class="face-decision">
           <p class="face-state">${faceOn(w) ? `${FACE_LABEL[face]}：已${face === 'gallery' ? '展示' : '进正式盲测池'}` : `${FACE_LABEL[face]}：未${face === 'gallery' ? '展示' : '进盲测'}`}</p>
           <p class="fine">本面动作只改${FACE_LABEL[face]}，另一面（${face === 'gallery' ? `盲测：${faceOn(w, 'arena') ? '已进' : '未进'}` : `展览馆：${faceOn(w, 'gallery') ? '已展示' : '未展示'}`}）保持不变。</p>
-          ${face === 'arena' ? `<label class="face-checks"><input type="checkbox" data-entertainment-toggle="${esc(w.id)}" ${w.show_entertainment ? 'checked' : ''}> 娱乐盲测<small>进娱乐数据与老作品对打，不影响正式排名与展览馆</small></label>` : ''}
         </div>
         <p class="form-error" role="alert"></p>
         <div class="sheet-actions"><span class="spacer"></span>
@@ -550,7 +549,7 @@ function openReview(w, { queue } = {}) {
         <div class="face-decision">
           <p class="face-state">${FACE_LABEL[face]}：${on ? (face === 'gallery' ? '已上展览馆' : '在正式盲测池') : face === 'gallery' ? '未上展览馆' : '未进盲测'}</p>
           <p class="fine">这里的决定只改${FACE_LABEL[face]}；${esc(other)}，保持不变。存疑会让作品在两边都下线。</p>
-          ${face === 'arena' ? `<label class="face-checks"><input type="checkbox" data-entertainment-toggle="${esc(w.id)}" ${w.show_entertainment ? 'checked' : ''}> 娱乐盲测<small>进娱乐数据与老作品对打，不影响正式排名与展览馆</small></label>` : ''}
+          <label class="face-checks"><input type="checkbox" name="toInbox"> 娱乐作品（进竞技场收件箱）<small>勾选后不进展览馆，也不进任何池子</small></label>
         </div>
         <label class="field"><span class="field-label">存疑原因<small>标记存疑时必填，作者与访客都能看到</small></span><textarea class="input" name="reason" rows="3" maxlength="500">${esc(w.status === 'questioned' ? w.reason : '')}</textarea></label>
         <p class="form-error" role="alert"></p>
@@ -593,7 +592,7 @@ function openReview(w, { queue } = {}) {
     const doneBusy = busy(decide, '正在保存…');
     try {
       if (Object.keys(meta).length) await api(`admin/works/${workKey(w)}/meta`, { method: 'POST', body: meta });
-      const body = mode === 'show' ? { status: 'verified', [`show_${face}`]: true }
+      const body = mode === 'show' ? { status: 'verified', entertainment: Boolean(form.elements.namedItem('toInbox')?.checked) }
         : mode === 'hide' ? { status: w.status, [`show_${face}`]: false } : { status: 'questioned', reason };
       await api(`works/${workKey(w)}/review`, { method: 'POST', body });
       sheet.close();
@@ -689,19 +688,20 @@ const COMMON_TABS = [
   { id: 'traffic', label: '流量', icon: 'clock' },
 ];
 const ARENA_NAV = [
-  ['内容管理', [['works', '作品管理', 'file', '#/works'], ['tasks', '题目管理', 'guide', '#/tasks'], ['review', '审核', 'shield', '#/review']]],
+  ['内容管理', [['works', '作品管理', 'file', '#/works'], ['intake', '收件箱 · 娱乐作品', 'inbox', '#/intake'], ['tasks', '题目管理', 'guide', '#/tasks'], ['review', '审核', 'shield', '#/review']]],
   ['玩法', [['guess', '模一把', 'game', '#/guess'], ['activity', '活动管理', 'calendar', '#/activity']]],
 ];
+const SUBMIT_URL = 'https://gallery.arenaofbias.icu/#/submit';
 const systemSwitch = () => `<div class="system-switch" role="group" aria-label="管理系统"><button type="button" data-system="gallery" aria-pressed="${state.system === 'gallery'}">展览馆系统</button><button type="button" data-system="arena" aria-pressed="${state.system === 'arena'}">竞技场系统</button><button type="button" data-system="common" aria-pressed="${state.system === 'common'}">通用后台</button></div>`;
 
 const routeAllowed = (route, sub) => state.system === 'common'
   ? COMMON_TABS.some((tab) => tab.id === route)
-  : TABS.some((tab) => tab.id === route) || (state.system === 'arena' && ['guess', 'activity'].includes(route));
+  : TABS.some((tab) => tab.id === route) || (state.system === 'arena' && ['guess', 'activity', 'intake'].includes(route));
 const tabsForSystem = () => state.system === 'common' ? COMMON_TABS : TABS;
 
 function topbar(route) {
   if (state.system === 'arena') return `<header class="topbar arena-topbar">
-    <div class="arena-page-mark"><span class="eyebrow">偏见试验场 / 管理工作台</span><strong>${esc(TABS.find((tab) => tab.id === route)?.label ?? '竞技场')}</strong></div>
+    <div class="arena-page-mark"><span class="eyebrow">偏见试验场 / 管理工作台</span><strong>${esc(TABS.find((tab) => tab.id === route)?.label ?? (route === 'intake' ? '收件箱 · 娱乐作品' : '竞技场'))}</strong></div>
     <span class="topbar-space"></span>${systemSwitch()}${themeButton()}
     <span class="user-chip" title="当前账号"><span class="avatar" aria-hidden="true">${esc(state.user.name.slice(0, 1).toUpperCase())}</span><span class="user-name">${esc(state.user.name)}</span></span>
     <button class="icon-btn" data-logout title="退出登录" aria-label="退出登录">${icon('logout')}</button>
@@ -780,12 +780,8 @@ function inboxPanel() {
   }).join('');
   return `<section class="block inbox-panel" aria-label="管理员代传">
     <div class="inbox-head"><h2>管理员代传 · 收件箱</h2><span class="muted">文件先暂存在这里预览，登记后才成为作品</span><button class="btn sm" type="button" data-inbox-reload>${icon('reload')}刷新</button></div>
-    <div class="inbox-drop" data-inbox-drop>
-      <input class="inbox-file-input" type="file" accept=".html,.htm,.zip" multiple data-inbox-input aria-hidden="true" tabindex="-1">
-      <p><b>把 HTML 单文件或 ZIP 拖到这里</b>，或</p>
-      <button class="btn" type="button" data-inbox-pick>选择文件</button>
-      <p class="fine">支持多选，单件不超过 30 MB。文件名用「标题，模型名.html」可以自动填表。</p>
-    </div>
+    <p><a class="btn primary" href="${SUBMIT_URL}" target="_blank" rel="noopener">前往投稿页 ${icon('arrow')}</a></p>
+    <p class="fine">新作品改到展览馆投稿页提交。上传接口仍保留给投稿页使用。</p>
     ${state.inbox === null ? skeleton(2) : cards ? `<div class="inbox-list">${cards}</div>` : ''}
   </section>`;
 }
@@ -909,7 +905,7 @@ function dashboardView() {
   <section class="block dashboard-actions">
     <button class="btn primary" type="button" data-goto-system="gallery">${icon('file')}进展览馆系统审核</button>
     <button class="btn primary" type="button" data-goto-system="arena">${icon('shield')}进竞技场系统审核</button>
-    <a class="btn" href="#/upload">${icon('inbox')}统一上传入口</a>
+    <a class="btn" href="${SUBMIT_URL}" target="_blank" rel="noopener">前往投稿页 ${icon('arrow')}</a>
   </section>
   ${traffic ? `<section class="block"><h2>访问近 14 日</h2><div class="traffic-bars" aria-label="近 14 日访问量">${traffic.daily.slice(-14).map((d) => { const max = Math.max(1, ...traffic.daily.slice(-14).map((x) => x.pv)); return `<div class="traffic-day" title="${d.day}：${d.pv} PV，${d.uniqueIps} 位独立访客"><div class="traffic-bar" style="height:${Math.max(2, d.pv / max * 100)}%"></div><span>${d.day.slice(5)}</span></div>`; }).join('')}</div><p class="fine">近 30 日新注册 ${traffic.users.new} 人，累计 ${traffic.users.total} 人。<a href="#/traffic">完整访问概况</a></p></section>` : `<section class="block" aria-busy="true"><h2>访问近 14 日</h2>${skeleton(6, 'bar')}</section>`}
   <section class="block"><h2>最近操作</h2>${state.works === null ? skeleton(4) : auditList(12)}</section>`;
@@ -917,7 +913,7 @@ function dashboardView() {
 
 function uploadView() {
   const entries = state.inbox ?? [];
-  return `${pageHero('统一上传入口', '上传', '两个系统共用的代传收件箱：上传暂存、预览、登记入库。登记即上展览馆；进不进盲测在竞技场系统里决定。', [['暂存', entries.length]])}
+  return `${pageHero('统一上传入口', '上传', '新作品前往展览馆投稿页。这里只保留已经暂存、尚未登记的文件。', [['暂存', entries.length]])}
   ${inboxPanel()}`;
 }
 
@@ -943,13 +939,14 @@ function adminWorkRow(w, face = state.system) {
   const datapackTasks = new Set((state.data?.tasks ?? []).map((t) => t.id));
   const curable = w.source === 'upload' && w.status === 'verified' && !w.curatedAs && datapackTasks.has(w.task);
   const promoted = Boolean(w.curatedAs);
+  const formal = w.entertainment_route === 1 ? '在收件箱' : promoted ? '已收录' : w.arena_eligible ? '在正式盲测池' : w.show_arena && !w.arena_generation_ok ? '不符合盲评条件（多轮 / 人工介入）' : '不在正式盲测池';
+  const entertainment = w.entertainment_route === 1 ? '在收件箱' : w.show_entertainment ? '在娱乐池' : '不在娱乐池';
   return `<tr data-work-key="${esc(`${w.task}/${w.id}`)}">
-    <td><input type="checkbox" data-select-work="${esc(`${w.task}/${w.id}`)}" aria-label="选择${esc(w.title)}" ${promoted ? 'disabled' : ''}></td>
-    <td><div class="admin-work-title">${thumb(w)}<div><b>${esc(w.title)}</b><small>${esc(taskTitle(w.task))} · ${w.votes ?? 0} 票</small></div></div></td>
-    <td>${esc(w.modelName)}${provenanceText(w) ? `<small class="work-provenance">${esc(provenanceText(w))}</small>` : ''}</td><td>${w.source === 'curated' ? '精选' : '投稿'}</td><td>${statusBadge(w.status)}</td>
-    <td>${promoted ? '—' : `<label class="face-toggle"><input type="checkbox" data-face-toggle="${esc(w.id)}" ${w[`show_${face}`] ? 'checked' : ''} aria-label="${esc(w.title)}${face === 'gallery' ? '在展览馆显示' : '进正式盲测'}">${w[`show_${face}`] ? '已开启' : '已关闭'}</label>`}</td>
-    ${face === 'arena' ? `<td>${promoted ? '已收录' : w.arena_eligible ? '在正式盲测池' : w.show_arena && !w.arena_generation_ok ? '不符合盲评条件（多轮 / 人工介入）' : '不在正式盲测池'}</td><td>${promoted ? '—' : `<label class="face-toggle"><input type="checkbox" data-entertainment-toggle="${esc(w.id)}" ${w.show_entertainment ? 'checked' : ''} aria-label="${esc(w.title)}进娱乐池">${w.show_entertainment ? '已开启' : '已关闭'}</label>`}</td>` : '<td>—</td>'}
-    <td><div class="actions">${promoted ? '<span class="badge">已收录</span>' : w.nominatedAt ? '<span class="badge">已提名</span>' : ''}<button class="btn sm" data-calibrate="${esc(w.id)}">${label}取景</button><button class="btn sm" data-task-note="${esc(w.task)}">${face === 'gallery' ? '策展笔记' : '题目点评'}</button>${w.source === 'upload' ? `${curable ? `<button class="btn sm primary" data-nominate="${esc(w.id)}">${w.nominatedAt ? '换发命令' : '提名收录'}</button>` : ''}${w.nominatedAt && !promoted ? `<button class="btn sm" data-withdraw="${esc(w.id)}">撤回提名</button>` : ''}<button class="btn sm" data-edit="${esc(w.id)}">编辑</button><button class="btn sm" data-review="${esc(w.id)}">审核</button>` : ''}</div></td>
+    <td><div class="admin-work-title">${thumb(w)}<div><b>${esc(w.title)}</b><small>${esc(taskTitle(w.task))} · ${w.votes ?? 0} 票</small>${w.entertainment_route === 1 ? '<span class="badge">在收件箱</span>' : ''}</div></div></td>
+    <td>${esc(w.modelName)}${provenanceText(w) ? `<small class="work-provenance">${esc(provenanceText(w))}</small>` : ''}</td><td>${statusBadge(w.status)}</td>
+    <td>${w.show_gallery ? '进入展览馆' : '未进展览馆'}</td>
+    ${face === 'arena' ? `<td>${formal}</td><td>${entertainment}</td>` : '<td>—</td>'}
+    <td><div class="actions">${promoted ? '<span class="badge">已收录</span>' : w.nominatedAt ? '<span class="badge">已提名</span>' : ''}<button class="btn sm" data-calibrate="${esc(w.id)}">${label}取景</button><button class="btn sm" data-task-note="${esc(w.task)}">${face === 'gallery' ? '策展笔记' : '题目点评'}</button>${w.source === 'upload' ? `${curable ? `<button class="btn sm primary" data-nominate="${esc(w.id)}">${w.nominatedAt ? '换发命令' : '提名收录'}</button>` : ''}${w.nominatedAt && !promoted ? `<button class="btn sm" data-withdraw="${esc(w.id)}">撤回提名</button>` : ''}` : ''}${promoted ? '' : `<button class="btn sm" data-edit="${esc(w.id)}">编辑</button><button class="btn sm" data-review="${esc(w.id)}">审核</button>`}</div></td>
   </tr>`;
 }
 function systemWorksView() {
@@ -959,7 +956,7 @@ function systemWorksView() {
   const options = tasks.map((t) => `<option value="${esc(t.id)}" ${state.workTask === t.id ? 'selected' : ''}>${esc(t.title)}</option>`).join('');
   const pages = Math.max(1, Math.ceil(state.workTotal / 30));
   const rows = works.map((w) => adminWorkRow(w, face)).join('');
-  return `${pageHero('作品管理', `${faceLabel()}作品`, '精选与投稿共用作品库，开关和取景分别保存。', [['全部作品', state.workTotal], ['本页', works.length]])}
+  return `${pageHero('作品管理', `${faceLabel()}作品`, '开关在编辑里保存，取景仍在本行。', [['全部作品', state.workTotal], ['本页', works.length]])}
     <section class="block"><form id="admin-work-filter" class="admin-filter">
       <input class="input" name="search" value="${esc(state.workSearch)}" placeholder="搜索作品或模型" aria-label="搜索作品或模型">
       <select class="input" name="task" aria-label="筛选题目"><option value="">全部题目</option>${options}</select>
@@ -977,15 +974,35 @@ function systemWorksView() {
         return `<select class="input" name="${type}" aria-label="筛选${PROVENANCE[type].label}"><option value="">全部${PROVENANCE[type].label}</option>${choices.map(([value, label]) => `<option value="${esc(value)}"${current === value ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select>`;
       }).join('')}
       <button class="btn" type="submit">筛选</button></form>
-      <div class="work-results" aria-busy="${state.workLoading}">${state.workLoading ? skeleton(7) : rows ? `<div class="admin-bulk"><span data-bulk-count>已选 0 件（本页）</span><button class="btn sm" data-bulk-face="on" disabled>批量开启${faceLabel()}</button><button class="btn sm" data-bulk-face="off" disabled>批量关闭${faceLabel()}</button></div><div class="table-wrap"><table class="board admin-work-table"><thead><tr><th><input type="checkbox" data-select-all aria-label="选择本页全部作品"></th><th>作品</th><th>模型</th><th>来源</th><th>状态</th><th>${face === 'arena' ? '正式盲测' : `${faceLabel()}开关`}</th><th>${face === 'arena' ? '正式盲测池' : '备注'}</th>${face === 'arena' ? '<th>娱乐池</th>' : ''}<th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="board-empty">没有符合条件的作品。</p>'}</div>
+      <div class="work-results" aria-busy="${state.workLoading}">${state.workLoading ? skeleton(7) : rows ? `<div class="table-wrap"><table class="board admin-work-table"><thead><tr><th>作品</th><th>模型</th><th>状态</th><th>进入展览馆</th><th>${face === 'arena' ? '正式盲测池' : '备注'}</th>${face === 'arena' ? '<th>娱乐池</th>' : ''}<th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="board-empty">没有符合条件的作品。</p>'}</div>
       <div class="admin-pagination"><button class="btn sm" data-page="${state.workPage - 1}" ${state.workPage <= 1 ? 'disabled' : ''}>上一页</button><span>第 ${state.workPage} / ${pages} 页</span><button class="btn sm" data-page="${state.workPage + 1}" ${state.workPage >= pages ? 'disabled' : ''}>下一页</button></div>
     </section>`;
 }
 
+const QUESTION_DOMAINS = ['数学', '物理', '化学', '生物', '天文', '建筑', '自然景观', '交通与机械', '产品与品牌', '文学艺术', '游戏娱乐'];
 function tasksView() {
   const tasks = [...(state.data?.tasks ?? []), ...(state.questions ?? [])];
   return `${pageHero('题目管理', `${faceLabel()}题目`, state.system === 'gallery' ? '为每道题编辑策展文案。' : '为每道题编辑点评和六维权重。', [['题目', tasks.length]])}
-    <section class="block"><div class="admin-task-list">${tasks.map((task) => `<article class="admin-task"><div><h3>${esc(task.title)}</h3><p class="muted">${esc(task.id)}</p></div><button class="btn" data-task-note="${esc(task.id)}">${state.system === 'gallery' ? '编辑策展文案' : '编辑点评与权重'}</button></article>`).join('')}</div></section>`;
+    <section class="block">${state.system === 'arena' ? '<div class="actions"><button class="btn primary" type="button" data-new-question>新建题目</button></div>' : ''}<div class="admin-task-list">${tasks.map((task) => `<article class="admin-task"><div><h3>${esc(task.title)}</h3><p class="muted">${esc(task.id)}</p></div><button class="btn" data-task-note="${esc(task.id)}">${state.system === 'gallery' ? '编辑策展文案' : '编辑点评与权重'}</button></article>`).join('')}</div></section>`;
+}
+function intakeView() {
+  const works = state.intake ?? [];
+  const tasks = [...(state.data?.tasks ?? []), ...(state.questions ?? [])];
+  const options = tasks.map((task) => `<option value="${esc(task.id)}">${esc(task.title)}</option>`).join('');
+  const rows = works.map((work) => `<tr>
+    <td><input type="checkbox" data-intake-task="${esc(work.task)}" data-intake-id="${esc(work.id)}" aria-label="选择${esc(work.title)}"></td>
+    <td><b>${esc(work.title)}</b><small>${esc(work.modelName)}</small></td>
+    <td>${esc(taskTitle(work.task))}</td>
+    <td>${formatTime(work.addedAt)}</td>
+    <td><button class="btn sm" data-edit="${esc(work.id)}">补信息</button></td>
+  </tr>`).join('');
+  return `${pageHero('收件箱 · 娱乐作品', '待归属', '归属到题目后自动离开收件箱。只补信息则继续留在这里。', [['待处理', works.length]])}
+    <section class="block"><form id="intake-assign" class="admin-filter">
+      <select class="input" name="task" required aria-label="归属题目"><option value="">选择题目</option>${options}</select>
+      <label class="face-checks"><input type="checkbox" name="entertainment"> 同时开启娱乐盲测</label>
+      <button class="btn primary" type="submit">归属所选</button>
+    </form>
+    ${rows ? `<div class="table-wrap"><table class="board"><thead><tr><th></th><th>作品</th><th>原题</th><th>进入时间</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="board-empty">收件箱是空的。</p>'}</section>`;
 }
 
 function trafficView() {
@@ -1001,23 +1018,48 @@ function placeholderView(route) {
   return `${pageHero('玩法 / 即将开放', title, '工作台入口已就位，功能建设中。', [])}<section class="block placeholder-module"><div class="placeholder-symbol">${icon(route === 'guess' ? 'game' : 'calendar')}</div><p class="eyebrow">玩法模块 / ${route === 'guess' ? '01' : '02'}</p><h2>功能建设中</h2><p>这里会接入「${title}」的管理工具。现有作品、题目与审核功能可继续使用。</p><a class="btn" href="#/works">返回作品管理 ${icon('arrow')}</a></section>`;
 }
 
-// Inline edit of an upload's registration info (title/summary/model); curated
-// works are repo-managed and never get this dialog.
+function newQuestionDialog() {
+  const sheet = openDialog({ title: '新建题目', body: `<form class="admin-editor">
+    <label class="field"><span class="field-label">标题</span><input class="input" name="title" maxlength="70" required></label>
+    <label class="field"><span class="field-label">简述</span><textarea class="input" name="summary" maxlength="400" rows="2" required></textarea></label>
+    <label class="field"><span class="field-label">提示词</span><textarea class="input" name="prompt" maxlength="20000" rows="6" required></textarea></label>
+    <label class="field"><span class="field-label">形式</span><select class="input" name="category" required><option value="静态网页">网页</option><option value="建模">三维</option><option value="文学">文本</option></select></label>
+    <label class="field"><span class="field-label">领域</span><select class="input" name="domain" required>${QUESTION_DOMAINS.map((domain) => `<option value="${domain}">${domain}</option>`).join('')}</select></label>
+    <p class="form-error" role="alert"></p><button class="btn primary" type="submit">创建</button></form>` });
+  const form = $('form', sheet.el);
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const category = form.category.value;
+    const done = busy($('button[type="submit"]', form), '正在创建…');
+    try {
+      await api('admin/questions', { method: 'POST', body: {
+        title: form.title.value, summary: form.summary.value, prompt: form.prompt.value, category,
+        domains: [form.domain.value], templates: category === '文学' ? ['text'] : ['static'],
+      } });
+      sheet.close();
+      toast('题目已创建');
+      await reload();
+    } catch (error) { $('.form-error', form).textContent = error.message; done(); }
+  });
+}
 function editDialog(w) {
+  const curated = w.source === 'curated';
   const models = state.data?.models ?? [];
   const tasks = [...(state.data?.tasks ?? []), ...(state.questions ?? [])];
   const taskOptions = tasks.map((t) => `<option value="${esc(t.id)}"${t.id === w.task ? ' selected' : ''}>${esc(t.title)}</option>`).join('');
   const sheet = openDialog({ title: `编辑信息 · ${w.title}`, body: `<form class="admin-editor">
-    <label class="field"><span class="field-label">归属题目<small>改归属会连历史投票、评论、表情一起搬过去</small></span><select class="input" name="task">${taskOptions}</select></label>
+    <label class="field"><span class="field-label">归属题目<small>${curated ? '馆藏归属随数据包' : '改归属会连历史投票、评论、表情一起搬过去'}</small></span><select class="input" name="task"${curated ? ' disabled' : ''}>${taskOptions}</select></label>
     <label class="field"><span class="field-label">作品标题</span><input class="input" name="title" maxlength="40" value="${esc(w.title)}" required></label>
     <div class="field-row">
       <label class="field"><span class="field-label">模型名称</span><input class="input" name="modelName" maxlength="60" value="${esc(w.modelName)}" required></label>
       ${effortField(w.effort)}
     </div>
-    <label class="field"><span class="field-label">登记为模型</span><select class="input" name="modelId"><option value="">不登记（保持自由文本）</option>${models.map((m) => `<option value="${esc(m.id)}"${m.id === w.model ? ' selected' : ''}>${esc(m.name)}</option>`).join('')}</select></label>
-    <label class="field"><span class="field-label">作品摘要</span><textarea class="input" name="summary" maxlength="200" rows="2">${esc(w.summary)}</textarea></label>
+    <label class="field"><span class="field-label">登记为模型</span><select class="input" name="modelId"${curated ? ' disabled' : ''}><option value="">不登记（保持自由文本）</option>${models.map((m) => `<option value="${esc(m.id)}"${m.id === w.model ? ' selected' : ''}>${esc(m.name)}</option>`).join('')}</select></label>
+    <label class="field"><span class="field-label">作品摘要</span><textarea class="input" name="summary" maxlength="200" rows="2">${esc(w.summary ?? '')}</textarea></label>
     ${provenanceFields({ harness: currentProvenance(w, 'harness'), provider: currentProvenance(w, 'provider') })}
     ${generationFields(w)}
+    <label class="face-checks"><input type="checkbox" name="enterGallery"${w.show_gallery ? ' checked' : ''}> 进入展览馆<small>同时写入展览馆和正式盲测</small></label>
+    <label class="face-checks"><input type="checkbox" name="pool"${w.show_entertainment ? ' checked' : ''}> 娱乐盲测</label>
     <p class="form-error" role="alert"></p><button class="btn primary" type="submit">保存</button></form>` });
   const form = $('form', sheet.el);
   form.addEventListener('submit', async (e) => {
@@ -1026,11 +1068,12 @@ function editDialog(w) {
     try { provenance = provenanceBody((name) => form.elements.namedItem(name)?.value, w); }
     catch (error) { $('.form-error', form).textContent = error.message; return; }
     const done = busy($('button[type="submit"]', form), '正在保存…');
+    const enter = form.enterGallery.checked;
+    const fields = { title: form.title.value, summary: form.summary.value, modelName: form.modelName.value, effort: form.effort.value, ...provenance, ...generationBody((name) => form.elements.namedItem(name)?.value, w) };
     try {
-      await api(`admin/works/${workKey(w)}/meta`, { method: 'POST', body: { title: form.title.value, summary: form.summary.value,
-        ...(form.task.value !== w.task ? { task: form.task.value } : {}),
-        modelName: form.modelName.value, modelId: form.modelId.value || undefined, effort: form.effort.value,
-        ...provenance, ...generationBody((name) => form.elements.namedItem(name)?.value, w) } });
+      if (curated) await api(`admin/works/${workKey(w)}/display`, { method: 'POST', body: fields });
+      else await api(`admin/works/${workKey(w)}/meta`, { method: 'POST', body: { ...fields, ...(form.task.value !== w.task ? { task: form.task.value } : {}), modelId: form.modelId.value || undefined } });
+      await api(`admin/works/${workKey(w)}/face-settings`, { method: 'POST', body: { show_gallery: enter, show_arena: enter, show_entertainment: form.pool.checked } });
       sheet.close();
       toast('信息已更新');
       await reload();
@@ -1455,7 +1498,8 @@ async function reload({ navigation = false } = {}) {
       state.trafficLoading = false;
     } else if (route === 'dashboard') {
       await Promise.all([loadReview(), state.traffic ? Promise.resolve() : api('admin/traffic?days=30').then((data) => { state.traffic = data; })]);
-    } else if (route === 'upload') await loadInbox();
+    }     else if (route === 'upload') await loadInbox();
+    else if (route === 'intake') state.intake = (await api('admin/inbox/works')).works;
     else if (route === 'review') await loadReview();
     if (requestId !== state.requestId) return;
     state.error = '';
@@ -1478,7 +1522,7 @@ function render({ soft = false, world = false } = {}) {
   if (!routeAllowed(route, sub)) { location.hash = state.system === 'common' ? '#/dashboard' : '#/review'; return; }
   const body = state.system === 'common'
     ? route === 'upload' ? uploadView() : route === 'users' ? usersView() : route === 'traffic' ? trafficView() : dashboardView()
-    : route === 'works' ? systemWorksView() : route === 'tasks' ? tasksView() : ['guess', 'activity'].includes(route) ? placeholderView(route) : reviewView(sub);
+    : route === 'works' ? systemWorksView() : route === 'intake' ? intakeView() : route === 'tasks' ? tasksView() : ['guess', 'activity'].includes(route) ? placeholderView(route) : reviewView(sub);
   const content = `${state.error ? `<p class="form-error page-error">${esc(state.error)}</p>` : ''}${body}`;
   const shellKey = `${state.system}/${route}/${sub || ''}`;
   const currentMain = $('main.page', app());
@@ -1641,7 +1685,12 @@ document.addEventListener('click', async (e) => {
   const calibrate = e.target.closest('[data-calibrate]');
   if (calibrate) { const w = state.adminWorks.find((item) => item.id === calibrate.dataset.calibrate); if (w) calibrationDialog(w); return; }
   const editBtn = e.target.closest('[data-edit]');
-  if (editBtn) { const w = state.adminWorks.find((item) => item.id === editBtn.dataset.edit); if (w) editDialog(w); return; }
+  if (editBtn) {
+    const w = [...state.adminWorks, ...(state.intake ?? [])].find((item) => item.id === editBtn.dataset.edit);
+    if (w) editDialog(w);
+    return;
+  }
+  if (e.target.closest('[data-new-question]')) { newQuestionDialog(); return; }
   const nominateBtn = e.target.closest('[data-nominate]');
   if (nominateBtn) {
     const w = state.adminWorks.find((item) => item.id === nominateBtn.dataset.nominate);
@@ -1840,6 +1889,22 @@ document.addEventListener('submit', async (e) => {
       await Promise.all([loadInbox(), loadReview()]);
       render({ soft: true });
     } catch (err) { error.textContent = err.message; done(); }
+    return;
+  }
+  if (e.target.id === 'intake-assign') {
+    e.preventDefault();
+    const picked = $$('[data-intake-id]:checked').map((input) => ({ task: input.dataset.intakeTask, id: input.dataset.intakeId }));
+    if (!picked.length) { toast('请先选择作品'); return; }
+    const task = e.target.elements.namedItem('task').value;
+    if (!task) { toast('请选择题目'); return; }
+    const done = busy($('button[type="submit"]', e.target), '正在归属…');
+    try {
+      await api('admin/works/batch-inbox', { method: 'POST', body: {
+        works: picked, task, entertainment: e.target.elements.namedItem('entertainment').checked,
+      } });
+      toast('已归属，作品离开收件箱');
+      await reload();
+    } catch (error) { toast(error.message); done(); }
     return;
   }
   if (e.target.id !== 'admin-work-filter') return;

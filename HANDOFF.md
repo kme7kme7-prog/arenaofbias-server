@@ -1,5 +1,14 @@
 # HANDOFF.md · 当前状态
 
+## 审核流程统一与按面决定（2026-10-02，本地提交，未推送）
+
+- 三名 GPT-6.1 Sol / medium 子代理并行完成 Gallery 合入、后端按面核验与浏览器验收。纳入已完成的管理台审核整理：admin 待处理为题目 / 内容 / 作品，已处理不计数，馆藏不进审核队列；内容独立弹窗、示例就地处理、登记信息先保存再提交决定、同队列下一件。修正 reviewed 缺本面时间却因开关已开启被算作已展示的问题。
+- v30 在 works 追加 reviewed_gallery_at / reviewed_arena_at；已核验和存疑旧行按 COALESCE(reviewed_at, updated_at) 回填两面，未核验保持 null。review 与单件/批量 face-settings 只记录明确指定的面，娱乐开关不记录；管理员投稿视图输出 reviewed，馆藏不输出。不改变内容 409、核验档位/服务商、存疑原因及 bootstrap 计数契约。
+- 为保持迁移序号，提交中保留已有 v29 questions.domains 迁移作为结构依赖；其余题目领域和排行榜功能未纳入本轮。server/library、api-contract、admin 测试、platform 测试与 HANDOFF 的既有其他改动通过 HEAD + 本轮差异合成暂存版本，仍保留在工作区。
+- 当前混合工作区 check 81/0、test 215/215；独立导出的暂存源码 check 81/0、test 207/207；diff --check 通过。新增回归核对单面核验、明确关闭保留状态、娱乐开关不记录和旧行回填；旧 schema 夹具只作必要字段调整。
+- 隔离真实后端 + 合成数据浏览器跑通 Gallery 审核、375 宽、竞技场待作品到未进盲测，以及开启但未审核本面的回归。Gallery console 0；管理台合成作品 iframe 因验收服务未提供作品域路由产生资源 404，无页面 JS 异常。未验收真实作品执行、生产账号、自动审核、SMTP 或截图服务；临时服务已关闭。证据在相邻 Gallery output/playwright/review-redesign-current/。
+- 本轮仅本地提交，未推送、部署、操作业务库或私有配置；其他会话的领域、邮件及内容加固等改动保留。归档：[review-pipeline](docs/archive/2026-10-02-review-pipeline-wsnxxxs.md)。
+
 ## 本轮：盲评池资格、作品分与每日代表作（2026-10-02 Brisbane，本地提交，未推送未部署）
 
 - 用户后续授权本地提交，仍不推送、不部署；不自动维护生产数据。本轮只改本仓相关源码、测试、API 契约与本页，不改数据包、数据仓或 Gallery。初始工作区干净，无他人遗留源码改动。

@@ -152,7 +152,7 @@ test('an old database migrates votes as legacy without inventing identity snapsh
       a_token TEXT UNIQUE, b_token TEXT UNIQUE, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, choice TEXT, decided_at INTEGER);
       CREATE TABLE votes (id TEXT PRIMARY KEY, match_id TEXT UNIQUE, user_id TEXT, task_id TEXT NOT NULL, a_work TEXT NOT NULL,
       b_work TEXT NOT NULL, pair_key TEXT NOT NULL, choice TEXT NOT NULL, created_at INTEGER NOT NULL);
-      CREATE TABLE works (id TEXT PRIMARY KEY, status TEXT NOT NULL, task_id TEXT NOT NULL, deleted_at INTEGER);
+      CREATE TABLE works (id TEXT PRIMARY KEY, status TEXT NOT NULL, task_id TEXT NOT NULL, deleted_at INTEGER, reviewed_at INTEGER, updated_at INTEGER);
       INSERT INTO matches VALUES ('old', NULL, 'one', 'a1', 'b1', 'ma', 'mb', 1, 9999999999999, 'a', 2);
       INSERT INTO votes VALUES ('old-vote', 'old', NULL, 'one', 'a1', 'b1', 'one:a1+b1', 'a', 2);
       CREATE TABLE audit (id INTEGER PRIMARY KEY, at INTEGER, actor_id TEXT, actor_name TEXT, action TEXT, task_id TEXT, work_id TEXT, detail TEXT);

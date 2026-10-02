@@ -116,14 +116,16 @@ export function createLibrary({ db, catalog, config, limits }) {
     review: db.prepare(`UPDATE works SET status = ?, status_reason = ?, model_id = ?, model_other = ?, effort = ?,
       harness_id = ?, harness_other = ?, provider_id = ?, provider_other = ?,
       generation_mode = ?, human_intervention = ?,
-      show_gallery = ?, show_arena = ?, title = ?, summary = ?, note = ?, reviewed_at = ?, updated_at = ? WHERE id = ?`),
+      show_gallery = ?, show_arena = ?, title = ?, summary = ?, note = ?, reviewed_at = ?,
+      reviewed_gallery_at = COALESCE(?, reviewed_gallery_at), reviewed_arena_at = COALESCE(?, reviewed_arena_at), updated_at = ? WHERE id = ?`),
     remove: db.prepare('UPDATE works SET deleted_at = ?, updated_at = ? WHERE id = ?'),
     captures: db.prepare('UPDATE works SET captures = ? WHERE id = ?'),
     moderation: db.prepare('UPDATE works SET moderation = ? WHERE id = ? AND deleted_at IS NULL'),
     moderationResult: db.prepare('UPDATE works SET moderation = ? WHERE id = ? AND moderation = ? AND deleted_at IS NULL'),
     calibration: db.prepare('UPDATE works SET trial = ?, updated_at = ? WHERE id = ?'),
     arenaCalibration: db.prepare('UPDATE works SET calibration_arena = ?, updated_at = ? WHERE id = ?'),
-    faceSettings: db.prepare('UPDATE works SET show_gallery = ?, show_arena = ?, show_entertainment = ?, updated_at = ? WHERE id = ?'),
+    faceSettings: db.prepare(`UPDATE works SET show_gallery = ?, show_arena = ?, show_entertainment = ?,
+      reviewed_gallery_at = COALESCE(?, reviewed_gallery_at), reviewed_arena_at = COALESCE(?, reviewed_arena_at), updated_at = ? WHERE id = ?`),
     meta: db.prepare(`UPDATE works SET title = ?, summary = ?, model_id = ?, model_other = ?, effort = ?,
       harness_id = ?, harness_other = ?, provider_id = ?, provider_other = ?,
       generation_mode = ?, human_intervention = ?,
@@ -185,6 +187,8 @@ export function createLibrary({ db, catalog, config, limits }) {
       ownerName: row.owner_name ?? null,
       reviewerName: row.reviewer_name ?? null,
       reviewedAt: row.reviewed_at,
+      reviewedGalleryAt: row.reviewed_gallery_at,
+      reviewedArenaAt: row.reviewed_arena_at,
       contentKey: row.content_key,
       root: row.root,
       entry: row.entry,
@@ -470,7 +474,8 @@ export function createLibrary({ db, catalog, config, limits }) {
       const override = work.curated ? q.override.get(work.taskId, work.id) : null;
       return {
         ...this.toPublic(work, { role: 'admin' }), source: work.curated ? 'curated' : 'upload',
-        ...(work.curated ? {} : { curatedAs: work.curatedAs ?? null, nominatedAt: iso(work.nominatedAt) }),
+        ...(work.curated ? {} : { curatedAs: work.curatedAs ?? null, nominatedAt: iso(work.nominatedAt),
+          reviewed: { gallery: iso(work.reviewedGalleryAt), arena: iso(work.reviewedArenaAt) } }),
         ...flags, calibration_gallery: work.curated ? (override?.calibration_gallery ? JSON.parse(override.calibration_gallery) : null) : work.trial.calibration ?? null,
         calibration_arena: work.curated ? (override?.calibration_arena ? JSON.parse(override.calibration_arena) : null) : work.calibrationArena,
         has_calibration_gallery: Boolean(work.curated ? override?.calibration_gallery : work.trial.calibration),
@@ -491,9 +496,11 @@ export function createLibrary({ db, catalog, config, limits }) {
       const arena = body.show_arena ?? current.show_arena;
       // 娱乐面对投稿和馆藏都开放：投稿落本行，馆藏落 override 列。
       const entertainment = body.show_entertainment ?? current.show_entertainment;
+      const now = Date.now();
       const apply = () => {
-        if (work.curated) q.setOverride.run(taskId, id, Number(gallery), Number(arena), Number(entertainment), admin.id, Date.now());
-        else q.faceSettings.run(Number(gallery), Number(arena), Number(entertainment), Date.now(), id);
+        if (work.curated) q.setOverride.run(taskId, id, Number(gallery), Number(arena), Number(entertainment), admin.id, now);
+        else q.faceSettings.run(Number(gallery), Number(arena), Number(entertainment),
+          Object.hasOwn(body, 'show_gallery') ? now : null, Object.hasOwn(body, 'show_arena') ? now : null, now, id);
         audit(admin, 'face-settings', work, JSON.stringify({ show_gallery: gallery, show_arena: arena, show_entertainment: entertainment }));
       };
       if (withinTransaction) apply();
@@ -805,7 +812,8 @@ export function createLibrary({ db, catalog, config, limits }) {
         q.review.run(status, status === 'verified' ? '' : reason, who.modelId, who.modelId ? '' : who.modelName, effort,
           source.harnessId, source.harnessOther, source.providerId, source.providerOther,
           ...GENERATION_FIELDS.map((key) => generation[key]), Number(gallery), Number(arena), title, summary,
-          noteWithVendor(work.note, who.modelId, body.vendor), now, now, id);
+          noteWithVendor(work.note, who.modelId, body.vendor), now,
+          typeof body.show_gallery === 'boolean' ? now : null, typeof body.show_arena === 'boolean' ? now : null, now, id);
         audit(admin, status, work, [labels[status], reason].filter(Boolean).join('：') + generationAudit(work, generation));
         const next = upload(taskId, id);
         if (config.moderation?.enabled && moderationText(work) !== moderationText(next)) q.moderation.run(JSON.stringify(pendingModeration()), id);

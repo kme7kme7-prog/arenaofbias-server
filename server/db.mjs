@@ -418,6 +418,22 @@ const MIGRATIONS = [
       day TEXT NOT NULL
     );`);
   },
+  // Questions name one or two domains; older ones start empty until a reviewer adds them.
+  (db) => {
+    const columns = new Set(db.prepare('PRAGMA table_info(questions)').all().map((column) => column.name));
+    if (!columns.has('domains')) db.exec(`ALTER TABLE questions ADD COLUMN domains TEXT NOT NULL DEFAULT '[]'`);
+  },
+  // Preserve existing decisions while tracking future review separately for each face.
+  (db) => {
+    const columns = new Set(db.prepare('PRAGMA table_info(works)').all().map((column) => column.name));
+    for (const column of ['reviewed_gallery_at', 'reviewed_arena_at']) {
+      if (!columns.has(column)) db.exec(`ALTER TABLE works ADD COLUMN ${column} INTEGER`);
+    }
+    db.exec(`UPDATE works SET
+      reviewed_gallery_at = COALESCE(reviewed_gallery_at, reviewed_at, updated_at),
+      reviewed_arena_at = COALESCE(reviewed_arena_at, reviewed_at, updated_at)
+      WHERE status IN ('verified', 'questioned')`);
+  },
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

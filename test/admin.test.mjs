@@ -83,6 +83,60 @@ async function withPlatform(run) {
   }
 }
 
+test('face review migration preserves old decisions and leaves unverified uploads pending', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'admin-face-review-'));
+  const file = join(root, 'platform.db');
+  try {
+    const old = new DatabaseSync(file);
+    for (const migration of MIGRATIONS.slice(0, -1)) {
+      if (typeof migration === 'function') migration(old);
+      else old.exec(migration);
+    }
+    old.exec(`PRAGMA user_version = ${MIGRATIONS.length - 1}`);
+    const insert = old.prepare(`INSERT INTO works
+      (id, task_id, title, model_other, content_key, source_name, root, entry, file_count, bytes, digest, checks, trial, created_at, updated_at, status, reviewed_at)
+      VALUES (?, 'one', '作品', '模型', ?, 'a.html', '', 'index.html', 1, 100, ?, '[]', '{}', 1, 2000, ?, ?)`);
+    for (const [status, reviewedAt] of [['verified', 1000], ['questioned', null], ['unverified', null]]) {
+      insert.run(status, `key-${status}`, `digest-${status}`, status, reviewedAt);
+    }
+    old.close();
+    const db = openDatabase(file);
+    try {
+      const decisions = () => db.prepare('SELECT id, reviewed_gallery_at, reviewed_arena_at FROM works ORDER BY id').all()
+        .map(({ id, reviewed_gallery_at, reviewed_arena_at }) => [id, reviewed_gallery_at, reviewed_arena_at]);
+      assert.deepEqual(decisions(), [['questioned', 2000, 2000], ['unverified', null, null], ['verified', 1000, 1000]]);
+      MIGRATIONS.at(-1)(db);
+      assert.deepEqual(decisions(), [['questioned', 2000, 2000], ['unverified', null, null], ['verified', 1000, 1000]]);
+    } finally { db.close(); }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('upload review records only explicit face decisions and face settings preserve status', async () => withPlatform(async ({ call }) => {
+  const draft = await call('voter', 'POST', '/api/drafts?task=one&name=work.html', html, true);
+  assert.equal(draft.status, 200, JSON.stringify(draft.data));
+  const submitted = await call('voter', 'POST', '/api/works', {
+    draftId: draft.data.draft.id, confirmed: true, title: '分面核验作品', modelName: '模型丙', effort: 'Default', providerId: 'official', harnessOther: '测试工具',
+  });
+  assert.equal(submitted.status, 200, JSON.stringify(submitted.data));
+  const id = submitted.data.work.id;
+  const uploaded = async () => (await call('root', 'GET', '/api/admin/works?source=upload')).data.works.find((work) => work.id === id);
+  assert.deepEqual((await uploaded()).reviewed, { gallery: null, arena: null });
+  const review = await call('root', 'POST', `/api/works/one/${id}/review`, { status: 'verified', show_gallery: true });
+  assert.equal(review.status, 200, JSON.stringify(review.data));
+  const galleryReviewed = await uploaded();
+  assert.ok(galleryReviewed.reviewed.gallery);
+  assert.equal(galleryReviewed.reviewed.arena, null);
+  const entertainment = await call('root', 'POST', `/api/admin/works/one/${id}/face-settings`, { show_entertainment: true });
+  assert.deepEqual(entertainment.data.work.reviewed, galleryReviewed.reviewed);
+  const settings = await call('root', 'POST', `/api/admin/works/one/${id}/face-settings`, { show_arena: false });
+  assert.equal(settings.status, 200);
+  assert.ok(settings.data.work.reviewed.arena);
+  assert.equal(settings.data.work.reviewed.gallery, galleryReviewed.reviewed.gallery);
+  assert.equal(settings.data.work.status, 'verified');
+  const curated = (await call('root', 'GET', '/api/admin/works?source=curated')).data.works;
+  assert.ok(curated.every((work) => !Object.hasOwn(work, 'reviewed')));
+}));
+
 test('admin API merges curated and upload works, applies face settings, calibration and audit', async () => withPlatform(async ({ platform, call }) => {
   const upload = await call('root', 'POST', '/api/admin/works/upload?effort=Default&providerId=official&task=one&name=work.html&title=代传作品&modelName=模型丙&show_gallery=1&show_arena=1', html, true);
   assert.equal(upload.status, 200, JSON.stringify(upload.data));

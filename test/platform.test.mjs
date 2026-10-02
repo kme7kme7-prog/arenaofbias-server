@@ -271,7 +271,7 @@ test('v6 migrates legacy password hashes on first successful login', async () =>
     nickname TEXT NOT NULL DEFAULT '');
     CREATE TABLE sessions (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users (id),
       created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
-    CREATE TABLE works (id TEXT PRIMARY KEY, status TEXT NOT NULL, task_id TEXT NOT NULL, deleted_at INTEGER);
+    CREATE TABLE works (id TEXT PRIMARY KEY, status TEXT NOT NULL, task_id TEXT NOT NULL, deleted_at INTEGER, reviewed_at INTEGER, updated_at INTEGER);
     CREATE TABLE votes (id TEXT PRIMARY KEY, identity_source TEXT NOT NULL DEFAULT 'legacy');
     CREATE TABLE audit (id INTEGER PRIMARY KEY, at INTEGER, actor_id TEXT, actor_name TEXT, action TEXT, task_id TEXT, work_id TEXT, detail TEXT);
     PRAGMA user_version = 5;`);
@@ -309,7 +309,7 @@ test('malformed legacy hash_params are treated as a wrong password, never a 500'
     nickname TEXT NOT NULL DEFAULT '');
     CREATE TABLE sessions (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users (id),
       created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
-    CREATE TABLE works (id TEXT PRIMARY KEY, status TEXT NOT NULL, task_id TEXT NOT NULL, deleted_at INTEGER);
+    CREATE TABLE works (id TEXT PRIMARY KEY, status TEXT NOT NULL, task_id TEXT NOT NULL, deleted_at INTEGER, reviewed_at INTEGER, updated_at INTEGER);
     CREATE TABLE votes (id TEXT PRIMARY KEY, identity_source TEXT NOT NULL DEFAULT 'legacy');
     CREATE TABLE audit (id INTEGER PRIMARY KEY, at INTEGER, actor_id TEXT, actor_name TEXT, action TEXT, task_id TEXT, work_id TEXT, detail TEXT);
     PRAGMA user_version = 5;`);

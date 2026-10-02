@@ -700,7 +700,9 @@ v23 追加可空 `questions.category`，无分类旧题按标签顺序取第一�
 
 作品对象还含原有管理员作品视图字段。精选开关和取景先读 `work_overrides`，缺失时展览馆开关默认开启、竞技场开关默认关闭。查询错误：`400 invalid_query`、`404 not_found`（题目不存在）。
 
-**`POST /api/admin/works/:task/:id/face-settings`** 请求 `{ "show_gallery": false, "show_arena": true }`，可只给其中一个布尔键。投稿只更新 `works` 两个开关；精选 upsert `work_overrides`，不修改数据包。响应 `{ "work": <合并管理员作品视图> }`。错误：`400 invalid_face_settings`、`404 not_found`、`429`。
+投稿的管理员作品视图另含 `reviewed: { gallery: <ISO 时间|null>, arena: <ISO 时间|null> }`，表示两面各自最近一次明确决定；馆藏不输出此字段。核验请求显式带布尔 `show_gallery` / `show_arena` 时只更新对应面的时间。v30 为已核验和存疑的旧投稿将两面时间回填为 `COALESCE(reviewed_at, updated_at)`，未核验旧投稿保持 null；娱乐盲测开关不记录面决定。
+
+**`POST /api/admin/works/:task/:id/face-settings`** 请求 `{ "show_gallery": false, "show_arena": true }`，可只给其中一个布尔键。投稿更新 `works` 开关，并记录请求中显式指定面的决定时间，保持核验状态不变；精选 upsert `work_overrides`，不修改数据包。批量开关沿用同样的按面记录规则。响应 `{ "work": <合并管理员作品视图> }`。错误：`400 invalid_face_settings`、`404 not_found`、`429`。
 
 **`POST /api/admin/works/batch-face-settings`** 仅管理员可用，使用 write 限流。请求 `{ "works": [{ "task": "题目 ID", "id": "作品 ID" }], "show_gallery": false, "show_arena": true }`，两个开关至少给一个，且只能为布尔值；一次须选 1–200 件。复用单件开关逻辑，在同一个数据库事务内更新所有作品并为每件写一条 `face-settings` audit；任一作品不存在或参数无效时整批回滚。成功 `200`：`{ "works": [<合并管理员作品视图>, …] }`，顺序与请求一致。错误：`401` / `403`、`400 invalid_work_list|invalid_face_settings`、`404 not_found`、`429`。
 

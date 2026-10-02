@@ -1,5 +1,14 @@
 # HANDOFF.md · 当前状态
 
+## 小红帽作品可见但盲评池为零的调查（2026-10-02）
+
+- 本轮用户要求调查完整链路。公网 API 当前 `serverVersion=83e43fe072a0280d86c76379d9964bd4a32eb4bd`，Gallery 源码 `ef7b0a5bb240a518033a1ce78bb29a36d5205cdc`；两端数据 pin 均为 `53ab3e7caae664a520a231ef4fb715c493f1baa0`，catalogDigest 均为 `95f4979445a2528dccd866a1f2e1ca72d2b431943d295fea53ceb0e8ddbdec4a`，排除本次数据版本不一致。
+- `little-red-riding-hood` 的静态馆藏 results 为 0；公开 bootstrap 实际有 6 件投稿、6 个不同模型，均 verified、single-turn / none。标题为「渡林条例」「红斗篷与灰影子」「红斗篷与停火线」「狼没有说谎」「林边的红灯」「三短一长」。已在登录的正式后台按题目筛选，6 件的正式盲测和娱乐池开关均关闭，均显示「不在正式盲测池」。正式盲评大厅与公网 bootstrap 均为 works=0 / entries=0。
+- 写入链路：library.insertWork 显式设 show_gallery=1 / show_arena=0；Gallery account.js 的通过核验只发送 status=verified / show_gallery=true，后端单件 review 保持省略的竞技场开关。新 batch-review 同样只显式开启展览馆。全局 verified 不等于竞技场已批准；后台竞技场系统的「通过并进盲测」才显式发送 show_arena=true。
+- 读取链路：Gallery app.mergePlatform 将静态馆藏和 bootstrap.works 合并展示；bootstrap.works 按展览馆可见性筛选。library.eligible 合并馆藏/投稿后要求 verified、有 dir、未被馆藏替代、公开内容可读、show_arena=true；文学题仅豁免生成方式/人工介入限制，不豁免竞技场开关。arena.poolStats 对该池计作品数、按 model + 规范化 effort 去重计配置数；bootstrap.arena 下发后，Gallery arena.js 直接展示，entries<2 禁止开始。createMatch 再走同一 eligible 并排除本人作品，防止绕过大厅直接配对。娱乐池开关独立，不控制 Gallery 正式盲评。
+- 产品提示造成误解：公共/后台 verified 的提示仍称「参与盲评并优先展示」，大厅把尚未开启盲测的题统一归为「作品不足」。建议保持分面审批规则，明确显示「已核验，是否参与盲评以竞技场批准为准」及「尚无作品进入盲评池」。本轮未实现提示修改或批准作品；至少批准两件不同配置后此题才能开始，若全部六件批准且其余条件保持，统计应为 6 件 / 6 个配置。
+- 验证：现有 blind-pool 的 eligibility 和 text exemption 两项通过；admin 的旧决定迁移、单面核验、批量开关三项通过，共 5 项实际用例。首条命令另报告一个无匹配用例的 admin 文件通过，不把它算作功能验证。已只读核对生产 UI/公开接口；未创建生产对局或投票，未改业务数据、源码、数据包或部署。工作区另有持续变动的安全加固文件，本轮未修改或暂存。
+
 ## 固定新数据包与生产发布准备（2026-10-02）
 
 - 数据源 `0291105a33d721d58b2345703817bc92c2ed5de4` 的 CI 36960742936 成功，固定不可变产物 `53ab3e7caae664a520a231ef4fb715c493f1baa0`；20 题 / 182 件，补齐领域、生成声明及模型登记信息。Gallery 私有 pin 与此同步。

@@ -348,38 +348,6 @@ dialog.sheet::backdrop { background: rgb(12 12 11 / 42%); -webkit-backdrop-filte
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
-/* ---- review sheet --------------------------------------------------------------------- */
-dialog.review-sheet { width: min(1020px, calc(100% - 32px)); }
-.review { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 32px; }
-.review h4 { margin: 20px 0 8px; color: var(--muted); font: 500 11.5px var(--mono); letter-spacing: 0.08em; }
-.review-head { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 16px; align-items: start; }
-.review-head h3 { font: 600 19px/1.4 var(--serif); }
-.review-head .work-model { gap: 8px; margin: 6px 0 10px; color: var(--muted); }
-.review-head .actions { gap: 6px; }
-.review-text { margin: 12px 0 0; color: var(--ink-2); font-size: 13px; white-space: pre-wrap; }
-.facts { display: grid; gap: 6px; margin: 14px 0 0; font-size: 13px; }
-.facts > div { display: grid; grid-template-columns: 5.5em minmax(0, 1fr); gap: 12px; }
-.facts dt { color: var(--muted); }
-.facts dd { margin: 0; color: var(--ink-2); overflow-wrap: anywhere; }
-.checks { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
-.check { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
-.check > .i { width: 16px; height: 16px; margin-top: 2px; flex: none; }
-.check span { display: block; min-width: 0; color: var(--ink-2); overflow-wrap: anywhere; }
-.check b { display: inline-block; min-width: 5.5em; margin-right: 12px; color: var(--ink); font-weight: 500; }
-.check.is-ok > .i { color: var(--ink-2); }
-.check.is-warn > .i, .check.is-fail > .i { color: var(--danger); }
-.check.is-fail b { color: var(--danger); }
-.check.is-info > .i { color: var(--muted); }
-.trial-live { border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; background: #ffffff; }
-.trial-live iframe { display: block; width: 100%; aspect-ratio: 16 / 10; border: 0; background: #ffffff; }
-.review-form { padding-left: 32px; border-left: 1px solid var(--line); }
-.review-form h4:first-child { margin-top: 0; }
-.review-list { display: grid; gap: 6px; margin: 0 0 6px; padding: 0; list-style: none; font-size: 13px; }
-.review-list label { display: flex; align-items: flex-start; gap: 8px; color: var(--ink-2); cursor: pointer; }
-.review-list input { margin-top: 4px; accent-color: var(--ink); }
-.review-form .fine { margin: 0 0 16px; }
-.review-form .sheet-actions { justify-content: flex-start; }
-
 /* ==========================================================================
    亮色 · 纸面仪器的结构性修饰
    零圆角、切角、硬投影、装订边、仪器标签——这些不是换色，是另一套形状语言，
@@ -460,8 +428,6 @@ dialog.review-sheet { width: min(1020px, calc(100% - 32px)); }
 /* 凹陷输入面（dk-well） */
 :root[data-theme="light"] .input { background: var(--surface); box-shadow: inset 3px 0 var(--line); }
 :root[data-theme="light"] .input:focus { border-color: var(--focus); background: var(--raised); box-shadow: inset 3px 0 var(--focus); }
-:root[data-theme="light"] .review-list input { accent-color: var(--accent-ink); }
-
 /* 卡片与弹层：纸叠纸的硬投影 */
 :root[data-theme="light"] .gate-panel {
   border: 1px solid var(--ink); border-left: 3px solid var(--ink); background: var(--raised);
@@ -472,7 +438,6 @@ dialog.review-sheet { width: min(1020px, calc(100% - 32px)); }
 }
 :root[data-theme="light"] dialog.sheet::backdrop { background: rgb(28 36 35 / 40%); }
 :root[data-theme="light"] .toast { border-radius: 0; border: 1px solid var(--ink); background: var(--inv); box-shadow: 5px 6px 0 var(--hard); }
-:root[data-theme="light"] .trial-live { border-color: var(--line-2); }
 :root[data-theme="light"] .work-thumb { box-shadow: 0 0 0 1px var(--line-2); }
 :root[data-theme="light"] .hero-foot { border-top: 2px solid var(--ink); }
 
@@ -480,10 +445,6 @@ dialog.review-sheet { width: min(1020px, calc(100% - 32px)); }
 :root[data-theme="dark"] .logo-bg { fill: var(--raised); }
 
 /* ---- responsive ------------------------------------------------------------------- */
-@media (max-width: 1000px) {
-  .review { grid-template-columns: 1fr; }
-  .review-form { padding: 20px 0 0; border-left: 0; border-top: 1px solid var(--line); }
-}
 @media (max-width: 860px) {
   .brand-name { display: none; }
   .work-row { grid-template-columns: 120px minmax(0, 1fr); }
@@ -702,27 +663,3 @@ dialog.sheet.sheet-calib { width: min(1120px, calc(100% - 32px)); border-radius:
 .calib-hint-row { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
 .calib-mode { display: inline-flex; gap: 4px; }
 .calib-mode .btn.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
-
-/* ---- review page: pending queues first, decided lists after ----------------------------- */
-.review-nav { display: flex; flex-wrap: wrap; gap: 10px 16px; margin-bottom: 14px; }
-.review-nav .review-tabs { margin-bottom: 0; align-items: center; }
-.seg-caption { padding: 0 8px 0 10px; color: var(--muted); font: 500 11px var(--mono); letter-spacing: 0.08em; }
-.review-lead { max-width: 52em; margin: 0 0 18px; color: var(--ink-2); font-size: 13px; line-height: 1.65; }
-.review-subhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 34px 0 10px; font-size: 15px; }
-.review-subhead small { color: var(--muted); font-size: 12.5px; font-weight: 400; }
-.work-list.is-muted .work-thumb { opacity: 0.72; }
-.review-history { margin-top: 28px; }
-.review-history > summary { cursor: pointer; margin-bottom: 12px; color: var(--ink-2); font-size: 13.5px; font-weight: 600; }
-.question-card .actions .fine { margin: 0 0 0 6px; }
-.review-meta { margin: 16px 0; padding: 12px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-.review-meta > summary { cursor: pointer; font-weight: 600; }
-.review-meta > summary small { margin-left: 8px; color: var(--muted); font-size: 12px; font-weight: 400; }
-.review-meta[open] > summary { margin-bottom: 12px; }
-.review-blocked { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 16px 0 0; padding: 10px 12px; border-left: 2px solid var(--danger); background: color-mix(in srgb, var(--danger) 9%, transparent); font-size: 13px; }
-.review-blocked p { flex: 1 1 16em; margin: 0; color: var(--ink-2); }
-.review-blocked .i { width: 16px; height: 16px; color: var(--danger); }
-.content-shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
-.content-shots a { display: block; border-radius: var(--radius-sm); overflow: hidden; background: var(--img-bg); box-shadow: 0 0 0 1px var(--line); }
-.content-shots img { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: top; }
-.work-list.is-muted .work-reason { border-left-color: var(--line); background: var(--surface-2); }
-.work-list.is-muted .work-reason .i { color: var(--muted); }

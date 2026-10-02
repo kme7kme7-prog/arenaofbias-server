@@ -87,6 +87,25 @@ export function createQuestions(db) {
       audit.run(now, user.id, user.name, 'question-create', id, null, title);
       return fromRow(one.get(id), user.role === 'admin' ? 'admin' : true);
     },
+    createByAdmin(admin, body, existingTags = []) {
+      if (admin?.role !== 'admin') fail(403, '仅管理员可以操作');
+      const category = requireCategory(body.category);
+      const domains = body.domains === undefined ? [] : requireDomains(body.domains);
+      const title = required(body.title, '题目标题', 70);
+      const summary = required(body.summary, '测试简述', 400);
+      const prompt = required(body.prompt, '完整提示词', 20000);
+      const tags = normalizeTags(body.tags, existingTags, category);
+      if (!compatibleTemplates(category, body.templates)) fail(400, '提交格式与题目分类不匹配');
+      const templates = [...new Set(body.templates)];
+      const id = `q-${randomBytes(8).toString('hex')}`;
+      const now = Date.now();
+      const moderation = { status: 'approved', source: 'human', reviewer: admin.name, reason: '管理员创建', at: now };
+      transaction(db, () => {
+        insert.run(id, admin.id, title, summary, prompt, JSON.stringify(tags), JSON.stringify(templates), now, JSON.stringify(moderation), category, JSON.stringify(domains));
+        audit.run(now, admin.id, admin.name, 'question-create', id, null, title);
+      });
+      return fromRow(one.get(id), 'admin');
+    },
     edit(actor, id, body) {
       if (actor.role !== 'admin') fail(403, '仅管理员可以操作');
       const row = one.get(id);

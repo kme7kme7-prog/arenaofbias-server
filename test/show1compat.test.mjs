@@ -267,16 +267,19 @@ test('retired snapshot ballots never enter live vote or rating responses', () =>
     const columns = db.prepare('PRAGMA table_info(works)').all().map((column) => column.name);
     db.exec(`INSERT INTO works (${columns.join(', ')}) SELECT ${columns.map((name) => ({
       id: "'up-live0001'", content_key: "'wlive'", digest: "'dlive'", show_entertainment: '1',
+      model_id: 'NULL', model_other: "'Custom model'", model_vendor: "'Custom vendor'",
     })[name] ?? name).join(', ')} FROM works WHERE id = 'up-cccc0003'`);
     const works = (await call(base, 'GET', '/api/works')).data.works;
     const live = works.find((work) => work.id === 'up-live0001');
-    assert.deepEqual(Object.keys(live).sort(), Object.keys(works[0]).sort());
+    assert.deepEqual(Object.keys(live).sort(), [...Object.keys(works[0]), 'vendor'].sort());
+    assert.equal(live.vendor, 'Custom vendor');
     assert.deepEqual(JSON.parse(live.content), { kind: 'html', src: 'https://wlive.works.test/' });
     assert.equal(live.promptId, '004');
     assert.equal(works.length, 5);
+    db.prepare("UPDATE works SET model_id = 'model-c', model_other = '', model_vendor = '' WHERE id = 'up-live0001'").run();
     const voter = await signIn(auth, 'live-voter');
     const result = await call(base, 'POST', '/api/votes', { cookie: voter.cookie, body: { id: randomUUID(),
-      promptId: '004', winnerRid: live.id, winnerMid: live.modelId,
+      promptId: '004', winnerRid: live.id, winnerMid: 'model-c',
       loserRid: '004-pagoda', loserMid: 'model-d', mode: 'blind' } });
     assert.equal(result.status, 201, result.text);
     assert.equal((await call(base, 'GET', '/api/votes?scope=entertainment')).data.votes.at(-1).winnerRid, live.id);

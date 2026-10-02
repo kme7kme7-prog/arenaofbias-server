@@ -74,7 +74,8 @@ export function registerShow1Compat(router, deps) {
     addReaction: db.prepare('INSERT OR IGNORE INTO reactions (task_id, work_id, user_id, emoji, created_at) VALUES (?, ?, ?, ?, ?)'),
     pageView: db.prepare('INSERT INTO page_views (day, path, ip_hash, created_at) VALUES (?, ?, ?, ?)'),
     arenaEditorial: db.prepare("SELECT commentary, weights_json FROM task_editorial WHERE task_id = ? AND face = 'arena'"),
-    liveWorks: db.prepare("SELECT id, task_id, model_id, model_other, title, content_key FROM works WHERE status = 'verified' AND show_entertainment = 1 AND json_extract(moderation, '$.status') IN ('legacy', 'approved') AND curated_as IS NULL AND deleted_at IS NULL ORDER BY created_at, id"),
+    liveWorks: db.prepare("SELECT id, task_id, model_id, model_other, model_vendor, title, content_key, entertainment_route FROM works WHERE status = 'verified' AND show_entertainment = 1 AND json_extract(moderation, '$.status') IN ('legacy', 'approved') AND curated_as IS NULL AND deleted_at IS NULL ORDER BY created_at, id"),
+    communityTasks: db.prepare('SELECT id FROM questions WHERE deleted_at IS NULL'),
     // Curated works opt into the entertainment pool through their override row; files
     // and model identity come from the datapack, not from a works row.
     curatedEntertainment: db.prepare("SELECT work_id, task_id FROM work_overrides WHERE show_entertainment = 1 ORDER BY task_id, work_id"),
@@ -113,9 +114,14 @@ export function registerShow1Compat(router, deps) {
   // The roster sorted by rid once: every "first work of a mid/task" lookup is deterministic.
   const liveWorks = () => {
     const { roundByTask } = promptCatalog();
-    const uploads = q.liveWorks.all().filter((row) => roundByTask[row.task_id] && !snapshot.upToRid[row.id])
-      .map((row) => ({ ...row, round: roundByTask[row.task_id],
-        modelName: row.model_id ? (deps.catalog.model(row.model_id)?.name ?? row.model_id) : row.model_other }));
+    const community = new Set(q.communityTasks.all().map((row) => row.id));
+    // Work gates stay in the SQL. This only admits a community question beside an arena id,
+    // and keeps an unassigned inbox item out even if its switch was turned on.
+    const uploads = q.liveWorks.all().filter((row) => row.entertainment_route !== 1 && !snapshot.upToRid[row.id]
+      && (roundByTask[row.task_id] || community.has(row.task_id)))
+      .map((row) => ({ ...row, round: roundByTask[row.task_id] ?? row.task_id,
+        modelName: row.model_id ? (deps.catalog.model(row.model_id)?.name ?? row.model_id) : row.model_other,
+        vendor: row.model_id ? (deps.catalog.model(row.model_id)?.vendor ?? '') : row.model_vendor }));
     // Curated pool members resolve through the catalog; their files are reached with a
     // short-lived p preview key (curated works have no works-row content key of their own).
     const curated = q.curatedEntertainment.all().flatMap(({ work_id, task_id }) => {
@@ -127,14 +133,14 @@ export function registerShow1Compat(router, deps) {
       const key = library?.previewOrigin ? new URL(library.previewOrigin(work)).host.split('.')[0] : work_id;
       return [{ id: work_id, task_id, round, model_id: work.modelId ?? null, model_other: work.modelId ? '' : (work.modelName ?? ''),
         title: work.title, content_key: key,
-        modelName: work.modelName ?? work.modelId ?? '' }];
+        modelName: work.modelName ?? work.modelId ?? '', vendor: work.vendor ?? '' }];
     });
     return [...uploads, ...curated];
   };
   const workMap = () => Object.fromEntries([
     ...Object.entries(snapshot.workMap),
     ...liveWorks().map((row) => [row.id, { up: row.id, key: row.content_key, task: row.task_id,
-      round: row.round, mid: row.model_id, modelName: row.modelName, title: row.title }]),
+      round: row.round, mid: row.model_id, modelName: row.modelName, vendor: row.vendor, title: row.title }]),
   ]);
   const roster = () => Object.entries(workMap()).sort(([a], [b]) => a.localeCompare(b));
   const workOf = (taskId, mid) => {
@@ -200,7 +206,7 @@ export function registerShow1Compat(router, deps) {
   });
   const worksOf = () => [...snapshot.works, ...liveWorks().map((row) => ({
     id: row.id, promptId: row.round, modelId: row.model_id,
-    modelName: row.modelName, title: row.title, isDemo: 0,
+    modelName: row.modelName, vendor: row.vendor, title: row.title, isDemo: 0,
     content: JSON.stringify({ kind: 'html', src: `${deps.config.contentTemplate.replace('{token}', row.content_key)}/` }),
   }))];
 
@@ -293,7 +299,7 @@ export function registerShow1Compat(router, deps) {
     const weights = editorial?.weights_json ? JSON.parse(editorial.weights_json) : promptOf(promptId)?.weights ?? null;
     const identity = (entry) => JSON.stringify({
       taskId, id: entry.up, curated: false, title: entry.title,
-      modelId: entry.mid, modelName: entry.modelName, vendor: '', effort: '',
+      modelId: entry.mid, modelName: entry.modelName, vendor: entry.vendor ?? deps.catalog.model(entry.mid)?.vendor ?? '', effort: '',
       effortKey: '', modelKey: entry.mid, configKey: entry.mid, ownerId: null,
     });
     // Placeholder match in the migration's shape: decided at creation, immediately expired.

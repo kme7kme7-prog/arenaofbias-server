@@ -165,6 +165,8 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         // gallery has not decided yet, which includes uploads already verified for the arena.
         unverified: library.reviewQueue().length,
         content: uploads.filter((work) => work.moderation.status === 'review').length,
+        autoRejected: uploads.filter((work) => work.moderation.status === 'rejected' && work.moderation.source !== 'human').length,
+        injected: uploads.filter((work) => work.moderation.categories?.includes('prompt-injection')).length,
         questions: questions.pendingCount(),
       } : null,
     };
@@ -240,6 +242,13 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     return { question, work: library.toPublic(work, user) };
   });
 
+  router.on('POST', '/api/admin/questions', async (ctx) => {
+    const admin = adminOnly(ctx);
+    limit.write(admin.id);
+    const question = questions.createByAdmin(admin, await readJson(ctx.req), catalog.tags());
+    arena.invalidate();
+    return { question };
+  });
   router.on('GET', '/api/admin/questions', (ctx) => {
     const admin = adminOnly(ctx);
     return { questions: questions.adminAll().map(({ ownerId, ...question }) => ({
@@ -430,6 +439,24 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   router.on('GET', '/api/admin/works', (ctx) => {
     adminOnly(ctx);
     return adminService.works(ctx.url.searchParams);
+  });
+  router.on('GET', '/api/admin/inbox/works', (ctx) => {
+    adminOnly(ctx);
+    return { works: library.inboxWorks() };
+  });
+  router.on('POST', '/api/admin/works/batch-inbox', async (ctx) => {
+    const admin = adminOnly(ctx);
+    limit.write(admin.id);
+    const body = await readJson(ctx.req);
+    const works = library.assignInbox(admin, body.works, { task: body.task ?? null, entertainment: body.entertainment ?? false });
+    arena.invalidate();
+    return { works };
+  });
+  router.on('POST', '/api/admin/works/:task/:id/display', async (ctx) => {
+    const admin = adminOnly(ctx);
+    limit.write(admin.id);
+    const work = library.setDisplay(admin, ctx.params.task, ctx.params.id, await readJson(ctx.req));
+    return { work };
   });
   router.on('POST', '/api/admin/works/batch-face-settings', async (ctx) => {
     const admin = adminOnly(ctx);

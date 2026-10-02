@@ -604,9 +604,34 @@ describe('platform lifecycle', () => {
     assert.equal(submitted.status, 200);
     upload = submitted.data.work;
     assert.equal(upload.modelName, 'Model X');
-    assert.equal(upload.vendor, '');
-    assert.equal(upload.note, 'Original note\n手填模型厂商：VX');
+    assert.equal(upload.vendor, 'VX');
+    assert.equal(upload.note, 'Original note');
     assert.equal(platform.db.prepare('SELECT model_other FROM works WHERE id = ?').get(upload.id).model_other, 'Model X');
+    const vendorRow = () => platform.db.prepare('SELECT model_vendor FROM works WHERE id = ?').get(upload.id).model_vendor;
+    assert.equal(vendorRow(), 'VX');
+    assert.equal((await call('alice', 'GET', '/api/me')).data.works.find((work) => work.id === upload.id).vendor, 'VX');
+    const path = `/api/works/one/${upload.id}`;
+    const registered = await call('alice', 'PATCH', path, { modelId: 'm-a', vendor: 'Ignored vendor' });
+    assert.equal(registered.status, 200);
+    assert.equal(registered.data.work.vendor, 'VA');
+    assert.equal(vendorRow(), '');
+    const ignored = await call('alice', 'PATCH', path, { vendor: 'Still ignored' });
+    assert.equal(ignored.status, 200);
+    assert.equal(ignored.data.work.vendor, 'VA');
+    assert.equal(vendorRow(), '');
+    const custom = await call('alice', 'PATCH', path, { modelName: 'Model X', vendor: 'VX edited' });
+    assert.equal(custom.status, 200);
+    assert.equal(custom.data.work.vendor, 'VX edited');
+    assert.equal(custom.data.work.note, 'Original note');
+    assert.equal(vendorRow(), 'VX edited');
+    const cleared = await call('alice', 'PATCH', path, { vendor: '' });
+    assert.equal(cleared.status, 200);
+    assert.equal(cleared.data.work.vendor, '');
+    assert.equal(vendorRow(), '');
+    const adminEdited = await call('root', 'POST', `/api/admin/works/one/${upload.id}/meta`, { vendor: 'VX admin' });
+    assert.equal(adminEdited.status, 200);
+    assert.equal(adminEdited.data.work.vendor, 'VX admin');
+    assert.equal(vendorRow(), 'VX admin');
     assert.equal(upload.status, 'unverified');
     assert.deepEqual([...Object.values(platform.db.prepare('SELECT show_gallery, show_arena FROM works WHERE id = ?').get(upload.id))], [1, 0], '新投稿默认展览馆开、竞技场关');
     assert.equal(upload.effort, 'High');
@@ -684,7 +709,9 @@ describe('platform lifecycle', () => {
     // 裸审核 = 默认门面（展览馆开、竞技场关）；显式开竞技场才进配对池。
     const reviewed = await call('root', 'POST', `/api/works/one/${upload.id}/review`, { status: 'verified', show_gallery: true, show_arena: true, vendor: 'VX' });
     assert.equal(reviewed.status, 200);
-    assert.equal(reviewed.data.work.note, 'Original note\n手填模型厂商：VX');
+    assert.equal(reviewed.data.work.note, 'Original note');
+    assert.equal(reviewed.data.work.vendor, 'VX');
+    assert.equal(platform.db.prepare('SELECT model_vendor FROM works WHERE id = ?').get(upload.id).model_vendor, 'VX');
     assert.equal((await call('bob', 'GET', '/api/bootstrap')).data.arena.one.entries, 3);
 
     // Alice never meets her own work; Bob may.
@@ -1027,11 +1054,13 @@ describe('platform lifecycle', () => {
     const form = { draftId: staged.data.draft.id, confirmed: true, title: 'Versioned', modelId: 'm-a', effort: 'Default', providerId: 'official', harnessOther: 'CLI' };
     assert.equal((await call('bob', 'POST', '/api/works', form)).status, 400, 'a versioned task needs the prompt version');
     assert.equal((await call('bob', 'POST', '/api/works', { ...form, promptVariant: 'medium' })).status, 400);
-    const submitted = await call('bob', 'POST', '/api/works', { ...form, promptVariant: 'short', generationMode: 'multi-turn', humanIntervention: 'none' });
+    const submitted = await call('bob', 'POST', '/api/works', { ...form, vendor: 'Ignored vendor', promptVariant: 'short', generationMode: 'multi-turn', humanIntervention: 'none' });
     assert.equal(submitted.status, 200, JSON.stringify(submitted.data));
     const { id } = submitted.data.work;
     assert.equal(submitted.data.work.promptVariant, 'short');
     assert.equal(submitted.data.work.generationMode, 'multi-turn');
+    assert.equal(submitted.data.work.vendor, 'VA');
+    assert.equal(platform.db.prepare('SELECT model_vendor FROM works WHERE id = ?').get(id).model_vendor, '');
 
     const path = `/api/works/versions/${id}`;
     assert.equal((await call('alice', 'PATCH', path, { title: 'Stolen' })).status, 403);
@@ -1040,7 +1069,13 @@ describe('platform lifecycle', () => {
     const edited = await call('bob', 'PATCH', path, { promptVariant: 'long', note: 'Two rounds', humanIntervention: 'prompt-guided' });
     assert.equal(edited.status, 200, JSON.stringify(edited.data));
     assert.deepEqual([edited.data.work.promptVariant, edited.data.work.note, edited.data.work.humanIntervention, edited.data.work.title], ['long', 'Two rounds', 'prompt-guided', 'Versioned']);
-    assert.equal((await call('root', 'POST', `${path}/review`, { status: 'verified' })).status, 200);
+    const customReview = await call('root', 'POST', `${path}/review`, { status: 'verified', modelName: 'Custom version', vendor: 'Review vendor' });
+    assert.equal(customReview.status, 200);
+    assert.equal(customReview.data.work.vendor, 'Review vendor');
+    const registeredReview = await call('root', 'POST', `${path}/review`, { status: 'verified', modelId: 'm-a', vendor: 'Ignored vendor' });
+    assert.equal(registeredReview.status, 200);
+    assert.equal(registeredReview.data.work.vendor, 'VA');
+    assert.equal(platform.db.prepare('SELECT model_vendor FROM works WHERE id = ?').get(id).model_vendor, '');
     assert.equal((await call('bob', 'PATCH', path, { title: 'Late' })).status, 409, 'reviewed works are frozen for the author');
     assert.equal((await call('root', 'POST', `/api/admin/works/versions/${id}/meta`, { title: 'Fixed' })).status, 200);
     assert.equal((await call('bob', 'DELETE', path)).status, 200);

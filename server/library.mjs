@@ -18,14 +18,11 @@ const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
 const clip = (value, max) => String(value ?? '').normalize('NFKC').trim().slice(0, max);
 const plainObject = (value) => value && typeof value === 'object' && !Array.isArray(value);
 const pendingModeration = () => ({ status: 'pending', revision: token('r'), at: Date.now() });
-const moderationText = (work) => JSON.stringify([work.title, work.summary, work.modelName, work.effort, work.note,
+const moderationText = (work) => JSON.stringify([work.title, work.summary, work.modelName, work.modelId ? '' : work.vendor, work.effort, work.note,
   work.harnessOther, work.providerOther, ...GENERATION_FIELDS.map((key) => work[key])]);
-const authorModeration = ({ status, reason, at }) => ({ status, ...(status === 'rejected' ? { reason } : {}), at });
-const noteWithVendor = (note, modelId, vendor) => {
-  const name = modelId ? '' : clip(vendor, 40);
-  const line = name ? `手填模型厂商：${name}` : '';
-  return line && !note.split('\n').includes(line) ? [note, line].filter(Boolean).join('\n') : note;
-};
+// Only a human's reason reaches the author; model text could carry what an injected upload asked for.
+const authorModeration = ({ status, reason, source, at }) => ({ status,
+  ...(status === 'rejected' ? { reason: source === 'human' ? reason : '自动内容审查未通过，请联系管理员' } : {}), at });
 
 function validFraming(value) {
   if (!plainObject(value)) return false;
@@ -129,15 +126,15 @@ export function createLibrary({ db, catalog, config, limits }) {
     updatesOf: db.prepare(`SELECT COUNT(*) AS n FROM works WHERE owner_id = ? AND deleted_at IS NULL AND ${changedAt} > ?`),
     recentReviews: db.prepare(`SELECT (reviewed_at - created_at) / 3600000.0 AS hours FROM works
       WHERE status = 'verified' AND deleted_at IS NULL AND reviewed_at >= ? ORDER BY hours`),
-    insertWork: db.prepare(`INSERT INTO works (id, task_id, owner_id, title, summary, model_id, model_other, effort,
+    insertWork: db.prepare(`INSERT INTO works (id, task_id, owner_id, title, summary, model_id, model_other, model_vendor, effort,
       harness_id, harness_other, provider_id, provider_other, note, content_key,
       source_name, root, entry, file_count, bytes, digest, checks, trial, cover, created_at, updated_at,
       generation_mode, human_intervention, moderation, prompt_variant, show_gallery, show_arena)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`),
-    review: db.prepare(`UPDATE works SET status = ?, status_reason = ?, model_id = ?, model_other = ?, effort = ?,
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`),
+    review: db.prepare(`UPDATE works SET status = ?, status_reason = ?, model_id = ?, model_other = ?, model_vendor = ?, effort = ?,
       harness_id = ?, harness_other = ?, provider_id = ?, provider_other = ?,
       generation_mode = ?, human_intervention = ?,
-      show_gallery = ?, show_arena = ?, title = ?, summary = ?, note = ?, reviewed_at = ?,
+      show_gallery = ?, show_arena = ?, show_entertainment = ?, entertainment_route = ?, title = ?, summary = ?, note = ?, reviewed_at = ?,
       reviewed_gallery_at = COALESCE(?, reviewed_gallery_at), reviewed_arena_at = COALESCE(?, reviewed_arena_at), updated_at = ? WHERE id = ?`),
     remove: db.prepare('UPDATE works SET deleted_at = ?, updated_at = ? WHERE id = ?'),
     captures: db.prepare('UPDATE works SET captures = ? WHERE id = ?'),
@@ -147,7 +144,7 @@ export function createLibrary({ db, catalog, config, limits }) {
     arenaCalibration: db.prepare('UPDATE works SET calibration_arena = ?, updated_at = ? WHERE id = ?'),
     faceSettings: db.prepare(`UPDATE works SET show_gallery = ?, show_arena = ?, show_entertainment = ?,
       reviewed_gallery_at = COALESCE(?, reviewed_gallery_at), reviewed_arena_at = COALESCE(?, reviewed_arena_at), updated_at = ? WHERE id = ?`),
-    meta: db.prepare(`UPDATE works SET title = ?, summary = ?, model_id = ?, model_other = ?, effort = ?,
+    meta: db.prepare(`UPDATE works SET title = ?, summary = ?, model_id = ?, model_other = ?, model_vendor = ?, effort = ?,
       harness_id = ?, harness_other = ?, provider_id = ?, provider_other = ?,
       generation_mode = ?, human_intervention = ?,
       prompt_variant = ?, note = ?, updated_at = ? WHERE id = ?`),
@@ -158,6 +155,10 @@ export function createLibrary({ db, catalog, config, limits }) {
       VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(task_id, work_id) DO UPDATE SET
       show_gallery = excluded.show_gallery, show_arena = excluded.show_arena, show_entertainment = excluded.show_entertainment,
       updated_by = excluded.updated_by, updated_at = excluded.updated_at`),
+    setDisplay: db.prepare(`INSERT INTO work_overrides (task_id, work_id, display_json, updated_by, updated_at)
+      VALUES (?, ?, ?, ?, ?) ON CONFLICT(task_id, work_id) DO UPDATE SET
+      display_json = excluded.display_json, updated_by = excluded.updated_by, updated_at = excluded.updated_at`),
+    setRoute: db.prepare('UPDATE works SET entertainment_route = ?, updated_at = ? WHERE id = ?'),
     setCuratedCalibration: db.prepare(`INSERT INTO work_overrides (task_id, work_id, show_gallery, show_arena, calibration_gallery, calibration_arena, updated_by, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(task_id, work_id) DO UPDATE SET
       calibration_gallery = excluded.calibration_gallery, calibration_arena = excluded.calibration_arena,
@@ -185,6 +186,7 @@ export function createLibrary({ db, catalog, config, limits }) {
       showGallery: Boolean(row.show_gallery),
       showArena: Boolean(row.show_arena),
       showEntertainment: Boolean(row.show_entertainment),
+      entertainmentRoute: row.entertainment_route ?? 0,
       curatedAs: row.curated_as ?? null,
       nominatedAt: row.nominated_at ?? null,
       calibrationArena: row.calibration_arena ? JSON.parse(row.calibration_arena) : null,
@@ -193,7 +195,7 @@ export function createLibrary({ db, catalog, config, limits }) {
       summary: row.summary,
       modelId: row.model_id,
       modelName: row.model_id ? (model?.name ?? row.model_id) : row.model_other,
-      vendor: model?.vendor ?? '',
+      vendor: row.model_id ? (model?.vendor ?? '') : row.model_vendor,
       effort: row.effort,
       tool: row.harness_id ? (archive.harness(row.harness_id)?.name ?? row.harness_id) : row.harness_other,
       harnessId: row.harness_id,
@@ -290,11 +292,12 @@ export function createLibrary({ db, catalog, config, limits }) {
     }
     return { show_gallery: work.showGallery, show_arena: work.showArena, show_entertainment: Boolean(work.showEntertainment) };
   };
-  const visibleTo = (work, site = 'show2') => Boolean(publicContent(work) && (site === 'show1' ? flagsOf(work).show_arena : flagsOf(work).show_gallery));
+  const inInbox = (work) => Boolean(work && !work.curated && work.entertainmentRoute === 1);
+  const visibleTo = (work, site = 'show2') => Boolean(!inInbox(work) && publicContent(work) && (site === 'show1' ? flagsOf(work).show_arena : flagsOf(work).show_gallery));
   // Text tasks keep their earlier rules; other works must be single-turn without human intervention.
   const generationQualified = (work) => isTextTask(catalog.task(work.taskId)) ||
     generationOf(work).generationMode === 'single-turn' && work.humanIntervention === 'none';
-  const isEligible = (work) => Boolean(work && work.status === 'verified' && work.dir && !work.curatedAs && visibleTo(work, 'show1') &&
+  const isEligible = (work) => Boolean(work && work.status === 'verified' && work.dir && !work.curatedAs && !inInbox(work) && visibleTo(work, 'show1') &&
     generationQualified(work));
   // The blind-pool rule read once for every client: in the pool, turned off by an admin, or why not.
   const arenaState = (work) => {
@@ -365,7 +368,7 @@ export function createLibrary({ db, catalog, config, limits }) {
     }
     const modelName = clip(body.modelName, 60);
     if (!modelName) fail(400, '请填写模型名称');
-    return { modelId: null, modelName, vendor: '' };
+    return { modelId: null, modelName, vendor: clip(body.vendor, 40) };
   }
 
   function provenance(body, current = {}) {
@@ -421,6 +424,19 @@ export function createLibrary({ db, catalog, config, limits }) {
     const known = EFFORTS.find((item) => item.toLowerCase() === effort.toLowerCase());
     return known ?? effort;
   };
+  const DISPLAY_KEYS = ['title', 'summary', 'modelName', 'effort', 'harnessId', 'harnessOther', 'providerId', 'generationMode', 'humanIntervention'];
+  function withDisplay(work) {
+    if (!work?.curated) return work;
+    const row = q.override.get(work.taskId, work.id);
+    if (!row?.display_json) return work;
+    let patch;
+    try { patch = JSON.parse(row.display_json); } catch { return work; }
+    const next = { ...work };
+    for (const key of DISPLAY_KEYS) if (typeof patch[key] === 'string') next[key] = patch[key];
+    if (next.harnessId) next.tool = catalog.harness(next.harnessId)?.name ?? next.harnessId;
+    else if (next.harnessOther) next.tool = next.harnessOther;
+    return next;
+  }
 
   return {
     isEligible,
@@ -449,7 +465,8 @@ export function createLibrary({ db, catalog, config, limits }) {
 
     work(taskId, id, snapshot = null) {
       const archive = snapshot ?? catalog.snapshot();
-      return archive.work(taskId, id) ?? upload(taskId, id, archive);
+      const curated = archive.work(taskId, id);
+      return curated ? withDisplay(curated) : upload(taskId, id, archive);
     },
     byContentKey(key) {
       const row = q.workByKey.get(key);
@@ -491,7 +508,10 @@ export function createLibrary({ db, catalog, config, limits }) {
     },
 
     toPublic(work, viewer) {
-      if (work.curated) return { task: work.taskId, id: work.id, curated: true, title: work.title, model: work.modelId, modelName: work.modelName, vendor: work.vendor, effort: work.effort, tool: work.tool, ...publicProvenance(work), cover: work.cover, status: 'verified' };
+      if (work.curated) {
+        work = withDisplay(work);
+        return { task: work.taskId, id: work.id, curated: true, title: work.title, model: work.modelId, modelName: work.modelName, vendor: work.vendor, effort: work.effort, tool: work.tool, ...publicProvenance(work), cover: work.cover, status: 'verified' };
+      }
       const privileged = viewer && (viewer.id === work.ownerId || viewer.role === 'admin');
       return {
         task: work.taskId,
@@ -539,6 +559,7 @@ export function createLibrary({ db, catalog, config, limits }) {
     },
 
     adminWork(work) {
+      work = withDisplay(work);
       const flags = flagsOf(work);
       const override = work.curated ? q.override.get(work.taskId, work.id) : null;
       return {
@@ -551,6 +572,7 @@ export function createLibrary({ db, catalog, config, limits }) {
         has_calibration_arena: Boolean(work.curated ? override?.calibration_arena : work.calibrationArena),
         arena_eligible: isEligible(work),
         arena_generation_ok: generationQualified(work),
+        entertainment_route: work.entertainmentRoute ?? 0,
         ...(work.curated ? {} : { arena: arenaState(work) }),
       };
     },
@@ -749,8 +771,8 @@ export function createLibrary({ db, catalog, config, limits }) {
             taskId = question.id;
           } else if (!templatesOf(catalog.task(taskId, user)).includes(format)) fail(400, '该题不支持此提交格式');
           q.insertWork.run(id, taskId, user.id, title, clip(body.summary, 200), who.modelId, who.modelId ? '' : who.modelName,
-            effort, source.harnessId, source.harnessOther, source.providerId,
-            source.providerOther, noteWithVendor(clip(body.note, 1000), who.modelId, body.vendor), token('w'), draft.source_name, draft.root, draft.entry, draft.file_count,
+            who.modelId ? '' : who.vendor, effort, source.harnessId, source.harnessOther, source.providerId,
+            source.providerOther, clip(body.note, 1000), token('w'), draft.source_name, draft.root, draft.entry, draft.file_count,
             draft.bytes, draft.digest, draft.checks, JSON.stringify(sanitizeTrial(body.trial)), coverName, now, now,
             ...GENERATION_FIELDS.map((key) => generation[key]), JSON.stringify(config.moderation?.enabled ? pendingModeration() : { status: 'legacy' }), promptVariant);
           q.deleteDraft.run(draft.id);
@@ -793,7 +815,9 @@ export function createLibrary({ db, catalog, config, limits }) {
       const title = body.title === undefined ? work.title : clip(body.title, 40);
       if (!title) fail(400, '请填写作品标题');
       const summary = body.summary === undefined ? work.summary : clip(body.summary, 200);
-      const who = body.modelId !== undefined || body.modelName !== undefined ? identity(body) : work;
+      const who = body.modelId !== undefined || body.modelName !== undefined || body.vendor !== undefined
+        ? identity({ ...work, vendor: work.modelId ? '' : work.vendor,
+          ...(body.modelName !== undefined ? { modelId: null } : {}), ...body }) : work;
       const effort = body.effort !== undefined ? effortOf(body.effort) : work.effort;
       const source = provenance(body, work);
       if (body.effort !== undefined && !effort) fail(400, '请选择或填写推理档位');
@@ -801,7 +825,7 @@ export function createLibrary({ db, catalog, config, limits }) {
       if (!admin && !source.harnessId && !source.harnessOther) fail(400, '请选择或填写 Harness');
       const generation = generationFrom(body, work);
       const promptVariant = promptVariantFrom(taskId, body, work.promptVariant, !admin);
-      const note = noteWithVendor(body.note === undefined ? work.note : clip(body.note, 1000), who.modelId, body.vendor);
+      const note = body.note === undefined ? work.note : clip(body.note, 1000);
       const apply = () => {
         if (moved) {
           q.moveWorkTask.run(moved.to, Date.now(), id);
@@ -810,7 +834,7 @@ export function createLibrary({ db, catalog, config, limits }) {
           q.moveComments.run(moved.to, moved.from, id);
           q.moveReactions.run(moved.to, moved.from, id);
         }
-        q.meta.run(title, summary, who.modelId, who.modelId ? '' : who.modelName, effort,
+        q.meta.run(title, summary, who.modelId, who.modelId ? '' : who.modelName, who.modelId ? '' : who.vendor, effort,
           source.harnessId, source.harnessOther, source.providerId, source.providerOther,
           ...GENERATION_FIELDS.map((key) => generation[key]), promptVariant, note, Date.now(), id);
         audit(actor, 'meta', work, `编辑信息${generationAudit(work, generation)}${moved ? `；归属题目 ${moved.from} → ${moved.to}` : ''}`);
@@ -863,24 +887,42 @@ export function createLibrary({ db, catalog, config, limits }) {
       if (status === 'verified' && !['legacy', 'approved'].includes(work.moderation?.status)) fail(409, '请先完成内容审核');
       const reason = clip(body.reason, 500);
       if (status === 'questioned' && !reason) fail(400, '标记存疑时请写明原因，作者和访客都会看到');
-      const who = body.modelId !== undefined || body.modelName !== undefined ? identity(body) : work;
+      const who = body.modelId !== undefined || body.modelName !== undefined || body.vendor !== undefined
+        ? identity({ ...work, vendor: work.modelId ? '' : work.vendor,
+          ...(body.modelName !== undefined ? { modelId: null } : {}), ...body }) : work;
       const effort = body.effort !== undefined ? effortOf(body.effort) : work.effort;
       const source = provenance(body, work);
       const generation = generationFrom(body, work);
       if ((status === 'verified' || body.effort !== undefined) && !effort) fail(400, '请选择或填写推理档位');
       if ((status === 'verified' || Object.hasOwn(body, 'providerId')) && !source.providerId) fail(400, '请选择服务商');
-      // Passing verification publishes: a first verification opens both faces unless the request names one.
-      if (status === 'verified' && work.status !== 'verified' && body.audience === undefined) {
+      if (Object.hasOwn(body, 'entertainment') && typeof body.entertainment !== 'boolean') fail(400, '娱乐作品标记无效');
+      if (body.entertainment === true && status !== 'verified') fail(400, '只有通过核验才能送进收件箱');
+      const firstVerify = status === 'verified' && work.status !== 'verified';
+      // First verification still opens both faces. entertainment follows that same default:
+      // omitted → on; explicit false publishes all three and clears the inbox; explicit true
+      // holds the work in the arena inbox with every switch off. A repeat omits it and keeps state.
+      const inbox = status === 'verified' && body.entertainment === true;
+      const publishAll = status === 'verified' && body.entertainment === false;
+      if (firstVerify && !inbox && !publishAll && body.audience === undefined) {
         body = { ...body, show_gallery: body.show_gallery ?? true, show_arena: body.show_arena ?? true };
       }
       const audience = body.audience === undefined ? work.audience : String(body.audience);
       if (!['hidden', 'show1', 'show2', 'both'].includes(audience)) fail(400, '展示站点无效');
       for (const key of ['show_gallery', 'show_arena']) if (body[key] !== undefined && typeof body[key] !== 'boolean') fail(400, '门面开关无效', 'invalid_face_settings');
       const fromAudience = { hidden: [false, false], show1: [false, true], show2: [true, false], both: [true, true] }[audience];
-      const gallery = body.show_gallery ?? (body.audience === undefined ? work.showGallery : fromAudience[0]);
-      const arena = body.show_arena ?? (body.audience === undefined ? work.showArena : fromAudience[1]);
+      let gallery = body.show_gallery ?? (body.audience === undefined ? work.showGallery : fromAudience[0]);
+      let arena = body.show_arena ?? (body.audience === undefined ? work.showArena : fromAudience[1]);
+      let entertainment = work.showEntertainment;
+      let route = work.entertainmentRoute ?? 0;
+      if (inbox) {
+        gallery = false; arena = false; entertainment = false; route = 1;
+      } else if (publishAll) {
+        gallery = true; arena = true; entertainment = true; route = 0;
+      } else if (firstVerify) {
+        entertainment = true; route = 0;
+      }
       const nextAudience = gallery && arena ? 'both' : gallery ? 'show2' : arena ? 'show1' : 'hidden';
-      if (work.audience === 'hidden' && status === 'verified' && nextAudience === 'hidden' && body.show_gallery === undefined && body.show_arena === undefined) fail(400, '请选择审核通过后展示的网站');
+      if (!inbox && work.audience === 'hidden' && status === 'verified' && nextAudience === 'hidden' && body.show_gallery === undefined && body.show_arena === undefined) fail(400, '请选择审核通过后展示的网站');
       if (nextAudience !== 'hidden' && status !== 'verified' && work.audience === 'hidden') fail(400, '隐藏作品须先审核通过才能发布');
       const title = body.title === undefined ? work.title : clip(body.title, 40);
       if (!title) fail(400, '请填写作品标题');
@@ -888,12 +930,14 @@ export function createLibrary({ db, catalog, config, limits }) {
       const now = Date.now();
       const labels = { verified: '通过验证', questioned: '标记存疑', unverified: '退回未验证' };
       const apply = () => {
-        q.review.run(status, status === 'verified' ? '' : reason, who.modelId, who.modelId ? '' : who.modelName, effort,
+        q.review.run(status, status === 'verified' ? '' : reason, who.modelId, who.modelId ? '' : who.modelName, who.modelId ? '' : who.vendor, effort,
           source.harnessId, source.harnessOther, source.providerId, source.providerOther,
-          ...GENERATION_FIELDS.map((key) => generation[key]), Number(gallery), Number(arena), title, summary,
-          noteWithVendor(work.note, who.modelId, body.vendor), now,
-          typeof body.show_gallery === 'boolean' ? now : null, typeof body.show_arena === 'boolean' ? now : null, now, id);
-        audit(admin, status, work, [labels[status], reason].filter(Boolean).join('：') + generationAudit(work, generation));
+          ...GENERATION_FIELDS.map((key) => generation[key]), Number(gallery), Number(arena), Number(entertainment), route, title, summary,
+          work.note, now,
+          status === 'verified' && work.reviewedGalleryAt == null ? now : null,
+          status === 'verified' && work.reviewedArenaAt == null ? now : null, now, id);
+        const routeNote = inbox ? '送进收件箱' : publishAll ? '三面公开' : firstVerify ? '娱乐盲测随首次核验开启' : '';
+        audit(admin, status, work, [labels[status], reason, routeNote].filter(Boolean).join('：') + generationAudit(work, generation));
       };
       if (inTransaction) apply();
       else transaction(db, apply);
@@ -905,6 +949,67 @@ export function createLibrary({ db, catalog, config, limits }) {
         if (body.meta && Object.keys(body.meta).length) this.setMeta(admin, taskId, id, body.meta, { inTransaction: true });
         return this.review(admin, taskId, id, body, { inTransaction: true });
       });
+    },
+
+    inboxWorks() {
+      return this.uploads().filter((work) => work.entertainmentRoute === 1).map((work) => this.adminWork(work));
+    },
+
+    setDisplay(admin, taskId, id, body) {
+      const work = this.work(taskId, id);
+      if (!work?.curated) fail(400, '只有馆藏作品可以写显示覆写', 'not_curated');
+      if (!plainObject(body) || !Object.keys(body).length
+        || Object.keys(body).some((key) => !DISPLAY_KEYS.includes(key))) fail(400, '没有可修改的内容');
+      const current = {};
+      try { Object.assign(current, JSON.parse(q.override.get(taskId, id)?.display_json || '{}')); } catch { /* replace a broken override */ }
+      const next = { ...current };
+      if (Object.hasOwn(body, 'title')) next.title = clip(body.title, 40);
+      if (Object.hasOwn(body, 'summary')) next.summary = clip(body.summary, 200);
+      if (Object.hasOwn(body, 'modelName')) next.modelName = clip(body.modelName, 60);
+      if (Object.hasOwn(body, 'effort')) next.effort = effortOf(body.effort);
+      if (Object.hasOwn(body, 'title') && !next.title) fail(400, '请填写作品标题');
+      if (Object.hasOwn(body, 'effort') && !next.effort) fail(400, '请选择或填写推理档位');
+      if (Object.hasOwn(body, 'providerId')) {
+        const provider = body.providerId === '' ? null : body.providerId;
+        if (provider !== null && (typeof provider !== 'string' || !catalog.provider(provider))) fail(400, '所选服务商不存在');
+        next.providerId = provider ?? '';
+      }
+      if (Object.hasOwn(body, 'harnessId') || Object.hasOwn(body, 'harnessOther')) {
+        const source = provenance(body, { ...work, ...next });
+        next.harnessId = source.harnessId ?? '';
+        next.harnessOther = source.harnessOther ?? '';
+      }
+      if (Object.hasOwn(body, 'generationMode') || Object.hasOwn(body, 'humanIntervention')) {
+        const generation = generationFrom(body, { ...work, ...next });
+        next.generationMode = generation.generationMode;
+        next.humanIntervention = generation.humanIntervention;
+      }
+      const now = Date.now();
+      transaction(db, () => {
+        q.setDisplay.run(taskId, id, JSON.stringify(next), admin.id, now);
+        audit(admin, 'display', work, JSON.stringify(next));
+      });
+      return this.adminWork(this.work(taskId, id));
+    },
+
+    // Assigning a task moves the work out of the inbox. Metadata alone leaves it there.
+    assignInbox(admin, items, { task = null, entertainment = false } = {}) {
+      if (!Array.isArray(items) || items.length < 1 || items.length > 200
+        || items.some((item) => !plainObject(item) || typeof item.task !== 'string' || !item.task || typeof item.id !== 'string' || !item.id))
+        fail(400, '作品列表无效（每次最多 200 件）', 'invalid_work_list');
+      if (typeof entertainment !== 'boolean') fail(400, '娱乐盲测标记无效');
+      if (task != null && !catalog.task(String(task)) && !q.questionExists.get(String(task))) fail(400, '目标题目不存在', 'invalid_task');
+      const now = Date.now();
+      return transaction(db, () => items.map(({ task: from, id }) => {
+        const work = upload(from, id);
+        if (!work || work.entertainmentRoute !== 1) fail(404, '收件箱里没有这件作品', 'not_found');
+        if (task != null && String(task) !== from) this.setMeta(admin, from, id, { task: String(task) }, { inTransaction: true });
+        const home = task != null ? String(task) : from;
+        if (task != null) q.setRoute.run(2, now, id);
+        if (entertainment) this.setFaceSettings(admin, home, id, { show_entertainment: true }, true);
+        audit(admin, task != null ? 'inbox-assign' : 'inbox-note', { taskId: home, id }, task != null ? `归属题目 ${from} → ${home}` : '补充信息');
+        return this.adminWork(this.work(home, id));
+      }));
     },
 
     remove(user, taskId, id) {

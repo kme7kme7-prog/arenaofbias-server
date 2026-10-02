@@ -446,10 +446,30 @@ const MIGRATIONS = [
     if (!columns.has('last_seen_at')) db.exec('ALTER TABLE sessions ADD COLUMN last_seen_at INTEGER');
     db.exec('UPDATE sessions SET last_seen_at = created_at WHERE last_seen_at IS NULL');
   },
+  // Inbox routing for entertainment works, and display overrides for curated works.
+  // 0 = ordinary, 1 = waiting in the arena inbox, 2 = assigned. No backfill.
+  (db) => {
+    const works = new Set(db.prepare('PRAGMA table_info(works)').all().map((column) => column.name));
+    if (!works.has('entertainment_route')) db.exec('ALTER TABLE works ADD COLUMN entertainment_route INTEGER NOT NULL DEFAULT 0');
+    const overrides = new Set(db.prepare('PRAGMA table_info(work_overrides)').all().map((column) => column.name));
+    if (!overrides.has('display_json')) db.exec('ALTER TABLE work_overrides ADD COLUMN display_json TEXT');
+  },
+  // One verification stamps both faces. Fill stamps that an earlier per-face review left empty.
+  (db) => {
+    db.exec(`UPDATE works SET reviewed_arena_at = COALESCE(reviewed_arena_at, COALESCE(reviewed_gallery_at, updated_at))
+      WHERE status = 'verified' AND reviewed_arena_at IS NULL AND deleted_at IS NULL`);
+    db.exec(`UPDATE works SET reviewed_gallery_at = COALESCE(reviewed_gallery_at, updated_at)
+      WHERE status = 'verified' AND reviewed_gallery_at IS NULL AND deleted_at IS NULL`);
+  },
   // Gallery reactions moved from emoji to sticker ids; every earlier reaction, Show1 votes
   // included, is cleared once.
   (db) => {
     if (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'reactions'").get()) db.exec('DELETE FROM reactions');
+  },
+  // Custom model vendors remain separate from author notes and registered identities.
+  (db) => {
+    const columns = new Set(db.prepare('PRAGMA table_info(works)').all().map((column) => column.name));
+    if (!columns.has('model_vendor')) db.exec("ALTER TABLE works ADD COLUMN model_vendor TEXT NOT NULL DEFAULT ''");
   },
 ];
 

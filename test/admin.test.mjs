@@ -111,6 +111,26 @@ test('face review migration preserves old decisions and leaves unverified upload
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('v34 fills a missing arena stamp on verified works and leaves unverified rows alone', () => {
+  const root = mkdtempSync(join(tmpdir(), 'admin-stamp-backfill-'));
+  const file = join(root, 'platform.db');
+  const db = openDatabase(file);
+  try {
+    db.exec(`INSERT INTO users (id, name, name_key, role, salt, hash, created_at) VALUES ('u', 'reader', 'reader', 'member', 's', 'h', 1)`);
+    const insert = db.prepare(`INSERT INTO works (id, task_id, title, model_other, content_key, source_name, root, entry,
+      file_count, bytes, digest, checks, trial, created_at, updated_at, status, reviewed_gallery_at, reviewed_arena_at)
+      VALUES (?, 'one', '作品', '模型', ?, 'a.html', '', 'index.html', 1, 10, ?, '[]', '{}', 1, 80, ?, ?, ?)`);
+    insert.run('stamped', 'k1', 'd1', 'verified', 40, null);
+    insert.run('open', 'k2', 'd2', 'unverified', null, null);
+    MIGRATIONS[33](db); // v34 fills missing verification stamps.
+    const row = (id) => db.prepare('SELECT status, reviewed_gallery_at, reviewed_arena_at FROM works WHERE id = ?').get(id);
+    assert.deepEqual({ ...row('stamped') }, { status: 'verified', reviewed_gallery_at: 40, reviewed_arena_at: 40 });
+    assert.deepEqual({ ...row('open') }, { status: 'unverified', reviewed_gallery_at: null, reviewed_arena_at: null });
+    MIGRATIONS[33](db);
+    assert.deepEqual({ ...row('stamped') }, { status: 'verified', reviewed_gallery_at: 40, reviewed_arena_at: 40 });
+  } finally { db.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
 test('a first verification decides both faces and face settings preserve status', async () => withPlatform(async ({ call }) => {
   const draft = await call('voter', 'POST', '/api/drafts?task=one&name=work.html', html, true);
   assert.equal(draft.status, 200, JSON.stringify(draft.data));
@@ -125,8 +145,10 @@ test('a first verification decides both faces and face settings preserve status'
   assert.equal(review.status, 200, JSON.stringify(review.data));
   const galleryReviewed = await uploaded();
   assert.ok(galleryReviewed.reviewed.gallery);
-  assert.ok(galleryReviewed.reviewed.arena, 'verification publishes to the arena unless the request says otherwise');
+  assert.ok(galleryReviewed.reviewed.arena, 'verification stamps both faces even when the request names one');
   assert.equal(galleryReviewed.show_arena, true);
+  assert.equal(galleryReviewed.show_entertainment, true, 'a first verification opens entertainment unless the request says otherwise');
+  assert.equal(galleryReviewed.entertainment_route, 0);
   assert.deepEqual(galleryReviewed.arena, { state: 'not_qualified', reason: '生成方式未填写' });
   const entertainment = await call('root', 'POST', `/api/admin/works/one/${id}/face-settings`, { show_entertainment: true });
   assert.deepEqual(entertainment.data.work.reviewed, galleryReviewed.reviewed);
@@ -138,6 +160,9 @@ test('a first verification decides both faces and face settings preserve status'
   assert.deepEqual(settings.data.work.arena, { state: 'off' });
   const again = await call('root', 'POST', `/api/works/one/${id}/review`, { status: 'verified' });
   assert.deepEqual(again.data.work.arena, { state: 'off' }, 'a repeated verification keeps an admin opt-out');
+  const restamped = await uploaded();
+  assert.equal(restamped.reviewed.gallery, galleryReviewed.reviewed.gallery);
+  assert.equal(restamped.reviewed.arena, settings.data.work.reviewed.arena);
   const curated = (await call('root', 'GET', '/api/admin/works?source=curated')).data.works;
   assert.ok(curated.every((work) => !Object.hasOwn(work, 'reviewed')));
 }));
@@ -468,7 +493,7 @@ test('editorial validates weights, traffic aggregates, and arena switches remove
 test('the entertainment switch opts uploads and curated works into the Show1 pool', async () => withPlatform(async ({ platform, call }) => {
   const upload = await call('root', 'POST', '/api/admin/works/upload?effort=Default&providerId=official&task=one&name=work.html&title=娱乐作品&modelName=模型丙&show_gallery=1', html, true);
   const id = upload.data.work.id;
-  assert.equal(upload.data.work.show_entertainment, false, 'uploads start outside the entertainment pool');
+  assert.equal(upload.data.work.show_entertainment, true, 'admin upload is a first verification, so entertainment opens with both faces');
   const on = await call('root', 'POST', `/api/admin/works/one/${id}/face-settings`, { show_entertainment: true });
   assert.equal(on.status, 200);
   assert.equal(on.data.work.show_entertainment, true);
@@ -486,4 +511,64 @@ test('the entertainment switch opts uploads and curated works into the Show1 poo
   const off = await call('root', 'POST', `/api/admin/works/one/${id}/face-settings`, { show_entertainment: false });
   assert.equal(off.data.work.show_entertainment, false);
   assert.equal((await call('root', 'GET', '/api/works')).data.works.some((work) => work.id === id), false, 'opting out removes it again');
+}));
+
+test('entertainment follows publish-on-verify and the inbox checkbox hides a passing work', async () => withPlatform(async ({ call }) => {
+  const draft = await call('voter', 'POST', '/api/drafts?task=one&name=work.html', html, true);
+  const submitted = await call('voter', 'POST', '/api/works', {
+    draftId: draft.data.draft.id, confirmed: true, title: '收件箱作品', modelName: '模型丙', effort: 'Default', providerId: 'official', harnessOther: '测试工具',
+  });
+  const id = submitted.data.work.id;
+  const held = await call('root', 'POST', `/api/works/one/${id}/review`, { status: 'verified', entertainment: true });
+  assert.equal(held.status, 200, JSON.stringify(held.data));
+  const row = (await call('root', 'GET', '/api/admin/works?source=upload')).data.works.find((work) => work.id === id);
+  assert.equal(row.entertainment_route, 1);
+  assert.equal(row.show_gallery, false);
+  assert.equal(row.show_arena, false);
+  assert.equal(row.show_entertainment, false);
+  assert.equal(row.status, 'verified');
+  const visible = (await call('voter', 'GET', '/api/bootstrap')).data.works ?? [];
+  assert.equal(visible.some((work) => work.id === id), false);
+  assert.equal((await call('voter', 'GET', '/api/works')).data.works.some((work) => work.id === id), false);
+  assert.notEqual(row.arena.state, 'in_pool');
+  const inbox = await call('root', 'GET', '/api/admin/inbox/works');
+  assert.equal(inbox.data.works.some((work) => work.id === id), true);
+  const question = await call('root', 'POST', '/api/admin/questions', {
+    title: '娱乐新题', summary: '给收件箱归属', prompt: '做一件小事', category: '静态网页', templates: ['static'], domains: ['游戏娱乐'],
+  });
+  assert.equal(question.status, 200, JSON.stringify(question.data));
+  assert.equal(question.data.question.moderation.status, 'approved');
+  const assigned = await call('root', 'POST', '/api/admin/works/batch-inbox', {
+    works: [{ task: 'one', id }], task: question.data.question.id, entertainment: true,
+  });
+  assert.equal(assigned.status, 200, JSON.stringify(assigned.data));
+  assert.equal(assigned.data.works[0].entertainment_route, 2);
+  assert.equal(assigned.data.works[0].task, question.data.question.id);
+  assert.equal(assigned.data.works[0].show_entertainment, true);
+  assert.equal((await call('root', 'GET', '/api/admin/inbox/works')).data.works.some((work) => work.id === id), false);
+  const roster = (await call('voter', 'GET', '/api/works')).data.works.find((work) => work.id === id);
+  assert.equal(roster.promptId, question.data.question.id);
+  const again = await call('voter', 'POST', '/api/drafts?task=one&name=work.html', html, true);
+  const second = await call('voter', 'POST', '/api/works', {
+    draftId: again.data.draft.id, confirmed: true, title: '保持原状', modelName: '模型丁', effort: 'Default', providerId: 'official', harnessOther: '测试工具',
+  });
+  const secondId = second.data.work.id;
+  assert.equal((await call('root', 'POST', `/api/works/one/${secondId}/review`, { status: 'verified', entertainment: false })).status, 200);
+  await call('root', 'POST', `/api/admin/works/one/${secondId}/face-settings`, { show_entertainment: false, show_arena: false });
+  const repeated = await call('root', 'POST', `/api/works/one/${secondId}/review`, { status: 'verified' });
+  assert.equal(repeated.status, 200, JSON.stringify(repeated.data));
+  const kept = (await call('root', 'GET', '/api/admin/works?source=upload')).data.works.find((work) => work.id === secondId);
+  assert.equal(kept.show_entertainment, false);
+  assert.equal(kept.show_arena, false);
+  assert.equal(kept.entertainment_route, 0);
+}));
+
+test('a curated display override changes the admin title and leaves the datapack model id', async () => withPlatform(async ({ call }) => {
+  const saved = await call('root', 'POST', '/api/admin/works/one/a/display', { title: '改名后的馆藏', modelName: '展签名' });
+  assert.equal(saved.status, 200, JSON.stringify(saved.data));
+  assert.equal(saved.data.work.title, '改名后的馆藏');
+  assert.equal(saved.data.work.modelName, '展签名');
+  assert.equal(saved.data.work.model, 'ma');
+  const listed = (await call('root', 'GET', '/api/admin/works?source=curated')).data.works.find((work) => work.id === 'a');
+  assert.equal(listed.title, '改名后的馆藏');
 }));

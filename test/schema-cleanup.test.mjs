@@ -43,12 +43,13 @@ test('v18 preserves v16/v17 metadata, audit actors and frozen vote identities on
       db = openDatabase(file);
       const works = db.prepare('SELECT * FROM works ORDER BY id').all();
       // v26 adds the entertainment switch; unverified rows stay out of the pool.
-      for (const row of originalWorks) Object.assign(row, { show_entertainment: 0, reviewed_gallery_at: null, reviewed_arena_at: null });
+      for (const row of originalWorks) Object.assign(row, { show_entertainment: 0, reviewed_gallery_at: null, reviewed_arena_at: null, entertainment_route: 0 });
       for (const [i, row] of works.entries()) {
         const { audience, tool, vendor, reviewed_by, deleted_by, model_name, ...retained } = originalWorks[i];
         assert.deepEqual({ ...row }, { ...retained,
           ...(version === 16 ? { model_version: '', generation_mode: '', human_intervention: '', generated_on: '', evidence_url: '' } : {}),
           model_other: row.model_id ? '' : model_name,
+          model_vendor: '',
           moderation: '{"status":"legacy"}',
           prompt_variant: '',
           harness_other: row.harness_id ? '' : tool,

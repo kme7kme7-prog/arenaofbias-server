@@ -30,6 +30,32 @@ test('text uploads escape raw HTML, code and link or image syntax without extern
   assert.equal(result.checks.find((check) => check.id === 'external').state, 'ok');
 });
 
+test('Markdown math and pipe tables render, and only pages with math load the pinned KaTeX', () => {
+  const source = [
+    '设 $a_1 + b_2 = c$，价格 $5 和 $10 不是公式，\\$ 是美元。', '',
+    '$$\\int_0^1 x^2\\,dx = \\frac13$$', '', '$$', 'E = mc^2', '$$', '', '\\[', 'x < y', '\\]', '',
+    '行内 \\(\\alpha\\) 与 `$x$` 与 **粗体 $y$**，snake_case_name 与 _强调_', '',
+    '| 物质 | 化学式 | 质量 |', '|:---|:---:|---:|', '| 水 | $\\mathrm{H_2O}$ | 18 |', '| 绝对值 | $\\|x\\|$ |', '',
+    '$$ 未闭合', '后续段落',
+  ].join('\n');
+  const result = inspect(source);
+  const html = result.files.get('index.html').toString();
+  for (const fragment of [
+    '设 <span class="math">a_1 + b_2 = c</span>，价格 $5 和 $10 不是公式，$ 是美元。',
+    '<div class="math" data-display>\\int_0^1 x^2\\,dx = \\frac13</div>', '<div class="math" data-display>E = mc^2</div>',
+    '<div class="math" data-display>x &lt; y</div>', '行内 <span class="math">\\alpha</span> 与 <code>$x$</code> 与 <strong>粗体 <span class="math">y</span></strong>',
+    'snake_case_name 与 <em>强调</em>',
+    '<thead><tr><th style="text-align:left">物质</th><th style="text-align:center">化学式</th><th style="text-align:right">质量</th></tr></thead>',
+    '<td style="text-align:center"><span class="math">\\mathrm{H_2O}</span></td>', '<span class="math">|x|</span></td><td style="text-align:right"></td>',
+    '<p>$$ 未闭合<br>后续段落</p>',
+    'https://cdn.jsdelivr.net/npm/katex@0.16.47/dist/katex.min.js" integrity="sha384-',
+  ]) assert.ok(html.includes(fragment), fragment);
+  assert.equal(result.checks.find((check) => check.id === 'external').detail, '公式由平台加载 KaTeX 显示，正文不引用外部地址');
+  const plain = inspect('| 只有一行 | 不是表格 |\n\n价格 $5').files.get('index.html').toString();
+  assert.ok(!plain.includes('katex') && !plain.includes('<table>'));
+  assert.ok(!inspect('$x$', 'work.txt').files.get('index.html').toString().includes('katex'), 'plain text is not parsed');
+});
+
 test('plain text keeps paragraphs and line breaks without Markdown formatting', () => {
   const result = inspect('# 字面标题\r\n第二行\r\n\r\n**字面粗体** <b>原文</b>', 'work.txt');
   const html = result.files.get('index.html').toString();

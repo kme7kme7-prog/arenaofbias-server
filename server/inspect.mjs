@@ -216,7 +216,10 @@ export function inspectUpload(buffer, filename, { limits, cdn, template }) {
   checks.push(missingOther.length
     ? { id: 'local', state: 'warn', label: '本地资源', detail: `有 ${missingOther.length} 个引用的文件不存在：${missingOther.slice(0, 3).join('、')}` }
     : { id: 'local', state: 'ok', label: '本地资源', detail: local ? `入口引用的 ${local} 个本地文件都在` : '入口没有引用其他本地文件' });
-  if (external.size) {
+  // A text page escapes everything the author wrote; its only external address is the platform's KaTeX.
+  if (textUpload) {
+    checks.push({ id: 'external', state: 'ok', label: '外部资源', detail: textUpload.math ? '公式由平台加载 KaTeX 显示，正文不引用外部地址' : '未引用外部地址，作品可以独立运行' });
+  } else if (external.size) {
     checks.push({ id: 'external', state: 'warn', label: '外部资源', detail: `引用了 ${[...external].slice(0, 3).join('、')}，平台会拦截这些地址。请把依赖打包进作品。` });
   } else if (cdnHosts.size) {
     checks.push({ id: 'external', state: 'info', label: '外部资源', detail: `使用公共 CDN：${[...cdnHosts].join('、')}。这些依赖不在平台内，将来可能失效。` });

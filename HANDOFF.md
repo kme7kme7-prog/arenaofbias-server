@@ -1,5 +1,13 @@
 # HANDOFF.md · 当前状态
 
+## 喷泉小模型与本机封面替换（2026-10-02，封面已更新，源码本地提交）
+
+- 用户暂停 WebGPU 环境处理，并明确“小模型”指简化后的 3D 喷泉模型；要求本机截图后换上去。新增 `scripts/fountain-preview/index.html` / README，轻量 WebGL2 预览使用固定 Three.js 0.169.0 CDN，不增加服务 npm 依赖；保留石池、水盘、中央水柱、环绕弧形喷流和少量庭园。固定三分之四视角，可旋转、复位、导出 GLB；`?capture=1` 隐藏控件，保留“简化模型预览”标签。
+- 本机两档最终截图为 1440×900 / 390×844，画面完整，console error/warn 为 0。首次手机 resize 后立即取图发生裁切，重新加载并核对实际画布尺寸后重新拍摄，未采用错误图。GLB 829632 bytes（约 810 KiB）、140 meshes / 141 nodes / 11 materials，无外部 buffer，glTF 2.0 头和长度校验通过。下载事件等待超时使工具会话重置，但导出文件实际已保存到用户 Downloads，找到本次生成文件后复制并校验，不将工具超时误记为导出失败。
+- 已替换投稿 `up-ccnksbcp`（classical-fountain / 庭院喷泉 / gpt-5.5 XHigh）的 `first.jpg` / `mobile.jpg`，保持原 captures 映射及 root:root / 0644。桌面 SHA-256 `49f63db3fd7114c8b20b2738b08f6dd13b09d5340b46821bea7ce52bc120231c`；手机 `ff10bac7472c9cc20dc6cd9d27f30dbe1f3b4b68cadb20bcc433c5c97358ee63`。公网两图 GET 的 hash 与本机完全一致、响应 no-store；生产版本门禁仍为 83e43fe，服务 active。仅替换这两张媒体，没有改投稿源码、馆藏数据包、数据库、等待时间或正式服务配置，没有部署其他本地代码。
+- 原图和 owner/mode/hash 在 root 私有 `/root/aob-fountain-preview-20261002-01a0fb12/` 备份；本轮证据、GLB 与已发布图片在忽略目录 `output/fountain-local-20261002/`。生成物不入库。inline module 语法检查、CDN 三地址 HTTP 200、diff 检查通过；独立预览未跑无关的后台全量测试。本轮按用户指示英文简单句本地提交，未 push；期间另轮 8035380 提交保留。完整记录见 [归档](docs/archive/2026-10-02-fountain-preview-wsnxxxs.md)。
+- 本地只读预览 `http://127.0.0.1:5362/` 暂留供用户查看小模型（本轮 Node exec session 29327），右侧打开请求已排队；不对公网监听，不连接生产数据，结束查看后可停止该预览进程。
+
 ## Gallery 审核接入盲评开关（2026-10-02，本地提交，未推送、未部署）
 
 - 承接下方小红帽调查：Gallery 审核改为同后台分面，单件核验显式发送 show_gallery / show_arena。本仓 batch-review 接受可选布尔 show_arena（仅 verified 时生效，非布尔 400）；admin.js 已验证提示改为「是否进入盲评以盲评开关为准」；admin.test 增加两条断言。

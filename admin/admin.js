@@ -162,39 +162,8 @@ const contentHeld = (w) => ['pending', 'review', 'rejected'].includes(w.moderati
 const contentReady = (w) => w.source === 'curated' || ['legacy', 'approved'].includes(w.moderation?.status);
 const faceOn = (w, face = state.system) => !contentHeld(w) && Boolean(w[`show_${face}`] ?? AUDIENCE_FACE[face].includes(w.audience));
 const CONTENT_STATUS = { pending: '自动审核中', approved: '内容已通过', review: '内容待人工审核', rejected: '内容未通过', legacy: '历史作品' };
-const contentBadge = (w) => w.moderation && !['legacy', 'approved'].includes(w.moderation.status) ? `<span class="badge">${esc(CONTENT_STATUS[w.moderation.status])}</span>` : '';
-const FACE_LABEL = { gallery: '展览馆', arena: '竞技场' };
-const FACE_GO = { gallery: '上展览馆', arena: '进盲测' };
-const FACE_OFF = { gallery: '撤下展览馆', arena: '移出盲测' };
 const QUESTION_STATUS = { pending: '待审核', approved: '已通过', rejected: '已拒绝', legacy: '历史题目' };
 
-// The review page runs one pipeline: 题目审核 → 内容审核 → 作品核验 (per face). Every
-// upload sits in exactly one bucket for the current face; curated works are toggled on the
-// works page instead. With `reviewed` from the server, a face decision (on or off) closes
-// the work's pending entry for that face; without it, only unverified works are pending.
-const REVIEW_TODO = { questions: '题目', content: '内容', pending: '作品' };
-const reviewDone = (face) => ({ shown: face === 'gallery' ? '已上展览馆' : '在盲测', off: face === 'gallery' ? '未上展览馆' : '未进盲测', questioned: '存疑', rejected: '已拒绝', log: '记录' });
-const listedTask = (id) => [...(state.data?.tasks ?? []), ...(state.questions ?? [])].some((t) => t.id === id);
-function reviewBucket(w, face = state.system) {
-  const status = w.moderation?.status;
-  if (status === 'review') return 'content';
-  if (status === 'pending') return 'auto';
-  if (status === 'rejected') return 'rejected';
-  if (!listedTask(w.task)) {
-    const question = state.adminQuestions?.find((q) => q.id === w.task);
-    return question && question.moderation.status !== 'rejected' ? 'sample' : 'rejected';
-  }
-  if (w.status === 'questioned') return 'questioned';
-  if (w.reviewed ? !w.reviewed[face] : w.status === 'unverified') return 'pending';
-  if (w.status === 'verified' && faceOn(w, face)) return 'shown';
-  return 'off';
-}
-const uploadsIn = (bucket, face = state.system) => (state.works ?? []).filter((w) => w.source !== 'curated' && reviewBucket(w, face) === bucket)
-  .sort((a, b) => (['content', 'auto', 'pending'].includes(bucket) ? 1 : -1) * (Date.parse(a.addedAt) - Date.parse(b.addedAt)));
-const pendingQuestions = () => state.adminQuestions?.filter((q) => q.moderation.status === 'pending').length ?? state.reviewCounts?.questions ?? 0;
-// Only what needs a person: pending questions, held content and unreviewed works of this face.
-const reviewCount = (face) => (state.works ? uploadsIn('content', face).length + uploadsIn('pending', face).length
-  : (state.reviewCounts?.unverified ?? 0) + (state.reviewCounts?.content ?? 0)) + pendingQuestions();
 const skeleton = (count = 4, kind = 'row') => `<div class="skeleton-list" aria-label="正在载入" role="status">${Array.from({ length: count }, () => `<div class="skeleton skeleton-${kind}"></div>`).join('')}</div>`;
 function busy(button, text = '处理中…') {
   if (!button) return () => {};
@@ -228,12 +197,6 @@ async function loadCatalog() {
   if (!state.data) return;
 }
 
-async function loadReview() {
-  const [data, questions] = await Promise.all([api('review'), api('admin/questions')]);
-  state.works = data.works;
-  state.audit = data.audit;
-  state.adminQuestions = questions.questions;
-}
 
 async function loadInbox() {
   try {
@@ -262,12 +225,6 @@ async function removeWork(w) {
   }
 }
 
-// After a decision in a queue, the oldest remaining item of that queue opens next.
-function openNext(bucket, doneId) {
-  const next = uploadsIn(bucket).find((w) => w.id !== doneId);
-  if (next) (bucket === 'pending' ? openReview : openContent)(next, { queue: bucket });
-  return next ? '' : bucket === 'pending' ? ' · 作品队列已清空' : ' · 内容队列已清空';
-}
 
 // ---- work rows ------------------------------------------------------------------------------
 function thumb(w) {
@@ -276,408 +233,12 @@ function thumb(w) {
   return `<span class="work-thumb" aria-hidden="true">${url ? `<img src="${esc(url)}" alt="" loading="lazy" decoding="async">` : `<span class="img-empty upload-cover"><b>${esc(w.title)}</b></span>`}</span>`;
 }
 
-// One row of the review page; each bucket offers the single next step for that work.
-function workRow(w, bucket = reviewBucket(w)) {
-  const face = state.system;
-  const meta = [taskTitle(w.task), esc(provenanceText(w) || w.tool), formatDate(w.addedAt), w.owner ? `投稿者 ${esc(w.owner)}` : ''].filter(Boolean).join(' · ');
-  const m = w.moderation ?? {};
-  const note = ['content', 'auto', 'rejected'].includes(bucket) && m.status !== 'approved'
-    ? [m.reason, m.error ? `未完成：${m.error}` : ''].filter(Boolean).join(' · ') || (bucket === 'auto' ? '正在检查文字、封面和页面截图' : '')
-    : bucket === 'rejected' ? '所属题目未通过审核，作品不会公开' : w.reason;
-  const action = {
-    content: `<button class="btn sm primary" data-content="${esc(w.id)}">审核内容</button>`,
-    auto: `<button class="btn sm" data-content="${esc(w.id)}">提前审核</button>`,
-    rejected: m.status === 'rejected' ? `<button class="btn sm" data-content="${esc(w.id)}">重新审核内容</button>` : '',
-    pending: `<button class="btn sm primary" data-review="${esc(w.id)}">核验</button>`,
-    shown: `<button class="btn sm" data-face-off="${esc(w.id)}" title="只影响${FACE_LABEL[face]}">${FACE_OFF[face]}</button><button class="btn sm" data-review="${esc(w.id)}">详情</button>`,
-    off: `<button class="btn sm primary" data-verify="${esc(w.id)}">${icon('check')}${FACE_GO[face]}</button><button class="btn sm" data-review="${esc(w.id)}">详情</button>`,
-    questioned: `<button class="btn sm" data-review="${esc(w.id)}">重新核验</button>`,
-  }[bucket] ?? '';
-  return `<article class="work-row" data-status="${esc(w.status)}">
-    ${thumb(w)}
-    <div class="work-main">
-      <p class="work-model"><b>${esc(w.modelName)}</b>${w.effort ? `<span class="badge">${esc(w.effort)}</span>` : ''}${contentBadge(w)}${statusBadge(w.status, w.reason)}</p>
-      <h3>${esc(w.title)}</h3>
-      <p class="work-meta">${meta}</p>
-      ${note ? `<p class="work-reason">${icon(bucket === 'auto' ? 'clock' : 'alert')}<span>${esc(note)}</span></p>` : ''}
-    </div>
-    <div class="work-side">
-      <div class="actions">
-        ${w.scene ? `<a class="btn sm" href="${esc(w.scene)}" target="_blank" rel="noopener">打开${icon('arrow')}</a>` : ''}
-        ${action}
-        <button class="icon-btn" data-delete="${esc(w.id)}" title="删除作品" aria-label="删除「${esc(w.title)}」">${icon('trash')}</button>
-      </div>
-    </div>
-  </article>`;
-}
-
-// ---- review sheet ----------------------------------------------------------------------------
-function trialRows(trial) {
-  if (!trial || trial.loaded === undefined) return '<li class="check is-info"><span><b>试加载</b>没有记录</span></li>';
-  const rows = [
-    trial.loaded ? ['ok', '页面载入', `${((trial.loadMs ?? 0) / 1000).toFixed(1)} 秒`] : ['fail', '页面载入', '作者提交时页面未完成载入'],
-    trial.errors ? ['warn', '脚本错误', `${trial.errors} 条：${trial.errorSamples?.[0] ?? ''}`] : ['ok', '脚本错误', '没有'],
-    trial.failedResources?.length ? ['warn', '资源加载', trial.failedResources.join('、')] : ['ok', '资源加载', '全部载入'],
-    trial.blocked?.length ? ['warn', '外部请求', `被拦截：${trial.blocked.join('、')}`] : ['ok', '外部请求', '没有被拦截的请求'],
-    trial.canvases || trial.media || trial.words > 20 ? ['ok', '画面内容', trial.canvases ? `${trial.canvases} 个画布` : '有可见内容'] : ['warn', '画面内容', '可能是空白页面'],
-  ];
-  return rows.map(([st, label, detail]) => `<li class="check is-${st}">${icon(st === 'ok' ? 'check' : st === 'fail' ? 'close' : 'alert')}<span><b>${esc(label)}</b>${esc(detail)}</span></li>`).join('');
-}
-
-// ---- provenance (Harness / provider) -------------------------------------------------------------
-// Harness entries come from the datapack (/data.json); providers use fixed categories.
-const PROVENANCE = { harness: { label: 'Harness', list: 'harnesses' }, provider: { label: '服务商', list: 'providers' } };
-const OTHER = '__other';
-const PROVIDER_CHOICES = { official: '官方', unofficial: '非官方' };
-const providerChoice = (w) => w?.provider === 'official' ? 'official' : w?.provider || w?.providerName ? 'unofficial' : '';
-const providerLabel = (w) => PROVIDER_CHOICES[providerChoice(w)] ?? '未注明';
-const registry = (type) => state.data?.[PROVENANCE[type].list] ?? [];
-const provenanceText = (w) => [w.harnessName, providerChoice(w) && providerLabel(w)].filter(Boolean).join(' · ');
-const nameKey = (value) => String(value ?? '').normalize('NFKC').toLowerCase().replace(/[\s-]/g, '');
-const suggestEntry = (type, text) => {
-  const key = nameKey(text);
-  return key ? registry(type).find((entry) => [entry.name, ...(entry.aliases ?? [])].some((name) => nameKey(name) === key)) ?? null : null;
-};
-// The stored choice of a work: registry id, OTHER (free text only) or ''.
-const currentProvenance = (w, type) => type === 'provider' ? { choice: providerChoice(w) } : ({ choice: w?.[type] ?? (w?.[`${type}Name`] ? OTHER : ''), other: w?.[type] ? '' : w?.[`${type}Name`] ?? '' });
-
-function suggestionHtml(type, choice, other) {
-  const match = choice === OTHER ? suggestEntry(type, other) : null;
-  return match ? `可能是 ${esc(match.name)}<button type="button" class="btn sm" data-pick-provenance="${type}" data-id="${esc(match.id)}">改选 ${esc(match.name)}</button>` : '';
-}
-
-const GENERATION_FIELDS = ['generationMode', 'humanIntervention'];
-const GENERATION_CHOICES = {
-  generationMode: { 'single-turn': '单轮', 'multi-turn': '多轮' },
-  humanIntervention: { none: '仅初始提示，未修改代码', 'prompt-guided': '人工提示与指导（未改代码）', 'code-edited': '人工修改了代码' },
-};
-const GENERATION_LABELS = { generationMode: '生成方式', humanIntervention: '人工介入程度' };
-function generationFields(work = {}) {
-  const select = (key) => `<label class="field"><span class="field-label">${GENERATION_LABELS[key]}</span><select class="input" name="${key}"><option value="">未注明</option>${Object.entries(GENERATION_CHOICES[key]).map(([value, label]) => `<option value="${value}"${work[key] === value ? ' selected' : ''}>${label}</option>`).join('')}</select></label>`;
-  return `<details class="generation-fields"${GENERATION_FIELDS.some((key) => work[key]) ? ' open' : ''}><summary>生成信息（选填）</summary>
-    <div class="field-row">${select('generationMode')}${select('humanIntervention')}</div>
-    <p class="fine">用户只发一次提示词即为单轮，智能体自主迭代也算单轮。仅单轮且无人工介入的作品可进盲评池；未注明与没有人工介入是不同含义。</p></details>`;
-}
-const generationBody = (get, work = {}) => Object.fromEntries(GENERATION_FIELDS
-  .map((key) => [key, String(get(key) ?? '').trim()]).filter(([key, value]) => value !== (work[key] ?? '')));
-const generationFacts = (work) => Object.keys(GENERATION_CHOICES).map((key) => `<div><dt>${GENERATION_LABELS[key]}</dt><dd>${esc(GENERATION_CHOICES[key][work[key]] || '未注明')}</dd></div>`).join('');
-let effortInputId = 0;
-function effortField(value = '') {
-  const id = `admin-efforts-${++effortInputId}`;
-  return `<label class="field"><span class="field-label">推理档位<i>*</i><small>请选择常用值或手填，使用默认设置填 Default</small></span><input class="input" name="effort" list="${id}" required maxlength="20" value="${esc(value)}" placeholder="选择或填写档位"><datalist id="${id}">${['Default', 'Low', 'Medium', 'High', 'XHigh', 'Max'].map((effort) => `<option value="${effort}">${effort === 'Default' ? '默认档位（明确使用默认设置）' : effort}</option>`).join('')}</datalist></label>`;
-}
-
-function provenanceFields({ harness = { choice: '', other: '' }, provider = { choice: '' } } = {}) {
-  const field = (type, { choice, other }) => {
-    const entries = registry(type).filter((entry) => entry.listed || entry.id === choice);
-    const known = !choice || choice === OTHER || entries.some((entry) => entry.id === choice);
-    const suggestion = suggestionHtml(type, choice, other);
-    return `<label class="field"><span class="field-label">${PROVENANCE[type].label}</span><select class="input" name="${type}Choice" data-provenance-choice="${type}">
-        <option value="">未注明</option>
-        ${entries.map((entry) => `<option value="${esc(entry.id)}"${entry.id === choice ? ' selected' : ''}>${esc(entry.name)}${entry.listed ? '' : '（已停用）'}</option>`).join('')}
-        ${known ? '' : `<option value="${esc(choice)}" selected>${esc(choice)}（不在当前数据包）</option>`}
-        <option value="${OTHER}"${choice === OTHER ? ' selected' : ''}>其他（手动填写）</option>
-      </select></label>
-      <label class="field" data-provenance-other="${type}"${choice === OTHER ? '' : ' hidden'}><span class="field-label">其他${PROVENANCE[type].label}名称</span><input class="input" name="${type}Other" maxlength="40" value="${esc(other)}">
-        <span class="provenance-suggestion" data-provenance-suggestion="${type}"${suggestion ? '' : ' hidden'}>${suggestion}</span></label>`;
-  };
-  return `<div class="field-row">${field('harness', harness)}</div>
-    <div class="field-row"><label class="field"><span class="field-label">服务商<i>*</i></span><select class="input" name="providerChoice" required><option value="">选择服务商</option>${Object.entries(PROVIDER_CHOICES).map(([value, label]) => `<option value="${value}"${provider.choice === value ? ' selected' : ''}>${label}</option>`).join('')}</select></label></div>`;
-}
-
-function refreshProvenance(form) {
-  for (const type of ['harness']) {
-    const choice = form.elements.namedItem(`${type}Choice`);
-    if (!choice) continue;
-    const other = form.elements.namedItem(`${type}Other`).value;
-    $(`[data-provenance-other="${type}"]`, form).hidden = choice.value !== OTHER;
-    const suggestion = $(`[data-provenance-suggestion="${type}"]`, form);
-    suggestion.innerHTML = suggestionHtml(type, choice.value, other);
-    suggestion.hidden = !suggestion.innerHTML;
-  }
-}
-
-// With `work`, only changed fields are sent. Harness id and free text are sent together.
-function provenanceBody(get, work = null) {
-  const body = {};
-  for (const type of ['harness']) {
-    const choice = get(`${type}Choice`) ?? '';
-    const other = String(get(`${type}Other`) ?? '').trim();
-    if (choice === OTHER && !other) throw new Error(`请填写${PROVENANCE[type].label}名称，或改选「未注明」`);
-    const next = choice === OTHER ? { id: null, other } : { id: choice || null, other: '' };
-    const before = currentProvenance(work, type);
-    const initial = { id: before.choice && before.choice !== OTHER ? before.choice : null, other: before.other };
-    if (work ? next.id === initial.id && next.other === initial.other : !next.id && !next.other) continue;
-    body[`${type}Id`] = next.id;
-    body[`${type}Other`] = next.other;
-  }
-  const provider = get('providerChoice') ?? '';
-  if (!provider) throw new Error('请选择服务商');
-  if (!String(get('effort') ?? '').trim()) throw new Error('请选择或填写推理档位');
-  if (work ? provider !== providerChoice(work) : provider) body.providerId = provider;
-  return body;
-}
-
-const provenanceFacts = (w) => `<div><dt>Harness</dt><dd>${esc(w.harnessName || '未注明')}</dd></div>
-  <div><dt>服务商</dt><dd>${esc(providerLabel(w))}</dd></div>`;
-
-// Curated works are repo-managed: reviewing one only decides the current face's flag.
-function openCuratedReview(w) {
-  const face = state.system;
-  const sheet = openDialog({
-    title: `${FACE_LABEL[face]}审核 · 已验证`,
-    className: 'review-sheet',
-    body: `<div class="review solo">
-      <div class="review-facts">
-        <div class="review-head">${thumb(w)}<div><h3>${esc(w.title)}</h3><p class="work-model"><span class="badge">已验证</span><span>${esc(taskTitle(w.task))}</span></p></div></div>
-        <dl class="facts">
-          <div><dt>声明的模型</dt><dd>${esc(w.modelName)}${w.vendor ? ` · ${esc(w.vendor)}` : ''}</dd></div>
-          <div><dt>推理档位</dt><dd>${esc(w.effort || '未注明')}</dd></div>
-          ${provenanceFacts(w)}
-          ${generationFacts(w)}
-        </dl>
-        <p class="fine">标题和登记信息在「编辑」里修改。这里只决定它在${esc(FACE_LABEL[face])}的展示。</p>
-        <div class="face-decision">
-          <p class="face-state">${faceOn(w) ? `${FACE_LABEL[face]}：已${face === 'gallery' ? '展示' : '进正式盲测池'}` : `${FACE_LABEL[face]}：未${face === 'gallery' ? '展示' : '进盲测'}`}</p>
-          <p class="fine">本面动作只改${FACE_LABEL[face]}，另一面（${face === 'gallery' ? `盲测：${faceOn(w, 'arena') ? '已进' : '未进'}` : `展览馆：${faceOn(w, 'gallery') ? '已展示' : '未展示'}`}）保持不变。</p>
-        </div>
-        <p class="form-error" role="alert"></p>
-        <div class="sheet-actions"><span class="spacer"></span>
-          ${faceOn(w)
-            ? `<button type="button" class="btn" data-face-decide="hide">从${FACE_LABEL[face]}${face === 'gallery' ? '撤下' : '移出'}</button>`
-            : `<button type="button" class="btn primary" data-face-decide="show">${icon('check')}${face === 'gallery' ? '通过并上展览馆' : '通过并进盲测'}</button>`}
-        </div>
-      </div>
-    </div>`,
-  });
-  sheet.el.addEventListener('click', async (e) => {
-    const decide = e.target.closest('[data-face-decide]');
-    if (!decide) return;
-    const mode = decide.dataset.faceDecide;
-    const doneBusy = busy(decide, '正在保存…');
-    try {
-      await api(`admin/works/${workKey(w)}/face-settings`, { method: 'POST', body: { [`show_${face}`]: mode === 'show' } });
-      sheet.close();
-      toast(`${mode === 'show' ? `已${face === 'gallery' ? '上展览馆' : '进盲测'}` : `已从${FACE_LABEL[face]}${face === 'gallery' ? '撤下' : '移出'}`}：${w.title}`);
-      await reload();
-    } catch (error) { $('.form-error', sheet.el).textContent = error.message; doneBusy(); }
-  });
-}
-
-// Registration fixes made in the review sheet are saved through the meta endpoint before
-// the decision, so a decision only carries status, reason and the face flag. Returns the
-// changed fields only (empty when nothing changed).
-function metaChanges(form, w) {
-  const field = (name) => String(form.elements.namedItem(name)?.value ?? '').trim();
-  const body = {};
-  if (!field('title')) throw new Error('请填写作品标题');
-  if (field('title') !== w.title) body.title = field('title');
-  if (field('summary') !== (w.summary ?? '')) body.summary = field('summary');
-  if (field('effort') && field('effort') !== (w.effort ?? '')) body.effort = field('effort');
-  if (field('modelId') && field('modelId') !== w.model) body.modelId = field('modelId');
-  else if (field('modelName') && field('modelName') !== w.modelName) body.modelName = field('modelName');
-  const before = currentProvenance(w, 'harness');
-  if (field('harnessChoice') !== before.choice || (field('harnessChoice') === OTHER && field('harnessOther') !== before.other)) {
-    if (field('harnessChoice') === OTHER && !field('harnessOther')) throw new Error('请填写 Harness 名称，或改选「未注明」');
-    body.harnessId = field('harnessChoice') === OTHER ? null : field('harnessChoice') || null;
-    body.harnessOther = field('harnessChoice') === OTHER ? field('harnessOther') : '';
-  }
-  if (field('providerChoice') && field('providerChoice') !== providerChoice(w)) body.providerId = field('providerChoice');
-  return Object.assign(body, generationBody(field, w));
-}
-
-// 作品核验 for one face: the facts on the left, the decision on the right. `queue` is set
-// when the sheet was opened from the pending list, so the next work opens after a decision.
-function openReview(w, { queue } = {}) {
-  if (w.source === 'curated') return openCuratedReview(w);
-  const face = state.system;
-  const bucket = reviewBucket(w, face);
-  const on = w.status === 'verified' && faceOn(w, face);
-  const needsMeta = !w.effort || !providerChoice(w);
-  const vendors = new Map();
-  for (const model of state.data?.models ?? []) {
-    if (!vendors.has(model.vendor)) vendors.set(model.vendor, []);
-    vendors.get(model.vendor).push(model);
-  }
-  const options = [...vendors].sort(([a], [b]) => a.localeCompare(b, 'en', { sensitivity: 'base' }))
-    .map(([vendor, models]) => `<optgroup label="${esc(vendor)}">${models.map((m) => `<option value="${esc(m.id)}"${m.id === w.model ? ' selected' : ''}>${esc(m.name)}</option>`).join('')}</optgroup>`).join('');
-  const other = face === 'gallery' ? `竞技场：${faceOn(w, 'arena') && w.status === 'verified' ? '在盲测' : '未进盲测'}` : `展览馆：${faceOn(w, 'gallery') && w.status === 'verified' ? '已上展览馆' : '未上展览馆'}`;
-  const sheet = openDialog({
-    title: `核验作品 · ${FACE_LABEL[face]}`,
-    className: 'review-sheet',
-    body: `<div class="review">
-      <div class="review-facts">
-        <div class="review-head">${thumb(w)}<div><h3>${esc(w.title)}</h3><p class="work-model">${statusBadge(w.status)}${contentBadge(w)}<span>${esc(taskTitle(w.task))}</span></p>
-          <div class="actions"><a class="btn sm" href="${esc(w.scene)}" target="_blank" rel="noopener">在新窗口打开${icon('arrow')}</a></div></div></div>
-        ${contentReady(w) ? '' : `<div class="review-blocked">${icon('alert')}<p>内容审核还没通过（${esc(CONTENT_STATUS[w.moderation?.status] ?? '未知')}），通过后才能核验。</p><button type="button" class="btn sm primary" data-open-content>审核内容</button></div>`}
-        <dl class="facts">
-          <div><dt>投稿者</dt><dd>${esc(w.owner ?? '已注销的用户')} · ${formatTime(w.addedAt)}</dd></div>
-          <div><dt>声明的模型</dt><dd>${esc(w.modelName)}${w.vendor ? ` · ${esc(w.vendor)}` : ''}${w.model ? '' : '（未登记）'}</dd></div>
-          <div><dt>推理档位</dt><dd>${esc(w.effort || '未注明')}</dd></div>
-          ${provenanceFacts(w)}
-          ${generationFacts(w)}
-          <div><dt>作者原始声明</dt><dd>${esc(w.tool || '未注明')}</dd></div>
-          <div><dt>文件</dt><dd>${esc(w.sourceName ?? '')} · ${w.files} 个 · ${formatBytes(w.bytes)} · 入口 ${esc(w.root ? `${w.root}/` : '')}${esc(w.entry ?? '')}</dd></div>
-          ${w.reviewer ? `<div><dt>上次核验</dt><dd>${esc(w.reviewer)} · ${formatTime(w.reviewedAt)}</dd></div>` : ''}
-        </dl>
-        ${w.summary ? `<p class="review-text">${esc(w.summary)}</p>` : ''}
-        <h4>生成说明</h4><p class="review-text">${w.note ? esc(w.note) : '<span class="muted">投稿者没有填写。</span>'}</p>
-        <h4>上传检查</h4><ul class="checks">${(w.checks ?? []).map((c) => `<li class="check is-${c.state}">${icon(c.state === 'ok' ? 'check' : c.state === 'info' ? 'guide' : 'alert')}<span><b>${esc(c.label)}</b>${esc(c.detail)}</span></li>`).join('')}</ul>
-        <h4>作者浏览器中的试加载</h4><ul class="checks">${trialRows(w.trial)}</ul>
-        <h4>试加载</h4><div class="trial-live"><iframe src="${esc(w.scene)}" title="试加载「${esc(w.title)}」" loading="lazy"></iframe></div>
-      </div>
-      <form class="review-form" novalidate>
-        <h4>核验清单</h4>
-        <ul class="review-list">
-          <li><label><input type="checkbox">作品能正常运行，内容符合本题提示词</label></li>
-          <li><label><input type="checkbox">模型与档位有可信依据（生成说明、记录链接）</label></li>
-          <li><label><input type="checkbox">画面中没有写出模型名称，不会破坏双盲</label></li>
-          <li><label><input type="checkbox">没有外部追踪、恶意代码或不当内容</label></li>
-        </ul>
-        <p class="fine">清单只是提醒，不会随结果保存。</p>
-        <details class="review-meta"${needsMeta ? ' open' : ''}><summary>登记信息<small>${needsMeta ? '缺推理档位或服务商，补齐后才能通过' : '需要时修正，改动随决定一起保存'}</small></summary>
-          <div class="field-row">
-            <label class="field"><span class="field-label">登记为模型<small>挂到模型档案，排行榜按模型记分</small></span><select class="input" name="modelId"><option value="">保持声明：${esc(w.modelName)}</option>${options}</select></label>
-            ${effortField(w.effort)}
-          </div>
-          <label class="field"><span class="field-label">作品标题</span><input class="input" name="title" maxlength="40" value="${esc(w.title)}" required></label>
-          <label class="field"><span class="field-label">模型名称<small>展签显示的名字</small></span><input class="input" name="modelName" maxlength="60" value="${esc(w.modelName)}" required></label>
-          <label class="field"><span class="field-label">作品摘要</span><textarea class="input" name="summary" maxlength="200" rows="2">${esc(w.summary)}</textarea></label>
-          ${provenanceFields({ harness: currentProvenance(w, 'harness'), provider: currentProvenance(w, 'provider') })}
-          ${generationFields(w)}
-        </details>
-        <div class="face-decision">
-          <p class="face-state">${FACE_LABEL[face]}：${on ? (face === 'gallery' ? '已上展览馆' : '在正式盲测池') : face === 'gallery' ? '未上展览馆' : '未进盲测'}</p>
-          <p class="fine">这里的决定只改${FACE_LABEL[face]}；${esc(other)}，保持不变。存疑会让作品在两边都下线。</p>
-          <label class="face-checks"><input type="checkbox" name="toInbox"> 娱乐作品（进竞技场收件箱）<small>勾选后不进展览馆，也不进任何池子</small></label>
-        </div>
-        <label class="field"><span class="field-label">存疑原因<small>标记存疑时必填，作者与访客都能看到</small></span><textarea class="input" name="reason" rows="3" maxlength="500">${esc(w.status === 'questioned' ? w.reason : '')}</textarea></label>
-        <p class="form-error" role="alert"></p>
-        <div class="sheet-actions">
-          <button type="button" class="btn danger ghost" data-remove>${icon('trash')}删除</button>
-          <span class="spacer"></span>
-          <button type="button" class="btn" data-decide="questioned">${icon('alert')}标记存疑</button>
-          ${on ? `<button type="button" class="btn" data-decide="hide">${FACE_OFF[face]}</button>`
-            : `${w.reviewed && bucket === 'pending' ? `<button type="button" class="btn" data-decide="hide">暂不${FACE_GO[face]}</button>` : ''}<button type="button" class="btn primary" data-decide="show"${contentReady(w) ? '' : ' disabled'}>${icon('check')}通过并${FACE_GO[face]}</button>`}
-        </div>
-      </form>
-    </div>`,
-  });
-  const form = $('form', sheet.el);
-  sheet.el.addEventListener('click', async (e) => {
-    if (e.target.closest('[data-open-content]')) { sheet.close(); openContent(w); return; }
-    if (e.target.closest('[data-remove]')) {
-      sheet.close();
-      if (await removeWork(w)) await reload();
-      return;
-    }
-    const decide = e.target.closest('[data-decide]');
-    if (!decide) return;
-    const mode = decide.dataset.decide;
-    const error = $('.form-error', form);
-    const reason = form.elements.namedItem('reason').value.trim();
-    error.textContent = '';
-    if (mode === 'questioned' && !reason) { error.textContent = '标记存疑时请写明原因，作者和访客都会看到'; form.elements.namedItem('reason').focus(); return; }
-    let meta = {};
-    try {
-      if (mode !== 'hide') meta = metaChanges(form, w);
-      if (mode === 'show' && !(meta.effort ?? w.effort)) throw new Error('请在登记信息里选择或填写推理档位');
-      if (mode === 'show' && !(meta.providerId ?? providerChoice(w))) throw new Error('请在登记信息里选择服务商');
-    } catch (err) {
-      error.textContent = err.message;
-      $('.review-meta', form).open = true;
-      return;
-    }
-    $$('[data-decide]', form).forEach((b) => { b.disabled = true; });
-    const doneBusy = busy(decide, '正在保存…');
-    try {
-      if (Object.keys(meta).length) await api(`admin/works/${workKey(w)}/meta`, { method: 'POST', body: meta });
-      const body = mode === 'show' ? { status: 'verified', entertainment: Boolean(form.elements.namedItem('toInbox')?.checked) }
-        : mode === 'hide' ? { status: w.status, [`show_${face}`]: false } : { status: 'questioned', reason };
-      await api(`works/${workKey(w)}/review`, { method: 'POST', body });
-      sheet.close();
-      await reload();
-      const note = queue ? openNext(queue, w.id) : '';
-      toast(`${{ show: `已${FACE_GO[face]}`, hide: on ? `已${FACE_OFF[face]}` : `暂不${FACE_GO[face]}`, questioned: '已标记存疑' }[mode]}：${w.title}${note}`);
-    } catch (err) {
-      error.textContent = err.message;
-      doneBusy();
-      $$('[data-decide]', form).forEach((b) => { b.disabled = b.dataset.decide === 'show' && !contentReady(w); });
-    }
-  });
-}
-
-// 内容审核: only whether the work may be shown at all. Approving moves it to 作品核验,
-// rejecting keeps it private with a reason the author reads, retry runs the automatic check again.
-function openContent(w, { queue } = {}) {
-  const m = w.moderation ?? {};
-  const source = m.source === 'human' ? `人工 · ${m.reviewer ?? ''}` : m.status === 'pending' ? '自动审核进行中' : `自动${m.model ? ` · ${m.model}` : ''}`;
-  const shots = Object.entries(w.captures ?? {});
-  const sheet = openDialog({
-    title: '审核内容',
-    className: 'review-sheet',
-    body: `<div class="review">
-      <div class="review-facts">
-        <div class="review-head">${thumb(w)}<div><h3>${esc(w.title)}</h3><p class="work-model"><span class="badge">${esc(CONTENT_STATUS[m.status] ?? m.status ?? '')}</span><span>${esc(taskTitle(w.task))}</span></p>
-          ${w.scene ? `<div class="actions"><a class="btn sm" href="${esc(w.scene)}" target="_blank" rel="noopener">在新窗口打开${icon('arrow')}</a></div>` : ''}</div></div>
-        <dl class="facts">
-          <div><dt>投稿者</dt><dd>${esc(w.owner ?? '已注销的用户')}${w.addedAt ? ` · ${formatTime(w.addedAt)}` : ''}</dd></div>
-          <div><dt>模型</dt><dd>${esc(w.modelName)}${w.effort ? ` · ${esc(w.effort)}` : ''}</dd></div>
-          <div><dt>审核来源</dt><dd>${esc(source)}</dd></div>
-          <div><dt>结论</dt><dd>${esc(m.reason || '暂无')}</dd></div>
-          ${m.categories?.length ? `<div><dt>风险类别</dt><dd>${esc(m.categories.join('、'))}</dd></div>` : ''}
-          ${m.error ? `<div><dt>未完成原因</dt><dd>${esc(m.error)}</dd></div>` : ''}
-        </dl>
-        ${listedTask(w.task) ? '' : '<p class="fine">这是新题目的示例结果：题目通过审核后，内容通过的结果才会公开。</p>'}
-        ${shots.length ? `<h4>页面截图</h4><div class="content-shots">${shots.map(([id, src]) => {
-          const url = src.startsWith('http') ? src : `/${src}`;
-          return `<a href="${esc(url)}" target="_blank" rel="noopener"><img src="${esc(url)}" alt="${esc(id)} 截图" loading="lazy" decoding="async"></a>`;
-        }).join('')}</div>` : ''}
-      </div>
-      <form class="review-form" novalidate>
-        <h4>判断</h4>
-        <p class="fine">这一步只看能否公开：违法、色情、仇恨、诈骗、恶意脚本等。作品质量和生成信息在「作品」核验里判断。</p>
-        <label class="field"><span class="field-label">理由<small>拒绝时必填，作者会看到</small></span><textarea class="input" name="reason" rows="3" maxlength="500"></textarea></label>
-        <p class="form-error" role="alert"></p>
-        <div class="sheet-actions">
-          ${state.site?.contentModeration && m.status !== 'pending' ? '<button type="button" class="btn ghost" data-content-act="retry">重新自动审核</button>' : ''}
-          <span class="spacer"></span>
-          ${m.status === 'rejected' ? '' : `<button type="button" class="btn danger" data-content-act="rejected">${icon('close')}拒绝</button>`}
-          <button type="button" class="btn primary" data-content-act="approved">${icon('check')}内容通过</button>
-        </div>
-      </form>
-    </div>`,
-  });
-  const form = $('form', sheet.el);
-  sheet.el.addEventListener('click', async (e) => {
-    const button = e.target.closest('[data-content-act]');
-    if (!button) return;
-    const act = button.dataset.contentAct;
-    const reason = form.elements.namedItem('reason').value.trim();
-    const error = $('.form-error', form);
-    if (act === 'rejected' && !reason) { error.textContent = '请写明拒绝理由'; form.elements.namedItem('reason').focus(); return; }
-    $$('[data-content-act]', form).forEach((b) => { b.disabled = true; });
-    const doneBusy = busy(button, '正在保存…');
-    try {
-      await api(`works/${workKey(w)}/moderation${act === 'retry' ? '/retry' : ''}`, { method: 'POST', ...(act === 'retry' ? {} : { body: { status: act, reason } }) });
-      sheet.close();
-      await reload();
-      const note = queue ? openNext(queue, w.id) : '';
-      toast(`${{ retry: '已重新提交自动审核', approved: listedTask(w.task) ? '内容已通过，转入作品核验' : '内容已通过', rejected: '内容已拒绝，作者会看到理由' }[act]}：${w.title}${note}`);
-    } catch (err) {
-      error.textContent = err.message;
-      doneBusy();
-      $$('[data-content-act]', form).forEach((b) => { b.disabled = false; });
-    }
-  });
-}
 
 // ---- views -----------------------------------------------------------------------------------
 const app = () => $('#app');
 const routeParts = () => location.hash.replace(/^#\/?/, '').split('?')[0].split('/').filter(Boolean);
 // Face systems carry only their own pages; everything shared lives in the common area.
 const TABS = [
-  { id: 'review', label: '审核', icon: 'shield' },
   { id: 'works', label: '作品', icon: 'file' },
   { id: 'tasks', label: '题目', icon: 'guide' },
 ];
@@ -688,10 +249,11 @@ const COMMON_TABS = [
   { id: 'traffic', label: '流量', icon: 'clock' },
 ];
 const ARENA_NAV = [
-  ['内容管理', [['works', '作品管理', 'file', '#/works'], ['intake', '收件箱 · 娱乐作品', 'inbox', '#/intake'], ['tasks', '题目管理', 'guide', '#/tasks'], ['review', '审核', 'shield', '#/review']]],
+  ['内容管理', [['works', '作品管理', 'file', '#/works'], ['intake', '收件箱 · 娱乐作品', 'inbox', '#/intake'], ['tasks', '题目管理', 'guide', '#/tasks'], ['gallery-review', '审核', 'shield', 'https://gallery.arenaofbias.icu/#/review']]],
   ['玩法', [['guess', '模一把', 'game', '#/guess'], ['activity', '活动管理', 'calendar', '#/activity']]],
 ];
 const SUBMIT_URL = 'https://gallery.arenaofbias.icu/#/submit';
+const REVIEW_URL = 'https://gallery.arenaofbias.icu/#/review';
 const systemSwitch = () => `<div class="system-switch" role="group" aria-label="管理系统"><button type="button" data-system="gallery" aria-pressed="${state.system === 'gallery'}">展览馆系统</button><button type="button" data-system="arena" aria-pressed="${state.system === 'arena'}">竞技场系统</button><button type="button" data-system="common" aria-pressed="${state.system === 'common'}">通用后台</button></div>`;
 
 const routeAllowed = (route, sub) => state.system === 'common'
@@ -707,10 +269,11 @@ function topbar(route) {
     <button class="icon-btn" data-logout title="退出登录" aria-label="退出登录">${icon('logout')}</button>
   </header>`;
   return `<header class="topbar">
-    <a class="brand" href="${state.system === 'common' ? '#/dashboard' : '#/review'}">${LOGO}<span class="brand-name">同题异答<b>${state.system === 'common' ? '通用后台' : '管理后台'}</b></span></a>
+    <a class="brand" href="${state.system === 'common' ? '#/dashboard' : '#/works'}">${LOGO}<span class="brand-name">同题异答<b>${state.system === 'common' ? '通用后台' : '管理后台'}</b></span></a>
     ${systemSwitch()}
     <nav class="tabs" aria-label="管理">
-      ${tabsForSystem().map((tab) => `<a href="#/${tab.id}"${tab.id === route ? ' aria-current="page"' : ''}>${icon(tab.icon)}${tab.label}${tab.id === 'review' ? `<span class="badge">${reviewCount(state.system)}</span>` : ''}</a>`).join('')}
+      ${tabsForSystem().map((tab) => `<a href="#/${tab.id}"${tab.id === route ? ' aria-current="page"' : ''}>${icon(tab.icon)}${tab.label}</a>`).join('')}
+      <a href="${REVIEW_URL}" target="_blank" rel="noopener">${icon('shield')}审核</a>
     </nav>
     <span class="topbar-space"></span>
     ${themeButton()}
@@ -723,7 +286,7 @@ function arenaSidebar(route, sub) {
   return `<aside class="workspace-sidebar" aria-label="竞技场工作台导航">
     <div class="sidebar-head"><a class="sidebar-brand" href="#/works">${LOGO}<span class="sidebar-copy"><b>偏见试验场</b><small>竞技场管理工作台</small></span></a>
       <button class="icon-btn sidebar-collapse" type="button" data-sidebar-collapse aria-label="${state.sidebarCollapsed ? '展开侧栏' : '折叠侧栏'}" aria-expanded="${!state.sidebarCollapsed}" title="${state.sidebarCollapsed ? '展开侧栏' : '折叠侧栏'}">${icon('panel')}</button></div>
-    <nav class="sidebar-nav">${ARENA_NAV.map(([group, items]) => `<div class="sidebar-group"><span class="sidebar-caption">${group}</span>${items.map(([id, label, glyph, href]) => `<a href="${href}" title="${label}" ${selected === id ? 'aria-current="page"' : ''}>${icon(glyph)}<span class="sidebar-label">${label}</span>${id === 'review' ? `<i>${reviewCount('arena')}</i>` : ''}</a>`).join('')}</div>`).join('')}</nav>
+    <nav class="sidebar-nav">${ARENA_NAV.map(([group, items]) => `<div class="sidebar-group"><span class="sidebar-caption">${group}</span>${items.map(([id, label, glyph, href]) => `<a href="${href}" title="${label}"${href.startsWith('http') ? ' target="_blank" rel="noopener"' : ''}${selected === id ? ' aria-current="page"' : ''}>${icon(glyph)}<span class="sidebar-label">${label}</span></a>`).join('')}</div>`).join('')}</nav>
     <div class="sidebar-foot"><span>共享数据 · 双系统门面</span><small>竞技场 / 管理后台</small></div>
   </aside>`;
 }
@@ -807,108 +370,16 @@ async function inboxUpload(files) {
   render({ soft: true });
 }
 
-// A sample result sent with a new question; its content is reviewed right here.
-function sampleRow(sample) {
-  const w = state.works?.find((item) => item.id === sample.id) ?? sample;
-  const held = ['pending', 'review', 'rejected'].includes(w.moderation?.status);
-  return `<li><b>${esc(w.title)}</b><span>${esc(w.modelName)}${w.effort ? ` · ${esc(w.effort)}` : ''}</span>${statusBadge(w.status)}<span class="badge">${esc(CONTENT_STATUS[w.moderation?.status ?? 'legacy'] ?? w.moderation?.status)}</span>
-    ${w.scene ? `<a class="btn sm" href="${esc(w.scene)}" target="_blank" rel="noopener">预览 ${icon('arrow')}</a>` : ''}
-    ${held ? `<button class="btn sm${w.moderation.status === 'review' ? ' primary' : ''}" data-content="${esc(w.id)}">审核内容</button>` : ''}</li>`;
-}
-
-function questionCard(q) {
-  const decided = q.moderation.status !== 'pending';
-  return `<article class="question-card" data-question-card="${esc(q.id)}">
-    <header><h3>${esc(q.title)}</h3><span class="badge">${esc(QUESTION_STATUS[q.moderation.status] ?? q.moderation.status)}</span></header>
-    <p class="work-meta">发布者 ${esc(q.ownerName)} · ${formatTime(q.createdAt)} · ${q.works} 份结果</p>
-    <p class="question-tags">${(q.tags ?? []).map((tag) => `<span class="badge">${esc(tag)}</span>`).join('')}</p>
-    <p class="review-text">${esc(q.summary)}</p>
-    <details class="question-prompt"><summary>完整提示词</summary><p class="review-text">${esc(q.prompt)}</p></details>
-    ${q.moderation.reason ? `<p class="work-reason">${esc(q.moderation.reason)}</p>` : ''}
-    <h4>示例结果</h4><ul class="question-samples">${(q.samples ?? []).map(sampleRow).join('') || '<li class="muted">没有作者本人上传的结果。</li>'}</ul>
-    <label class="field"><span class="field-label">理由<small>拒绝时必填，作者会看到</small></span><textarea class="input" data-question-reason rows="2" maxlength="500"></textarea></label>
-    <p class="form-error" data-question-error role="alert"></p>
-    <div class="actions">${q.moderation.status === 'approved' ? '' : '<button class="btn sm primary" data-question-decide="approved">通过</button>'}${q.moderation.status === 'rejected' ? '' : '<button class="btn sm danger ghost" data-question-decide="rejected">拒绝</button>'}<button class="btn sm danger ghost" data-question-delete>删除</button>${decided ? '' : '<span class="fine">示例内容可以先在上面审核；题目通过后，内容通过的示例才会公开。</span>'}</div>
-  </article>`;
-}
-
-function questionList() {
-  const all = state.adminQuestions ?? [];
-  const waiting = all.filter((q) => q.moderation.status === 'pending').sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
-  const decided = all.filter((q) => q.moderation.status !== 'pending').sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
-  return `${waiting.length ? `<div class="question-list">${waiting.map(questionCard).join('')}</div>`
-    : '<div class="board-empty"><p class="board-empty-title">没有待审核的题目</p><p>用户发起的新题目会出现在这里，并附上一份模型结果。</p></div>'}
-    ${decided.length ? `<details class="review-history"><summary>已处理的题目 · ${decided.length}</summary><div class="question-list">${decided.map(questionCard).join('')}</div></details>` : ''}`;
-}
-
-const reviewLead = (tab, face) => ({
-  questions: '题目只能人工审核。通过后进入题库并开放投稿；拒绝需写理由，作者会看到。',
-  content: '只判断能否公开。自动审核没能确定的投稿在这里由人决定：通过后转入「作品」核验，拒绝需写理由。',
-  pending: face === 'gallery' ? '内容已通过、还没在展览馆核验的投稿，最早的在前。通过即上展览馆；无法核实的标记存疑。'
-    : '内容已通过、还没在竞技场核验的投稿，最早的在前。通过即进正式盲测（另需单轮、无人工介入）；无法核实的标记存疑。',
-  shown: `已核验并${face === 'gallery' ? '在展览馆展示' : '进入正式盲测'}的投稿。撤下只影响${FACE_LABEL[face]}。`,
-  off: `已处理但没有${face === 'gallery' ? '在展览馆展示' : '进入正式盲测'}的投稿。馆藏作品的开关在「作品」页。`,
-  questioned: '无法核实的投稿，两边都不参与互动与盲评。原因对作者与访客可见。',
-  rejected: '内容未通过，或所属题目未通过的投稿；都不会公开。',
-  log: '最近 200 条管理操作。',
-}[tab]);
-
-function reviewView(sub) {
-  const face = state.system;
-  const done = reviewDone(face);
-  const count = (id) => id === 'questions' ? pendingQuestions() : uploadsIn(id, face).length;
-  const tab = Object.hasOwn(REVIEW_TODO, sub ?? '') || Object.hasOwn(done, sub ?? '') ? sub
-    : Object.keys(REVIEW_TODO).find((id) => state.works && count(id)) ?? 'pending';
-  const rows = (bucket) => uploadsIn(bucket, face).map((w) => workRow(w, bucket)).join('');
-  const empty = (title) => `<div class="board-empty"><p class="board-empty-title">${title}</p></div>`;
-  let list;
-  if (tab === 'log') list = auditList(state.audit.length);
-  else if (tab === 'questions') list = questionList();
-  else if (tab === 'content') {
-    const held = rows('content'), auto = rows('auto');
-    list = `${held ? `<div class="work-list">${held}</div>` : empty('没有等待人工审核内容的投稿')}
-      ${auto ? `<h3 class="review-subhead">自动审核中 · ${uploadsIn('auto', face).length}<small>完成后会自动转入「作品」或回到这里，也可以提前人工审核</small></h3><div class="work-list is-muted">${auto}</div>` : ''}`;
-  } else {
-    list = rows(tab) ? `<div class="work-list">${rows(tab)}</div>`
-      : empty(tab === 'pending' ? `没有等待${FACE_LABEL[face]}核验的投稿` : `没有${done[tab]}的投稿`);
-  }
-  const link = (id, text, counted) => `<a href="#/review/${id}"${id === tab ? ' aria-current="page"' : ''}>${text}${counted && state.works ? `<span>${count(id)}</span>` : ''}</a>`;
-  return `${pageHero('审核管理', '审核', `题目审核 → 内容审核 → 作品核验。前两步两个系统共用，作品核验只决定${face === 'gallery' ? '上不上展览馆' : '进不进盲测'}。`,
-    [['待审题目', pendingQuestions()], ['待审内容', state.works ? count('content') : '—'], [`待${FACE_LABEL[face]}核验`, state.works ? count('pending') : '—'], ['存疑', state.works ? count('questioned') : '—']])}
-  <section class="block">
-    <nav class="review-nav" aria-label="审核分类">
-      <div class="seg review-tabs"><span class="seg-caption">待处理</span>${Object.entries(REVIEW_TODO).map(([id, text]) => link(id, text, true)).join('')}</div>
-      <div class="seg review-tabs"><span class="seg-caption">已处理</span>${Object.entries(done).map(([id, text]) => link(id, text, false)).join('')}</div>
-    </nav>
-    <p class="review-lead">${esc(reviewLead(tab, face))}</p>
-    ${state.works === null ? skeleton(5) : list}
-  </section>`;
-}
-
-// -- common area: dashboard + unified upload -----------------------------------
-const auditList = (limit) => {
-  const titles = new Map([...(state.works ?? []), ...(state.adminQuestions ?? [])].map((w) => [w.id, w.title]));
-  return state.audit.length
-    ? `<ol class="audit">${state.audit.slice(0, limit).map((row) => {
-      const target = row.action.startsWith('question-') ? row.task : row.work;
-      return `<li><time>${formatTime(row.at)}</time><span class="audit-actor">${esc(row.actor)}</span><b>${esc(ACTIONS[row.action] ?? row.action)}</b><span class="audit-work">${target ? esc(titles.get(target) ?? `${target}（已删除）`) : ''}${row.detail ? ` · ${esc(row.detail)}` : ''}</span></li>`;
-    }).join('')}</ol>`
-    : '<p class="muted">还没有记录。</p>';
-};
-
 function dashboardView() {
-  const works = state.works;
-  const pending = (face) => (works ? reviewCount(face) : '—');
   const traffic = state.traffic;
-  return `${pageHero('总览', '仪表盘', '两个系统共用的后台：作品从这里统一上传，两边的审核进度和访问概况在这里看。', [
-    ['投稿作品', works ? works.filter((w) => w.source !== 'curated').length : '—'], ['展览馆待处理', pending('gallery')], ['竞技场待处理', pending('arena')], ['用户', traffic ? traffic.users.total : '—']])}
+  return `${pageHero('总览', '仪表盘', '审核在展览馆进行。这里看访问概况和最近的管理操作。', [
+    ['用户', traffic ? traffic.users.total : '—']])}
   <section class="block dashboard-actions">
-    <button class="btn primary" type="button" data-goto-system="gallery">${icon('file')}进展览馆系统审核</button>
-    <button class="btn primary" type="button" data-goto-system="arena">${icon('shield')}进竞技场系统审核</button>
+    <a class="btn primary" href="${REVIEW_URL}" target="_blank" rel="noopener">${icon('shield')}前往审核 ${icon('arrow')}</a>
     <a class="btn" href="${SUBMIT_URL}" target="_blank" rel="noopener">前往投稿页 ${icon('arrow')}</a>
   </section>
   ${traffic ? `<section class="block"><h2>访问近 14 日</h2><div class="traffic-bars" aria-label="近 14 日访问量">${traffic.daily.slice(-14).map((d) => { const max = Math.max(1, ...traffic.daily.slice(-14).map((x) => x.pv)); return `<div class="traffic-day" title="${d.day}：${d.pv} PV，${d.uniqueIps} 位独立访客"><div class="traffic-bar" style="height:${Math.max(2, d.pv / max * 100)}%"></div><span>${d.day.slice(5)}</span></div>`; }).join('')}</div><p class="fine">近 30 日新注册 ${traffic.users.new} 人，累计 ${traffic.users.total} 人。<a href="#/traffic">完整访问概况</a></p></section>` : `<section class="block" aria-busy="true"><h2>访问近 14 日</h2>${skeleton(6, 'bar')}</section>`}
-  <section class="block"><h2>最近操作</h2>${state.works === null ? skeleton(4) : auditList(12)}</section>`;
+  <section class="block"><h2>最近操作</h2>${state.audit.length ? auditList(12) : skeleton(4)}</section>`;
 }
 
 function uploadView() {
@@ -946,7 +417,7 @@ function adminWorkRow(w, face = state.system) {
     <td>${esc(w.modelName)}${provenanceText(w) ? `<small class="work-provenance">${esc(provenanceText(w))}</small>` : ''}</td><td>${statusBadge(w.status)}</td>
     <td>${w.show_gallery ? '进入展览馆' : '未进展览馆'}</td>
     ${face === 'arena' ? `<td>${formal}</td><td>${entertainment}</td>` : '<td>—</td>'}
-    <td><div class="actions">${promoted ? '<span class="badge">已收录</span>' : w.nominatedAt ? '<span class="badge">已提名</span>' : ''}<button class="btn sm" data-calibrate="${esc(w.id)}">${label}取景</button><button class="btn sm" data-task-note="${esc(w.task)}">${face === 'gallery' ? '策展笔记' : '题目点评'}</button>${w.source === 'upload' ? `${curable ? `<button class="btn sm primary" data-nominate="${esc(w.id)}">${w.nominatedAt ? '换发命令' : '提名收录'}</button>` : ''}${w.nominatedAt && !promoted ? `<button class="btn sm" data-withdraw="${esc(w.id)}">撤回提名</button>` : ''}` : ''}${promoted ? '' : `<button class="btn sm" data-edit="${esc(w.id)}">编辑</button><button class="btn sm" data-review="${esc(w.id)}">审核</button>`}</div></td>
+    <td><div class="actions">${promoted ? '<span class="badge">已收录</span>' : w.nominatedAt ? '<span class="badge">已提名</span>' : ''}<button class="btn sm" data-calibrate="${esc(w.id)}">${label}取景</button><button class="btn sm" data-task-note="${esc(w.task)}">${face === 'gallery' ? '策展笔记' : '题目点评'}</button>${w.source === 'upload' ? `${curable ? `<button class="btn sm primary" data-nominate="${esc(w.id)}">${w.nominatedAt ? '换发命令' : '提名收录'}</button>` : ''}${w.nominatedAt && !promoted ? `<button class="btn sm" data-withdraw="${esc(w.id)}">撤回提名</button>` : ''}` : ''}${promoted ? '' : `<button class="btn sm" data-edit="${esc(w.id)}">编辑</button><a class="btn sm" href="${REVIEW_URL}" target="_blank" rel="noopener">审核</a>`}</div></td>
   </tr>`;
 }
 function systemWorksView() {
@@ -1466,9 +937,10 @@ function patchWorks(newMain) {
 }
 async function reload({ navigation = false } = {}) {
   const requestId = ++state.requestId;
-  const [route = 'review'] = routeParts();
+  const [route = 'works'] = routeParts();
   const system = state.system;
-  if (!routeAllowed(route)) { location.hash = system === 'common' ? '#/dashboard' : '#/review'; return; }
+  if (route === 'review') { location.replace(REVIEW_URL); return; }
+  if (!routeAllowed(route)) { location.hash = system === 'common' ? '#/dashboard' : '#/works'; return; }
   let key = '';
   if (route === 'works') {
     if (navigation) applyWorksHash();
@@ -1497,10 +969,11 @@ async function reload({ navigation = false } = {}) {
       state.traffic = await api('admin/traffic?days=30');
       state.trafficLoading = false;
     } else if (route === 'dashboard') {
-      await Promise.all([loadReview(), state.traffic ? Promise.resolve() : api('admin/traffic?days=30').then((data) => { state.traffic = data; })]);
+      const [review, traffic] = await Promise.all([api('review'), state.traffic ? Promise.resolve(state.traffic) : api('admin/traffic?days=30')]);
+      state.audit = review.audit;
+      if (!state.traffic) state.traffic = traffic;
     }     else if (route === 'upload') await loadInbox();
     else if (route === 'intake') state.intake = (await api('admin/inbox/works')).works;
-    else if (route === 'review') await loadReview();
     if (requestId !== state.requestId) return;
     state.error = '';
   } catch (error) {
@@ -1518,11 +991,12 @@ function render({ soft = false, world = false } = {}) {
   if (state.user === undefined) { app().innerHTML = `<main class="gate">${skeleton(3)}</main>`; return; }
   if (!state.user) return loginView();
   if (state.user.role !== 'admin') return forbiddenView();
-  const [route = 'review', sub] = routeParts();
-  if (!routeAllowed(route, sub)) { location.hash = state.system === 'common' ? '#/dashboard' : '#/review'; return; }
+  const [route = 'works', sub] = routeParts();
+  if (route === 'review') { location.replace(REVIEW_URL); return; }
+  if (!routeAllowed(route, sub)) { location.hash = state.system === 'common' ? '#/dashboard' : '#/works'; return; }
   const body = state.system === 'common'
     ? route === 'upload' ? uploadView() : route === 'users' ? usersView() : route === 'traffic' ? trafficView() : dashboardView()
-    : route === 'works' ? systemWorksView() : route === 'intake' ? intakeView() : route === 'tasks' ? tasksView() : ['guess', 'activity'].includes(route) ? placeholderView(route) : reviewView(sub);
+    : route === 'works' ? systemWorksView() : route === 'intake' ? intakeView() : route === 'tasks' ? tasksView() : placeholderView(route);
   const content = `${state.error ? `<p class="form-error page-error">${esc(state.error)}</p>` : ''}${body}`;
   const shellKey = `${state.system}/${route}/${sub || ''}`;
   const currentMain = $('main.page', app());
@@ -1562,8 +1036,6 @@ function render({ soft = false, world = false } = {}) {
     renderedContent = content;
   }
   document.title = `${route === 'guess' ? '模一把' : route === 'activity' ? '活动管理' : tabsForSystem().find((tab) => tab.id === route)?.label ?? '管理后台'} · 管理后台`;
-  const reviewEntry = $('.tabs a[href="#/review"] .badge, .sidebar-nav a[href="#/review"] i', app());
-  if (reviewEntry) reviewEntry.textContent = reviewCount(state.system);
   if (route === 'works') updateBulkSelection();
   syncThemeUi();
 }
@@ -1597,7 +1069,8 @@ document.addEventListener('click', async (e) => {
   if (system && state.system !== system.dataset.system) {
     state.system = system.dataset.system; store.set('admin-system', state.system); state.workPage = 1;
     applySystemTheme();
-    if (!routeAllowed(routeParts()[0])) location.hash = state.system === 'common' ? '#/dashboard' : '#/review';
+    if (routeParts()[0] === 'review') { location.replace(REVIEW_URL); return; }
+    if (!routeAllowed(routeParts()[0])) location.hash = state.system === 'common' ? '#/dashboard' : '#/works';
     if (routeParts()[0] === 'works') {
       const cached = state.workCache.get(worksQuery().toString());
       state.adminWorks = cached?.works ?? [];
@@ -1612,8 +1085,7 @@ document.addEventListener('click', async (e) => {
   if (gotoSystem && state.system !== gotoSystem.dataset.gotoSystem) {
     state.system = gotoSystem.dataset.gotoSystem; store.set('admin-system', state.system);
     applySystemTheme();
-    if (routeParts()[0] === 'review') { render({ world: true }); reload(); }
-    else location.hash = '#/review';
+    location.hash = '#/works';
     return;
   }
   if (e.target.closest('[data-sidebar-collapse]')) {
@@ -1627,27 +1099,6 @@ document.addEventListener('click', async (e) => {
     return;
   }
   if (e.target.closest('[data-theme-toggle]')) { toggleTheme(); return; }
-  const questionAction = e.target.closest('[data-question-decide], [data-question-delete]');
-  if (questionAction) {
-    const card = questionAction.closest('[data-question-card]');
-    const q = state.adminQuestions?.find((item) => item.id === card.dataset.questionCard);
-    if (!q) return;
-    const errorEl = $('[data-question-error]', card);
-    const reason = $('[data-question-reason]', card).value.trim();
-    const status = questionAction.dataset.questionDecide;
-    errorEl.textContent = '';
-    if (status === 'rejected' && !reason) { errorEl.textContent = '拒绝题目时请填写理由。'; $('[data-question-reason]', card).focus(); return; }
-    if (!status && !await confirmDialog({ title: '删除这道题目？', message: `「${q.title}」及其所有作品会从公开列表移除。有投票记录的题目不能删除，操作会记入审核记录。`, confirm: '删除题目', danger: true })) return;
-    const done = busy(questionAction, status ? '正在审核…' : '正在删除…');
-    try {
-      await api(`questions/${encodeURIComponent(q.id)}${status ? '/moderation' : ''}`, { method: status ? 'POST' : 'DELETE', ...(status ? { body: { status, reason } } : {}) });
-      state.questions = (await api('bootstrap')).questions;
-      toast(status ? `题目已${status === 'approved' ? '通过' : '拒绝'}` : '题目已删除');
-      await reload();
-    } catch (error) { errorEl.textContent = error.message; }
-    finally { done(); }
-    return;
-  }
   const inboxPick = e.target.closest('[data-inbox-pick]');
   if (inboxPick) { $('.inbox-panel [data-inbox-input]')?.click(); return; }
   const inboxReload = e.target.closest('[data-inbox-reload]');
@@ -1726,62 +1177,6 @@ document.addEventListener('click', async (e) => {
   }
   const filter = e.target.closest('[data-filter]');
   if (filter) { state.worksFilter = filter.dataset.filter; render(); return; }
-  const reviewBtn = e.target.closest('[data-review]');
-  if (reviewBtn) {
-    const work = state.works?.find((w) => w.id === reviewBtn.dataset.review) ?? state.adminWorks.find((w) => w.id === reviewBtn.dataset.review);
-    if (work) openReview(work, { queue: routeParts()[0] === 'review' && reviewBucket(work) === 'pending' ? 'pending' : undefined });
-    return;
-  }
-  const contentBtn = e.target.closest('[data-content]');
-  if (contentBtn) {
-    const id = contentBtn.dataset.content;
-    const work = state.works?.find((w) => w.id === id) ?? state.adminQuestions?.flatMap((q) => q.samples ?? []).find((w) => w.id === id);
-    if (work) openContent(work, { queue: reviewBucket(work) === 'content' && !contentBtn.closest('[data-question-card]') ? 'content' : undefined });
-    return;
-  }
-  const verifyBtn = e.target.closest('[data-verify]');
-  if (verifyBtn) {
-    const work = state.works?.find((w) => w.id === verifyBtn.dataset.verify);
-    if (!work) return;
-    const doneBusy = busy(verifyBtn, '正在通过…');
-    try {
-      // Quick approve: current face on. Curated works go through face-settings
-      // (their content is repo-vetted); uploads must already pass content review.
-      if (work.source === 'curated') {
-        await api(`admin/works/${workKey(work)}/face-settings`, { method: 'POST', body: { [`show_${state.system}`]: true } });
-      } else {
-        await api(`works/${encodeURIComponent(work.task)}/${encodeURIComponent(work.id)}/review`,
-          { method: 'POST', body: { status: 'verified', [`show_${state.system}`]: true } });
-      }
-      toast(`已${state.system === 'gallery' ? '上展览馆' : '进盲测'}：${work.title}`);
-      await reload();
-    } catch (error) {
-      toast(error.message);
-      doneBusy();
-    }
-    return;
-  }
-  // 本面撤下（审核队列的行）；作品表里的「撤回提名」用的是 data-withdraw，两者不要混。
-  const faceOffBtn = e.target.closest('[data-face-off]');
-  if (faceOffBtn) {
-    const work = state.works?.find((w) => w.id === faceOffBtn.dataset.faceOff);
-    if (!work) return;
-    const doneBusy = busy(faceOffBtn, '正在撤下…');
-    try {
-      if (work.source === 'curated') {
-        await api(`admin/works/${workKey(work)}/face-settings`, { method: 'POST', body: { [`show_${state.system}`]: false } });
-      } else {
-        await api(`works/${encodeURIComponent(work.task)}/${encodeURIComponent(work.id)}/review`,
-          { method: 'POST', body: { status: work.status, [`show_${state.system}`]: false } });
-      }
-      toast(`已从${FACE_LABEL[state.system]}撤下：${work.title}`);
-      await reload();
-    } catch (error) {
-      toast(error.message);
-      doneBusy();
-    }
-    return;
-  }
   const deleteBtn = e.target.closest('[data-delete]');
   if (deleteBtn) {
     const work = state.works?.find((w) => w.id === deleteBtn.dataset.delete);
@@ -1886,7 +1281,7 @@ document.addEventListener('submit', async (e) => {
       delete state.inboxForms[id];
       state.workCache.clear();
       toast(`已入库并上展览馆：${data.work.title}`);
-      await Promise.all([loadInbox(), loadReview()]);
+      await loadInbox();
       render({ soft: true });
     } catch (err) { error.textContent = err.message; done(); }
     return;

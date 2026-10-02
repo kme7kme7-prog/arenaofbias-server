@@ -1,5 +1,14 @@
 # HANDOFF.md · 当前状态
 
+## 喷泉适配纠正：提取原作（2026-10-02，封面已替换）
+
+- 用户指出上一轮手工重建偏离现有小模型流程。本轮替换 scripts/fountain-preview/index.html / README，新增 Node 内置模块本机 serve.mjs；复用 data 的 importArchitecture / packPreview 以及 Gallery 的 readModel / result-previews，保留投稿 up-ccnksbcp 的原几何、世界矩阵、石纹、材质和庭院布局。原作 WebGPU 水滴位置与波高读回后，按原 WGSL 公式生成静态水面/水滴；每四粒子稳定取一粒，保留原大小和透明度。最终边界按已提取有限几何计算，包含真实地面和四面围墙。本节取代下方手工重建方案及其后续建议。
+- 本机 .sbox 2348700 bytes（约 2.24 MiB），格式 v2、13 meshes / 13 geometries / 13 materials / 5 内嵌纹理，使用现有 Gallery loader 重新加载并渲染成功。原源码下载备份与公网 SHA-256 均为 83dc19d5667369026535f51a0996c5ad6a3c0e4cbe6a77bd003006b5898b0936；模型 hash 为 8eb37494566cf512445a9897d13b89419817bc34fed7ff41c7bba29d46a000b1。仅忽略的提取副本增加场景暴露与 GPU COPY_SRC，没有改原作。
+- 桌面 1440×900、手机 390×844 都在 DOM ready=true 且画布实际尺寸正确后截图，console error/warn 为 0。一次已保存包的首次截图过早取到加载提示，未上传，最终图已覆写；水面先恢复原生 overlay 无深度测试行为，再核对原配色；最终重拍保留完整围墙。inline module / serve.mjs / Python 替换脚本语法和 diff 检查通过，gzip 格式/边界/内嵌纹理检查通过；仅独立预览和媒体变更，未运行无关后台全量测试。
+- 已原子替换该投稿 first.jpg / mobile.jpg，保留 captures 映射和 root:root / 0644；公网两图 hash 与本机完全一致，no-store。桌面 1949b27987933385853685248a9bf08153cc3f693328adb1e083c27b76dcbc39；手机 eee2b207da14a13ea2400e5d8b52743af790055d048cd7b65e7087c1ccafaca4。生产仍为本人上次核对的 83e43fe072a0280d86c76379d9964bd4a32eb4bd，service active。未改业务库、馆藏包、截图等待、VPS WebGPU 或部署其他本地代码。
+- 本轮替换前的手工重建封面与 owner/mode/hash 已备份到 root 私有 /root/aob-fountain-faithful-20261002-01a0fb12；更早的 WebGPU 错误封面备份仍保留。原作备份、提取副本、真实 .sbox、本机图、公网图和验收 JSON 在忽略的 output/fountain-faithful-20261002，不提交生成物。按用户授权仅本地英文简单句提交，未 push；保留另轮 bc040b8 与未提交会话调查记录。完整记录见 [归档](docs/archive/2026-10-02-fountain-faithful-wsnxxxs.md)。
+
+
 ## 通过即公开规则（2026-10-02，本地提交，未推送、未部署）
 
 - 用户拍板：核验通过即公开，合格自动进盲评。library.review 在作品首次转为 verified 且请求未给开关、也未给 audience 时两面都开启并记录本面决定；已是 verified 的重复核验保持原开关（管理员关闭的盲评不会被重新打开）。管理员代传与收件箱发布不再显式传竞技场关闭，走同一缺省。馆藏 override 默认不变（仍需在后台作品页开启）。

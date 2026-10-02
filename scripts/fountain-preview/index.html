@@ -1,253 +1,86 @@
 <!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>古典庭园喷泉 · 3D 小模型</title>
-  <style>
-    * { box-sizing: border-box; }
-    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
-    body { font-family: system-ui, sans-serif; color: #344342; background: #f0eee7; }
-    main { height: 100svh; display: grid; grid-template-rows: auto 1fr auto; }
-    header { padding: 24px 30px 0; }
-    h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: .08em; }
-    header p { margin: 8px 0 0; color: #7b8580; font-size: 12px; letter-spacing: .08em; }
-    #stage { min-height: 0; position: relative; touch-action: none; }
-    canvas { display: block; width: 100%; height: 100%; }
-    #status { position: absolute; inset: 0; display: grid; place-content: center; padding: 24px; text-align: center; font-size: 14px; }
-    #status[hidden] { display: none; }
-    footer { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 10px; padding: 0 20px 22px; }
-    button { color: #344342; background: #faf9f5; border: 1px solid #d3d9d2; border-radius: 24px; padding: 10px 18px; font: inherit; font-size: 12px; cursor: pointer; }
-    button:hover { background: #fff; border-color: #7d9e92; }
-    button:disabled { opacity: .5; cursor: wait; }
-    #export { background: #345c50; color: #fff; border-color: #345c50; }
-    .hint { color: #849087; font-size: 11px; }
-    body.capture main { grid-template-rows: 1fr; }
-    body.capture header, body.capture footer { display: none; }
-    #preview-label { display: none; position: fixed; right: 18px; bottom: 14px; color: #69756c; font-size: 10px; letter-spacing: .1em; pointer-events: none; }
-    body.capture #preview-label { display: block; }
-    @media (max-width: 600px) { header { padding: 22px 22px 0; } h1 { font-size: 18px; } footer { padding-bottom: 24px; } .hint { width: 100%; text-align: center; } }
-  </style>
-  <script type="importmap">
-    {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"}}
-  </script>
-</head>
-<body>
-  <main>
-    <header><h1>古典庭园喷泉</h1><p>CLASSICAL GARDEN · A MINIATURE IN STONE & WATER</p></header>
-    <div id="stage"><div id="status">正在载入庭园模型…</div></div>
-    <footer>
-      <button id="reset" disabled>复位视角</button>
-      <button id="export" disabled>下载 GLB 模型</button>
-      <span class="hint">拖动旋转 · 滚轮缩放</span>
-    </footer>
-  </main>
-  <span id="preview-label">简化模型预览</span>
-  <script type="module">
-    const params = new URLSearchParams(location.search);
-    if (params.has('capture')) document.body.classList.add('capture');
-    const status = document.querySelector('#status');
-    const timeout = setTimeout(() => { status.textContent = '模型载入超时，请检查网络后刷新。'; }, 20000);
-    try {
-      const [THREE, { OrbitControls }, { GLTFExporter }] = await Promise.all([
-        import('three'), import('three/addons/controls/OrbitControls.js'), import('three/addons/exporters/GLTFExporter.js')
-      ]);
-      const stage = document.querySelector('#stage');
-      const scene = new THREE.Scene();
-      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
-      renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-      renderer.shadowMap.enabled = true;
-      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-      renderer.outputColorSpace = THREE.SRGBColorSpace;
-      renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.25;
-      stage.appendChild(renderer.domElement);
-      const camera = new THREE.OrthographicCamera(-8, 8, 8, -8, .1, 100);
-      const controls = new OrbitControls(camera, renderer.domElement);
-      controls.enableDamping = true;
-      controls.enablePan = false;
-      controls.minZoom = .8;
-      controls.maxZoom = 2.5;
-      controls.minPolarAngle = .35;
-      controls.maxPolarAngle = Math.PI * .47;
-      const garden = new THREE.Group();
-      garden.name = 'Classical garden fountain miniature';
-      scene.add(garden);
-      const material = (color, roughness = .8, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness, ...extra });
-      const stone = material('#cec5ad');
-      const paleStone = material('#e6dfcb');
-      const stoneShadow = material('#a99f85');
-      const paving = material('#d9d1bc');
-      const soil = material('#748169');
-      const leaf = material('#42694e');
-      const leafLight = material('#5a815a');
-      const bark = material('#827158');
-      const bronze = material('#6c7868', .4, { metalness: .45 });
-      const water = material('#65b7c4', .19, { metalness: .18, transparent: true, opacity: .84 });
-      const jet = material('#b0eff1', .2, { metalness: .08, emissive: '#56858c', emissiveIntensity: .18, transparent: true, opacity: .88 });
-      const add = (geometry, mat, x = 0, y = 0, z = 0, parent = garden) => {
-        const mesh = new THREE.Mesh(geometry, mat);
-        mesh.position.set(x, y, z);
-        mesh.castShadow = mat !== water && mat !== jet;
-        mesh.receiveShadow = true;
-        parent.add(mesh);
-        return mesh;
-      };
-      const box = (w, h, d, mat, x, y, z) => add(new THREE.BoxGeometry(w, h, d), mat, x, y, z);
-      const cylinder = (r1, r2, h, mat, y, x = 0, z = 0, segments = 48) => add(new THREE.CylinderGeometry(r1, r2, h, segments), mat, x, y, z);
-      const ring = (r, tube, mat, y) => { const m = add(new THREE.TorusGeometry(r, tube, 8, 64), mat, 0, y, 0); m.rotation.x = Math.PI / 2; return m; };
-      const roundedTile = new THREE.Shape();
-      const half = 4.4, radius = .38;
-      roundedTile.moveTo(-half + radius, -half);
-      roundedTile.lineTo(half - radius, -half);
-      roundedTile.quadraticCurveTo(half, -half, half, -half + radius);
-      roundedTile.lineTo(half, half - radius);
-      roundedTile.quadraticCurveTo(half, half, half - radius, half);
-      roundedTile.lineTo(-half + radius, half);
-      roundedTile.quadraticCurveTo(-half, half, -half, half - radius);
-      roundedTile.lineTo(-half, -half + radius);
-      roundedTile.quadraticCurveTo(-half, -half, -half + radius, -half);
-      const base = add(new THREE.ExtrudeGeometry(roundedTile, { depth: .3, bevelEnabled: true, bevelSegments: 1, steps: 1, bevelSize: .06, bevelThickness: .06 }), stoneShadow);
-      base.rotation.x = -Math.PI / 2;
-      base.position.y = -.3;
-      box(8.6, .09, 8.6, paving, 0, .035, 0);
-      // A circular promenade and four simple paths keep the miniature legible.
-      cylinder(3.45, 3.45, .06, stone, .10);
-      cylinder(3.22, 3.22, .065, paleStone, .105);
-      ring(3.34, .035, stoneShadow, .15);
-      for (let i = 0; i < 4; i++) {
-        const path = box(1.12, .025, 2.1, paleStone, 0, .095, 3.3);
-        path.position.set(Math.sin(i * Math.PI / 2) * 3.3, .095, Math.cos(i * Math.PI / 2) * 3.3);
-        path.rotation.y = i * Math.PI / 2;
-      }
-      // Low enclosing walls, capped pillars, and planted corner beds.
-      box(8.5, .62, .25, stone, 0, .4, -4.1);
-      box(.25, .62, 8.2, stone, -4.1, .4, 0);
-      box(.25, .62, 8.2, stone, 4.1, .4, 0);
-      box(8.5, .12, .35, paleStone, 0, .77, -4.1);
-      box(.35, .12, 8.2, paleStone, -4.1, .77, 0);
-      box(.35, .12, 8.2, paleStone, 4.1, .77, 0);
-      for (const x of [-4.1, 4.1]) for (const z of [-4.1, 4.1]) {
-        box(.42, .93, .42, stone, x, .54, z);
-        box(.55, .12, .55, paleStone, x, 1.06, z);
-        add(new THREE.SphereGeometry(.15, 12, 8), paleStone, x, 1.26, z);
-      }
-      for (const x of [-3.45, 3.45]) for (const z of [-3.35, 3.35]) {
-        box(1.05, .10, 1.06, soil, x, .13, z);
-        box(1.15, .12, .10, stoneShadow, x, .15, z + .56);
-        box(1.15, .12, .10, stoneShadow, x, .15, z - .56);
-        box(.10, .12, 1.06, stoneShadow, x + .56, .15, z);
-        box(.10, .12, 1.06, stoneShadow, x - .56, .15, z);
-        const back = z < 0;
-        cylinder(.10, .13, back ? 1.2 : .70, bark, back ? .78 : .53, x, z, 8);
-        const crown = add(new THREE.IcosahedronGeometry(back ? .68 : .46, 1), leaf, x, back ? 1.95 : 1.22, z);
-        crown.scale.set(1, 1.25, 1);
-        add(new THREE.IcosahedronGeometry(back ? .50 : .33, 1), leafLight, x - .12, back ? 2.55 : 1.62, z - .02);
-      }
-      for (const x of [-3.52, 3.52]) {
-        box(.55, .15, 1.30, bronze, x, .48, -.5);
-        box(.10, .43, 1.3, bronze, x + Math.sign(x) * .24, .69, -.5);
-        for (const z of [-.95, -.05]) box(.12, .36, .12, stoneShadow, x, .28, z);
-      }
-      // The pool has a stepped plinth, a carved rim and a clear water surface.
-      cylinder(2.46, 2.55, .17, stoneShadow, .23);
-      cylinder(2.35, 2.46, .15, paleStone, .39);
-      cylinder(2.31, 2.34, .25, stone, .56);
-      ring(2.30, .10, paleStone, .71);
-      cylinder(2.19, 2.19, .055, water, .65);
-      for (let i = 0; i < 32; i++) {
-        const a = i / 32 * Math.PI * 2;
-        const detail = box(.085, .13, .04, stoneShadow, Math.sin(a) * 2.33, .55, Math.cos(a) * 2.33);
-        detail.rotation.y = a;
-      }
-      cylinder(.51, .65, .17, paleStone, .79);
-      cylinder(.23, .40, .53, stone, 1.10);
-      const bowl = (r, y) => {
-        const profile = [[0, -.19], [.24 * r, -.19], [.42 * r, -.14], [.72 * r, -.04], [.96 * r, .12], [r, .18], [r, .24], [.91 * r, .24], [.88 * r, .16], [.64 * r, .025], [.24 * r, -.055], [0, -.055]].map(([x, yy]) => new THREE.Vector2(x, yy));
-        add(new THREE.LatheGeometry(profile, 48), paleStone, 0, y, 0);
-        cylinder(r * .9, r * .9, .035, water, y + .16);
-        ring(r * .97, .055, stone, y + .235);
-      };
-      bowl(1.30, 1.44);
-      cylinder(.17, .28, .70, stone, 1.96);
-      bowl(.72, 2.40);
-      cylinder(.10, .16, .23, paleStone, 2.68);
-      const tube = (curve, width, segments = 24) => add(new THREE.TubeGeometry(curve, segments, width, 5, false), jet);
-      // Static curved tubes replace particles and export directly to glTF.
-      for (let i = 0; i < 8; i++) {
-        const a = i / 8 * Math.PI * 2, sx = Math.sin(a), sz = Math.cos(a);
-        tube(new THREE.CubicBezierCurve3(
-          new THREE.Vector3(sx * .97, 1.62, sz * .97),
-          new THREE.Vector3(sx * 1.24, 2.75, sz * 1.24),
-          new THREE.Vector3(sx * 1.89, 2.29, sz * 1.89),
-          new THREE.Vector3(sx * 2.04, .72, sz * 2.04)
-        ), .032);
-        tube(new THREE.CubicBezierCurve3(
-          new THREE.Vector3(sx * .56, 2.57, sz * .56),
-          new THREE.Vector3(sx * .72, 2.81, sz * .72),
-          new THREE.Vector3(sx * .81, 2.08, sz * .81),
-          new THREE.Vector3(sx * .84, 1.63, sz * .84)
-        ), .024, 16);
-      }
-      tube(new THREE.CubicBezierCurve3(new THREE.Vector3(0, 2.79, 0), new THREE.Vector3(-.045, 3.40, 0), new THREE.Vector3(-.015, 4.0, 0), new THREE.Vector3(.05, 4.12, 0)), .060, 28);
-      for (let i = 0; i < 5; i++) {
-        const a = i / 5 * Math.PI * 2;
-        tube(new THREE.CubicBezierCurve3(new THREE.Vector3(.05, 4.07, 0), new THREE.Vector3(Math.sin(a) * .22, 4.31, Math.cos(a) * .22), new THREE.Vector3(Math.sin(a) * .33, 3.64, Math.cos(a) * .33), new THREE.Vector3(Math.sin(a) * .27, 2.61, Math.cos(a) * .27)), .018, 22);
-      }
-      for (const [r, y] of [[1.78, .688], [1.54, .688], [.91, 1.633], [.43, 2.593]]) ring(r, .010, jet, y);
-      scene.add(new THREE.HemisphereLight('#ffffff', '#a4ac89', 2.6));
-      const sun = new THREE.DirectionalLight('#fff2d3', 3.4);
-      sun.position.set(-3, 9, 5);
-      sun.castShadow = true;
-      sun.shadow.mapSize.set(1024, 1024);
-      Object.assign(sun.shadow.camera, { left: -7, right: 7, top: 7, bottom: -7, near: .1, far: 25 });
-      sun.shadow.bias = -.0006;
-      sun.shadow.normalBias = .025;
-      scene.add(sun);
-      const fill = new THREE.DirectionalLight('#d4eeff', 1.2);
-      fill.position.set(5, 5, -6);
-      scene.add(fill);
-      const shadow = add(new THREE.PlaneGeometry(200, 200), new THREE.ShadowMaterial({ color: '#4b5b4e', opacity: .13 }), 0, -.375, 0, scene);
-      shadow.rotation.x = -Math.PI / 2;
-      shadow.castShadow = false;
-      const target = new THREE.Vector3(0, 1.55, 0);
-      const reset = () => { camera.position.set(10, 9.4, 12); controls.target.copy(target); camera.zoom = 1; camera.updateProjectionMatrix(); controls.update(); };
-      reset();
-      const resize = () => {
-        const w = stage.clientWidth, h = stage.clientHeight, aspect = w / h;
-        // Fit a bounding sphere, preserving every wall and tree on narrow phones.
-        const halfHeight = Math.max(6.85, 6.85 / aspect);
-        camera.left = -halfHeight * aspect; camera.right = halfHeight * aspect;
-        camera.top = halfHeight; camera.bottom = -halfHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(w, h);
-      };
-      new ResizeObserver(resize).observe(stage);
-      resize();
-      renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
-      document.querySelector('#reset').disabled = false;
-      document.querySelector('#reset').onclick = reset;
-      const exportButton = document.querySelector('#export');
-      exportButton.disabled = false;
-      exportButton.onclick = async () => {
-        exportButton.disabled = true;
-        try {
-          const glb = await new GLTFExporter().parseAsync(garden, { binary: true });
-          const url = URL.createObjectURL(new Blob([glb], { type: 'model/gltf-binary' }));
-          const a = document.createElement('a');
-          a.href = url; a.download = 'classical-garden-fountain.glb'; a.click();
-          setTimeout(() => URL.revokeObjectURL(url), 1000);
-        } catch (error) { status.hidden = false; status.textContent = `模型导出失败：${error.message}`; }
-        finally { exportButton.disabled = false; }
-      };
-      window.fountainPreview = { scene, camera, renderer, garden, exportGLB: () => new GLTFExporter().parseAsync(garden, { binary: true }) };
-      clearTimeout(timeout);
-      status.hidden = true;
-      document.documentElement.dataset.previewReady = 'true';
-    } catch (error) {
-      clearTimeout(timeout);
-      status.textContent = `无法载入 3D 模型：${error.message}。请确认网络及浏览器 WebGL 可用。`;
-    }
-  </script>
-</body>
-</html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>原作喷泉 · 静态小模型提取</title>
+<style>*{box-sizing:border-box}html,body{margin:0;height:100%;overflow:hidden}body{font:14px system-ui,sans-serif;background:#f0eee7;color:#344342}main{height:100svh;display:grid;grid-template-rows:auto 1fr auto}header{padding:20px 24px 0}h1{font-size:18px;margin:0 0 8px}p{margin:0;color:#69756c;font-size:12px}#stage{position:relative;min-height:0}canvas{display:block;width:100%;height:100%}#status{position:absolute;inset:0;display:grid;place-content:center;padding:28px;text-align:center;pointer-events:none}#status.ready{inset:auto 20px 8px;font-size:11px;color:#6c7d70}footer{display:flex;justify-content:center;gap:10px;padding:12px 20px 22px;flex-wrap:wrap}button,a.download{border:1px solid #b7c7ba;background:#faf9f5;color:#344342;border-radius:24px;padding:10px 16px;font:12px system-ui;text-decoration:none;cursor:pointer}button:disabled{opacity:.5;cursor:wait}#source{position:fixed;left:-1600px;top:0;width:1440px;height:900px;border:0;visibility:hidden}#label{display:none;position:fixed;right:18px;bottom:14px;font-size:10px;color:#69756c;letter-spacing:.1em}body.capture main{grid-template-rows:1fr}body.capture header,body.capture footer,body.capture #status.ready{display:none}body.capture #label{display:block}</style>
+<script type="importmap">{"imports":{"three":"/vendor/three.module.js","three/addons/":"/vendor/addons/"}}</script></head><body>
+<main><header><h1>古典庭园喷泉</h1><p>提取原作真实几何、纹理与 GPU 水流的静态帧</p></header><div id="stage"><div id="status">点击“提取原作”生成真实场景的小模型。</div></div><footer><button id="extract">提取原作</button><button id="reset" disabled>复位视角</button><a id="download" class="download" hidden download="up-ccnksbcp.sbox">下载 .sbox</a></footer></main><span id="label">原作静态小模型</span>
+<script type="module">
+const params=new URLSearchParams(location.search);if(params.has('capture'))document.body.classList.add('capture');
+const status=document.querySelector('#status'),start=document.querySelector('#extract'),download=document.querySelector('#download'),stage=document.querySelector('#stage');
+let modules,renderer,camera,view,frame,modelURL;
+const show=(text)=>{status.textContent=text;status.classList.remove('ready')};
+async function dependencies(){return modules??=Promise.all([import('three'),import('/__bake/import-architecture.js'),import('/__bake/pack-preview.js'),import('/__gallery/result-previews.js'),import('/__gallery/preview-model.js')]);}
+async function readGPU(water,buffer){const device=water.device;const staging=device.createBuffer({size:buffer.size,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});const encoder=device.createCommandEncoder();encoder.copyBufferToBuffer(buffer,0,staging,0,buffer.size);device.queue.submit([encoder.finish()]);await staging.mapAsync(GPUMapMode.READ);const data=new Float32Array(staging.getMappedRange().slice(0));staging.unmap();staging.destroy();return data;}
+const smooth=(a,b,x)=>{const t=Math.min(1,Math.max(0,(x-a)/(b-a)));return t*t*(3-2*t)};
+function staticWater(T,source,particles,height){
+  const group=new T.Group();group.name='Original WebGPU water frozen frame';
+  const uni=Array.from(source.water.uniformData),power=uni[2],night=smooth(.66,1,uni[6]);
+  const right=new T.Vector3(...uni.slice(24,27)),up=new T.Vector3(...uni.slice(28,31)),cam=new T.Vector3(...uni.slice(32,35)),sun=new T.Vector3(...uni.slice(36,39));
+  const positions=[],colors=[],uvs=[];let active=0;
+  for(let i=0;i<particles.length;i+=12){
+    // Retain one real particle per four-particle block. A stable block hash
+    // varies the selected lane, preserving all authored source kinds.
+    const index=i/12;if((Math.imul(index>>>2,2654435761)>>>30)!==(index&3))continue;
+    const pos=new T.Vector3(...particles.slice(i,i+3)),vel=new T.Vector3(...particles.slice(i+4,i+7)),life=Math.min(1,Math.max(0,particles[i+3]/Math.max(particles[i+7],.001))),kind=particles[i+9];
+    if(pos.y<-.2||pos.y>7.2||Math.hypot(pos.x,pos.z)>4.2||!Number.isFinite(pos.length()))continue;
+    const speed=vel.length()+.001,unit=vel.clone().normalize();let ax=unit.dot(right)+.0001,ay=unit.dot(up)+.001;const al=Math.hypot(ax,ay);ax/=al;ay/=al;
+    const axis=right.clone().multiplyScalar(ax).addScaledVector(up,ay).normalize(),perp=right.clone().multiplyScalar(-ay).addScaledVector(up,ax).normalize();
+    let width=.038,stretch=.13+speed*.027,alpha=.55;
+    if(kind<.5){width=(.04+(.019-.04)*smooth(.42,.78,life))*(.78+.34*power);stretch=.14+.14*power+speed*.018;alpha=.13+(.075-.13)*life}
+    else if(kind<1.5){width=.026*(.85+.29*power);stretch=.12+speed*.022;alpha=.095}
+    else if(kind<2.5){width=.018;stretch=.045+speed*.012;alpha=.06}
+    else{width=.038*(.8+.4*power);stretch=.08+speed*.012;alpha=.08}
+    const age=smooth(1,.72,life)*smooth(0,kind<1.5?.18:kind>2.5?.12:.08,life);
+    const half=cam.clone().sub(pos).normalize().sub(sun).normalize();const glint=Math.pow(Math.max(unit.dot(half),0),10)*(.35+.65*(Math.sin(particles[i+8]*31+uni[1]*22)*.5+.5));
+    alpha=Math.min(.34,alpha*age*(kind>1.5&&kind<2.5?.55:1)+glint*.055);if(alpha<.004)continue;
+    const mix=.46+glint*.34;let rgb=[.5+(.92-.5)*mix,.82+(.98-.82)*mix,1];rgb=rgb.map((c,j)=>c+([.42,.88,1][j]-c)*night*.42);
+    for(const [x,y] of [[-1,-1],[1,-1],[-1,1],[-1,1],[1,-1],[1,1]]){const p=pos.clone().addScaledVector(perp,x*width).addScaledVector(axis,y*stretch);positions.push(p.x,p.y,p.z);colors.push(...rgb,alpha);uvs.push((x+1)/2,(y+1)/2)}active++;
+  }
+  const canvas=document.createElement('canvas');canvas.width=canvas.height=64;const ctx=canvas.getContext('2d'),image=ctx.createImageData(64,64);for(let y=0;y<64;y++)for(let x=0;x<64;x++){const at=(y*64+x)*4;image.data.set([255,255,255,Math.round(smooth(1,.18,Math.hypot((x+.5)/32-1,((y+.5)/32-1)*.56))*255)],at)}ctx.putImageData(image,0,0);
+  const geometry=new T.BufferGeometry();geometry.setAttribute('position',new T.Float32BufferAttribute(positions,3));geometry.setAttribute('color',new T.Float32BufferAttribute(colors,4));geometry.setAttribute('uv',new T.Float32BufferAttribute(uvs,2));
+  const particleMesh=new T.Mesh(geometry,new T.MeshBasicMaterial({vertexColors:true,map:new T.CanvasTexture(canvas),transparent:true,depthTest:false,depthWrite:false,side:T.DoubleSide}));particleMesh.name='Original GPU particle billboards';particleMesh.renderOrder=2;group.add(particleMesh);
+  const grid=source.water.gridSize;const sample=(u,v)=>height[Math.floor(Math.min(1,Math.max(0,v))*(grid-1))*grid+Math.floor(Math.min(1,Math.max(0,u))*(grid-1))];
+  for(const [radius,y] of [[3.16,.255],[1.66,1.535],[.91,2.60]]){
+    const verts=[],rgba=[],step=1/91;
+    const vertex=(u,v)=>{const x=u*2-1,z=v*2-1,r=Math.hypot(x,z),h=sample(u,v),eps=1/grid,n=new T.Vector3(-(sample(u+eps,v)-sample(u-eps,v))*22,1,-(sample(u,v+eps)-sample(u,v-eps))*22).normalize(),p=new T.Vector3(x*radius,y+h*.42,z*radius),vd=cam.clone().sub(p).normalize(),f=Math.pow(1-Math.min(1,Math.max(0,vd.dot(n))),3),light=Math.pow(Math.max(sun.clone().reflect(n).dot(vd),0),42),foam=smooth(.018,.07,Math.abs(h))*smooth(.97,.55,r),sky=[.62+(.07-.62)*night,.82+(.23-.82)*night,1+(.42-1)*night],shallow=[.18,.44,.5];let color=shallow.map((c,j)=>c+(sky[j]-c)*(.42+f*.38)+[1,.91,.72][j]*light*(1-night)*.65+[.26,.78,1][j]*night*(.18+foam*.25));color=color.map((c,j)=>c+([.84,.96,1][j]-c)*foam*.48);return {p,color,alpha:(.32+f*.2+foam*.18)*smooth(1,.88,r),r}};
+    for(let row=0;row<91;row++)for(let col=0;col<91;col++){const u=col*step,v=row*step;for(const corners of [[[u,v],[u+step,v],[u,v+step]],[[u,v+step],[u+step,v],[u+step,v+step]]]){const points=corners.map(([a,b])=>vertex(a,b));if(points.every(p=>p.r>1))continue;for(const p of points){verts.push(p.p.x,p.p.y,p.p.z);rgba.push(...p.color,p.alpha)}}}
+    // The authored native water pass overlays the Three canvas with no depth
+    // attachment. Keep that behavior, including its water under the stone rim.
+    const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(verts,3));g.setAttribute('color',new T.Float32BufferAttribute(rgba,4));const mesh=new T.Mesh(g,new T.MeshBasicMaterial({vertexColors:true,transparent:true,depthTest:false,depthWrite:false,side:T.DoubleSide}));mesh.name='Original GPU water surface '+radius;mesh.renderOrder=1;group.add(mesh);
+  }
+  return {group,active};
+}
+async function generate(){
+  start.disabled=true;show('正在载入原作并等待场景稳定…');document.documentElement.dataset.previewReady='false';
+  let timeout;
+  try{
+    const [T,{importArchitecture},{packPreview},preview,{readModel}]=await dependencies();
+    frame=document.createElement('iframe');frame.id='source';frame.title='原作提取副本';
+    const ready=new Promise((resolve,reject)=>{const listener=e=>{if(e.source===frame.contentWindow&&e.origin===location.origin&&e.data?.type==='gallery-scene-ready'){removeEventListener('message',listener);resolve()}};addEventListener('message',listener);timeout=setTimeout(()=>{removeEventListener('message',listener);reject(new Error('原作载入超时，请确认本机 WebGPU 可用'))},60000)});
+    frame.src='/original/index.html?sandtable=1';document.body.append(frame);await ready;clearTimeout(timeout);
+    const source=frame.contentWindow.__fountainSource;if(!source)throw new Error('缺少原作捕获接口');source.renderer.setAnimationLoop(null);await source.water.device.queue.onSubmittedWorkDone();
+    show('正在提取原作几何与 GPU 水面、水滴…');
+    const [particles,height]=await Promise.all([readGPU(source.water,source.water.particleBuffer),readGPU(source.water,source.water.heightCur)]);
+    // This authored courtyard already has a finite 24×24 ground plane. Using
+    // non-architecture extraction includes that real plane in the footprint.
+    const imported=await importArchitecture([source.scene],'up-ccnksbcp',{architecture:false,task:'classical-fountain'});
+    const water=staticWater(T,source,particles,height);imported.group.add(water.group);imported.group.updateMatrixWorld(true);imported.previewBounds.copy(new T.Box3().setFromObject(imported.group));
+    show('正在按现有管线打包 .sbox 并重新加载验证…');const buffer=await packPreview(imported,true);
+    if(modelURL)URL.revokeObjectURL(modelURL);modelURL=URL.createObjectURL(new Blob([buffer],{type:'application/octet-stream'}));download.href=modelURL;download.hidden=false;
+    const saved=await fetch('/__save/model.sbox',{method:'POST',body:buffer});if(!saved.ok)throw new Error('本机模型保存失败：'+saved.status);
+    const loaded=await readModel(modelURL);view=preview.buildPreviewScene(loaded,true,true);camera=preview.createPreviewCamera();
+    if(!renderer){renderer=preview.createPreviewRenderer(Math.min(devicePixelRatio,2));stage.append(renderer.domElement);new ResizeObserver(()=>resize()).observe(stage)}
+    resize();renderer.render(view.scene,camera);document.querySelector('#reset').disabled=false;document.querySelector('#reset').onclick=()=>{camera=preview.createPreviewCamera();resize();renderer.render(view.scene,camera)};
+    status.textContent='原作提取完成 · '+water.active+' 个真实水滴 · '+Math.round(buffer.byteLength/1024)+' KiB .sbox';status.classList.add('ready');document.documentElement.dataset.previewReady='true';document.documentElement.dataset.modelBytes=buffer.byteLength;
+    source.water.device.destroy();source.renderer.dispose();frame.remove();frame=null;
+  }catch(error){clearTimeout(timeout);show('提取失败：'+error.message);document.documentElement.dataset.previewReady='error';if(frame){frame.remove();frame=null}}
+  finally{start.disabled=false}
+}
+function resize(){if(!renderer||!view)return;const w=stage.clientWidth,h=stage.clientHeight;modules.then(([, , ,preview])=>{preview.fitPreviewCamera(camera,view.bounds,w/h);renderer.setSize(w,h);renderer.render(view.scene,camera)})}
+start.addEventListener('click',generate);
+async function loadSaved(){
+  start.disabled=true;show('正在加载已提取的原作 .sbox…');
+  try{const [, , ,preview,{readModel}]=await dependencies();const loaded=await readModel('/model.sbox');view=preview.buildPreviewScene(loaded,true,true);camera=preview.createPreviewCamera();renderer=preview.createPreviewRenderer(Math.min(devicePixelRatio,2));stage.append(renderer.domElement);new ResizeObserver(resize).observe(stage);resize();renderer.render(view.scene,camera);download.href='/model.sbox';download.hidden=false;document.querySelector('#reset').disabled=false;document.querySelector('#reset').onclick=()=>{camera=preview.createPreviewCamera();resize()};status.textContent='已加载原作静态模型';status.classList.add('ready');document.documentElement.dataset.previewReady='true'}
+  catch(error){show('模型加载失败：'+error.message);document.documentElement.dataset.previewReady='error'}finally{start.disabled=false}
+}
+if(params.has('model'))loadSaved();else if(params.has('capture'))generate();
+</script></body></html>

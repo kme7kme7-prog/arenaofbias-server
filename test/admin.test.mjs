@@ -111,7 +111,7 @@ test('face review migration preserves old decisions and leaves unverified upload
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('upload review records only explicit face decisions and face settings preserve status', async () => withPlatform(async ({ call }) => {
+test('a first verification decides both faces and face settings preserve status', async () => withPlatform(async ({ call }) => {
   const draft = await call('voter', 'POST', '/api/drafts?task=one&name=work.html', html, true);
   assert.equal(draft.status, 200, JSON.stringify(draft.data));
   const submitted = await call('voter', 'POST', '/api/works', {
@@ -125,7 +125,9 @@ test('upload review records only explicit face decisions and face settings prese
   assert.equal(review.status, 200, JSON.stringify(review.data));
   const galleryReviewed = await uploaded();
   assert.ok(galleryReviewed.reviewed.gallery);
-  assert.equal(galleryReviewed.reviewed.arena, null);
+  assert.ok(galleryReviewed.reviewed.arena, 'verification publishes to the arena unless the request says otherwise');
+  assert.equal(galleryReviewed.show_arena, true);
+  assert.deepEqual(galleryReviewed.arena, { state: 'not_qualified', reason: '生成方式未填写' });
   const entertainment = await call('root', 'POST', `/api/admin/works/one/${id}/face-settings`, { show_entertainment: true });
   assert.deepEqual(entertainment.data.work.reviewed, galleryReviewed.reviewed);
   const settings = await call('root', 'POST', `/api/admin/works/one/${id}/face-settings`, { show_arena: false });
@@ -133,11 +135,14 @@ test('upload review records only explicit face decisions and face settings prese
   assert.ok(settings.data.work.reviewed.arena);
   assert.equal(settings.data.work.reviewed.gallery, galleryReviewed.reviewed.gallery);
   assert.equal(settings.data.work.status, 'verified');
+  assert.deepEqual(settings.data.work.arena, { state: 'off' });
+  const again = await call('root', 'POST', `/api/works/one/${id}/review`, { status: 'verified' });
+  assert.deepEqual(again.data.work.arena, { state: 'off' }, 'a repeated verification keeps an admin opt-out');
   const curated = (await call('root', 'GET', '/api/admin/works?source=curated')).data.works;
   assert.ok(curated.every((work) => !Object.hasOwn(work, 'reviewed')));
 }));
 
-test('the gallery review count waits for a gallery decision even after the arena verified', async () => withPlatform(async ({ call }) => {
+test('verification clears the gallery review count whichever face the request names', async () => withPlatform(async ({ call }) => {
   const pending = async () => (await call('root', 'GET', '/api/bootstrap')).data.review.unverified;
   const before = await pending();
   const draft = await call('voter', 'POST', '/api/drafts?task=one&name=work.html', html, true);
@@ -148,7 +153,7 @@ test('the gallery review count waits for a gallery decision even after the arena
   const id = submitted.data.work.id;
   assert.equal(await pending(), before + 1);
   assert.equal((await call('root', 'POST', `/api/works/one/${id}/review`, { status: 'verified', show_arena: true })).status, 200);
-  assert.equal(await pending(), before + 1);
+  assert.equal(await pending(), before);
   assert.equal((await call('root', 'POST', `/api/admin/works/one/${id}/face-settings`, { show_gallery: false })).status, 200);
   assert.equal(await pending(), before);
 }));

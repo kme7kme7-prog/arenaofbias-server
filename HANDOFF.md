@@ -1,5 +1,12 @@
 # HANDOFF.md · 当前状态
 
+## 通过即公开规则（2026-10-02，本地提交，未推送、未部署）
+
+- 用户拍板：核验通过即公开，合格自动进盲评。library.review 在作品首次转为 verified 且请求未给开关、也未给 audience 时两面都开启并记录本面决定；已是 verified 的重复核验保持原开关（管理员关闭的盲评不会被重新打开）。管理员代传与收件箱发布不再显式传竞技场关闭，走同一缺省。馆藏 override 默认不变（仍需在后台作品页开启）。
+- 新增 arena 状态：toPublic 对作者与管理员、adminWork 对投稿输出 { state: in_pool | off | not_qualified | curated | waiting, reason? }，客户端只显示不推断。admin.js 已验证提示同步。api-contract 更新字段表、review 缺省、代传 / 收件箱缺省与 batch-review 的 show_arena。
+- 测试按新规则改写三条旧断言（分面单独批准 → 首次核验两面开启），新增重复核验保持关闭、not_qualified 原因、in_pool 断言。check 87/0、test 244/244。不迁移存量数据：已验证但竞技场关闭的投稿由管理员在 Gallery「不进盲评」批量开启。
+- 工作区未跟踪 scripts/fountain-preview/serve.mjs 非本轮产生，未改动。见 [归档](docs/archive/2026-10-02-publish-on-verify-wsnxxxs.md)。
+
 ## 喷泉小模型与本机封面替换（2026-10-02，封面已更新，源码本地提交）
 
 - 用户暂停 WebGPU 环境处理，并明确“小模型”指简化后的 3D 喷泉模型；要求本机截图后换上去。新增 `scripts/fountain-preview/index.html` / README，轻量 WebGL2 预览使用固定 Three.js 0.169.0 CDN，不增加服务 npm 依赖；保留石池、水盘、中央水柱、环绕弧形喷流和少量庭园。固定三分之四视角，可旋转、复位、导出 GLB；`?capture=1` 隐藏控件，保留“简化模型预览”标签。

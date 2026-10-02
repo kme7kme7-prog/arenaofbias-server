@@ -142,7 +142,7 @@ function confirmDialog({ title, message, confirm = '确认', danger = false }) {
 
 // ---- shared bits ---------------------------------------------------------------------------
 const STATUS = {
-  verified: { label: '已验证', hint: '已核验并优先展示；是否进入盲评以盲评开关为准', icon: 'check' },
+  verified: { label: '已验证', hint: '已核验并公开；单轮生成且无人工介入的作品参与盲评', icon: 'check' },
   unverified: { label: '未验证', hint: '等待核验：可以浏览和贴表情，暂不参与盲评', icon: 'clock' },
   questioned: { label: '存疑', hint: '核验存疑：仅供参考，不参与互动与盲评', icon: 'alert' },
 };

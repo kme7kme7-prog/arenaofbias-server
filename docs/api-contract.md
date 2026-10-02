@@ -121,6 +121,7 @@ API 域静态 `/data.json`（含等价编码路径）仅管理员登录后返回
 | `reviewerName` / `reviewedAt` | string / null | 审核人从最近一次审核 audit 解析；审核时间保留在作品行 |
 | `contentKey` | string | 作品永久内容令牌（`w` + 32 位十六进制），作品 origin 的子域名 |
 | `checks` / `trial` | object | 上传检查报告 / 试加载探针数据（仅作者与管理员可见） |
+| `arena` | object | 盲评池状态（仅作者与管理员可见；管理员作品视图的投稿同样输出）：`{ "state": "in_pool" \| "off" \| "not_qualified" \| "curated" \| "waiting", "reason"?: "多轮生成" \| "有人工介入" \| "生成方式未填写" }`。`off` 为管理员关闭竞技场开关，`not_qualified` 为开关开启但生成方式不符，`waiting` 为尚未核验或内容未放行，`curated` 为已转为馆藏。客户端只显示此结论，不自行推断。 |
 | `trial.calibration` | object / null | Show1 逐作品展示设置，含可选的 `framing`（画布）与 `camera`（3D 视角）；没有时缺省 |
 | `captures` | object | 截图映射 `{条件id: 文件名}`，由自动截图写回 |
 | `cover` | string / null | 封面文件名（`cover.png` / `cover.jpg` / `cover.webp`） |
@@ -443,7 +444,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 - `status` 取值 `verified` / `questioned` / `unverified`；`questioned` 必须给 `reason`（`400` 否则）；置为 `verified` 会清空理由。
 - 仅当请求体出现 `modelId` / `modelName` 键时才重取模型身份，否则保持原值；`effort` 同理。
-- `title`、`summary` 与两个布尔门面开关均可选；审核通过时可同时修改。兼容旧的 `audience` 参数，将其换算为两个开关；响应中的 `audience` 由最终开关计算。审核状态和 audit 在同一事务写入。管理员在审核中修改声明保持现有 `moderation`，不重新置为 `pending` 或排队。
+- `title`、`summary` 与两个布尔门面开关均可选；审核通过时可同时修改。作品首次转为 `verified`（原状态非 `verified`）且请求未给开关、也未给 `audience` 时，两个开关都开启并记为本面决定：通过即公开，符合盲评条件的同时进池。已是 `verified` 的重复核验保持原开关。兼容旧的 `audience` 参数，将其换算为两个开关；响应中的 `audience` 由最终开关计算。审核状态和 audit 在同一事务写入。管理员在审核中修改声明保持现有 `moderation`，不重新置为 `pending` 或排队。
 - 审核可选 `harnessId`、`harnessOther`、`providerId`；按 3.6 节的 Harness 与服务商规则校验，只更新请求中出现的维度。旧 `harnessVersion` 忽略。
 - 内容尚未放行（`moderation.status` 不为 `legacy` / `approved`）时提交 `status: "verified"` 返回 `409 请先完成内容审核`。`questioned` / `unverified` 不受此限制。
 
@@ -459,7 +460,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 认证：管理员；每批消耗一次 write 限流。请求 `{ "works": [{ "task": "…", "id": "…" }], "status": "verified" | "questioned", "reason": "…", "meta": { "effort": "High", "providerId": "official", "harnessId": "…", "harnessOther": "…" } }`，`works` 为 1–100 件，`meta` 选填且仅允许这四个字段，字段校验同单件 meta。列表、状态或理由无效时整体 `400`，不执行任何项目；`questioned` 必须提供非空理由，最多 500 字。
 
-每件在独立事务中先调用 `setMeta`（有修改时写 `meta` audit），再调用 review 并写核验 audit。`verified` 要求内容已为 `approved` / `legacy`，否则单件 `409 请先完成内容审核`；最终推理档位与服务商必须齐全，否则单件 `400`。核验通过强制 `show_gallery: true`。单件失败回滚该件全部修改，包括 meta 与 audit；管理员修改声明保持现有 `moderation`。响应 `200` 的 `results` 顺序与成功/失败项结构同 batch-moderation，每批只刷新一次缓存。认证、同源与限流错误为 `401` / `403` / `429`。
+每件在独立事务中先调用 `setMeta`（有修改时写 `meta` audit），再调用 review 并写核验 audit。`verified` 要求内容已为 `approved` / `legacy`，否则单件 `409 请先完成内容审核`；最终推理档位与服务商必须齐全，否则单件 `400`。核验通过强制 `show_gallery: true`；可选布尔 `show_arena`（非布尔整体 `400`），缺省时按首次核验规则开启。单件失败回滚该件全部修改，包括 meta 与 audit；管理员修改声明保持现有 `moderation`。响应 `200` 的 `results` 顺序与成功/失败项结构同 batch-moderation，每批只刷新一次缓存。认证、同源与限流错误为 `401` / `403` / `429`。
 
 **`POST /api/works/:task/:id/reactions`** —— 表情反应（开关式）
 
@@ -714,7 +715,7 @@ v23 追加可空 `questions.category`，无分类旧题按标签顺序取第一�
 
 ### 3.17 Show1 历史作品的审核与站点展示（schema v7）
 
-`audience` 为 `hidden` / `show1` / `show2` / `both`，API 保留兼容输出，v18 删除 `works.audience` 及其索引。实际可见性只由 `show_gallery`、`show_arena` 决定；早期迁移仍按当时的 `audience` 回填开关。新投稿和管理员代传默认展览馆开启、竞技场关闭；Show1 历史待审作品升级后两个开关关闭。管理员审核通过时可指定门面。后台审核视图可取得随机作品内容令牌用于私密试加载；令牌本身具有预览能力，不应公开转发。
+`audience` 为 `hidden` / `show1` / `show2` / `both`，API 保留兼容输出，v18 删除 `works.audience` 及其索引。实际可见性只由 `show_gallery`、`show_arena` 决定；早期迁移仍按当时的 `audience` 回填开关。新投稿入库时展览馆开启、竞技场关闭，首次核验通过时缺省两面都开启；管理员代传与收件箱发布同样走这条缺省，可显式指定。Show1 历史待审作品升级后两个开关关闭。后台审核视图可取得随机作品内容令牌用于私密试加载；令牌本身具有预览能力，不应公开转发。
 
 **`GET /api/show1/works`** —— Show1 公开作品列表，不需要登录、无限流。成功 `200`：`{ "works": [<作品公开视图>], "reactions": { "counts": {}, "mine": {} } }`。只返回 `verified` 且 `show_arena=1` 的 SQLite 作品；`/api/bootstrap.works` 只看 `show_gallery`。竞技场盲评池同样使用 `show_arena`。Show1 题目定义仍由数据包负责，此接口不创建题目。
 
@@ -752,7 +753,7 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 
 **`GET /api/admin/traffic?days=N`** `N` 默认 30，范围 1–90。响应 `{ "days": 30, "daily": [{ "day": "2026-09-28", "pv": 12, "uniqueIps": 8 }], "paths": [{ "path": "/", "pv": 9 }], "users": { "total": 24, "new": 2 } }`。`daily` 按 UTC 日补齐零值；`paths` 最多 20 条；错误 `400 invalid_query`。
 
-**`POST /api/admin/works/upload`** 原始 HTML 或 ZIP 请求体，查询参数 `task`、`name`（含扩展名）、`title`、`modelId` 或 `modelName`、`summary`、`tool`、`harnessId`、`harnessOther`、必填 `effort`、`providerId`、`template`、`show_gallery=0|1`、`show_arena=0|1`。来源字段遵循 3.6 节规则，旧 `harnessVersion` 忽略；管理员可不填 Harness，`tool` 不再自动设为录入渠道。管理员上传即人工内容审核：登记时保存 `moderation: { status: "approved", source: "human", reviewer: <管理员名>, reason: "管理员上传", at: <毫秒时间> }`，写 `content-review` 审计，再核验为 `verified`；不送 Luna，仍可排队生成截图。开关缺省时展览馆开启、竞技场关闭。响应 `{ "work": <合并管理员作品视图> }`。错误沿用 `/api/drafts` 和 `/api/works`，另有 `400 invalid_face_settings`、`413`、`429`。该流程在 audit 中留下 `submit`、`content-review`、`verified` 三条记录；普通核验接口的内容未放行 409 不影响此路径。
+**`POST /api/admin/works/upload`** 原始 HTML 或 ZIP 请求体，查询参数 `task`、`name`（含扩展名）、`title`、`modelId` 或 `modelName`、`summary`、`tool`、`harnessId`、`harnessOther`、必填 `effort`、`providerId`、`template`、`show_gallery=0|1`、`show_arena=0|1`。来源字段遵循 3.6 节规则，旧 `harnessVersion` 忽略；管理员可不填 Harness，`tool` 不再自动设为录入渠道。管理员上传即人工内容审核：登记时保存 `moderation: { status: "approved", source: "human", reviewer: <管理员名>, reason: "管理员上传", at: <毫秒时间> }`，写 `content-review` 审计，再核验为 `verified`；不送 Luna，仍可排队生成截图。开关缺省时按首次核验规则两面都开启。响应 `{ "work": <合并管理员作品视图> }`。错误沿用 `/api/drafts` 和 `/api/works`，另有 `400 invalid_face_settings`、`413`、`429`。该流程在 audit 中留下 `submit`、`content-review`、`verified` 三条记录；普通核验接口的内容未放行 409 不影响此路径。
 
 竞技场配对和 Bradley–Terry 计分都只纳入当前 `show_arena=1` 的已验证作品；精选没有覆盖记录时竞技场开关默认关闭。`votes.source='arena'` 的限制不变。Show1 娱乐榜仍从全量历史票回放。
 
@@ -763,7 +764,7 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 - **`GET /api/admin/inbox`** 返回 `{ "entries": [...] }`，按加入时间升序。每项含 `id`、原文件名 `name`、`kind`（HTML/ZIP）、字节数 `size`、毫秒时间戳 `addedAt`、从文件名推断的 `suggest: { title, model }` 和预览路径 `preview`。
 - **`POST /api/admin/inbox?name=<文件名>[&overwrite=1]`** 请求体为原始 HTML 或 ZIP，最多 30 MB；文件名只接受 `.html`、`.htm`、`.zip`（含「标题，模型.html」格式）。上传前执行包检查；同名文件默认返回 `409 inbox_conflict`，`overwrite=1` 覆盖。成功 `200`：`{ "ok": true, "name": "…" }`，写 `inbox-upload` audit。
 - **`GET /admin/inbox/:id/...`** 是预览文件路径，不是 API；仅管理员可读取，其他用户或文件不存在时返回纯文本 `404`。`/file` 返回原始文件；ZIP 的预览路径由列表给出，响应使用 `no-store`。
-- **`POST /api/admin/inbox/register`** JSON 请求含 `id`、`task`、必填 `effort`、`providerId`，可选的 `title`、`summary`、`modelId` 或 `modelName`、`tool`、`harnessId`、`harnessOther`；标题和模型名可从文件名建议值补齐。来源字段遵循 3.6 节规则，旧 `harnessVersion` 忽略；不填时 `tool` 为空，不写录入渠道。缺省登记为 `unverified` 且两个门面均关闭，照常走内容审核；`publish: true` 时按管理员上传即人工内容审核，保存 `approved` / `human`、管理员名、理由「管理员上传」与时间并写 `content-review` 审计，然后直接核验为 `verified`，不送 Luna。缺省展览馆开启、竞技场关闭，可用 `show_gallery` / `show_arena` 指定。成功 `200`：`{ "work": <管理员作品视图> }`，移除收件箱文件并写 `inbox-register` audit；无效或已移除的 `id` 返回 `404`。
+- **`POST /api/admin/inbox/register`** JSON 请求含 `id`、`task`、必填 `effort`、`providerId`，可选的 `title`、`summary`、`modelId` 或 `modelName`、`tool`、`harnessId`、`harnessOther`；标题和模型名可从文件名建议值补齐。来源字段遵循 3.6 节规则，旧 `harnessVersion` 忽略；不填时 `tool` 为空，不写录入渠道。缺省登记为 `unverified` 且两个门面均关闭，照常走内容审核；`publish: true` 时按管理员上传即人工内容审核，保存 `approved` / `human`、管理员名、理由「管理员上传」与时间并写 `content-review` 审计，然后直接核验为 `verified`，不送 Luna。缺省按首次核验规则两面都开启，可用 `show_gallery` / `show_arena` 指定。成功 `200`：`{ "work": <管理员作品视图> }`，移除收件箱文件并写 `inbox-register` audit；无效或已移除的 `id` 返回 `404`。
 - **`DELETE /api/admin/inbox?id=<收件箱 ID>`** 移除暂存文件，成功 `200`：`{ "ok": true }`，写 `inbox-remove` audit；文件不存在返回 `404`。
 - **`POST /api/admin/works/:task/:id/meta`** 仅编辑 SQLite 投稿，不编辑馆藏。JSON 请求可含 `title`、`summary`、`modelName`、`modelId`、`effort`、`harnessId`、`harnessOther`、`providerId`；至少提供一个允许字段（只有旧 `harnessVersion` 时成功返回原视图，不写 audit 或重新审核）。标题不能为空，`modelId` 须存在于目录。来源字段按 3.6 节校验；设置 Harness ID 会清空「其他」，反之亦然。管理员编辑送审声明保持现有 `moderation`，不重新置为 `pending` 或排队。成功 `200`：`{ "work": <管理员作品视图> }`，写 `meta` audit；无效字段或内容返回 `400`，投稿不存在或目标为馆藏返回 `404 not_found`。
 - **`POST /api/admin/works/:task/:id/nominate`** 仅对已核验、尚未收录、且题目在当前数据包内的投稿有效。生成有效期 14 天的随机导出令牌；重复提名会换发令牌，数据库仅存 SHA-256。返回 `{ "exportUrl": "<当前来源>/api/curate/export/<令牌>", "command": "npm run intake:from-server -- <exportUrl>" }`。提名不改变作品的公开展示状态。管理员列表以 `nominatedAt` 标记提名，以 `curatedAs` 标记已收录。

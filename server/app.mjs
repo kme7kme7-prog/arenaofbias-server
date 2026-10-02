@@ -535,7 +535,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     }
     library.reviewContent(admin, task, submitted.id, { status: 'approved', reason: '管理员上传' });
     const work = library.review(admin, task, submitted.id, { status: 'verified',
-      show_gallery: gallery === null ? true : gallery === '1', show_arena: arenaFace === null ? false : arenaFace === '1' });
+      ...(gallery === null ? {} : { show_gallery: gallery === '1' }), ...(arenaFace === null ? {} : { show_arena: arenaFace === '1' }) });
     queueWork(work);
     arena.invalidate();
     return { work: library.adminWork(work) };

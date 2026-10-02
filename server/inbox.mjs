@@ -135,8 +135,8 @@ export function createInbox({ library, config, limits }) {
       if (body.publish) {
         work = library.reviewContent(admin, work.taskId, work.id, { status: 'approved', reason: '管理员上传' });
         work = library.review(admin, work.taskId, work.id, { status: 'verified',
-          show_gallery: body.show_gallery === undefined ? true : Boolean(body.show_gallery),
-          show_arena: Boolean(body.show_arena) });
+          ...(body.show_gallery === undefined ? {} : { show_gallery: Boolean(body.show_gallery) }),
+          ...(body.show_arena === undefined ? {} : { show_arena: Boolean(body.show_arena) }) });
       } else {
         // Per-face review: registration decides nothing about display. The work waits
         // with both faces off until each system's review turns its own face on.

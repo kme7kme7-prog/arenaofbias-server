@@ -296,6 +296,16 @@ export function createLibrary({ db, catalog, config, limits }) {
     generationOf(work).generationMode === 'single-turn' && work.humanIntervention === 'none';
   const isEligible = (work) => Boolean(work && work.status === 'verified' && work.dir && !work.curatedAs && visibleTo(work, 'show1') &&
     generationQualified(work));
+  // The blind-pool rule read once for every client: in the pool, turned off by an admin, or why not.
+  const arenaState = (work) => {
+    if (isEligible(work)) return { state: 'in_pool' };
+    if (work.status !== 'verified' || !publicContent(work)) return { state: 'waiting' };
+    if (work.curatedAs) return { state: 'curated' };
+    if (!flagsOf(work).show_arena) return { state: 'off' };
+    const { generationMode, humanIntervention } = generationOf(work);
+    return { state: 'not_qualified', reason: generationMode === 'multi-turn' ? '多轮生成'
+      : humanIntervention && humanIntervention !== 'none' ? '有人工介入' : '生成方式未填写' };
+  };
   const isInteractive = (work) => Boolean(work && work.status !== 'questioned' &&
     (visibleTo(work, 'show1') || visibleTo(work, 'show2')));
 
@@ -499,7 +509,7 @@ export function createLibrary({ db, catalog, config, limits }) {
         note: work.note,
         status: work.status,
         ...(privileged ? { moderation: viewer.role === 'admin' ? work.moderation : authorModeration(work.moderation) } : {}),
-        ...(privileged ? { audience: work.audience } : {}),
+        ...(privileged ? { audience: work.audience, arena: arenaState(work) } : {}),
         reason: work.reason,
         owner: work.ownerName,
         mine: Boolean(viewer && viewer.id === work.ownerId),
@@ -541,6 +551,7 @@ export function createLibrary({ db, catalog, config, limits }) {
         has_calibration_arena: Boolean(work.curated ? override?.calibration_arena : work.calibrationArena),
         arena_eligible: isEligible(work),
         arena_generation_ok: generationQualified(work),
+        ...(work.curated ? {} : { arena: arenaState(work) }),
       };
     },
 
@@ -858,6 +869,10 @@ export function createLibrary({ db, catalog, config, limits }) {
       const generation = generationFrom(body, work);
       if ((status === 'verified' || body.effort !== undefined) && !effort) fail(400, '请选择或填写推理档位');
       if ((status === 'verified' || Object.hasOwn(body, 'providerId')) && !source.providerId) fail(400, '请选择服务商');
+      // Passing verification publishes: a first verification opens both faces unless the request names one.
+      if (status === 'verified' && work.status !== 'verified' && body.audience === undefined) {
+        body = { ...body, show_gallery: body.show_gallery ?? true, show_arena: body.show_arena ?? true };
+      }
       const audience = body.audience === undefined ? work.audience : String(body.audience);
       if (!['hidden', 'show1', 'show2', 'both'].includes(audience)) fail(400, '展示站点无效');
       for (const key of ['show_gallery', 'show_arena']) if (body[key] !== undefined && typeof body[key] !== 'boolean') fail(400, '门面开关无效', 'invalid_face_settings');

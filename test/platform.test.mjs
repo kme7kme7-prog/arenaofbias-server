@@ -992,7 +992,7 @@ describe('platform lifecycle', () => {
 
   });
 
-  test('imported works stay out of both public lists until admin chooses a site', async () => {
+  test('imported works stay out of both public lists until verified, which publishes both faces', async () => {
     const staged = await call('alice', 'POST', '/api/drafts?task=one&name=legacy.html', '<!doctype html><html><head><title>Legacy</title></head><body><h1>Legacy</h1></body></html>', { raw: true });
     assert.equal(staged.status, 200);
     const submitted = await call('alice', 'POST', '/api/works', { draftId: staged.data.draft.id, confirmed: true, title: 'Legacy', modelId: 'm-a', effort: 'Default', providerId: 'official', tool: 'CLI', generationMode: 'single-turn', humanIntervention: 'none' });
@@ -1004,7 +1004,11 @@ describe('platform lifecycle', () => {
     assert.ok(!(await call('guest', 'GET', '/api/show1/works')).data.works.some((work) => work.id === id));
     assert.equal((await call('bob', 'POST', `${path}/reactions`, { emoji: '👍' })).status, 409);
     assert.equal((await call('guest', 'GET', `${path}/comments`)).status, 404);
-    assert.equal((await call('root', 'POST', `${path}/review`, { status: 'verified' })).status, 400);
+    const verified = await call('root', 'POST', `${path}/review`, { status: 'verified' });
+    assert.equal(verified.status, 200);
+    assert.deepEqual(verified.data.work.arena, { state: 'in_pool' });
+    assert.ok((await call('guest', 'GET', '/api/bootstrap')).data.works.some((work) => work.id === id));
+    assert.ok((await call('guest', 'GET', '/api/show1/works')).data.works.some((work) => work.id === id));
     assert.equal((await call('bob', 'POST', `${path}/review`, { status: 'verified', audience: 'show1' })).status, 403);
     assert.equal((await call('root', 'POST', `${path}/review`, { status: 'verified', audience: 'show1' })).status, 200);
     assert.ok(!(await call('guest', 'GET', '/api/bootstrap')).data.works.some((work) => work.id === id));

@@ -60,7 +60,7 @@ test('eligibility normalizes agent and controls matches, counted scores and pool
     work('multi', 'a', { generationMode: 'multi-turn' }), work('guided', 'b', { humanIntervention: 'prompt-guided' }),
     work('edited', 'b', { humanIntervention: 'code-edited' }), work('unset', 'b', { generationMode: '' })]);
   try {
-    assert.deepEqual(f.arena.poolStats('one'), { works: 0, entries: 0 });
+    assert.deepEqual(f.arena.poolStats('one'), { works: 5, entries: 2 }, 'curated works start in the pool');
     f.enable();
     assert.equal(f.library.work('one', 'agent').generationMode, 'single-turn');
     assert.deepEqual(f.library.eligible('one').map((item) => item.id).sort(), ['a1', 'a2', 'agent', 'b1', 'b2']);

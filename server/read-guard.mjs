@@ -16,9 +16,6 @@ export function createReadGuard(config) {
   const ip = (req) => clientIp(req, config.trustProxy);
   return {
     api(req, pathname) {
-      // Capability-protected intake exports already have token/IP limits and may
-      // legitimately fetch thousands of files in one run.
-      if (/^\/api\/curate\/export\/[^/]+(?:\/file)?$/.test(pathname)) return;
       const key = ip(req);
       api(key);
       if (catalogPaths.has(pathname)) catalog(key);

@@ -76,9 +76,6 @@ export function registerShow1Compat(router, deps) {
     arenaEditorial: db.prepare("SELECT commentary, weights_json FROM task_editorial WHERE task_id = ? AND face = 'arena'"),
     liveWorks: db.prepare("SELECT id, task_id, model_id, model_other, title, content_key, entertainment_route FROM works WHERE status = 'verified' AND show_entertainment = 1 AND json_extract(moderation, '$.status') IN ('legacy', 'approved') AND curated_as IS NULL AND deleted_at IS NULL ORDER BY created_at, id"),
     communityTasks: db.prepare('SELECT id FROM questions WHERE deleted_at IS NULL'),
-    // Curated works opt into the entertainment pool through their override row; files
-    // and model identity come from the datapack, not from a works row.
-    curatedEntertainment: db.prepare("SELECT work_id, task_id FROM work_overrides WHERE show_entertainment = 1 ORDER BY task_id, work_id"),
   };
 
   // Stable arena IDs live with the authoritative question definitions in the datapack.
@@ -111,6 +108,11 @@ export function registerShow1Compat(router, deps) {
   const roundOfTask = (task) => promptCatalog().roundByTask[task];
   const promptOf = (id) => promptCatalog().prompts.find((prompt) => prompt.id === id) ?? null;
   const published = (round) => Object.hasOwn(promptCatalog().taskByRound, round);
+  // Datapack ids repeat across tasks (and old snapshot rids look like 004-grok-4.6), so a
+  // datapack work's game id carries its round. Votes still store the work id with its task.
+  const datapackRid = (round, id) => `dp-${round}-${id}`;
+  const ridOf = (round, workId) => snapshot.upToRid[workId]
+    ?? (/^(?:up-|legacy:)/.test(workId) ? workId : datapackRid(round, workId));
   // The roster sorted by rid once: every "first work of a mid/task" lookup is deterministic.
   const liveWorks = () => {
     const { roundByTask } = promptCatalog();
@@ -121,24 +123,22 @@ export function registerShow1Compat(router, deps) {
       && (roundByTask[row.task_id] || community.has(row.task_id)))
       .map((row) => ({ ...row, round: roundByTask[row.task_id] ?? row.task_id,
         modelName: row.model_id ? (deps.catalog.model(row.model_id)?.name ?? row.model_id) : row.model_other }));
-    // Curated pool members resolve through the catalog; their files are reached with a
-    // short-lived p preview key (curated works have no works-row content key of their own).
-    const curated = q.curatedEntertainment.all().flatMap(({ work_id, task_id }) => {
-      const round = roundByTask[task_id];
+    // Datapack works follow the same entertainment switch as uploads (on unless turned off);
+    // their files are reached with a short-lived p preview key, as they have no works row.
+    const archive = deps.catalog.snapshot?.();
+    const datapack = !library || !archive ? [] : archive.tasks().flatMap((task) => {
+      const round = roundByTask[task.id];
       if (!round) return [];
-      const archive = deps.catalog.snapshot?.() ?? deps.catalog;
-      const work = archive.work?.(task_id, work_id);
-      if (!work || !work.dir) return [];
-      const key = library?.previewOrigin ? new URL(library.previewOrigin(work)).host.split('.')[0] : work_id;
-      return [{ id: work_id, task_id, round, model_id: work.modelId ?? null, model_other: work.modelId ? '' : (work.modelName ?? ''),
-        title: work.title, content_key: key,
-        modelName: work.modelName ?? work.modelId ?? '' }];
+      return [...task.works.values()].filter((work) => work.dir && library.flagsOf(work).show_entertainment).map((work) => ({
+        id: work.id, rid: datapackRid(round, work.id), task_id: task.id, round,
+        model_id: work.modelId ?? null, model_other: work.modelId ? '' : (work.modelName ?? ''), title: work.title,
+        content_key: new URL(library.previewOrigin(work)).host.split('.')[0], modelName: work.modelName ?? work.modelId ?? '' }));
     });
-    return [...uploads, ...curated];
+    return [...uploads, ...datapack];
   };
   const workMap = () => Object.fromEntries([
     ...Object.entries(snapshot.workMap),
-    ...liveWorks().map((row) => [row.id, { up: row.id, key: row.content_key, task: row.task_id,
+    ...liveWorks().map((row) => [row.rid ?? row.id, { up: row.id, key: row.content_key, task: row.task_id,
       round: row.round, mid: row.model_id, modelName: row.modelName, title: row.title }]),
   ]);
   const roster = () => Object.entries(workMap()).sort(([a], [b]) => a.localeCompare(b));
@@ -150,10 +150,7 @@ export function registerShow1Compat(router, deps) {
     for (const [, work] of roster()) if (work.task === taskId) return work;
     return null;
   };
-  const midOfWorkId = (workId) => {
-    const rid = snapshot.upToRid[workId] ?? workId;
-    return workMap()[rid]?.mid ?? null;
-  };
+  const midOfWorkId = (round, workId) => workMap()[ridOf(round, workId)]?.mid ?? null;
 
   // A live compat vote back to the old vote shape (goldens: votes_*.json). Tie votes
   // report side a as the "winner" with outcome 'draw', exactly like the old server.
@@ -170,9 +167,9 @@ export function registerShow1Compat(router, deps) {
     const vote = {
       id: row.id,
       promptId,
-      winnerRid: snapshot.upToRid[winnerWork] ?? winnerWork,
+      winnerRid: ridOf(promptId, winnerWork),
       winnerMid: winnerIdentity.modelId,
-      loserRid: snapshot.upToRid[loserWork] ?? loserWork,
+      loserRid: ridOf(promptId, loserWork),
       loserMid: loserIdentity.modelId,
       mode: row.compat_mode ?? 'blind',
       ts: row.created_at,
@@ -204,7 +201,7 @@ export function registerShow1Compat(router, deps) {
     return row ? { ...prompt, commentary: row.commentary, ...(row.weights_json ? { weights: JSON.parse(row.weights_json) } : {}) } : prompt;
   });
   const worksOf = () => [...snapshot.works, ...liveWorks().map((row) => ({
-    id: row.id, promptId: row.round, modelId: row.model_id,
+    id: row.rid ?? row.id, promptId: row.round, modelId: row.model_id,
     modelName: row.modelName, title: row.title, isDemo: 0,
     content: JSON.stringify({ kind: 'html', src: `${deps.config.contentTemplate.replace('{token}', row.content_key)}/` }),
   }))];
@@ -389,10 +386,10 @@ export function registerShow1Compat(router, deps) {
   // ---- reactions -----------------------------------------------------------------
 
   function reactionCounts(taskId, onlyMid = null) {
-    const counts = {};
+    const counts = {}, round = roundOfTask(taskId);
     for (const row of q.reactionCounts.all(taskId)) {
       const kind = EMOJI_KIND[row.emoji];
-      const mid = kind ? midOfWorkId(row.work_id) : null;
+      const mid = kind ? midOfWorkId(round, row.work_id) : null;
       if (!mid || (onlyMid && mid !== onlyMid)) continue;
       (counts[mid] ??= { up: 0, down: 0, laugh: 0 })[kind] += row.n;
     }
@@ -407,7 +404,7 @@ export function registerShow1Compat(router, deps) {
     if (ctx.user) {
       for (const row of q.myReactions.all(taskId, ctx.user.id)) {
         const kind = EMOJI_KIND[row.emoji];
-        const mid = kind ? midOfWorkId(row.work_id) : null;
+        const mid = kind ? midOfWorkId(promptId, row.work_id) : null;
         if (mid) mine[mid] = kind;
       }
     }

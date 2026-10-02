@@ -77,14 +77,13 @@
 | matches | 60 次 / 分钟 | 用户 ID（未登录时为 IP） | 创建对战 |
 | guess result | 20 次 / 分钟 | 客户端 IP | `POST /api/guess/result`，另受 guess/matches 桶约束 |
 | export | 2000 次 / 分钟 | 导出令牌 | 导出元数据及文件；另有每 IP 10000 次 / 分钟兜底 |
-| read API | 180 次 / 分钟 | 客户端 IP | `/api/*` GET/HEAD（收录导出除外），跨端点、登录状态共享 |
+| read API | 180 次 / 分钟 | 客户端 IP | `/api/*` GET/HEAD，跨端点、登录状态共享 |
 | read catalog | 30 次 / 分钟 | 客户端 IP | bootstrap、show1/works、works、prompts、votes、ratings、leaderboard、guess/today 的 GET/HEAD，共用一桶，参数不影响计数 |
 | read files | 1200 次 / 分钟 | 客户端 IP | 后端静态文件与所有作品源 GET/HEAD，共用一桶 |
 | read pages | 60 次 / 分钟 | 客户端 IP | 所有作品源 HTML/HTM，共用一桶；HTML 同时计入 read files |
 
 读取额度可通过 `READ_API_PER_MIN`、`READ_CATALOG_PER_MIN`、`READ_FILES_PER_MIN`、`READ_PAGES_PER_MIN` 调整（最小 1）。超限响应带 `Retry-After` 秒数；可信 Origin 的 API 错误仍保留 CORS 许可。HEAD 计数与 GET 相同。OPTIONS 和写 API 不占读取额度，继续沿用自己的来源校验和写限流。
 
-`/api/curate/export/:token` 及其 `/file` 由 export 桶单独计数，不受新的通用 API/边缘资源桶限制，保持批量收录所需额度。导出令牌的校验、失效及每 IP 兜底不变。
 
 API 域静态 `/data.json`（含等价编码路径）仅管理员登录后返回；其他访问返回 404。`.datapack-source.json` 对所有人返回 404。管理员页面无需改请求方式；画廊使用自己部署的展示目录。Show1 榜单与配对分由后端聚合，逐票兼容接口保留，详见 3.21。VPS 的两个静态前端需安装 Nginx 读取限制，详见 [部署说明](deploy.md#公开读取与反爬配置)。
 
@@ -98,7 +97,7 @@ API 域静态 `/data.json`（含等价编码路径）仅管理员登录后返回
 
 ### 2.1 作品（work）
 
-作品分两类：**馆藏作品**（curated，随数据包 `dist/data.json` 分发，平台视为已验证）与**投稿作品**（upload，写入数据库，走审核流）。
+作品文件有两个来源：**数据包作品**（`curated: true`，随数据包 `dist/data.json` 分发，视同已核验的投稿）与**投稿作品**（upload，写入数据库，走审核流）。两者的展示与盲评规则相同：数据包作品没有 override 行时展览馆、竞技场、娱乐三面默认开启，管理员用同一套开关关闭；只有旧 Show1 快照已有作品的轮次（001–008），数据包作品的娱乐面默认关闭，因为同一作品已以旧投稿身份在娱乐名单中。投稿收录进数据包的流程已退役，历史 `curated_as` 列仍让已收录的原投稿不重复出现。
 
 **投稿作品（数据库行，时间均为毫秒整数）：**
 
@@ -122,7 +121,7 @@ API 域静态 `/data.json`（含等价编码路径）仅管理员登录后返回
 | `reviewerName` / `reviewedAt` | string / null | 审核人从最近一次审核 audit 解析；审核时间保留在作品行 |
 | `contentKey` | string | 作品永久内容令牌（`w` + 32 位十六进制），作品 origin 的子域名 |
 | `checks` / `trial` | object | 上传检查报告 / 试加载探针数据（仅作者与管理员可见） |
-| `arena` | object | 盲评池状态（仅作者与管理员可见；管理员作品视图的投稿同样输出）：`{ "state": "in_pool" \| "off" \| "not_qualified" \| "curated" \| "waiting", "reason"?: "多轮生成" \| "有人工介入" \| "生成方式未填写" }`。`off` 为管理员关闭竞技场开关，`not_qualified` 为开关开启但生成方式不符，`waiting` 为尚未核验或内容未放行，`curated` 为已转为馆藏。客户端只显示此结论，不自行推断。 |
+| `arena` | object | 盲评池状态（仅作者与管理员可见；管理员作品视图的投稿与数据包作品都输出）：`{ "state": "in_pool" \| "off" \| "not_qualified" \| "curated" \| "waiting", "reason"?: "多轮生成" \| "有人工介入" \| "生成方式未填写" }`。`off` 为管理员关闭竞技场开关，`not_qualified` 为开关开启但生成方式不符，`waiting` 为尚未核验或内容未放行，`curated` 为已转为馆藏。客户端只显示此结论，不自行推断。 |
 | `trial.calibration` | object / null | Show1 逐作品展示设置，含可选的 `framing`（画布）与 `camera`（3D 视角）；没有时缺省 |
 | `captures` | object | 截图映射 `{条件id: 文件名}`，由自动截图写回 |
 | `cover` | string / null | 封面文件名（`cover.png` / `cover.jpg` / `cover.webp`） |
@@ -756,7 +755,7 @@ v23 追加可空 `questions.category`，无分类旧题按标签顺序取第一�
 
 管理员作品视图带两个只读字段：`arena_eligible` 即服务端盲评池资格（`library.isEligible`）的判定结果；`arena_generation_ok` 表示生成信息是否合格（文字题恒为 true，其余须单轮且无人工介入）。后台竞技场系统据此显示「在正式盲测池」「不符合盲评条件（多轮 / 人工介入）」或「不在正式盲测池」，不在前端重复判断题型。
 
-作品对象还含原有管理员作品视图字段。精选开关和取景先读 `work_overrides`，缺失时展览馆开关默认开启、竞技场开关默认关闭。查询错误：`400 invalid_query`、`404 not_found`（题目不存在）。
+作品对象还含原有管理员作品视图字段。精选开关和取景先读 `work_overrides`，缺失时三面默认开启（视同已核验的投稿），旧 Show1 快照轮次的娱乐面默认关闭（见 2.1）。查询错误：`400 invalid_query`、`404 not_found`（题目不存在）。
 
 投稿的管理员作品视图另含 `reviewed: { gallery: <ISO 时间|null>, arena: <ISO 时间|null> }`，表示两面各自最近一次明确决定；馆藏不输出此字段。核验请求显式带布尔 `show_gallery` / `show_arena` 时只更新对应面的时间。v30 为已核验和存疑的旧投稿将两面时间回填为 `COALESCE(reviewed_at, updated_at)`，未核验旧投稿保持 null；娱乐盲测开关不记录面决定。
 
@@ -776,7 +775,7 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 
 竞技场配对和 Bradley–Terry 计分都只纳入当前 `show_arena=1` 的已验证作品；精选没有覆盖记录时竞技场开关默认关闭。`votes.source='arena'` 的限制不变。Show1 娱乐榜仍从全量历史票回放。
 
-### 3.19 管理员收件箱、作品编辑与收录
+### 3.19 管理员收件箱与作品编辑
 
 以下 API 均须管理员会话；写请求遵循同源检查和 write 限流。收件箱位于 `DATA_DIR/inbox`，只保存待登记的 HTML/ZIP，不会因上传本身发布作品。
 
@@ -786,10 +785,7 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 - **`POST /api/admin/inbox/register`** JSON 请求含 `id`、`task`、必填 `effort`、`providerId`，可选的 `title`、`summary`、`modelId` 或 `modelName`、`tool`、`harnessId`、`harnessOther`；标题和模型名可从文件名建议值补齐。来源字段遵循 3.6 节规则，旧 `harnessVersion` 忽略；不填时 `tool` 为空，不写录入渠道。缺省登记为 `unverified` 且两个门面均关闭，照常走内容审核；`publish: true` 时按管理员上传即人工内容审核，保存 `approved` / `human`、管理员名、理由「管理员上传」与时间并写 `content-review` 审计，然后直接核验为 `verified`，不送 Luna。缺省按首次核验规则两面都开启，可用 `show_gallery` / `show_arena` 指定。成功 `200`：`{ "work": <管理员作品视图> }`，移除收件箱文件并写 `inbox-register` audit；无效或已移除的 `id` 返回 `404`。
 - **`DELETE /api/admin/inbox?id=<收件箱 ID>`** 移除暂存文件，成功 `200`：`{ "ok": true }`，写 `inbox-remove` audit；文件不存在返回 `404`。
 - **`POST /api/admin/works/:task/:id/meta`** 仅编辑 SQLite 投稿，不编辑馆藏。JSON 请求可含 `title`、`summary`、`modelName`、`modelId`、`effort`、`harnessId`、`harnessOther`、`providerId`；至少提供一个允许字段（只有旧 `harnessVersion` 时成功返回原视图，不写 audit 或重新审核）。标题不能为空，`modelId` 须存在于目录。来源字段按 3.6 节校验；设置 Harness ID 会清空「其他」，反之亦然。管理员编辑送审声明保持现有 `moderation`，不重新置为 `pending` 或排队。成功 `200`：`{ "work": <管理员作品视图> }`，写 `meta` audit；无效字段或内容返回 `400`，投稿不存在或目标为馆藏返回 `404 not_found`。
-- **`POST /api/admin/works/:task/:id/nominate`** 仅对已核验、尚未收录、且题目在当前数据包内的投稿有效。生成有效期 14 天的随机导出令牌；重复提名会换发令牌，数据库仅存 SHA-256。返回 `{ "exportUrl": "<当前来源>/api/curate/export/<令牌>", "command": "npm run intake:from-server -- <exportUrl>" }`。提名不改变作品的公开展示状态。管理员列表以 `nominatedAt` 标记提名，以 `curatedAs` 标记已收录。
-- **`DELETE /api/admin/works/:task/:id/nominate`** 撤回提名并使令牌立即失效，返回 `{ "ok": true }`；已收录返回 `409`。提名和撤回均写审计记录。
-- **`GET /api/curate/export/:token`** 无需登录，返回 `task`、`id`、`title`、`summary`、`modelId`、`modelName`、`vendor`、`effort`、`tool`、`harnessId`、`harnessOther`、`providerId`、`providerOther`、`note`、`createdAt`、`root`、`entry`、`digest` 及 `files: [{ path, size, sha256 }]`；`providerId` 为两类或 null，导出兼容字段 `providerOther` 恒为空串。**`GET /api/curate/export/:token/file?path=<相对路径>`** 返回原始文件。两者按令牌每分钟限流 2000 次，另有每 IP 每分钟 10000 次兜底；命中返回 `429` 和 `Retry-After`。无效、过期、撤回或已被数据包接管的令牌返回 `404`，非法文件路径返回 `404`。
-- 数据包中某馆藏结果带 `sourceUpload: "up-…"` 时，后端在数据包版本变化后异步设置对应投稿的 `curated_as`、清除提名字段、继承投稿的展览馆与竞技场开关（已有馆藏 override 不覆盖），并以系统身份写审计；成功接管的版本不重复更新，失败会记录并在下次刷新时重试。
+
 
 ### 3.20 Show1 猜模型接口
 
@@ -866,7 +862,7 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 
 `moderation` 仅返回作者/管理员。普通作者只收到 `{ status, at }`，且仅在 `rejected` 时附简短 `reason`；管理员保留完整结果，可含 `source: automatic|human`、中文 `reason`、风险 `categories`、`error` 代码、`model`、`serviceTier`、`responseId`、`usage`、`coverage` 或人工 `reviewer`。`at` 为毫秒时间，旧 legacy 记录可缺省。不含 API 密钥或服务商原始错误响应。题目作者视图采用相同裁剪规则；管理员题目视图保留完整结果。`bootstrap.site.autoModeration` 与管理员两类待办计数见 3.1。
 
-内容尚未通过时，公开 bootstrap、Show1 动态作品、盲评、评论/表情与收录导出均不可使用该作品。自动通过（以及关闭审查时的 `legacy`）本身也不公开投稿：公开列表、评论/表情、公开 `w<32hex>` 源与媒体还要求人工已作决定，即 `status` 不为 `unverified`，或 `moderation.source` 为 `human`；在此之前作者/管理员继续使用下述预览源。公开 `w<32hex>` 源返回 410，媒体请求仅允许作者/管理员，否则 404。作者/管理员作品 DTO 的 `scene` 是随机 `p<32hex>` 源，有效一小时、进程重启失效，返回 `Cache-Control: no-store`。该地址本身具有预览能力，不应公开转发。自动截图也使用此源。参与审查的已公开作品源与媒体使用 `no-store`，防止新审核状态被已有缓存跳过。
+内容尚未通过时，公开 bootstrap、Show1 动态作品、盲评、评论/表情均不可使用该作品。自动通过（以及关闭审查时的 `legacy`）本身也不公开投稿：公开列表、评论/表情、公开 `w<32hex>` 源与媒体还要求人工已作决定，即 `status` 不为 `unverified`，或 `moderation.source` 为 `human`；在此之前作者/管理员继续使用下述预览源。公开 `w<32hex>` 源返回 410，媒体请求仅允许作者/管理员，否则 404。作者/管理员作品 DTO 的 `scene` 是随机 `p<32hex>` 源，有效一小时、进程重启失效，返回 `Cache-Control: no-store`。该地址本身具有预览能力，不应公开转发。自动截图也使用此源。参与审查的已公开作品源与媒体使用 `no-store`，防止新审核状态被已有缓存跳过。
 
 - **`POST /api/works/:task/:id/moderation`**：仅管理员；JSON `{ "status": "approved" | "rejected", "reason": "人工理由" }`。通过理由选填，省略或空白时保存「人工复核通过」；拒绝理由必填，理由保存最多 500 字；无效决定或拒绝缺理由 400，无权限 403，作品不存在 404。成功 200 `{ "work": <管理员作品视图> }`，写 `content-review` audit 并刷新竞技场缓存。内容通过不改变来源核验或门面开关；示例作品需题目也人工通过、进入 catalog 后才公开，无需再次操作作品。
 - **`POST /api/works/:task/:id/moderation/retry`**：仅管理员，无需请求体；仅开启自动审查时可用，否则 409。成功 200 `{ "work": <pending 作品视图> }`，写 `content-retry` audit 并刷新竞技场缓存，重新进入队列并暂不公开。
@@ -880,25 +876,6 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 ### 3.25 盲评资格维护与代表作持久化（schema v26）
 
 v26 仅追加幂等建表 `featured_picks(task_id, scope, model_key, work_id, conservative, picked_at)` 与 `featured_refreshes(task_id, day)`，不回填作品、不打开竞技场开关，也不修改旧 CHECK 约束。`scope` 为 `cover` 或 `model`；封面的 `model_key` 为空串。日刷新状态独立保存，未有当选者的题目也不会在同日重复拟合。
-
-维护命令默认只读演练，不运行迁移、不写库：
-
-```powershell
-npm run arena-backfill -- --db .data/platform.db --dist .datapack/current
-npm run arena-backfill -- --db .data/platform.db --dist .datapack/current --exclude boeing-787/claude-opus-5.5-max-zip,voxel-construction-site/claude-opus-5.5-max-zip,sydney-opera-house/claude-opus-5.5-max-zip
-```
-
-按题返回将打开竞技场的数量和 ID、将补齐生成信息的数量和 ID、显式多轮或人工介入的数量和 ID、排除清单。三件重复 ZIP 无论当前包是否包含均在 `duplicates` 中单列 `present`/`excluded`，由用户决定包含或排除后再执行。`curatedMissingGeneration` 列出仍缺生成声明的旧包作品；命令不会修改数据包，开关打开也须等包含两项声明的新包才合格。
-
-`--exclude task/id,...` 排除该作品的全部维护修改。非文字题中，未删除投稿只有未申报多轮或人工介入时才补齐空值，并把 `agent` 改为 `single-turn`；显式非标准作品保留原生成信息。内容已公开放行、已核验的作品开启竞技场开关；馆藏 upsert 保留原 `show_gallery`（无记录为 1）及校准值。文字题完全跳过，包括只声明 `templates: ['text']` 的社区题目。
-
-写库只能由操作人员停服后手动执行，备份路径须不存在，`--actor` 为负责人姓名；全部作品修改与逐件 `arena-backfill` audit 在同一事务完成：
-
-```powershell
-npm run arena-backfill -- --db .data/platform.db --dist .datapack/current --exclude boeing-787/claude-opus-5.5-max-zip,voxel-construction-site/claude-opus-5.5-max-zip,sydney-opera-house/claude-opus-5.5-max-zip --apply --backup <new-backup.db> --actor <name>
-```
-
-命令先用 `VACUUM INTO` 保存一致性备份。演练支持旧 schema（未有生成/内容审核字段时按已发布迁移的空串/legacy 默认值展示），输出 `schemaVersion`；`--apply` 要求至少 v19，旧库须另行手动升级，命令不自动升级。执行后重启已停服的服务以清空排行榜和作品分缓存；`poolStats` 无缓存，每次读取当前资格。进程内维护调用可传 `invalidate` 回调，在事务提交后失效。没有启动时回填或自动维护入口。
 
 ## 4. 数据包契约（`dist/data.json`）
 

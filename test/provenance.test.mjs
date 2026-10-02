@@ -174,7 +174,7 @@ test('an old pack accepts a custom Harness and binary providers but no Harness r
   }
 });
 
-test('submission, review, metadata, export and vote snapshots carry provenance', async () => {
+test('submission, review, metadata and vote snapshots carry provenance', async () => {
   const root = mkdtempSync(join(tmpdir(), 'provenance-api-'));
   const dist = pack(root);
   const platform = createPlatform({ config: { dist, dataDir: join(root, 'data'), contentTemplate: '',
@@ -339,14 +339,6 @@ test('submission, review, metadata, export and vote snapshots carry provenance',
     const audits = platform.db.prepare("SELECT detail FROM audit WHERE work_id = ? AND action = 'meta'").all(id);
     assert.equal(audits.some((audit) => audit.detail.includes('code-edited')), true);
     assert.equal(audits.some((audit) => retired.some((key) => audit.detail.includes(key))), false);
-    const nomination = await call('root', 'POST', `/api/admin/works/one/${id}/nominate`);
-    assert.equal(nomination.status, 200);
-    const exported = await call('alice', 'GET', new URL(nomination.data.exportUrl).pathname);
-    assert.equal(exported.status, 200);
-    assert.deepEqual([exported.data.harnessId, exported.data.harnessOther,
-      exported.data.providerId, exported.data.providerOther], ['codex', '', 'official', '']);
-    assert.equal('harnessVersion' in exported.data, false);
-    for (const key of retired) assert.equal(key in exported.data, false);
     const clear = await call('root', 'POST', meta, { evidenceUrl: '' });
     assert.equal('evidenceUrl' in clear.data.work, false);
     assert.equal(clear.data.work.generationMode, 'multi-turn');

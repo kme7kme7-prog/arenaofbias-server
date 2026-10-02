@@ -1,5 +1,24 @@
 # HANDOFF.md · 当前状态
 
+## 四仓发布准备（2026-10-02，用户已授权提交、推送、部署）
+
+- 本轮整理既有七条待推送提交和三个未提交文档；当前只读门禁确认公网与 .server-version 同为 83e43fe，与个人 output/release-20261002/release.json 一致。数据库 v31、integrity ok，正式 Turnstile 已配置。
+- check 87/0、test 244/244。尚未修改生产文件；将先完成固定数据包与四仓隔离联调，再备份、发布和记录实际验收。game /api 反代保留，截图降权等独立基础设施不自动实施。见[准备归档](docs/archive/2026-10-02-shared-session-release-preparation-wsnxxxs.md)。
+
+## 准备移除 game /api 反代（2026-10-02，仅文档，未提交、未推送、未部署）
+
+- 本轮只修改 `docs/deploy.md` 与本节，保留此前 `docs/api-contract.md`、发布文档与其他轮次未提交内容。新增第 9 节「移除 game /api 反代」，写明上线并通过两站登录互通、用户指定观察期已完成、聊天中明确授权修改生产 Nginx 三项前置条件；缺一项只维护文档，不连接服务器。
+- 流程包括第 0 节现场版本核对；只读查看 game vhost / include 的 API location、XFF、429 CORS 与安全头；按现场日志格式统计 game 主机 `/api` 请求量与 UA；向用户展示拟删除配置原文及计划并取得明确同意；备份、恢复静态 404、`nginx -t` 后 reload；验收与恢复备份的回滚步骤。同步修改静态构建后的「反代暂留」和第 8 节 game XFF 描述，指向第 9 节。
+- 特别保留 `deploy/nginx/read-zones.conf` 的 game CORS 来源要求：game 仍直接跨域请求 api 主机，此来源不能随旧反代删除。没有修改该文件、后端代码、Cookie 或生产数据。
+- 验证：`git diff --check` 通过。未运行 check / test，原因是本轮仅改文档；未执行现场配置查看、日志统计、Nginx 语法检查、reload 或公网验收，原因是三项前置条件尚未确认满足，且未获执行授权。本轮没有连接服务器、提交、推送、部署或写归档。
+
+## game / Gallery 共用登录会话文档同步（2026-10-02，本地完成，未提交、未推送、未部署）
+
+- 仅在 docs/api-contract.md 的 1.3 认证小节补充：生产 Cookie 属于 api.arenaofbias.icu，两前端必须直接请求同一 API 主机；经各自前端域名反代的 /api 会形成独立会话。
+- docs/deploy.md 在静态构建步骤补充 game 自动读取入库 .env.production（VITE_API_BASE_URL=https://api.arenaofbias.icu），以及显式构建变量写法；Gallery 的 GITHUB_SHA / API_BASE_URL 命令原义保持。game /api 反代暂留，兼容上线前已打开的旧页面，是否移除留待用户决定。
+- 发布验收补充 game 登录 → Gallery 已登录，Gallery 登出 → 切回 game 未登录，以及新会话 Cookie 只在 API 主机的 DevTools 检查。首次上线后的原 game 用户需重新登录一次，旧 Cookie 自然过期，无需清理。
+- git diff --check 通过。本轮没有代码改动，按用户要求未运行后端 check / test；未执行生产登录或部署验收。仅做指定位置插入和本节追加，已有未提交会话调查记录完整保留，未写归档、commit 或 push。后端代码、Cookie 属性、nginx 与生产数据未改。
+
 ## 喷泉适配纠正：提取原作（2026-10-02，封面已替换）
 
 - 用户指出上一轮手工重建偏离现有小模型流程。本轮替换 scripts/fountain-preview/index.html / README，新增 Node 内置模块本机 serve.mjs；复用 data 的 importArchitecture / packPreview 以及 Gallery 的 readModel / result-previews，保留投稿 up-ccnksbcp 的原几何、世界矩阵、石纹、材质和庭院布局。原作 WebGPU 水滴位置与波高读回后，按原 WGSL 公式生成静态水面/水滴；每四粒子稳定取一粒，保留原大小和透明度。最终边界按已提取有限几何计算，包含真实地面和四面围墙。本节取代下方手工重建方案及其后续建议。
@@ -8,6 +27,12 @@
 - 已原子替换该投稿 first.jpg / mobile.jpg，保留 captures 映射和 root:root / 0644；公网两图 hash 与本机完全一致，no-store。桌面 1949b27987933385853685248a9bf08153cc3f693328adb1e083c27b76dcbc39；手机 eee2b207da14a13ea2400e5d8b52743af790055d048cd7b65e7087c1ccafaca4。生产仍为本人上次核对的 83e43fe072a0280d86c76379d9964bd4a32eb4bd，service active。未改业务库、馆藏包、截图等待、VPS WebGPU 或部署其他本地代码。
 - 本轮替换前的手工重建封面与 owner/mode/hash 已备份到 root 私有 /root/aob-fountain-faithful-20261002-01a0fb12；更早的 WebGPU 错误封面备份仍保留。原作备份、提取副本、真实 .sbox、本机图、公网图和验收 JSON 在忽略的 output/fountain-faithful-20261002，不提交生成物。按用户授权仅本地英文简单句提交，未 push；保留另轮 bc040b8 与未提交会话调查记录。完整记录见 [归档](docs/archive/2026-10-02-fountain-faithful-wsnxxxs.md)。
 
+
+## game 已登录、Gallery 显示未登录的调查（2026-10-02，仅调查，未改代码）
+
+- 原因：两个前端把会话种在不同主机。game（Show1）用相对路径 `/api/...`，由 game vhost 反代到同一后端，Cookie 落在 `game.arenaofbias.icu`；Gallery 线上 `runtime-config.js` 的 apiBaseUrl 为 `https://api.arenaofbias.icu/`，Cookie 落在 `api.arenaofbias.icu`。`COOKIE_SECURE=1` 时会话名为 `__Host-sp_session`，按规范不能带 Domain，只发回种下它的主机，所以两站各自需要登录，后端会话本身没有失效。
+- 公网只读核对：两个主机的 `/api/auth/me` 都由 nginx 转发到同一服务，对 game 与 gallery Origin 都返回带凭据的 CORS 许可。未登录、未改配置或数据。
+- 用户选定方案 A：Show1 也改为请求 api 主机，两站共用一个会话，上线后 game 用户需重新登录一次（未采用 `Domain=arenaofbias.icu`，避免 `*.w.arenaofbias.icu` 作品沙盒收到会话）。Show1 仓库已本地实现（`lib/api.ts`、入库 `.env.production`），未提交、未部署，详见该仓 HANDOFF。本仓无需代码改动；复核时 Show1 的 placeholder 在改动前后各 8/8 通过（其报告的失败为偶发），formal 的 EBUSY 在改动前已存在。
 
 ## 通过即公开规则（2026-10-02，本地提交，未推送、未部署）
 

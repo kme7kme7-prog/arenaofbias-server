@@ -95,6 +95,8 @@ cp -a dist/. "$work/out/"
 scp "$work/manifest.sha256" "$host:/root/static-deploy-$site-$sha.manifest"
 ```
 
+game 的 `npm run build` 自动读取已入库的 `.env.production`（`VITE_API_BASE_URL=https://api.arenaofbias.icu`），也可显式使用 `VITE_API_BASE_URL=https://api.arenaofbias.icu npm run build`。game 的 `/api` 反代用于兼容上线前已打开的旧页面；移除条件、验收与回滚见[第 9 节](#9-移除-game-api-反代)，满足条件并获用户明确同意前保留。
+
 Gallery 的 `GITHUB_SHA` 必须是该次前端源码 SHA，`API_BASE_URL` 设为 `https://api.arenaofbias.icu/`；前端请求层会把根地址规范化为 `/api/` 目录。两站产物都在各自 `dist/`。上传之前检查入口文件和构建结果。完整 manifest **先**上传，在服务器上对比当前正式目录，产生变化及缺失列表、过时文件列表：
 
 ```bash
@@ -154,6 +156,8 @@ mv "$next" "$live"
 ```
 
 切换后核对首页、JS/CSS/JSON 的响应与缓存头，并在桌面和窄屏检查关键页面。若验收失败，先保留新目录作调查，可用 `mv "$live" "${live}.failed-$sha"`、`mv "$prev" "$live"` 回滚；不要在正式目录上直接解包或删除文件。Nginx 配置若需同步修改，按上节备份、`-t`、reload。此流程描述操作方法，本页修改本身不执行发布。
+
+两站登录互通验收：在 game 登录后，打开 Gallery 应显示已登录；在 Gallery 登出后，切回 game 应显示未登录。DevTools 中新会话 Cookie 只出现在 `api.arenaofbias.icu`。首次上线后，原本在 game 上登录的用户需要重新登录一次；旧 game Cookie 自然过期，不需要清理。
 
 ## 1. 备份与检出
 
@@ -433,8 +437,28 @@ add_header X-Frame-Options "SAMEORIGIN" always;
 - 匿名对局已有 3 小时过期时间，改为启动与每分钟确定清理无正式票引用的过期行，匿名无票对局最多 10000 条。练习模式始终只存内存，原有 5000 局上限，新增 3 小时 TTL；不强制练习登录。
 - 部署 `deploy/nginx/security-headers.conf`、`static-private-paths.conf` 与更新的 `read-zones.conf` / `read-server.conf`。主域、game、gallery、API 在 server 级加入 security-headers include；自带 `add_header` 的 location 同样加入，避免丢失 HSTS / nosniff / CSP。CSP 按 host 在 read-zones 中定义，API / 作品域不叠加前端 CSP。作品沙箱保持原策略。
 - 三个静态站在其他正则 location 之前 include `static-private-paths.conf`，隐藏文件与仓库配置返回 404，ACME 路径保留。Gallery 使用 hash 路由，`try_files $uri $uri/ =404`；game 静态导出用 `try_files $uri $uri/ $uri.html =404`，保留实际导出页面。`robots.txt` 仅返回真实文件，不回退 HTML。主域到 game 的既有旧路径跳转按原用途保留。
-- game API 反代覆盖 XFF 为 `$remote_addr`。现有读取限流均带 `nodelay`，后端固定窗口也直接拒绝；本次不因报告中超时现象猜测并调整限流额度。429 错误 CORS 补齐 game 来源，安全头同时覆盖限流错误页。
+- game `/api` 反代保留期间覆盖 XFF 为 `$remote_addr`，移除流程见[第 9 节](#9-移除-game-api-反代)。现有读取限流均带 `nodelay`，后端固定窗口也直接拒绝；本次不因报告中超时现象猜测并调整限流额度。429 错误 CORS 补齐 game 来源，安全头同时覆盖限流错误页。
 
 每次改 Nginx 前备份原 vhost 与 game 反代 include，`nginx -t` 成功才 reload。发布验收应包含三个首屏、安全头、game 合法静态路由、未知路径 / `.git` / `.env` / `robots.txt` 的状态码，以及三个登录 UI 的 token 获取、失败后重置、正常登录。不得用生产管理员错误密码或批量请求做压测。
 
 复核报告的实际差异：会话原先已有绝对过期和新 token，只缺旧会话撤销及闲置超时；练习局不落库；后台 traffic paths 已通过 `esc()` 输出，报告的 canary 不会作为 HTML 渲染。服务仍以 root 运行、SSH 允许 root 密码登录属于独立基础设施风险；修改它们前须确认新的运维登录通道与截图服务权限，不能直接关闭现有唯一通道。
+
+## 9. 移除 game /api 反代
+
+game `/api` 反代只用于兼容上线前已打开的旧页面；配置仅在服务器的 game vhost 或其 include 中，仓库没有这段配置。执行前必须同时满足：Show1 共用会话版本已发布并通过“两站登录互通”验收；上线后已完成用户指定时长的观察；用户在聊天中明确同意修改生产 Nginx。缺一项就只维护文档，不连接服务器或修改配置，不自行决定观察时长。
+
+1. 先按第 0 节核对现场版本与来源，并核对已发布的 Show1 产物确实直接请求 `https://api.arenaofbias.icu`。核对两站登录互通的验收记录和观察期起止。
+2. 只读查看 game vhost 及其实际引用的 include，必要时用 `/www/server/nginx/sbin/nginx -T` 核对有效配置。列出所有匹配 `/api` 的精确、前缀与正则 location，连同 XFF 覆盖、限流、429 错误 CORS 和安全头的相关配置；确认哪些 include 被其他站点共用。按现场 `access_log` 路径和 `log_format`，只读统计观察期内 game 主机 `/api` 的近期请求量与 UA，确认只剩零星旧页面请求；共享日志须按 game 主机筛选，不能把 api 主机流量算入。仍有持续使用者或来源不明就停止并报告。
+3. 将拟删除的配置原文、涉及的 vhost / include 路径、日志结论、备份位置与修改计划先发给用户看，取得针对这份计划的明确同意后再执行。备份 game vhost 及所有将修改的 include，记录路径；共用文件只改 game 对应的配置，不删除其他站点使用的规则。
+4. 删除 game 中代理 `/api` 的 location，让该路径回到既有静态站 404 规则（game 为 `try_files $uri $uri/ $uri.html =404`），不加入首页回退。保留其余静态路由、安全头和 CSP。`deploy/nginx/read-zones.conf` 的 CORS 映射必须保留 game 来源，因为 game 页面仍会跨域请求 api 主机；api 主机的代理、XFF 与 429 CORS 配置不随此次删除而撤下。
+5. 执行 `/www/server/nginx/sbin/nginx -t`，通过后才执行 `/www/server/nginx/sbin/nginx -s reload`；失败时恢复备份，不重载无效配置。按下表验收，并如实记录执行时间、配置差异、语法检查与验收结果。
+
+| 检查 | 期望 |
+| --- | --- |
+| `https://game.arenaofbias.icu/api/bootstrap` | HTTP 404 |
+| game 首屏、登录、投票、评论 | 正常，API 请求发往 api 主机 |
+| Gallery 首屏与登录状态 | 正常；game 登录后 Gallery 已登录，Gallery 登出后切回 game 未登录 |
+| DevTools 新会话 Cookie | 只出现在 api.arenaofbias.icu |
+| game 安全头与 CSP | 与修改前一致 |
+
+回滚时恢复本次备份的 vhost 与 include，执行 `/www/server/nginx/sbin/nginx -t`，通过后 reload，再确认 game `/api/bootstrap` 恢复代理且两个前端正常。此次操作不改后端代码、Cookie 或生产数据。

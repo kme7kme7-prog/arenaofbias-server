@@ -42,3 +42,12 @@
 - 父代理在实际差异包部署中确认 cpSync(oldRoot) 会保留 .datapack/current 根符号链接，后续删除和更新写穿旧版本。仅修改 scripts/datapack-delta.mjs 与既有 delta 测试：先 realpathSync 解析旧根，基线核验和复制均使用实体目录，资源内部链接继续由 inventory 拒绝。
 - 新 root-link 回归使用 Windows junction / Linux directory symlink，确认旧版本树 SHA256 不变、current 保持链接、目标是实体目录并通过目标校验。修复前 Windows cp 报 EPERM，修复后 2 / 2 专项通过；npm run check 86 / 0、完整 npm test 259 / 259、diff --check 通过。
 - 本轮不操作生产，不重跑数据库迁移；线上受影响文件恢复与旧版本完整校验由父代理负责。保留父代理已更新但未提交的 datapack.json 与原脏文档。本补充与脚本 / 测试作为必要修复独立提交，父代理重新固定后端来源后发布。
+
+
+## 2026-10-03 · 发布完成与差异包事件补记
+
+- 父代理完成生产发布，固定后端 a7179f28c3c6c2de46f4da4b2b5e1ca4aa6fa6a1，API v2 / schema v38；Linux 干净固定源码 check 86 / 0、npm test 259 / 259 通过。验证后的统一数据包已安装，公网核对尚在进行；此补记不宣称全部交互或移动端验收通过。
+- 事件发生于旧 delta 工具的暂存阶段：cpSync 保留 current 根链接，后续文件操作穿透链接，旧包 5 文件更新、8 文件删除。父代理短暂停服，使用事先保存的完整旧包缓存恢复全部 13 文件；确认旧包完整文件集合和每项 SHA256 精确复原后，才用实体路径重新暂存。旧版本保留，新工具 realpathSync 根解析回归及 Linux 全量 259 项测试通过。
+- 上述资源恢复先完成，正式数据库迁移另行执行。停服迁移前 users=31 / votes=444 / works=360 / questions=14 / matches=445 / reactions=2；19 张既有表的原列内容哈希保留，users 只执行授权 member -> user。恢复服务前 foreign_key_check 和 integrity_check 均通过。
+- 服务器受限备份目录 /root/aob-integrated-release-20261003/backup 保留 code.tar.gz 和停服一致数据库 platform-stopped.db。回退代码时不得覆盖迁移后产生的新业务写入。
+- 本次只改本轮 HANDOFF 最新节与本归档追加部分，不 commit / push；线上固定 SHA 保持。他人脏文档和本地消费配置保留。

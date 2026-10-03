@@ -251,7 +251,7 @@ node -e 'const {DatabaseSync}=require("node:sqlite"); const db=new DatabaseSync(
 tar -C "$live" --exclude='./.git' --exclude='./.data' --exclude='./.datapack' --exclude='./output' -czf "$backup/code.tar.gz" .
 ```
 
-数据库先做一致性快照，代码另行打包。投稿文件与媒体由现有每日 restic 归档保存；若本次变更会改动它们，另做同步文件备份。当前仓库的 `scripts/archive-backup.sh` 已先 `VACUUM INTO`，再把 `works`、`media`、数据包和快照交给 restic。恢复较早数据库时，多出的作品目录会在服务启动时移至 `.data/orphans`。
+数据库先做一致性快照，代码另行打包。投稿文件、媒体和题目参考图由每日 restic 归档保存；若本次变更会改动它们，另做同步文件备份。当前仓库的 `scripts/archive-backup.sh` 已先 `VACUUM INTO`，再把 `works`、`media`、已存在的 `references`、数据包和快照交给 restic。参考图存于 `DATA_DIR/references`，与数据库 `reference_uploads` 一起备份和恢复；部署新脚本时按第 5 节同步 `/root/archive-backup.sh`。恢复较早数据库时，多出的作品目录会在服务启动时移至 `.data/orphans`。
 
 在服务器克隆到临时目录、检出明确的目标 SHA 并运行门禁：
 
@@ -318,6 +318,10 @@ curl -fsS http://127.0.0.1:5273/api/bootstrap
 
 检查 JSON 的 `serverVersion` 等于目标代码 SHA，`datapack` 等于目标产物 SHA，并核对 `catalogDigest`、作品数和关键登录/榜单接口。代码部署目录没有 `.git`，所以 `.server-version` 是 `serverVersion` 的依据。若从旧会话 Cookie 升级到 `COOKIE_SECURE=1` 下的 `__Host-sp_session`，会让现有用户登出一次。若本轮含数据库迁移，重启时自动执行追加迁移，部署前须另核对迁移版本；数据库不能靠切回旧代码自动降级。
 
+题目参考图首次发布追加 v39：在生产一致性快照的独立副本上运行目标代码的 `openDatabase`，确认 `user_version=39`、`foreign_key_check` 无行、`integrity_check=ok`，并逐表核对所有旧列和旧行。v1–v38 不改；v39 只新增 `questions.reference_credit`、`reference_uploads` 及索引。正式切换前停服后再保存数据库快照，避免把演练后新增的业务写入漏掉。参考图需人工审核，未接入自动图片内容审核，图片校验不做完整像素解码。
+
+投稿模型预览不需要数据库迁移，但必须另安装已经审阅的运行媒体，步骤见 [投稿预览安装](upload-preview-adaptations.md)。每件先核对运行库记录所指入口 HTML 的 SHA-256 等于 `preview.json.sourceDigest`，再安装清单与模型 / 海报，保持原作字节不变；不安装临时 `extract/`。发布后核对 API 预览字段及实际媒体 GET / HEAD、权限和文件 SHA；只更新源码不会自动带上这些生成物。显式 `PENDING_PER_USER` 会覆盖新的默认 8，发布前核对服务环境中的额度值。
+
 ## 4. 回滚
 
 先停止服务，把当前 `.data/platform.db` 和现有代码另存以便调查。恢复备份的代码和数据库，恢复旧数据包链接，确认 `.server-version`，再启动服务。若新版本已经产生业务写入，恢复旧数据库会丢弃这段时间的写入；应先决定是否做人工数据恢复。跨数据库版本回滚必须使用兼容旧代码的备份。
@@ -333,7 +337,7 @@ systemctl status arenaofbias-server --no-pager
 curl -fsS http://127.0.0.1:5273/api/bootstrap
 ```
 
-若新版本删除或改名了旧代码文件，回滚前按第 1 节记录的清单恢复或清理；tar 解包也不会自动删除新增文件。`.data/works` 与 `.data/media` 不随代码覆盖，必要时从 restic 日备份恢复。
+若新版本删除或改名了旧代码文件，回滚前按第 1 节记录的清单恢复或清理；tar 解包也不会自动删除新增文件。`.data/works`、`.data/media` 与 `.data/references` 不随代码覆盖，必要时从同一数据库备份对应的 restic 快照恢复。
 
 ## 5. 运维文件
 

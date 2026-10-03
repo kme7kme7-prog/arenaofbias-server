@@ -95,7 +95,7 @@
 | --- | --- | --- | --- |
 | auth | 10 次 / 分钟 | 客户端 IP | 注册、登录 |
 | write | 120 次 / 分钟 | 用户 ID（未登录时为 IP） | 投稿提交、投票、表情、评论写入/删除、校准写回 |
-| drafts | 12 次 / 10 分钟 | 用户 ID | 上传草稿 |
+| drafts | 12 次 / 10 分钟 | 用户 ID | 上传草稿与题目参考图共享 |
 | matches | 60 次 / 分钟 | 用户 ID（未登录时为 IP） | 创建对战 |
 | guess result | 20 次 / 分钟 | 客户端 IP | `POST /api/guess/result`，另受 guess/matches 桶约束 |
 | export | 2000 次 / 分钟 | 导出令牌 | 导出元数据及文件；另有每 IP 10000 次 / 分钟兜底 |
@@ -266,7 +266,7 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
     "autoModeration": true,
     "efforts": ["Low", "Medium", "High", "XHigh", "Max"],
     "emojis": ["lick", "lol", "press", "luck", "yes", "drool", "knock", "stare", "no"],
-    "limits": { "uploadBytes": 31457280, "coverBytes": 3145728, "pendingPerUser": 8, "provisionalGames": 30 }
+    "limits": { "uploadBytes": 31457280, "coverBytes": 3145728, "referenceCount": 8, "referenceBytes": 5242880, "pendingPerUser": 8, "provisionalGames": 30 }
   },
   "works": [ /* 两种存储中 visibleTo(show2) 的作品，已应用覆盖 */ ],
   "questions": [ /* 两种存储中全部公开题目，已应用覆盖，见 2.2 */ ],
@@ -718,6 +718,14 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 **`POST /api/questions`**：登录并绑定邮箱，write 限流，请求体上限 6 MB。`title` / `summary` / `prompt` 必填，长度上限 70 / 400 / 20000 字；提示词仅去首尾空白。`category` 为文学 / 静态网页 / 建模；`domains` 有值时为词表内 1–2 项；`templates` 文学固定 text，其他分类为 static / vite 的非空子集；可选 tags 沿用既有规则。
 
+可选 `references: [{id, name, caption}]` 与 `referenceCredit`。参考图最多 8 张，数组顺序就是交给模型的顺序；图片须为本人尚未过期且未绑定其他题目的上传。name 匹配 `^\d{2}-[\p{L}\p{N}-]+\.(jpg|png|webp)$`（Unicode），扩展名须与实际类型一致；id 和 name 均不可重复。说明最多 40 字，来源最多 80 字。带示例作品时在同一事务绑定参考图，失败保留临时上传。
+
+**`POST /api/references?name=<原文件名>`**：登录并绑定邮箱，write 与 drafts 限流；请求体为 PNG / JPEG / WebP 原始图片字节，上限 `site.limits.referenceBytes`（5 MiB），超限返回 413 与中文 error。类型以文件头和结构判断，扩展名不符返回 400，Content-Type 不作为类型依据。无损移除 EXIF、文本、ICC 等元数据，保留压缩像素与宽高；JPEG `.jpeg` 规范为存储扩展名 `.jpg`。记录清理后的 bytes 与 SHA-256，不生成缩略图。响应 `{reference: {id, name, src, width, height, bytes}}`。携带的 `X-Datapack-Version` 过时则响应 `X-Datapack-Stale: 1`，不拒绝上传。未绑定图片在 24 小时后清理，启动时及每分钟检查；移除的图片重新作为临时上传计时。
+
+数据库题目 DTO（公开、本人、审核及管理视图）增加 `references: [{id, name, src, caption, width, height}]` 和 `referenceCredit`，src 为 `media/references/<id>.<ext>` 相对媒体路径。`GET /api/review` 增加 questions，高级管理员取得题目管理视图，普通管理员为空数组。数据包题目返回空参考图与来源，由前端消费数据包中的图片；后台不复制包图片，也不接受非空参考图覆盖。包题面继续从当前 catalog 读取，普通元数据编辑不新建 prompt 覆盖；既有显式 prompt 覆盖保留。新增 SQLite v39，仅追加 `questions.reference_credit` 与 `reference_uploads` 表和索引，API 版本保持 2。
+
+**`GET /media/references/<id>.<ext>`**（亦支持 HEAD）：临时上传仅上传者和管理员可读；绑定后按题目权限，未公开仅题目作者和管理员可读，公开后所有人可读，不能读取返回 404。正确 MIME、nosniff、`Content-Disposition: inline; filename*=UTF-8''<name>`，公开缓存 `public, max-age=31536000, immutable`，私密缓存使用 private；`Vary: Origin, Cookie`。沿用配置的前端源 CORS 与凭据许可，支持 GET/HEAD 预检，公开图片可供跨源 fetch 打包下载。
+
 不附作品时传题目字段；附示例时另传 `draftId`、`confirmed:true`、`work`（同作品表单字段）。草稿须属于本人、未过期且 task=__new__。题目与示例及审计在同一事务写入，失败保留可重试草稿。响应 `{ "question": <题目作者视图>, "work"?: <作品作者视图> }`，统一 author/mine DTO。
 
 所有角色发起的新题目均为 pending，只有高级管理员可人工通过；普通用户至多 3 道未删除 pending 题目，工作人员免限额。附带作品按发布者角色决定内容审查：普通用户照常审查，工作人员 human / approved，但保持 unverified；题目与作品必须各自通过才公开。本人题目在 `GET /api/me` 中可见。保留的 `POST /api/admin/questions` 仅高级管理员可调用，也创建 pending。
@@ -730,7 +738,11 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 **`POST /api/admin/questions/:id/meta`**：仅高级管理员，任何题目可改 title / summary / prompt / category / domains / acceptsUploads / cover。acceptsUploads 须为布尔值，cover 须为同题现有作品 ID，null 清除。公开且有作品的题目不能改提示词；有作品的题目不能改提交格式（作品数合计两种存储）。数据包写 question_overrides，数据库写本行；保持原 moderation，写 question-edit 审计，提示词只记录是否变化与长度。
 
+亦接受 references 与 referenceCredit，只有这两个字段的修改合法；可混合本题已保存 id 与当前管理员本人新上传 id。公开且有作品时参考图顺序、文件名、说明和来源一并锁定，变更返回 409 与中文提示；同值重发合法。改动写 question-edit 审计，图片与题目一起人工审核；自动图片内容审核未接入。
+
 **`DELETE /api/questions/:id`**：高级管理员可删除任意无票题目；有 Gallery 或 Show1 投票返回 409。作者删除自己题目沿用原规则：公開题目有其他作者作品或有票不可删。数据包题目覆盖层软删除，题下数据包作品随之隐藏，关联数据库作品同步软删除；文件不动。公开、本人与管理员列表不返回已删除题目，写 question-delete 审计。
+
+删除数据库题目后删除其绑定参考图文件与上传记录；拒绝题目保留图片，读取权限随题目撤回公开状态。
 
 上述写接口均遵循 Origin 校验、write 限流和通用错误格式。普通管理员对题目管理接口返回 403。历史 v22/v23/v29 字段和原审核记录保留，v38 增加发布者与覆盖层（见 2.2.1）。
 

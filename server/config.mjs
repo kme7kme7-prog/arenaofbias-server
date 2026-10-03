@@ -66,7 +66,7 @@ export const limits = {
   fileBytes: 50 * 1024 * 1024,
   files: 2000,
   coverBytes: 3 * 1024 * 1024,
-  pendingPerUser: Math.max(1, int(env.PENDING_PER_USER, 5)),
+  pendingPerUser: Math.max(1, int(env.PENDING_PER_USER, 8)),
   trustedPendingPerUser: Math.max(1, int(env.TRUSTED_PENDING_PER_USER, 20)),
   trustedMinVerified: Math.max(1, int(env.TRUSTED_MIN_VERIFIED, 3)),
   draftsPerUser: 3,

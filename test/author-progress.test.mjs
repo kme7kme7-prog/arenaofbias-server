@@ -12,13 +12,13 @@ const DAY = 86400e3;
 const html = '<!doctype html><title>Test</title><h1>Test</h1>';
 const workBody = { confirmed: true, title: 'Test work', modelId: 'ma', effort: 'High', providerId: 'official', harnessOther: 'Test harness', trial: { loaded: true } };
 
-async function withPlatform(run) {
+async function withPlatform(run, quota = { pendingPerUser: 2, trustedPendingPerUser: 4, trustedMinVerified: 3 }) {
   const root = mkdtempSync(join(tmpdir(), 'author-progress-'));
   const dist = join(root, 'dist'); mkdirSync(dist);
   writeFileSync(join(dist, 'data.json'), JSON.stringify({ title: 'Test', models: [{ id: 'ma', name: 'Model A' }], tasks: [{ id: 'one', title: 'One', results: [] }] }));
   const platform = createPlatform({ config: { dist, dataDir: join(root, 'state'), contentTemplate: 'http://{token}.localhost',
     siteOrigins: [], admins: ['root'], cdn: [], capture: false, secureCookies: false, trustProxy: false },
-    limits: { ...limits, pendingPerUser: 2, trustedPendingPerUser: 4, trustedMinVerified: 3 } });
+    limits: { ...limits, ...quota } });
   const server = createServer(platform.handleSite).listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -45,13 +45,13 @@ async function withPlatform(run) {
       VALUES (?, ?, ?, 'Summary', 'Prompt', '[]', '["static"]', ?, ?, '静态网页')`)
       .run(id, users.author.id, id, now, JSON.stringify({ status, at: now - 1000 }));
   }
-  async function submit(task = 'one') {
-    const draft = await call('author', 'POST', `/api/drafts?task=${task}&name=work.html`, html, true);
+  async function submit(task = 'one', who = 'author') {
+    const draft = await call(who, 'POST', `/api/drafts?task=${task}&name=work.html`, html, true);
     assert.equal(draft.status, 200, JSON.stringify(draft.data));
     return task === '__new__'
-      ? call('author', 'POST', '/api/questions', { title: 'New question', summary: 'Summary', prompt: 'Prompt', category: '静态网页', templates: ['static'],
+      ? call(who, 'POST', '/api/questions', { title: 'New question', summary: 'Summary', prompt: 'Prompt', category: '静态网页', templates: ['static'],
         draftId: draft.data.draft.id, confirmed: true, work: workBody })
-      : call('author', 'POST', '/api/works', { ...workBody, draftId: draft.data.draft.id });
+      : call(who, 'POST', '/api/works', { ...workBody, draftId: draft.data.draft.id });
   }
   try {
     for (const name of ['author', 'other']) users[name] = await verifiedUser(platform.auth, name);
@@ -64,6 +64,26 @@ async function withPlatform(run) {
     rmSync(root, { recursive: true, force: true });
   }
 }
+
+test('default members can hold eight pending works and both staff roles are unlimited', async () => withPlatform(async ({ auth, db, users, work, call, submit }) => {
+  for (let i = 0; i < 7; i++) work(`member-${i}`);
+  const boot = (await call('author', 'GET', '/api/bootstrap')).data;
+  assert.equal(boot.site.limits.pendingPerUser, 8);
+  assert.equal(boot.me.pendingLimit, 8);
+  assert.equal((await submit()).status, 200);
+  for (const task of ['one', '__new__']) {
+    const response = await submit(task);
+    assert.equal(response.status, 429);
+    assert.match(response.data.error, /上限 8 件/);
+  }
+  db.prepare("UPDATE users SET role = 'moderator' WHERE id = ?").run(users.other.id);
+  auth.bindEmail(users.root.id, 'root@example.test');
+  for (const who of ['other', 'root']) {
+    for (let i = 0; i < 8; i++) work(`${who}-${i}`, who);
+    assert.equal((await call(who, 'GET', '/api/bootstrap')).data.me.pendingLimit, null);
+    for (const task of ['one', '__new__']) assert.equal((await submit(task, who)).status, 200);
+  }
+}, {}));
 
 test('rejected content and rejected question samples release quota for both submission routes', async () => withPlatform(async ({ work, question, call, submit }) => {
   question('rejected-question', 'rejected');

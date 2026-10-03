@@ -1,5 +1,11 @@
 # HANDOFF.md · 当前状态
 
+## 包参考图联调与 Linux 脚本修正（2026-10-04，待统一发布）
+
+- 联调发现包题目页靠回退显示五图，但管理/审核直接读API导致缺失；旧契约原本明确包refs为空，本轮按新授权更新为只读包引用与来源。新增声明/题目权限校验的media/pack-references路径，原包字节直接读取，不复制、不写上传表，上传图权限不变；包metadata同值可重发，变更仍在数据仓维护。
+- 定向13/13、check95/0、完整test283/283。正式包真实HTTP五图GET/HEAD200、JPEG MIME/CORS/逐图SHA与包一致；bootstrap/admin/review字段一致，公开且有包作品时同值保存200，上传表0行。未做生产和完整浏览器交互。
+- 父代理Linux staged唯一失败定位datapack-sync.sh的CRLF；补*.sh text eol=lf并仅归一三个部署shell脚本，Bash语法与diff检查通过。父代理换新SHA/tar后重跑Linux，不能沿用dcfcd95源码包。本轮不改pin/迁移版本，证据保留output/coordinated-release-20261004；[本轮归档](docs/archive/2026-10-04-pack-reference-release-fix-wsnxxxs.md)。
+
 ## 四仓后端联调整理（2026-10-04，已验证，待统一发布）
 
 - 用户本轮授权全部已有修改提交、必要分支合并、推送及联调发布。后端隔离合并 origin/main 3ef8ec7（父代理核实已在线）与本地版本标记文档、投稿预览、成员默认8；既有题目参考图v39/契约/测试和历史发布补记一起整理，其他支线无独有功能。

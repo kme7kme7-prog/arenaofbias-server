@@ -722,9 +722,11 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 **`POST /api/references?name=<原文件名>`**：登录并绑定邮箱，write 与 drafts 限流；请求体为 PNG / JPEG / WebP 原始图片字节，上限 `site.limits.referenceBytes`（5 MiB），超限返回 413 与中文 error。类型以文件头和结构判断，扩展名不符返回 400，Content-Type 不作为类型依据。无损移除 EXIF、文本、ICC 等元数据，保留压缩像素与宽高；JPEG `.jpeg` 规范为存储扩展名 `.jpg`。记录清理后的 bytes 与 SHA-256，不生成缩略图。响应 `{reference: {id, name, src, width, height, bytes}}`。携带的 `X-Datapack-Version` 过时则响应 `X-Datapack-Stale: 1`，不拒绝上传。未绑定图片在 24 小时后清理，启动时及每分钟检查；移除的图片重新作为临时上传计时。
 
-数据库题目 DTO（公开、本人、审核及管理视图）增加 `references: [{id, name, src, caption, width, height}]` 和 `referenceCredit`，src 为 `media/references/<id>.<ext>` 相对媒体路径。`GET /api/review` 增加 questions，高级管理员取得题目管理视图，普通管理员为空数组。数据包题目返回空参考图与来源，由前端消费数据包中的图片；后台不复制包图片，也不接受非空参考图覆盖。包题面继续从当前 catalog 读取，普通元数据编辑不新建 prompt 覆盖；既有显式 prompt 覆盖保留。新增 SQLite v39，仅追加 `questions.reference_credit` 与 `reference_uploads` 表和索引，API 版本保持 2。
+数据库题目 DTO（公开、本人、审核及管理视图）增加 `references: [{id, name, src, caption, width, height}]` 和 `referenceCredit`，src 为 `media/references/<id>.<ext>` 相对媒体路径。`GET /api/review` 增加 questions，高级管理员取得题目管理视图，普通管理员为空数组。数据包题目也返回当前包声明的参考图与来源，包图没有上传 id，src 映射为 `media/pack-references/<task>/<name>`（路径段 URL 编码）；后台不复制图片、不写入 reference_uploads。包图和来源仅由数据仓维护；元数据编辑可同值重发有序 name / caption 与来源，变更返回 400，客户端 id / src 不用于图片绑定。包题面继续从当前 catalog 读取，普通元数据编辑不新建 prompt 覆盖；既有显式 prompt 覆盖保留。新增 SQLite v39，仅追加 `questions.reference_credit` 与 `reference_uploads` 表和索引，API 版本保持 2。
 
 **`GET /media/references/<id>.<ext>`**（亦支持 HEAD）：临时上传仅上传者和管理员可读；绑定后按题目权限，未公开仅题目作者和管理员可读，公开后所有人可读，不能读取返回 404。正确 MIME、nosniff、`Content-Disposition: inline; filename*=UTF-8''<name>`，公开缓存 `public, max-age=31536000, immutable`，私密缓存使用 private；`Vary: Origin, Cookie`。沿用配置的前端源 CORS 与凭据许可，支持 GET/HEAD 预检，公开图片可供跨源 fetch 打包下载。
+
+**`GET /media/pack-references/<task>/<name>`**（亦支持 HEAD）：只提供当前包该题声明的图片，未声明文件或无题目读取权限返回 404；包题目撤回公开后只允许工作人员读取。返回原包字节及对应 MIME、nosniff、`Cache-Control: no-cache`、`Vary: Origin, Cookie`，沿用前端源凭据 CORS 与 GET/HEAD 预检，不复用上传参考图表或文件存储。
 
 不附作品时传题目字段；附示例时另传 `draftId`、`confirmed:true`、`work`（同作品表单字段）。草稿须属于本人、未过期且 task=__new__。题目与示例及审计在同一事务写入，失败保留可重试草稿。响应 `{ "question": <题目作者视图>, "work"?: <作品作者视图> }`，统一 author/mine DTO。
 

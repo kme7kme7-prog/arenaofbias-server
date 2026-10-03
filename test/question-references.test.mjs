@@ -151,17 +151,20 @@ test('failed question writes roll back references and failed deletion leaves the
   } finally { db.close(); }
 });
 
-test('packaged questions expose empty reference metadata and keep fresh prompts unless explicitly overridden', () => {
+test('packaged questions expose read-only references and keep fresh prompts unless explicitly overridden', () => {
   const db = openDatabase(':memory:');
   try {
     users(db); const questions = createQuestions(db);
-    let task = { ...body, id: 'pack', tags: [], acceptsUploads: true, references: [{ src: '/private-copy.png' }], referenceCredit: 'Pack author' };
+    let task = { ...body, id: 'pack', tags: [], acceptsUploads: true,
+      references: [{ name: '01-构图.png', src: 'references/pack.png', caption: 'Layout' }], referenceCredit: 'Pack author' };
     questions.bindCatalog({ snapshot: () => ({ task: id => id === 'pack' ? task : null, tasks: () => [task], works: () => [] }) });
     let dto = questions.get('pack');
-    assert.deepEqual(dto.references, []); assert.equal(dto.referenceCredit, '');
+    assert.deepEqual(dto.references, [{ ...task.references[0], src: 'media/pack-references/pack/01-%E6%9E%84%E5%9B%BE.png' }]);
+    assert.equal(dto.referenceCredit, 'Pack author');
     assert.throws(() => questions.edit(admin, 'pack', { references: [{ id: 'r-a' }] }), error => error.status === 400 && /数据包/.test(error.message));
     assert.throws(() => questions.edit(admin, 'pack', { referenceCredit: 'Artist' }), error => error.status === 400 && /数据包/.test(error.message));
-    questions.edit(admin, 'pack', { title: 'Edited title', references: [], referenceCredit: '' });
+    assert.throws(() => questions.edit(admin, 'pack', { references: [] }), error => error.status === 400 && /数据包/.test(error.message));
+    questions.edit(admin, 'pack', { title: 'Edited title', references: dto.references, referenceCredit: dto.referenceCredit });
     assert.equal(Object.hasOwn(JSON.parse(db.prepare('SELECT display_json FROM question_overrides').get().display_json), 'prompt'), false);
     task = { ...task, prompt: 'Fresh catalog prompt' };
     assert.equal(questions.get('pack').prompt, 'Fresh catalog prompt');
@@ -169,6 +172,7 @@ test('packaged questions expose empty reference metadata and keep fresh prompts 
     task = { ...task, prompt: 'Another catalog prompt' };
     questions.edit(admin, 'pack', { summary: 'Updated summary' });
     dto = questions.get('pack'); assert.equal(dto.prompt, 'Explicit admin prompt');
-    assert.deepEqual(dto.references, []); assert.equal(dto.referenceCredit, '');
+    assert.deepEqual(dto.references.map(ref => ref.name), ['01-构图.png']); assert.equal(dto.referenceCredit, 'Pack author');
+    assert.equal(db.prepare('SELECT count(*) AS n FROM reference_uploads').get().n, 0);
   } finally { db.close(); }
 });

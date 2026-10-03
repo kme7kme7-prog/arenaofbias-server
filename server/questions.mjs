@@ -60,7 +60,9 @@ export function createQuestions(db, { references = null } = {}) {
     if (overlay?.deleted_at != null) return null;
     return { ...task, tags: task.tags ?? [], ...JSON.parse(overlay?.display_json ?? '{}'), packaged: true,
       author_role: 'admin', owner_id: null, owner_name: null, owner_avatar: null,
-      references: [], referenceCredit: '',
+      references: (task.references ?? []).map((ref) => ({ ...ref,
+        src: `media/pack-references/${encodeURIComponent(task.id)}/${encodeURIComponent(ref.name)}` })),
+      referenceCredit: task.referenceCredit ?? '',
       moderation: JSON.parse(overlay?.moderation ?? '{"status":"approved"}'),
       acceptsUploads: overlay?.accepts_uploads == null ? task.acceptsUploads : Boolean(overlay.accepts_uploads),
       cover: overlay?.cover_work ?? null, version: task.version ?? 1, createdAt: task.createdAt ?? null, date: task.date ?? null };
@@ -114,10 +116,13 @@ export function createQuestions(db, { references = null } = {}) {
     let refs = question.references;
     if (Object.hasOwn(body, 'references')) {
       if (!Array.isArray(body.references)) fail(400, '参考图格式不正确');
-      if (question.packaged && body.references.length) fail(400, '数据包题目不能添加参考图，请在数据仓库维护');
-      refs = question.packaged ? [] : prepareReferences(actor, body.references, question.id);
+      if (question.packaged) {
+        const metadata = (items) => items.map((ref) => ({ name: ref?.name, caption: ref?.caption ?? '' }));
+        if (JSON.stringify(metadata(body.references)) !== JSON.stringify(metadata(question.references)))
+          fail(400, '数据包题目不能修改参考图，请在数据仓库维护');
+      } else refs = prepareReferences(actor, body.references, question.id);
     }
-    if (question.packaged && credit) fail(400, '数据包题目不能添加参考图署名，请在数据仓库维护');
+    if (question.packaged && credit !== question.referenceCredit) fail(400, '数据包题目不能修改参考图署名，请在数据仓库维护');
     const category = Object.hasOwn(body, 'category') ? requireCategory(body.category) : question.category;
     const domains = Object.hasOwn(body, 'domains') ? requireDomains(body.domains) : question.domains;
     let templates = question.templates;

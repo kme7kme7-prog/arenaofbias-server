@@ -647,6 +647,18 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
 
   function serveSite(req, res, pathname) {
     readGuard.file(req);
+    const packagedReference = /^\/media\/pack-references\/([^/]+)\/([^/]+)$/.exec(pathname);
+    if (pathname.startsWith('/media/pack-references/')) {
+      const taskId = packagedReference && decodeURIComponent(packagedReference[1]);
+      const name = packagedReference && decodeURIComponent(packagedReference[2]);
+      const snapshot = catalog.snapshot();
+      const image = taskId && questions.get(taskId, auth.userFrom(req))
+        && snapshot.task(taskId)?.references.find((ref) => ref.name === name);
+      const found = image && resolveInside(snapshot.root, `/${image.src}`);
+      if (!found) return sendJson(res, 404, { error: '文件不存在' });
+      return streamFile(req, res, found, { 'Cache-Control': 'no-cache', 'Vary': 'Origin, Cookie',
+        'Content-Security-Policy': "default-src 'none'" });
+    }
     const reference = /^\/media\/references\/([a-z0-9-]+)\.(png|jpg|webp)$/.exec(pathname);
     if (reference) {
       const image = references.file(reference[1], auth.userFrom(req));
@@ -722,10 +734,11 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
           res.setHeader('Access-Control-Expose-Headers', 'X-Datapack-Stale');
         }
       }
-      if (req.method === 'OPTIONS' && (url.pathname.startsWith('/api/') || url.pathname.startsWith('/media/references/'))) {
+      const referenceMedia = url.pathname.startsWith('/media/references/') || url.pathname.startsWith('/media/pack-references/');
+      if (req.method === 'OPTIONS' && (url.pathname.startsWith('/api/') || referenceMedia)) {
         assertSameOrigin(req, config);
         const method = req.headers['access-control-request-method'];
-        const route = url.pathname.startsWith('/media/references/') && ['GET', 'HEAD'].includes(method)
+        const route = referenceMedia && ['GET', 'HEAD'].includes(method)
           ? { handler: true } : router.match(method, url.pathname);
         if (!route) fail(404, '接口不存在');
         if (route.methodNotAllowed) fail(405, '不支持这个操作');

@@ -38,6 +38,9 @@ function readSnapshot(root) {
     version: task.version ?? 1, date: task.date ?? null, createdAt: task.createdAt ?? null, tags: task.tags ?? [],
     arenaId: task.arenaId ?? null, kind: task.kind ?? 'web', category: task.category ?? '', domains: task.domains ?? [],
     templates: templatesOf(task),
+    references: (task.references ?? []).map((ref) => Object.fromEntries(['name', 'src', 'caption', 'width', 'height']
+      .filter((key) => ref[key] !== undefined).map((key) => [key, ref[key]]))),
+    referenceCredit: task.referenceCredit ?? '',
     promptVariants: (task.promptVariants ?? []).map(({ id, label, prompt }) => ({ id, label, prompt })),
     acceptsUploads: !task.promptPending,
     works: new Map(task.results.map((result) => {

@@ -260,8 +260,8 @@ describe('reference image HTTP contract', () => {
     const data = JSON.parse(readFileSync(join(dist, 'data.json'), 'utf8'));
     const prompt = 'Updated packaged prompt.\n\n【参考图】\n01-构图.png：保留主体布局。';
     data.tasks[0].prompt = prompt;
-    data.tasks[0].references = [{ id: 'fake-package-reference', name: '01-构图.png', src: 'references/fake.png', caption: '包内伪造字段' }];
-    data.tasks[0].referenceCredit = '包内伪造来源';
+    data.tasks[0].references = [{ name: '01-构图.png', src: 'references/fake.png', caption: '包内说明', width: 2, height: 3 }];
+    data.tasks[0].referenceCredit = '包内来源';
     mkdirSync(join(dist, 'references'));
     writeFileSync(join(dist, 'references', 'fake.png'), png);
     writeFileSync(join(dist, 'data.json'), JSON.stringify(data));
@@ -271,11 +271,29 @@ describe('reference image HTTP contract', () => {
     assert.equal(bootstrap.data.datapack, 'b'.repeat(40));
     const admin = await call('root', 'GET', '/api/admin/questions');
     assert.equal(admin.status, 200, JSON.stringify(admin.data));
-    for (const question of [bootstrap.data.questions.find(item => item.id === 'one'), admin.data.questions.find(item => item.id === 'one')]) {
+    const review = await call('root', 'GET', '/api/review');
+    const expectedReference = { ...data.tasks[0].references[0], src: 'media/pack-references/one/01-%E6%9E%84%E5%9B%BE.png' };
+    for (const question of [bootstrap.data.questions.find(item => item.id === 'one'), admin.data.questions.find(item => item.id === 'one'),
+      review.data.questions.find(item => item.id === 'one')]) {
       assert.equal(question.title, 'Edited package title');
       assert.equal(question.prompt, prompt);
-      assert.deepEqual(question.references, []); assert.equal(question.referenceCredit, '');
+      assert.deepEqual(question.references, [expectedReference]); assert.equal(question.referenceCredit, '包内来源');
     }
+    const path = mediaPath(expectedReference);
+    const image = await call('guest', 'GET', path);
+    assert.equal(image.status, 200); assert.deepEqual(image.buffer, png);
+    assert.equal(image.headers.get('content-type'), 'image/png');
+    assert.equal(image.headers.get('cache-control'), 'no-cache');
+    assert.equal(image.headers.get('access-control-allow-origin'), galleryOrigin);
+    assert.equal((await call('guest', 'HEAD', path)).status, 200);
+    assert.equal((await call('guest', 'OPTIONS', path, undefined, { 'access-control-request-method': 'GET' })).status, 204);
+    assert.equal((await call('guest', 'GET', '/media/pack-references/one/not-declared.png')).status, 404);
+    const resent = await call('root', 'POST', '/api/admin/questions/one/meta', {
+      references: [{ name: expectedReference.name, caption: expectedReference.caption }], referenceCredit: '包内来源' });
+    assert.equal(resent.status, 200, JSON.stringify(resent.data));
+    assert.equal((await moderate('one', 'rejected', 'Hold packaged question')).status, 200);
+    assert.equal((await call('guest', 'GET', path)).status, 404);
+    assert.equal((await call('root', 'GET', path)).status, 200);
     assert.equal(platform.db.prepare('SELECT count(*) AS n FROM reference_uploads').get().n, rowsBefore);
     assert.deepEqual(readdirSync(join(root, 'data', 'references')).sort(), filesBefore);
   });

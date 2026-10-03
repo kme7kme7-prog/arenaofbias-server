@@ -471,6 +471,15 @@ const MIGRATIONS = [
     const columns = new Set(db.prepare('PRAGMA table_info(works)').all().map((column) => column.name));
     if (!columns.has('model_vendor')) db.exec("ALTER TABLE works ADD COLUMN model_vendor TEXT NOT NULL DEFAULT ''");
   },
+  // Stable public datapack addresses are indexes, never preview capabilities.
+  (db) => {
+    db.exec(`CREATE TABLE IF NOT EXISTS curated_content_keys (
+      task_id TEXT NOT NULL,
+      work_id TEXT NOT NULL,
+      content_key TEXT NOT NULL UNIQUE CHECK (length(content_key) = 33 AND substr(content_key, 1, 1) = 'c'),
+      PRIMARY KEY (task_id, work_id)
+    );`);
+  },
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

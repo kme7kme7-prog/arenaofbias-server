@@ -125,15 +125,15 @@ export function registerShow1Compat(router, deps) {
         modelName: row.model_id ? (deps.catalog.model(row.model_id)?.name ?? row.model_id) : row.model_other,
         vendor: row.model_id ? (deps.catalog.model(row.model_id)?.vendor ?? '') : row.model_vendor }));
     // Datapack works follow the same entertainment switch as uploads (on unless turned off);
-    // their files are reached with a short-lived p preview key, as they have no works row.
+    // their files use persistent public indexes; private p previews remain separate.
     const archive = deps.catalog.snapshot?.();
     const datapack = !library || !archive ? [] : archive.tasks().flatMap((task) => {
       const round = roundByTask[task.id];
       if (!round) return [];
-      return [...task.works.values()].filter((work) => work.dir && library.flagsOf(work).show_entertainment).map((work) => ({
+      return [...task.works.values()].filter((work) => library.publicCuratedContent(work)).map((work) => ({
         id: work.id, rid: datapackRid(round, work.id), task_id: task.id, round,
         model_id: work.modelId ?? null, model_other: work.modelId ? '' : (work.modelName ?? ''), title: work.title,
-        content_key: new URL(library.previewOrigin(work)).host.split('.')[0], modelName: work.modelName ?? work.modelId ?? '', vendor: work.vendor ?? '' }));
+        content_key: library.curatedContentKey(work), modelName: work.modelName ?? work.modelId ?? '', vendor: work.vendor ?? '' }));
     });
     return [...uploads, ...datapack];
   };

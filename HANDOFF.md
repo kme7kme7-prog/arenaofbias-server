@@ -1,5 +1,15 @@
 # HANDOFF.md · 当前状态
 
+## 竞技场公开收录内容长期索引（2026-10-03，本地完成，未提交、推送、部署）
+
+- 用户确认实施报告后授权拉取准备实施；pull --ff-only 2915a49→5527c5e，原工作区干净。只改 server/db.mjs、library.mjs、show1compat.mjs、content.mjs、新增 test/curated-content.test.mjs、API 契约及本节。不改投稿地址/门禁、Gallery、nginx、CSP、部署配置、老题定义或历史桥接。
+- 方案 B：v36 后追加幂等 v37，curated_content_keys 按 task_id/work_id 联合唯一、content_key 唯一。首次公开清单访问为在娱乐池的 datapack 件生成 c<32hex> 持久化随机索引，不依赖 secret，不回填 works、不改发布开关。投稿 w 分支原样，p 的一小时/重启失效语义原样，有效旧 p 不迁移。
+- c 每次内容/子资源请求重读当前 catalog、verified/内容状态和娱乐开关，private/held 不发键；关闭娱乐池或移出数据包后旧 c 410，no-store 防浏览器缓存绕过门禁。不套正式 isEligible，避免误加生成资格条件，同名 id 跨题隔离。
+- 实查只有 m HTML 注入就绪探针，与任务书假设不同。c 默认注入；其他已有地址仅在 aob=prev 时 opt-in，普通 w、作者/管理员预览和截图默认行为不动。错误页不发探针、安全头不变。Show1 配套识别平台 URL 和一次性恢复；后端需先于前端发布。
+- 最终 check 84 个文件/0 错；npm test 248/248，原未过审作者私看/公开不可见测试无回退。新增真实 HTTP 测试涵盖 c 200/探针/no-store、重建平台/重复开库后原键有效、跨题同名不同键、unverified/held 禁发及 410、关娱乐/移出目录后 410、p 过期/重启失效、p opt-in 探针、清单不泄露测试 secret。diff --check 通过，仅 CRLF 提示。
+- 动工前公网只读 curl --ssl-no-revoke：464 HTML，177 p / 287 w，刚取 p 样本 200；没有声称历史失效地址已恢复。未部署、未写生产库、未验收公网新 c 200，发布需先备份生产 SQLite 并验收 v37；生产版本须现场核对。
+- 后续提交禁止 Co-authored-by / Generated with 等联合署名，英文简单句。本轮不 commit/push/deploy，不新增归档或决策日志。
+
 ## 共池分支发布（2026-10-03，发布准备完成）
 
 - 用户明确授权发布，并选择统一开启当前数据包作品的正式盲评；计划只恢复当前目录内 90 件关闭的作品，其他 87 件已开启，保留退役记录、校准、其他门面开关及全部业务数据。

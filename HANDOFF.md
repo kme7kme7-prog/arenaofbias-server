@@ -1,5 +1,13 @@
 # HANDOFF.md · 当前状态
 
+## Gallery 版本标记部署配套（2026-10-04，文档已获授权本地提交，未推送、未部署）
+
+- 用户要求仅修改部署文档 / 必要配置，并指定 GPT-6.1 Sol / high 分工；两个子代理完成配置审计与部署文档，父代理集成与验证。明确禁止 commit / push / 部署 / 生产登录，未修改 Gallery 前端，原有脏文件保留。
+- docs/deploy.md 完整 manifest 包含 version.json，构建检查 assets 与 index.html 全部 ?v= 一致；资产差异包排除标记，先上传资产和 index.html、最后独立上传标记（哈希未变也传）。.next 完整核验后先切资产与入口，最后原子发布标记；回退 gallery.prev 同样最后恢复标记且不改原 .prev，旧构建无标记时示例在切换前停止。
+- 现有 JSON no-cache 规则满足 /version.json 的缓存要求，文档补充禁止长缓存 / immutable 及 CDN / 反代缓存；未来新增 location 必须 include security-headers.conf。static-private-paths.conf、read-zones.conf、Gallery gallery-private-files.conf 不拦截此路径，走普通 20r/s、burst 200 / 64 并发，不加入 catalog。配置无需修改；vhost 证据仅为本地历史样本，未核实当前生产。
+- 本地验证：npm run check 91 / 0，npm test 278 / 278，六个相关 Bash 块语法通过；合成目录验证新旧标记、首次引入、标记哈希不变及 Show1 发布，核对最后单传 / 生效、完整树、回退与缺少旧标记时切换前停止。Windows Git Bash manifest 分隔符 / 换行已在合成夹具中规范化，非生产 Linux 实跑；未新增测试。git diff --check / 文档相对链接检查通过，测试含他轮原有功能。
+- 未执行生产 HEAD / GET、Nginx -t / reload、CDN 缓存或浏览器恢复验收；未部署、commit、push、登录或请求生产。server 无 build / check:intake，未构建 Gallery。发布验收要求 version.json 200、no-cache（或 no-store），assets 与 index.html app.js?v= / 全部资产版本一致。证据在忽略目录 output/gallery-version-deploy-20261004-gz9e7zfx；[本轮归档](docs/archive/2026-10-04-gallery-version-deploy-wsnxxxs.md)。
+
 ## 四仓最新功能合并（2026-10-03，待统一发布）
 
 - 用户授权四仓联调、合并、提交、推送和部署；本仓在隔离 worktree 将本地 `216879e`（分类扩充与 CDN / 重试修复）与远端 `ca3e2ca`（娱乐小窗 `arena-fold` / 键盘 `arena-scene`）合并。其他本地功能分支均为主线祖先，无独有提交需再次合并。

@@ -303,6 +303,10 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
 
 子页面报告 `{source:'sp-fold', count}`，父页面通过 `{source:'sp-arena', fold:boolean}` 切换；`false` 显示控件，`true` 隐藏控件。控件 DOM 与状态保留，接受消息时只认当前父窗口。检测启发式与超过 6 个块 / 本次覆盖 40% 的保护规则沿用现有脚本。
 
+Show1 娱乐盲测小窗可单独 opt-in `aob=arena-fold`，注入 `/__aob_fold.js`（`server/arena-fold.js`），不限题目类别；放大及正式模式不附加此参数。它与原折叠脚本互斥，不改变 `aob=fold` / Gallery 语义；草稿不启用。策略要求大幅 Canvas，识别覆盖其上的 fixed/absolute 控制容器，以及由多个短文本绝对定位节点构成的非交互标注层，保护入口、表单、带语义标记的介绍内容；未识别时保持原貌。沿用上述父子消息协议，默认收起，可恢复原 DOM/输入状态，并检测迟加载容器；count 仍仅报告控制面板数量。脚本资源同样先经过作品访问门禁，不扩大公开范围。Canvas 内文字和布局内 UI 不保证可自动识别。
+
+键盘娱乐小窗在上述参数之外附加 `aob=arena-scene`，仅在存在唯一可识别大 Canvas 时将其原容器链铺满，收起链外产品页内容并触发原作品 resize；不移动/重建 Canvas 或修改相机。没有 Canvas 或多个候选时不选择。场景布局不受 `sp-arena` 面板开关控制；放大/正式使用不含两项 Arena 参数的原地址恢复完整页面。源文件及访问权限不变。
+
 ### 3.2 `POST /api/auth/register` —— 注册
 
 **认证**：无。**限流**：auth 桶（10 次/分钟/IP）。

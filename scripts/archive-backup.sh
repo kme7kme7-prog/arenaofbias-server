@@ -2,6 +2,8 @@
 # 每日加密归档：restic 快照（AES-256 加密 + 去重 + 增量，密钥只在 /root/.archive-restic-password）
 # 推送的是加密块，仓库里看不到任何明文。无变化则静默跳过。
 set -euo pipefail
+# cron 默认 PATH 只有 /usr/bin:/bin，restic 装在 /usr/local/bin
+export PATH="/usr/local/bin:$PATH"
 DATA="${ARCHIVE_DATA_DIR:-/www/wwwroot/arenaofbias-server/.data}"
 DIST="${ARCHIVE_DIST_DIR:-/www/wwwroot/arenaofbias-server/.datapack/current}"
 REPO="${ARCHIVE_REPO_DIR:-/root/arenaofbias-archive}"

@@ -11,6 +11,7 @@ import { bridgeTags, probeTag, rewriteImportmap, serveBridgeVirtual, validCamera
 const SCRIPTS = {
   draft: { path: '/__sp_probe.js', body: readFileSync(new URL('./probe.js', import.meta.url)) },
   match: { path: '/__sp_fold.js', body: readFileSync(new URL('./fold.js', import.meta.url)) },
+  arena: { path: '/__aob_fold.js', body: readFileSync(new URL('./arena-fold.js', import.meta.url)) },
 };
 
 function errorPage(res, status, title, detail, headers = {}) {
@@ -92,7 +93,8 @@ export function createContentHandler({ config, library, arena, siteOrigins, read
       'Cache-Control': target.draft || target.private || key[0] === 'm' ? 'no-store' : 'private, max-age=600',
     };
     const fold = key[0] === 'm' || (!target.draft && url.searchParams.getAll('aob').includes('fold'));
-    const inject = pathname === SCRIPTS.match.path ? SCRIPTS.match : target.draft ? SCRIPTS.draft : null;
+    const arenaFold = !target.draft && url.searchParams.getAll('aob').includes('arena-fold');
+    const inject = pathname === SCRIPTS.arena.path ? SCRIPTS.arena : pathname === SCRIPTS.match.path ? SCRIPTS.match : target.draft ? SCRIPTS.draft : null;
     if (inject && pathname === inject.path) {
       res.writeHead(200, { ...headers, 'Content-Type': 'text/javascript; charset=utf-8', 'Content-Length': inject.body.length });
       return res.end(req.method === 'HEAD' ? undefined : inject.body);
@@ -112,7 +114,8 @@ export function createContentHandler({ config, library, arena, siteOrigins, read
       // for aob:work-ready); the camera bridge restores or captures per bridgePlan.
       const head = [];
       if (target.draft) head.push(scriptTag(SCRIPTS.draft.path));
-      if (fold) head.push(scriptTag(SCRIPTS.match.path));
+      if (arenaFold) head.push(scriptTag(SCRIPTS.arena.path));
+      else if (fold) head.push(scriptTag(SCRIPTS.match.path));
       if (key[0] === 'm' || key[0] === 'c' || url.searchParams.getAll('aob').includes('prev')) head.push(probeTag());
       const bridge = bridgePlan(key, work, url);
       let body = readFileSync(found.file);

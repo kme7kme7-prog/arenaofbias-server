@@ -463,9 +463,9 @@ describe('platform lifecycle', () => {
   }
 
   function fetchContent(url) {
-    const { host, pathname } = new URL(url);
+    const { host, pathname, search } = new URL(url);
     return new Promise((resolve, reject) => {
-      const req = request({ host: '127.0.0.1', port: content.address().port, path: pathname, headers: { host } }, (res) => {
+      const req = request({ host: '127.0.0.1', port: content.address().port, path: pathname + search, headers: { host } }, (res) => {
         let text = '';
         res.on('data', (chunk) => { text += chunk; });
         res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, text }));
@@ -682,6 +682,12 @@ describe('platform lifecycle', () => {
     assert.equal(frame.status, 200);
     assert.match(frame.text, /<script src="\/__sp_fold\.js"><\/script>/);
     assert.equal((await fetchContent(new URL('/__sp_fold.js', match.data.a).href)).status, 200);
+    const arenaFrame = await fetchContent(`${match.data.a}?aob=arena-fold`);
+    assert.match(arenaFrame.text, /<script src="\/__aob_fold\.js"><\/script>/);
+    assert.doesNotMatch(arenaFrame.text, /__sp_fold\.js/);
+    const arenaScript = await fetchContent(new URL('/__aob_fold.js', match.data.a).href);
+    assert.equal(arenaScript.status, 200);
+    assert.equal(arenaScript.text, readFileSync(new URL('../server/arena-fold.js', import.meta.url), 'utf8'));
     const vote = await call('alice', 'POST', `/api/arena/matches/${match.data.id}/vote`, { choice: 'a' });
     assert.equal(vote.data.counted, true);
     assert.ok(['A1', 'B1'].includes(vote.data.a.title));

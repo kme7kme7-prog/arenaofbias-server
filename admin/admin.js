@@ -794,7 +794,15 @@ function calibrationDialog(w) {
   (async () => {
     try {
       const { url } = await api(`admin/works/${workKey(w)}/preview`, { method: 'POST' });
-      view.src = `${url}${url.includes('?') ? '&' : '?'}aob=bridge&face=${face}`;
+      const preview = new URL(url, location.href);
+      preview.searchParams.append('aob', 'bridge');
+      preview.searchParams.set('face', face);
+      if (face === 'arena') {
+        preview.searchParams.append('aob', 'arena-fold');
+        const question = [...(state.adminQuestions ?? []), ...(state.questions ?? []), ...(state.data?.tasks ?? [])].find(item => item.id === w.task);
+        if (/^(建模|3D 场景|物理模拟|体素世界)$/.test(question?.category ?? '')) preview.searchParams.append('aob', 'arena-scene');
+      }
+      view.src = preview.href;
       grab.disabled = false;
       hint.textContent = '拖动画面移动取景；滑杆与数字实时联动。取景只改显示，不改作品文件。';
     } catch {

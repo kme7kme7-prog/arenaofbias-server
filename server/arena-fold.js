@@ -22,7 +22,9 @@
     if (!sceneOnly || !document.body) return;
     // Entry / credential forms must remain usable before the scene starts.
     if ([...document.querySelectorAll('form,input[type="email"],input[type="password"],textarea,' + controls)].some(node =>
-      node.getClientRects().length && (node.matches('form,input[type="email"],input[type="password"],textarea') ||
+      node.getClientRects().length && (node.matches('input[type="email"],input[type="password"],textarea') ||
+        (node.matches('form') && (!node.querySelector('input[type="radio"],input[type="range"],select') ||
+          node.querySelector('input[type="email"],input[type="password"],textarea'))) ||
         /开始体验|进入体验|点击开始|start experience|enter experience/i.test(node.textContent)))) return;
     if (!isolatedCanvas?.isConnected) {
       root.removeAttribute('data-aob-scene');

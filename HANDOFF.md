@@ -1,5 +1,10 @@
 # HANDOFF.md · 当前状态
 
+## 配置表单与竞技场取景预览（2026-10-04，本地）
+
+- arena-fold.js 收窄场景隔离的表单保护，配置 radio/range/select 且无凭据/textarea 可隐藏；登录/普通表单和开始体验入口保持。admin/admin.js 竞技场取景接入 arena-fold 及对应类别 arena-scene，bridge/face 保留，展览馆不变。API 契约更新，不修改源作品或数据库。
+- check 87/0、test 263/263；Show1 typecheck/lint、键盘回归及真实 FORM 68 复验通过，截图已查看。未实点管理员保存、未提交/推送/部署；本地下载副本内容服务已重启。其他遗留不动。
+
 
 ## 娱乐评测巡检问题修复（2026-10-04，本地未提交/部署）
 

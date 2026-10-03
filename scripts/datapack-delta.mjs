@@ -1,6 +1,6 @@
 // Transfer only changed datapack files when downloading a full release is too slow.
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
@@ -59,12 +59,13 @@ export function verifyDelta(root, archive) {
 export function applyDelta(oldRoot, archive, targetRoot) {
   const delta = readDelta(archive);
   if (existsSync(targetRoot)) throw new Error('Target release already exists');
-  if (treeHash(inventory(oldRoot)) !== delta.base) throw new Error('Base datapack checksum mismatch');
+  const sourceRoot = realpathSync(oldRoot);
+  if (treeHash(inventory(sourceRoot)) !== delta.base) throw new Error('Base datapack checksum mismatch');
   const stage = join(dirname(targetRoot), `.${basename(targetRoot)}.delta-${process.pid}`);
   if (existsSync(stage)) throw new Error('Delta staging directory already exists');
   try {
     mkdirSync(dirname(targetRoot), { recursive: true });
-    cpSync(oldRoot, stage, { recursive: true, errorOnExist: true, force: false });
+    cpSync(sourceRoot, stage, { recursive: true, errorOnExist: true, force: false });
     for (const name of delta.removed) rmSync(join(stage, name));
     for (const [name, encoded] of Object.entries(delta.changed)) {
       const bytes = Buffer.from(encoded, 'base64');

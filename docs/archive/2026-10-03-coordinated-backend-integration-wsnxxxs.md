@@ -35,3 +35,10 @@
 ## 下一步建议
 
 父代理从已进入上游 main 的最终 SHA 部署至 /www/wwwroot/arenaofbias-server，备份生产 SQLite / 包指针 / 旧代码后迁移到 v38，再发布游戏与 API v2 Gallery；核对公共 bootstrap、c 地址、游戏阈值、数据库行内容及服务状态。
+
+
+## 差异包根链接复制修复（2026-10-03，发布前必要修复）
+
+- 父代理在实际差异包部署中确认 cpSync(oldRoot) 会保留 .datapack/current 根符号链接，后续删除和更新写穿旧版本。仅修改 scripts/datapack-delta.mjs 与既有 delta 测试：先 realpathSync 解析旧根，基线核验和复制均使用实体目录，资源内部链接继续由 inventory 拒绝。
+- 新 root-link 回归使用 Windows junction / Linux directory symlink，确认旧版本树 SHA256 不变、current 保持链接、目标是实体目录并通过目标校验。修复前 Windows cp 报 EPERM，修复后 2 / 2 专项通过；npm run check 86 / 0、完整 npm test 259 / 259、diff --check 通过。
+- 本轮不操作生产，不重跑数据库迁移；线上受影响文件恢复与旧版本完整校验由父代理负责。保留父代理已更新但未提交的 datapack.json 与原脏文档。本补充与脚本 / 测试作为必要修复独立提交，父代理重新固定后端来源后发布。

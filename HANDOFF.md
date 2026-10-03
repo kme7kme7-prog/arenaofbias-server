@@ -1,5 +1,14 @@
 # HANDOFF.md · 当前状态
 
+## 娱乐盲测十件作品门槛（2026-10-03，本地完成，未提交、推送、部署）
+
+- 用户确认实施报告后授权：Show1 公开娱乐题目须当前至少 10 件不同 id 的非演示公开娱乐作品；前端同时保留跨模型要求。不隐藏题库清单、不删除历史票/榜单、不影响 Gallery 正式盲测。
+- 动工复核本地已在 873b5c8（上一轮长期 c 门牌由外部提交），工作区干净。本轮仅修改 server/show1compat.mjs、test/show1compat.test.mjs、docs/api-contract.md 和本节；不改迁移、审核、数据包、内容门禁、CSP、nginx 或部署配置。
+- 新 blind/party 票按当前 worksOf 清单按 id 去重，demo 不计数；不足十件返回 409 pool 与中文收集进度。已存同 id 同票幂等重放先处理，formal 保留管理员门禁、免娱乐门槛。公开作品清单仍全量供浏览。live 投稿和 datapack 件继续由现有公开/娱乐开关过滤。
+- 测试 fixture 每题扩至十件不同作品（可共享模型），新增 9/10、重复/demo不计数、unverified/questioned不计数、第十件实时加入/撤出、formal免门槛、历史票/重放保留。check 84/0、npm test 249/249、diff --check 通过。早期测试把 held 当作品核验 status 导致约束错误，已按真实 questioned 状态修正并全量重跑。
+- Show1 配套公共随机/直接/分享/继续/失败恢复门槛及收集进度；typecheck/lint/check build/production build 通过，public pool 5、arena 13、placeholder 10、formal 6、work retry 8、work ready 14 全通过。仅隔离浏览器/临时库验证，无生产写入；未部署/未线上验收。本轮不 commit/push/deploy，未来提交英文简单句并禁止任何联合署名。
+
+
 ## 竞技场公开收录内容长期索引（2026-10-03，本地完成，未提交、推送、部署）
 
 - 用户确认实施报告后授权拉取准备实施；pull --ff-only 2915a49→5527c5e，原工作区干净。只改 server/db.mjs、library.mjs、show1compat.mjs、content.mjs、新增 test/curated-content.test.mjs、API 契约及本节。不改投稿地址/门禁、Gallery、nginx、CSP、部署配置、老题定义或历史桥接。

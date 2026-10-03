@@ -824,7 +824,7 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 | `GET /api/prompts` | `{ prompts: [...] }`；合并历史快照与数据包正式题目，竞技场 editorial 覆盖对应题目的 `commentary`、`weights`。 |
 | `GET /api/works` | `{ works: [...] }`；快照作品加符合条件的 live 投稿。 |
 | `GET /api/votes?scope=entertainment\|formal` | `{ votes: [...] }`；只读库内 `source=show1` 的票，按时间和 ID 排序，不合入旧快照。scope 必填，非法或缺失为 400。 |
-| `POST /api/votes` | 登录必需；提交 `id`、`promptId`、`winnerRid/Mid`、`loserRid/Mid`、`mode`、`outcome`。未绑定邮箱时有效请求返回 `200 { counted: false, reason: 'unbound' }`，不写入对局或票；已绑定时成功 `201 { vote }`，同 ID 同票幂等重放，已投同一对返回 `409 pair`；`formal` 仅管理员。 |
+| `POST /api/votes` | 登录必需；提交 `id`、`promptId`、`winnerRid/Mid`、`loserRid/Mid`、`mode`、`outcome`。未绑定邮箱时有效请求返回 `200 { counted: false, reason: 'unbound' }`，不写入对局或票；已绑定时成功 `201 { vote }`，同 ID 同票幂等重放，已投同一对返回 `409 pair`；`formal` 仅管理员。新 `blind` / `party` 票要求该题当前公开娱乐作品至少 10 件（非演示、按 id 去重），不足返回 `409 { code: "pool", error: "作品收集中（数量/10），暂未开放娱乐盲测" }`；已存票幂等重放及历史榜单保留，正式范围不套此门槛。 |
 | `GET /api/ratings?scope=entertainment\|formal` | `{ ratings: { [modelId]: number }, games: { [modelId]: number } }`；按库内票回放未取整 Elo，供配对，复用聚合缓存。scope 必填。 |
 | `GET /api/show1/leaderboard?scope=entertainment\|formal&category=all\|text\|web` | 主站聚合榜单，scope 必填，category 缺省 all；非法参数 400。见下方。 |
 | `GET /api/comments?round=<题目编号>` | `{ comments: [...] }`；无效题目 `400`。 |
@@ -833,7 +833,7 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 | `POST /api/reactions` | 登录且绑定邮箱；请求 `id`、`promptId`、`mid`、`kind`，成功 `201 { counts, mine }`；`kind:null` 撤销。未绑定返回 `403 email_required`。 |
 | `POST /api/track` | 最佳努力记录 `path` 浏览量，成功 `204`。 |
 
-正式题目在数据仓库登记 `arenaId`（稳定三位编号）、`kind`（`text` / `web`）和 `category`。共享后端将同一个 task ID 映射到 Show1 编号，新增题目及其已验证、开启竞技场展示的投稿可以进入娱乐玩法；长短提示词使用同一个 task ID 与编号，以 `promptVariants: [{id, label, prompt}]` 返回两份原文，由前端按钮切换；作品可通过 `promptVariant` 标明使用的版本，同一模型的两版展示在一起。既有快照题目保留编号、名称及权重，正式提示词由数据包提供；未进入数据包的历史题目仍保留。此登记不写入社区 `questions` 表，也不改变作品审核和展示开关。
+正式题目在数据仓库登记 `arenaId`（稳定三位编号）、`kind`（`text` / `web`）和 `category`。共享后端将同一个 task ID 映射到 Show1 编号，新增题目及其已验证、开启竞技场展示的投稿会保留在公开清单中；娱乐盲测须至少有 10 件不同 id 的非演示公开娱乐作品且有跨模型组合，未达门槛仍可浏览；长短提示词使用同一个 task ID 与编号，以 `promptVariants: [{id, label, prompt}]` 返回两份原文，由前端按钮切换；作品可通过 `promptVariant` 标明使用的版本，同一模型的两版展示在一起。既有快照题目保留编号、名称及权重，正式提示词由数据包提供；未进入数据包的历史题目仍保留。此登记不写入社区 `questions` 表，也不改变作品审核和展示开关。
 
 旧分享卡端点已移除，访问返回 `404`。兼容层的详细字段可参考 `test/fixtures/show1-golden/` 中的固定响应。
 

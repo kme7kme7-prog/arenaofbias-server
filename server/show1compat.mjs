@@ -290,6 +290,13 @@ export function registerShow1Compat(router, deps) {
     }
     if (q.voteById.get(id)) fail(409, '投票编号冲突，请重新提交', 'id');
 
+    // Count the current public roster, not historical ballots or model names.
+    // Replays above remain idempotent even if a pool has since closed.
+    if (mode !== 'formal') {
+      const count = new Set(worksOf().filter((work) => work.promptId === promptId && !work.isDemo)
+        .map((work) => work.id)).size;
+      if (count < 10) fail(409, `作品收集中（${count}/10），暂未开放娱乐盲测`, 'pool');
+    }
     const taskId = taskOfRound(promptId);
     const now = Date.now();
     const editorial = q.arenaEditorial.get(taskId);

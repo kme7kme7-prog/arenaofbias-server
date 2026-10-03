@@ -22,9 +22,9 @@ const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 const loadJson = (url) => JSON.parse(readFileSync(url, 'utf8'));
 
 // A tiny synthetic snapshot: rounds 001 (→ show1-001, with weights) and 004
-// (→ chinese-architecture, without weights), four works, no votes unless seeded.
+// (→ chinese-architecture, without weights), ten works per round, no votes unless seeded.
 function fixtureSnapshot(votes = { entertainment: [], formal: [] }) {
-  return {
+  const snapshot = {
     generatedAt: '2026-09-28T00:00:00.000Z',
     taskByRound: { '001': 'show1-001', '004': 'chinese-architecture' },
     roundByTask: { 'show1-001': '001', 'chinese-architecture': '004' },
@@ -48,6 +48,17 @@ function fixtureSnapshot(votes = { entertainment: [], formal: [] }) {
     votes,
     commentsBackfill: [],
   };
+  // Ten unique public works per question; multiple works may share a model.
+  for (const round of ['001', '004']) {
+    const template = snapshot.works.find((work) => work.promptId === round);
+    for (let i = 2; i < 10; i++) {
+      const id = `${round}-extra-${i}`, up = `up-${round}-extra-${i}`;
+      snapshot.works.push({ ...template, id });
+      snapshot.workMap[id] = { ...snapshot.workMap[template.id], up };
+      snapshot.upToRid[up] = id;
+    }
+  }
+  return snapshot;
 }
 
 // The same dispatch core as app.mjs's handleSite, so 201/204 retargeting and error
@@ -211,6 +222,43 @@ test('countedVotes only feeds source=arena votes to Bradley–Terry', async () =
 });
 
 describe('show1 compat endpoints', () => {
+  test('entertainment pools open at ten public works and close below ten without deleting votes', async () => {
+    const snapshot = fixtureSnapshot();
+    snapshot.works = snapshot.works.filter((work) => work.id !== '004-extra-9');
+    // Duplicates and demos do not supply the missing tenth work.
+    snapshot.works.push({ ...snapshot.works.find((work) => work.id === '004-hall') });
+    snapshot.works.push({ ...snapshot.works.find((work) => work.id === '004-hall'), id: '004-demo', isDemo: 1 });
+    await withServer({ snapshot }, async ({ db, auth, base }) => {
+      seedWorks(db);
+      const voter = await signIn(auth, 'pool-voter');
+      const admin = await signIn(auth, 'root');
+      const ballot = { promptId: '004', winnerRid: '004-hall', winnerMid: 'model-c',
+        loserRid: '004-pagoda', loserMid: 'model-d', mode: 'blind' };
+      const submit = (cookie, body) => call(base, 'POST', '/api/votes', { cookie, body: { id: randomUUID(), ...ballot, ...body } });
+      const closed = await submit(voter.cookie);
+      assert.equal(closed.status, 409);
+      assert.equal(closed.data.code, 'pool');
+      assert.match(closed.data.error, /9\/10/);
+      assert.equal((await submit(voter.cookie, { mode: 'party' })).status, 409);
+      assert.equal((await submit(admin.cookie, { mode: 'formal' })).status, 201);
+      const columns = db.prepare('PRAGMA table_info(works)').all().map((column) => column.name);
+      db.exec(`INSERT INTO works (${columns.join(', ')}) SELECT ${columns.map((name) => ({
+        id: "'up-pool-tenth'", content_key: "'wpooltenth'", digest: "'dpooltenth'", status: "'unverified'",
+      })[name] ?? name).join(', ')} FROM works WHERE id = 'up-cccc0003'`);
+      assert.equal((await submit(voter.cookie)).status, 409, 'unverified work does not count');
+      db.prepare("UPDATE works SET status = 'verified' WHERE id = 'up-pool-tenth'").run();
+      const id = randomUUID();
+      assert.equal((await submit(voter.cookie, { id })).status, 201, 'tenth public work opens pool');
+      db.prepare("UPDATE works SET show_entertainment = 0 WHERE id = 'up-pool-tenth'").run();
+      assert.equal((await submit(voter.cookie, { id })).status, 200, 'stored ballot replay stays idempotent');
+      const nextVoter = await signIn(auth, 'pool-next');
+      assert.equal((await submit(nextVoter.cookie)).status, 409, 'removing tenth work closes new votes');
+      assert.equal((await call(base, 'GET', '/api/votes?scope=entertainment')).data.votes.length, 1, 'history remains');
+      db.prepare("UPDATE works SET show_entertainment = 1, status = 'questioned' WHERE id = 'up-pool-tenth'").run();
+      assert.equal((await submit(nextVoter.cookie)).status, 409, 'questioned work does not count');
+    });
+  });
+
   test('unbound legacy users cannot react or record Show1 votes', () => withServer({}, async ({ db, auth, base }) => {
     seedWorks(db);
     const user = await auth.register('legacy-show1', 'correct horse');
@@ -231,7 +279,7 @@ describe('show1 compat endpoints', () => {
     assert.equal(prompts.data.prompts.length, 2);
     assert.deepEqual(prompts.data.prompts[0].weights, [0.3, 0, 0.6, 0, 0, 0.1]);
     const works = await call(base, 'GET', '/api/works');
-    assert.equal(works.data.works.length, 4);
+    assert.equal(works.data.works.length, 20);
     assert.equal(works.data.works[0].id, '001-a');
   }));
 
@@ -275,7 +323,7 @@ test('retired snapshot ballots never enter live vote or rating responses', () =>
     assert.equal(live.vendor, 'Custom vendor');
     assert.deepEqual(JSON.parse(live.content), { kind: 'html', src: 'https://wlive.works.test/' });
     assert.equal(live.promptId, '004');
-    assert.equal(works.length, 5);
+    assert.equal(works.length, 21);
     db.prepare("UPDATE works SET model_id = 'model-c', model_other = '', model_vendor = '' WHERE id = 'up-live0001'").run();
     const voter = await signIn(auth, 'live-voter');
     const result = await call(base, 'POST', '/api/votes', { cookie: voter.cookie, body: { id: randomUUID(),
@@ -307,6 +355,7 @@ test('retired snapshot ballots never enter live vote or rating responses', () =>
       ['up-long-a', 'supernovai', 'up-cccc0003'],
       ['up-long-b', 'supernovai', 'up-bbbb0002'],
       ['up-short-b', 'little-red-riding-hood', 'up-bbbb0002'],
+      ...Array.from({ length: 8 }, (_, i) => [`up-long-extra-${i}`, 'supernovai', 'up-cccc0003']),
     ]) {
       db.exec(`INSERT INTO works (${columns.join(', ')}) SELECT ${columns.map((name) => ({
         id: `'${id}'`, task_id: `'${task}'`, content_key: `'w${id}'`, digest: `'d${id}'`,

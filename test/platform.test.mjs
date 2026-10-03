@@ -684,6 +684,7 @@ describe('platform lifecycle', () => {
     assert.equal((await fetchContent(new URL('/__sp_fold.js', match.data.a).href)).status, 200);
     const arenaFrame = await fetchContent(`${match.data.a}?aob=arena-fold`);
     assert.match(arenaFrame.text, /<script src="\/__aob_fold\.js"><\/script>/);
+    assert.ok(arenaFrame.text.indexOf('data-aob-probe') < arenaFrame.text.indexOf('/__aob_fold.js'), 'readiness starts before the blocking fold script');
     assert.doesNotMatch(arenaFrame.text, /__sp_fold\.js/);
     const arenaScript = await fetchContent(new URL('/__aob_fold.js', match.data.a).href);
     assert.equal(arenaScript.status, 200);

@@ -63,11 +63,11 @@ function fixtureSnapshot(votes = { entertainment: [], formal: [] }) {
 
 // The same dispatch core as app.mjs's handleSite, so 201/204 retargeting and error
 // envelopes behave exactly like production wiring.
-function createFixture({ snapshot = fixtureSnapshot(), admins = ['root'], tasks = [] } = {}) {
+function createFixture({ snapshot = fixtureSnapshot(), admins = ['root'], tasks = [], library } = {}) {
   const db = openDatabase(':memory:');
   const auth = createAuth(db, { admins, secureCookies: false, sessionTtl: 60000 });
   const router = createRouter();
-  registerShow1Compat(router, { db, catalog: { tasks: () => tasks, model: (id) => ({ name: `Model ${id.at(-1).toUpperCase()}` }) }, snapshot, config: { contentTemplate: 'https://{token}.works.test' }, limit: {} });
+  registerShow1Compat(router, { db, library, catalog: { tasks: () => tasks, model: (id) => ({ name: `Model ${id.at(-1).toUpperCase()}` }) }, snapshot, config: { contentTemplate: 'https://{token}.works.test' }, limit: {} });
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://test.invalid');
@@ -222,6 +222,27 @@ test('countedVotes only feeds source=arena votes to Bradley–Terry', async () =
 });
 
 describe('show1 compat endpoints', () => {
+  test('historical HTML roster follows the current public content gate without removing inline works', async () => {
+    const snapshot = fixtureSnapshot();
+    snapshot.works.forEach(row => { if (row.promptId === '001') row.content = '{"kind":"html","src":"https://wa.works.test/"}'; });
+    let published = false;
+    const library = { byContentKey: key => ({ key }), publicContent: work => !!work && published };
+    await withServer({ snapshot, library }, async ({ db, base }) => {
+      seedWorks(db);
+      const columns = db.prepare('PRAGMA table_info(works)').all().map(column => column.name);
+      db.exec(`INSERT INTO works (${columns.join(', ')}) SELECT ${columns.map(name => ({
+        id: "'up-unmapped'", content_key: "'wunmapped'", digest: "'dunmapped'", show_entertainment: '1',
+      })[name] ?? name).join(', ')} FROM works WHERE id = 'up-cccc0003'`);
+      const hidden = (await call(base, 'GET', '/api/works')).data.works;
+      assert.equal(hidden.filter(row => row.promptId === '001').length, 0);
+      assert.equal(hidden.filter(row => row.promptId === '004').length, 10);
+      assert.equal(hidden.some(row => row.id === 'up-unmapped'), false, 'SQL-visible uploads still require the content gate');
+      published = true;
+      assert.equal((await call(base, 'GET', '/api/works')).data.works.length, 21);
+      published = false;
+      assert.equal((await call(base, 'GET', '/api/works')).data.works.length, 10, 'gate changes apply without restarting');
+    });
+  });
   test('entertainment pools open at ten public works and close below ten without deleting votes', async () => {
     const snapshot = fixtureSnapshot();
     snapshot.works = snapshot.works.filter((work) => work.id !== '004-extra-9');

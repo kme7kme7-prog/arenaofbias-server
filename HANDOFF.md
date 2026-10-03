@@ -1,5 +1,13 @@
 # HANDOFF.md · 当前状态
 
+## 娱乐评测巡检问题修复（2026-10-04，本地未提交/部署）
+
+- 用户授权修复 Show1 娱乐巡检缺陷。`show1compat.mjs` 将 snapshot HTML 和 live 投稿的清单资格与 library 当前 publicContent 门禁对齐，保留内联作品及历史身份/投票映射。本地生产副本清单 527 -> 445（HTML 464 -> 382），001/006 退出可配对池，002 留一件内联；011=22、022=4。没有补 show1-001/002/006 定义、改数据库/键语义或放宽内容访问。
+- `arena-fold.js` 扩充小 HUD/单按钮识别及 scene 隔离入口/表单保护；Show1 将既有唯一 Canvas 场景隔离用于娱乐建模/3D/物理/体素类别。仅 aob=arena-fold/arena-scene opt-in，普通/放大/正式预览保持原展示，源文件、图库 fold.js 和相机未改。真实飞机/键盘、营地及正式/放大保留控件回归通过，不保证 Canvas 内 UI 或复杂多画布全部覆盖。
+- `bridge.mjs` 探针新增一次 `aob:work-loading`，`content.mjs` 在其他阻塞注入脚本前安排探针，原 ready 时序保留。解决本地真实 011/010 文档慢到达造成首组误超时；Show1 文档到达上限二十秒、到达后就绪十秒，重复信号不续期，一次自动刷新后仍失败进入手动空态。契约已更新。
+- 验证：npm run check 87 文件/0 错，npm test 260/260；新增门禁清单动态撤下/恢复及内联保留测试，HTTP 断言探针先于阻塞适配脚本。Show1 类型/lint/构建、work-ready 14/14、work-retry 13/13、真实 work-controls 和 keyboard-preview 通过，详情在 Show1 docs/qa/2026-10-03-entertainment-tabbit.md。两仓 diff --check 通过。
+- 仅本地下载副本 API 5190/内容 5191 与 Show1 5441，未触及生产、未 commit/push/deploy，无迁移/依赖/CSP/nginx/部署配置变更。不是整批入口重新 HTTP 验收：中途 bulk HEAD 命中 60/min 限流，未放宽限流，也未据此报告剩余入口逐件全绿。
+
 ## 四仓联调后端合并（2026-10-03，待统一发布）
 
 - 用户授权四仓联调、合并已完成分支、提交、推送和部署。后端把本地 c4585a8 的发布者角色 / API v2 与远端 bdb55e9 汇合；远端 873b5c8 的长期 c 内容地址和 bdb55e9 的娱乐池十件门槛均保留。其他本地分支均已在主线祖先中，无独有功能需要再次合并。

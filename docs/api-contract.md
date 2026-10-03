@@ -5,7 +5,7 @@
 - Show1 `GET /api/works` 的公开 datapack 作品使用 `c<32hex>` 内容 origin；地址为持久化随机索引，按 task/id 联合识别，SQLite v37 追加 `curated_content_keys` 表。正常重启、再次拉清单不换键，不需要签名 secret。投稿 `w` 地址不变。
 - 仅当前数据包中的公开、开启娱乐池且有内容目录的作品可取得 `c` 键。每次 GET/HEAD（含子资源）重新从当前目录读取作品并检查 `publicContent` 和娱乐开关；移出目录或关闭娱乐池后旧地址返回 410。返回 `Cache-Control: no-store`；键本身不授予权限。
 - `p` 仍是作者/管理员私看与截图机的 bearer 预览源：一小时有效、重启失效。已有有效 `p` 无需迁移，新索引不延长或改变它的权限。
-- `c` HTML 注入 `aob:work-ready` 探针；竞技场请求其他已有作品源时用 `aob=prev` 请求同一探针，普通 `w` 地址未带此参数时保持原样。错误页不发送就绪消息。CSP 和部署配置不变。
+- `c` HTML 注入就绪探针：在其他阻塞脚本前首先发送 `aob:work-loading`，随后按原时序发送 `aob:work-ready`；竞技场请求其他已有作品源时用 `aob=prev` 请求同一探针，普通 `w` 地址未带此参数时保持原样。错误页不发送上述消息。父页等待文档到达最多二十秒；当前作品窗口首次 loading 或 iframe 文档 load 后，给该文档十秒就绪等待，重复信号不续期。初始 about:blank 不算文档到达，自动恢复仍仅一次。CSP 和部署配置不变。
 
 > 本文档是「娱乐面 React 站」与「专业面静态画廊」两个前端对接本后端的**唯一硬接口文档**。
 > 文中全部端点、字段、状态码与限制均以 `server/` 目录当前代码为准逐条核实；
@@ -833,7 +833,7 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 | 方法与路径 | 请求与响应 |
 | --- | --- |
 | `GET /api/prompts` | `{ prompts: [...] }`；合并历史快照与数据包正式题目，竞技场 editorial 覆盖对应题目的 `commentary`、`weights`。 |
-| `GET /api/works` | `{ works: [...] }`；快照作品加符合条件的 live 投稿。 |
+| `GET /api/works` | `{ works: [...] }`；快照作品加符合条件的 live 投稿与公开收录。快照 HTML 和 live 投稿还须通过内容源当前的 `publicContent` 门禁；任务缺失、撤下或不可公开的源不进入清单，快照非 HTML 内容保留。历史身份映射、票与题目定义不删除。 |
 | `GET /api/votes?scope=entertainment\|formal` | `{ votes: [...] }`；只读库内 `source=show1` 的票，按时间和 ID 排序，不合入旧快照。scope 必填，非法或缺失为 400。 |
 | `POST /api/votes` | 登录必需；提交 `id`、`promptId`、`winnerRid/Mid`、`loserRid/Mid`、`mode`、`outcome`。未绑定邮箱时有效请求返回 `200 { counted: false, reason: 'unbound' }`，不写入对局或票；已绑定时成功 `201 { vote }`，同 ID 同票幂等重放，已投同一对返回 `409 pair`；`formal` 仅管理员。新 `blind` / `party` 票要求该题当前公开娱乐作品至少 10 件（非演示、按 id 去重），不足返回 `409 { code: "pool", error: "作品收集中（数量/10），暂未开放娱乐盲测" }`；已存票幂等重放及历史榜单保留，正式范围不套此门槛。 |
 | `GET /api/ratings?scope=entertainment\|formal` | `{ ratings: { [modelId]: number }, games: { [modelId]: number } }`；按库内票回放未取整 Elo，供配对，复用聚合缓存。scope 必填。 |

@@ -1,5 +1,12 @@
 # HANDOFF.md · 当前状态
 
+## 四仓最新功能合并（2026-10-03，待统一发布）
+
+- 用户授权四仓联调、合并、提交、推送和部署；本仓在隔离 worktree 将本地 `216879e`（分类扩充与 CDN / 重试修复）与远端 `ca3e2ca`（娱乐小窗 `arena-fold` / 键盘 `arena-scene`）合并。其他本地功能分支均为主线祖先，无独有提交需再次合并。
+- 保留 Gallery 原折叠及娱乐独立 opt-in，修正文档冲突，并给娱乐脚本补齐 `#err` / `#error` / alert 错误恢复控件保护，避免再次隐藏换源按钮；普通控制面板仍折叠。远端运维脚本保留，本轮不运行清理、不安装 cron。
+- Windows Node 24.16.0：check 87 / 0、test 262 / 262，无失败、取消或跳过；迁移仍 v38，`server/db.mjs` 与远端及合并前相同。邮箱验证注册、三级权限、统一作品管理、领域扩充、内容门禁及娱乐阈值回归通过。
+- 原工作区未提交 HANDOFF / datapack / 旧归档与未跟踪归档原样保留；本轮不改消费 pin、不写生产库、不推送或部署。父代理从合并后的完整 SHA 统一发布，后端先于游戏；生产现场、显式 CDN 白名单、SMTP / Turnstile 和浏览器验收由父代理核对。[本轮归档](docs/archive/2026-10-03-latest-backend-integration-wsnxxxs.md)。
+
 ## 四仓联调后端合并（2026-10-03，待统一发布）
 
 - 用户授权四仓联调、合并已完成分支、提交、推送和部署。后端把本地 c4585a8 的发布者角色 / API v2 与远端 bdb55e9 汇合；远端 873b5c8 的长期 c 内容地址和 bdb55e9 的娱乐池十件门槛均保留。其他本地分支均已在主线祖先中，无独有功能需要再次合并。
@@ -22,6 +29,24 @@
 - **本地包联调**：只读当前本地包 20 题 / 182 件作品，临时库新建公开题 1 道与已核验作品 3 件；bootstrap=21 题 / 185 件，与同一包按旧前端“包作品 + 公开数据库作品”的合并口径一致。临时库新作品 author_role 各 admin / moderator / user=1，题目 admin=1、moderator=1（后者 pending）、user=0。浏览器确认高级管理题目覆盖保存、三级角色选项、普通管理员入口隐藏 / 本人开关禁用、空路由加载及 185 件列表；未捕获 console error / warn。服务已关闭，新工作区临时库已清除。
 - **范围与未做**：排名实现、回放脚本、Show1 兼容层源码和他轮归档原样保留；仅新身份快照省略 curated，旧票读取 / 排行规则保持。未修改 Gallery、另一前端、数据包源码或 pin，未验收双前端同步发布、生产迁移 / SMTP / CAPTCHA / 外部审查、全部作品交互、移动端或多浏览器；本仓没有 build / check:intake 脚本。Gallery 与后端须同时发布 v2。
 - [本轮归档](docs/archive/2026-10-03-unified-authorship-api-v2-wsnxxxs.md)。本地证据在忽略目录 output/unify-authorship-20261003-parent；旧外部临时目录的清理被自动审批拒绝（见归档），未无差别清理。
+
+## 键盘场景小窗（2026-10-03，仅本地）
+
+- arena-fold.js 额外支持 aob=arena-scene，唯一大 Canvas 和祖先链铺满、链外内容 CSS 隐藏、触发原 resize。无/多 Canvas 保守不选，处理迟加载/替换。Show1 仅 010 娱乐小窗附加；放大/正式原样。不改作品文件、Gallery fold.js、相机或门禁。
+- check 85/0、test 249/249 通过；Show1 截图两份真实键盘的小窗尺寸/比例、放大恢复、正式对照及保护 fixtures 通过，其他键盘未逐件视觉验收。本地已重启，未部署/提交，他人脚本改动保留。
+
+## 娱乐小窗说明标签收起（2026-10-03，本地完成，未提交部署）
+
+- 用户要求娱乐小窗默认收起标签/控件，放大显示原作，正式模式不受影响。Show1 改为仅娱乐 blind 小窗附加 aob=arena-fold，取消类别白名单和前端开关；正式/放大不附加。原 Gallery fold.js、m 语义及访问门禁保持。
+- server/arena-fold.js 补充大幅 Canvas 上的非交互投影标签层检测，多个短文本绝对定位子节点一致才隐藏，迟加载也处理；不按 .tag 名称批量删除。不保证 Canvas 内文字及复杂布局覆盖。docs/api-contract.md 同步。
+- check 85/0、npm test 249/249 通过。Show1 浏览器保护 fixtures、真实截图飞机标签/面板小窗隐藏、放大完整显示、关闭不重载底层、正式对照保留原标签/控件通过（正式用户只在隔离浏览器 mock，未登录或写库）。本地 API 已重启，未生产部署。保留前述他人脚本改动。
+
+## Show1 控件折叠试版（2026-10-03，仅本地、未提交部署）
+
+- 用户授权可行性试做。server/content.mjs 新增 aob=arena-fold opt-in 及受既有内容门禁保护的 /__aob_fold.js；新增 server/arena-fold.js 自动检测大幅 Canvas 上的浮动控制容器，默认隐藏、父消息可恢复原 DOM 状态，迟加载继续检测，入口/表单/语义介绍保留。不更改原 server/fold.js、Gallery、源作品、相机、CSP、迁移或部署。
+- docs/api-contract.md 已记录独立 opt-in。test/platform.test.mjs 覆盖新旧脚本互斥和返回字节；修正该测试 helper 丢弃 query 的问题。npm run check 85/0、npm test 249/249 通过。
+- Show1 scripts/validate-work-controls.mjs 本地浏览器验证：保护 fixture、恢复 DOM/输入、迟加载、消息来源、双 iframe 切换不重载、放大继承选择、键盘例外。9 个真实飞机样本中 8 个有识别结果，部分仅工具栏；不代表全面兼容。布局侧栏/Canvas 内 UI 暂不处理。5441/5190/5191 本地副本服务已重启，无生产写入。
+- 检查期间出现 scripts/archive-backup.sh、scripts/datapack-sync.sh、scripts/cleanup-retention.sh 他人改动，未触碰；本轮不 commit/push/deploy。
 
 ## 娱乐盲测十件作品门槛（2026-10-03，本地完成，未提交、推送、部署）
 

@@ -98,8 +98,10 @@ function foldElement(tag, { position = 'static', width = 100, height = 30, text 
     setAttribute(name, value) { attributes.set(name, value); },
     getAttribute(name) { return attributes.get(name) ?? null; },
     hasAttribute(name) { return attributes.has(name); },
+    removeAttribute(name) { attributes.delete(name); },
     toggleAttribute(name, force) { if (force) attributes.set(name, ''); else attributes.delete(name); },
-    getBoundingClientRect() { return { width, height }; },
+    getBoundingClientRect() { return { width, height, left: 0, top: 0, right: width, bottom: height }; },
+    isConnected: true,
     getClientRects() { return [{}]; },
     matches(selector) {
       return selector.split(',').some(part => {
@@ -108,6 +110,7 @@ function foldElement(tag, { position = 'static', width = 100, height = 30, text 
       });
     },
     appendChild(child) { this.children.push(child); child.parentElement = this; return child; },
+    append(child) { return this.appendChild(child); },
     contains(other) { return this === other || this.children.some(child => child.contains(other)); },
     querySelectorAll(selector) { return this.children.flatMap(child => [...(child.matches(selector) ? [child] : []), ...child.querySelectorAll(selector)]); },
     querySelector(selector) { return this.querySelectorAll(selector)[0] ?? null; },
@@ -116,15 +119,17 @@ function foldElement(tag, { position = 'static', width = 100, height = 30, text 
   return el;
 }
 
-function foldFrame(children, readyState = 'loading') {
+function foldFrame(children, readyState = 'loading', script = 'fold.js') {
   const body = foldElement('body', {}, children);
   const root = foldElement('html', {}, [body]);
   const events = new Map(), timers = [], reports = [];
   const parent = { postMessage(data) { reports.push({ ...data }); } };
   const document = { body, readyState, documentElement: root, createElement: tag => foldElement(tag), querySelectorAll: selector => root.querySelectorAll(selector) };
-  runInNewContext(readFileSync(new URL('../server/fold.js', import.meta.url), 'utf8'), {
+  runInNewContext(readFileSync(new URL(`../server/${script}`, import.meta.url), 'utf8'), {
     document, parent, innerWidth: 1280, innerHeight: 660,
-    getComputedStyle: el => ({ position: el.position }),
+    getComputedStyle: el => ({ position: el.position, pointerEvents: 'auto' }),
+    URL, location: { href: 'https://work.example/?aob=arena-fold' },
+    MutationObserver: class { observe() {} },
     addEventListener: (type, callback) => events.set(type, callback),
     setTimeout: callback => timers.push(callback),
   });
@@ -190,6 +195,17 @@ test('fold keeps retry buttons inside a full-page error overlay', () => {
   assert.equal(retries.hasAttribute('data-sp-fold-ui'), false);
   assert.equal(tuning.hasAttribute('data-sp-fold-ui'), true);
   assert.deepEqual(frame.reports.map(report => report.count), [0, 1]);
+});
+
+test('arena fold keeps error recovery controls while hiding tuning panels', () => {
+  const buttons = () => [foldElement('button', { text: 'unpkg' }), foldElement('button', { text: 'jsdelivr' })];
+  const errors = ['#err', '#error', '[role="alert"]', '[role="alertdialog"]'].map(selector =>
+    foldElement('div', { position: 'fixed', width: 300, height: 120, selectors: [selector] }, buttons()));
+  const tuning = foldElement('div', { position: 'fixed', width: 300, height: 120 }, buttons());
+  const canvas = foldElement('canvas', { width: 1280, height: 660 });
+  foldFrame([canvas, ...errors, tuning], 'complete', 'arena-fold.js');
+  for (const error of errors) assert.equal(error.hasAttribute('data-aob-fold-panel'), false);
+  assert.equal(tuning.hasAttribute('data-aob-fold-panel'), true);
 });
 
 test('fold reports cumulative batches and only accepts its parent toolbar messages', () => {
@@ -485,9 +501,9 @@ describe('platform lifecycle', () => {
   }
 
   function fetchContent(url) {
-    const { host, pathname } = new URL(url);
+    const { host, pathname, search } = new URL(url);
     return new Promise((resolve, reject) => {
-      const req = request({ host: '127.0.0.1', port: content.address().port, path: pathname, headers: { host } }, (res) => {
+      const req = request({ host: '127.0.0.1', port: content.address().port, path: pathname + search, headers: { host } }, (res) => {
         let text = '';
         res.on('data', (chunk) => { text += chunk; });
         res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, text }));
@@ -704,6 +720,12 @@ describe('platform lifecycle', () => {
     assert.equal(frame.status, 200);
     assert.match(frame.text, /<script src="\/__sp_fold\.js"><\/script>/);
     assert.equal((await fetchContent(new URL('/__sp_fold.js', match.data.a).href)).status, 200);
+    const arenaFrame = await fetchContent(`${match.data.a}?aob=arena-fold`);
+    assert.match(arenaFrame.text, /<script src="\/__aob_fold\.js"><\/script>/);
+    assert.doesNotMatch(arenaFrame.text, /__sp_fold\.js/);
+    const arenaScript = await fetchContent(new URL('/__aob_fold.js', match.data.a).href);
+    assert.equal(arenaScript.status, 200);
+    assert.equal(arenaScript.text, readFileSync(new URL('../server/arena-fold.js', import.meta.url), 'utf8'));
     const vote = await call('alice', 'POST', `/api/arena/matches/${match.data.id}/vote`, { choice: 'a' });
     assert.equal(vote.data.counted, true);
     assert.ok(['A1', 'B1'].includes(vote.data.a.title));

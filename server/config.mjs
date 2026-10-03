@@ -12,6 +12,9 @@ const list = (value, fallback) => (value ?? fallback).split(',').map((item) => i
 const port = int(env.PORT, 5173);
 const contentPort = int(env.CONTENT_PORT, 5180);
 
+// Only the verified Three.js release is allowed from this package mirror.
+export const THREE_MIRROR_PATH = '/three/0.170.0/files/';
+
 export const config = {
   host: env.HOST || '127.0.0.1',
   port,
@@ -29,7 +32,7 @@ export const config = {
   // Usernames that always hold the admin role; `npm run admin -- <name>` also promotes.
   admins: list(env.ADMIN_USERNAMES, '').map((name) => name.normalize('NFKC').toLowerCase()),
   // Public CDNs a work may load scripts, styles, fonts and data from. Everything else is blocked.
-  cdn: list(env.CONTENT_CDN_ALLOWLIST, 'cdn.jsdelivr.net,unpkg.com,cdnjs.cloudflare.com,esm.sh,fonts.googleapis.com,fonts.gstatic.com'),
+  cdn: list(env.CONTENT_CDN_ALLOWLIST, 'cdn.jsdelivr.net,unpkg.com,cdnjs.cloudflare.com,esm.sh,fonts.googleapis.com,fonts.gstatic.com,registry.npmmirror.com'),
   // Headless screenshots of submitted works (Playwright + a local Chrome); off with CAPTURE=0.
   capture: env.CAPTURE !== '0',
   captureChannel: env.CAPTURE_BROWSER ?? 'chrome',

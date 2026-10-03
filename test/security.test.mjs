@@ -108,7 +108,7 @@ test('capture routing blocks foreign navigation, WebSockets and private redirect
     route: async (_pattern, handler) => { routeHandler = handler; },
     routeWebSocket: async (_pattern, handler) => { socketHandler = handler; },
   };
-  await guardCaptureContext(context, { origin: 'http://work.localhost:5180', cdn: ['cdn.example'] });
+  await guardCaptureContext(context, { origin: 'http://work.localhost:5180', cdn: ['cdn.example', 'registry.npmmirror.com'] });
   let socketClosed = false;
   await socketHandler({ close: () => { socketClosed = true; } });
   assert.equal(socketClosed, true);
@@ -135,6 +135,10 @@ test('capture routing blocks foreign navigation, WebSockets and private redirect
   assert.deepEqual(await request('http://work.localhost:5180/app.js', 'script'), {
     fetched: ['http://127.0.0.1:5180/app.js'], outcome: 'fulfilled',
   });
+  const mirror = 'https://registry.npmmirror.com/three/0.170.0/files/build/three.module.js';
+  assert.deepEqual(await request(mirror, 'script'), { fetched: [mirror], outcome: 'fulfilled' });
+  assert.deepEqual(await request('https://registry.npmmirror.com/other/1.0.0/files/index.js', 'script'), { fetched: [], outcome: 'aborted' });
+  assert.deepEqual(await request(mirror.replace('0.170.0', '0.171.0'), 'script'), { fetched: [], outcome: 'aborted' });
   assert.deepEqual(await request('https://cdn.example/module', 'script', {
     'https://cdn.example/module': { status: 302, headers: { location: 'http://127.0.0.1:9999/internal' } },
   }), { fetched: ['https://cdn.example/module'], outcome: 'aborted' });

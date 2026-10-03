@@ -260,7 +260,7 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
   "user": { "id": "…", "name": "alice", "role": "user", "emailBound": true },
   "site": {
     "content": "http://{token}.localhost:5180",
-    "cdn": ["cdn.jsdelivr.net", "unpkg.com", "cdnjs.cloudflare.com", "esm.sh", "fonts.googleapis.com", "fonts.gstatic.com"],
+    "cdn": ["cdn.jsdelivr.net", "unpkg.com", "cdnjs.cloudflare.com", "esm.sh", "fonts.googleapis.com", "fonts.gstatic.com", "registry.npmmirror.com"],
     "capture": true,
     "contentModeration": true,
     "autoModeration": true,
@@ -304,6 +304,8 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
 盲评令牌页面继续默认注入折叠脚本；公开及预览作品的 HTML 仅在 URL 带 `aob=fold` 时额外注入，脚本资源 `/__sp_fold.js` 无需重复携带参数。可同时使用 `aob=bridge&aob=fold`，相机恢复和捕获规则保持。草稿试加载不启用此 opt-in。
 
 子页面报告 `{source:'sp-fold', count}`，父页面通过 `{source:'sp-arena', fold:boolean}` 切换；`false` 显示控件，`true` 隐藏控件。控件 DOM 与状态保留，接受消息时只认当前父窗口。检测启发式与超过 6 个块 / 本次覆盖 40% 的保护规则沿用现有脚本。
+
+错误提示区域（`#err`、`#error`、`role=alert|alertdialog`）及其重试、换源按钮不折叠。
 
 ### 3.2 `POST /api/auth/register` —— 注册
 
@@ -698,6 +700,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 - 畸形 URL 返回 `400` 错误页，不使共享进程退出；请求期间消失的资源返回 `404`。
 - 令牌无效：`404` 错误页「作品地址无效」；令牌存在但目标不可用（草稿过期、对局结束、作品删除、对局侧作品被下架）：`410` 错误页「作品已不可用」。
 - 全部响应施加沙盒 CSP：`sandbox allow-scripts allow-same-origin allow-forms allow-modals allow-popups …`，外部资源仅放行 `bootstrap.site.cdn` 白名单内的公共 CDN；`frame-ancestors` 限定为 `SITE_ORIGINS`（即作品只能被站点 iframe 嵌入）；`Referrer-Policy: no-referrer`。
+- `registry.npmmirror.com` 仅允许已核对的 Three.js 0.170.0：`https://registry.npmmirror.com/three/0.170.0/files/`。CSP、上传检查和截图网络守卫使用同一固定路径；该镜像的其他包或版本仍被拦截。
 - 注入脚本作为 HTML 首个 `<script>` 插入。`d` / `m` 令牌按上表注入；`w` / `p` 令牌无校准数据时**原样伺服**。
 - **就绪探针**（`m` 令牌）：等 `window load` + 渲染循环 3 帧 + 600ms 后 `parent.postMessage('aob:work-ready','*')`，8 秒兜底；竞技场换局纸幕以此握手钉住「作品画完才掀幕」。
 - **视角桥**（`server/bridge.mjs`，移植自融合前竞技场）：作品存有管理员保存的 3D 视角（按门面）时，内嵌 `window.__AOB_SAVED__` 并注入桥运行时；桥登记作品的 OrbitControls（全局 UMD 拦截 `window.THREE`，importmap ESM 则改写映射经 `/__aob__/` 虚拟路由转发 `three` 与 `OrbitControls.js`），在机位创建后套回存档视角。`m` 令牌只恢复竞技场视角、绝不抓取；`w` / `p` 令牌带 `?aob=bridge` 时另注入 `__AOB_CAPTURE__`，桥应答 `{aob:'get-camera'}` → `{aob:'camera', camera}` 的 postMessage 握手（作品在独立源，无法直接读 iframe 窗口），供后台校准面板抓取当前视角；`?face=arena|gallery` 选择起步视角来源。importmap 仅改写可安全转发的目标（https CDN 或作品同源路径），其余原样保留；`/__aob__/` 虚拟路由校验并拒绝穿越与非 https 绝对目标。

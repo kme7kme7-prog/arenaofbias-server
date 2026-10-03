@@ -5,6 +5,7 @@ import { posix } from 'node:path';
 import * as zlib from 'node:zlib';
 import { fail, formatBytes } from './http.mjs';
 import { renderTextUpload } from './text.mjs';
+import { THREE_MIRROR_PATH } from './config.mjs';
 
 const JUNK = /(^|\/)(__MACOSX(\/|$)|\.DS_Store$|Thumbs\.db$|desktop\.ini$)/i;
 const IGNORED = /(^|\/)(node_modules|\.git|\.svn|\.hg)(\/|$)/i;
@@ -201,6 +202,7 @@ export function inspectUpload(buffer, filename, { limits, cdn, template }) {
       const host = hostOf(url);
       if (!host) continue;
       if (host === 'cdn.jsdelivr.net' && new URL(url, 'https://local.invalid/').pathname.startsWith('/gh/')) external.add('cdn.jsdelivr.net/gh');
+      else if (host === 'registry.npmmirror.com' && !new URL(url, 'https://local.invalid/').pathname.startsWith(THREE_MIRROR_PATH)) external.add('registry.npmmirror.com（仅允许 Three.js 0.170.0）');
       else (cdn.includes(host) ? cdnHosts : external).add(host);
       continue;
     }

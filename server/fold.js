@@ -27,7 +27,7 @@
   // Real works mix tuning controls with navigation, descriptions and an activation
   // button. Keep those regions intact rather than hiding their contents together.
   function isContent(el) {
-    if (el.matches('header') || (el.matches('[aria-live], [aria-labelledby]') && el.querySelector('p'))) return true;
+    if (el.matches('header, [role="alert"], [role="alertdialog"], #err, #error') || (el.matches('[aria-live], [aria-labelledby]') && el.querySelector('p'))) return true;
     if (el.matches('section') && el.querySelector('strong + p')) return true;
     if ([...el.querySelectorAll('li')].some((item) => item.textContent.trim() && !item.matches(CONTROLS) && !item.querySelector(CONTROLS))) return true;
     const buttons = el.matches('button, [role="button"]') ? [el] : el.querySelectorAll('button, [role="button"]');

@@ -2,6 +2,7 @@
 // draft is reached through its own host name ({token}.<content domain>), so every page gets
 // a separate origin and can reach neither the site's session nor another work.
 import { readFileSync } from 'node:fs';
+import { THREE_MIRROR_PATH } from './config.mjs';
 import { HttpError, resolveInside, streamFile } from './http.mjs';
 import { createReadGuard } from './read-guard.mjs';
 import { bridgeTags, probeTag, rewriteImportmap, serveBridgeVirtual, validCamera } from './bridge.mjs';
@@ -36,7 +37,8 @@ const scriptTag = (path) => `<script src="${path}"></script>`;
 
 export function createContentHandler({ config, library, arena, siteOrigins, readGuard = createReadGuard(config) }) {
   // jsdelivr is limited to npm: its GitHub paths follow a repository that can change after review.
-  const cdn = config.cdn.map((host) => (host === 'cdn.jsdelivr.net' ? 'https://cdn.jsdelivr.net/npm/' : `https://${host}`)).join(' ');
+  const cdn = config.cdn.map((host) => host === 'cdn.jsdelivr.net' ? 'https://cdn.jsdelivr.net/npm/'
+    : `https://${host}${host === 'registry.npmmirror.com' ? THREE_MIRROR_PATH : ''}`).join(' ');
   const policy = [
     'sandbox allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-pointer-lock allow-downloads',
     "default-src 'self' data: blob:",

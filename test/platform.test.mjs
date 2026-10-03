@@ -178,6 +178,20 @@ test('fold finds static tuning cards inside a full-page positioned overlay', () 
   assert.deepEqual(frame.reports.map(report => report.count), [0, 2]);
 });
 
+test('fold keeps retry buttons inside a full-page error overlay', () => {
+  const retries = foldElement('div', {}, [foldElement('button', { text: 'unpkg' }), foldElement('button', { text: 'jsdelivr' })]);
+  const error = foldElement('div', { position: 'fixed', width: 1280, height: 660, selectors: ['#err'] }, [
+    foldElement('h3', { text: 'Three.js 加载失败' }), foldElement('p', { text: '请选择镜像后重试' }), retries,
+  ]);
+  const tuning = foldElement('div', { position: 'fixed' }, [foldElement('input')]);
+  const frame = foldFrame([error, tuning]);
+  frame.load(); frame.scan();
+  assert.equal(error.hasAttribute('data-sp-fold-ui'), false);
+  assert.equal(retries.hasAttribute('data-sp-fold-ui'), false);
+  assert.equal(tuning.hasAttribute('data-sp-fold-ui'), true);
+  assert.deepEqual(frame.reports.map(report => report.count), [0, 1]);
+});
+
 test('fold reports cumulative batches and only accepts its parent toolbar messages', () => {
   const input = foldElement('input');
   input.value = '0.75';
@@ -440,6 +454,14 @@ describe('upload inspection', () => {
     assert.equal(blocked.checks.find((check) => check.id === 'external').state, 'warn');
     const cdn = inspect(zip([{ name: 'index.html', data: '<html><script type="importmap">{"imports":{"three":"https://unpkg.com/three"}}</script></html>' }]));
     assert.equal(cdn.checks.find((check) => check.id === 'external').state, 'info');
+  });
+
+  test('npmmirror only allows the verified Three.js release', () => {
+    for (const [path, state] of [['three/0.170.0/files/build/three.module.js', 'info'], ['three/0.171.0/files/build/three.module.js', 'warn'], ['other/1.0.0/files/index.js', 'warn']]) {
+      const result = inspectUpload(Buffer.from(`<html><script src="https://registry.npmmirror.com/${path}"></script></html>`), 'index.html',
+        { limits: defaultLimits, cdn: ['registry.npmmirror.com'] });
+      assert.equal(result.checks.find((check) => check.id === 'external').state, state, path);
+    }
   });
 });
 

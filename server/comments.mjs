@@ -1,4 +1,4 @@
-// Comments belong to listed works, including curated works that are not SQLite rows.
+// Comments belong to listed works, including packaged works that are not SQLite rows.
 import { newId } from './auth.mjs';
 import { fail } from './http.mjs';
 
@@ -16,8 +16,8 @@ export function createComments(db, library) {
 
   const listed = (taskId, workId) => {
     const work = library.work(taskId, workId);
-    if (!work || work.status !== 'verified' || (!work.curated &&
-      !library.visibleTo(work, 'show1') && !library.visibleTo(work, 'show2'))) fail(404, '作品不存在');
+    if (!work || work.status !== 'verified' ||
+      (!library.visibleTo(work, 'show1') && !library.visibleTo(work, 'show2'))) fail(404, '作品不存在');
   };
   const publicComment = (row, viewer) => ({
     id: row.id,

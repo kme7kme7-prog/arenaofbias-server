@@ -1,5 +1,18 @@
 # HANDOFF.md · 当前状态
 
+## 发布者角色统一与 API v2（2026-10-03，本地验证完成）
+
+- 三名 GPT-6.1 Sol / high 子代理分别完成数据库与题目、作品流程、API 与 `/admin/`；父代理完成联调、文档、交接与单条本地提交。依据用户本轮开头“完成后请 commit”的授权，只纳入本轮文件及本节交接；不推送、不部署。
+- **迁移 v37**：追加 author_role、questions.accepts_uploads / cover_work、question_overrides，以及 work_overrides.status / reason / reviewer_id / reviewed_at / deleted_at；旧 member 账号转 user，admin 保持高级，新增 moderator。迁移不改写 v1–v36、历史票 JSON / 审计 / curated_as / nominated_at；创建时发布者角色不随账号升降权变化。
+- **路由**：删除 `POST /api/admin/works/:task/:id/display`（404），作品统一走现有 `/meta`；没有新增路由。保留 `POST /api/admin/questions`，仅高级管理员可用，创建结果改为 pending；所有角色也可用 `POST /api/questions`。现有题目编辑、审核、删除与作品核验、删除支持两种存储；数据包改动只写覆盖层。
+- **DTO 联调清单**：bootstrap.apiVersion=2；questions 合并全部公开题目，works 合并 visibleTo(show2) 的全部作品，以 task/id 标识。题目与作品使用 `author:{role,name,avatar}` + mine，删除 owner / ownerName / ownerAvatar / curated / community / source / curatedAs / nominatedAt。公开及 me 的工作人员姓名头像为 null，管理员接口保留账号昵称。题目新增 acceptsUploads / cover；arena[task] 删除 uploads，仅保留 poolStats。数据包作品省略 scene / captures / cover / files / bytes / checks / trial / sourceName / root / entry，业务字段与 status / reason 已应用覆盖；arena.state 不再含 curated。
+- **流程与权限**：工作人员发作品 human / approved、unverified，跳过自动内容审查但须人工核验后公开；发题目均 pending，工作人员免待审上限。普通管理员可处理作品审核、核验、编辑、开关、校准、收件箱，但不能对本人作品作决定；题目管理、角色、删除他人作品及其他运营入口仅高级。后台同步发布者筛选 / 列、三级角色、统一编辑、题目列表与按钮权限，并修复空 hash 首次登录丢弃作品列表响应。
+- **验证**：npm run check 85 文件 / 0 错，最终 npm test 255 / 255；覆盖工作人员发布、题目 pending、包与数据库覆盖 / 撤下 / 恢复 / 软删除、有票不能删、三级接口权限与自审限制、署名隐私、v2、旧票快照兼容。出现过 Windows listen(0) 随机选到 fetch 禁用端口导致 bad port，原 HTTP 测试曾停滞，停止该次进程后单测及完整重跑通过；未改无关端口或 HTTP 实现。
+- **回填数量（隔离 v36 合成库）**：questions 与 works 各 admin=2、moderator=0、user=1；额外 moderator 缺省回填用例各达 admin=2、moderator=1、user=1。外键、依赖账号行、原始票面与审计原样保留，幂等复跑通过。未访问生产库，因此没有生产回填数量。
+- **本地包联调**：只读当前本地包 20 题 / 182 件作品，临时库新建公开题 1 道与已核验作品 3 件；bootstrap=21 题 / 185 件，与同一包按旧前端“包作品 + 公开数据库作品”的合并口径一致。临时库新作品 author_role 各 admin / moderator / user=1，题目 admin=1、moderator=1（后者 pending）、user=0。浏览器确认高级管理题目覆盖保存、三级角色选项、普通管理员入口隐藏 / 本人开关禁用、空路由加载及 185 件列表；未捕获 console error / warn。服务已关闭，新工作区临时库已清除。
+- **范围与未做**：排名实现、回放脚本、Show1 兼容层源码和他轮归档原样保留；仅新身份快照省略 curated，旧票读取 / 排行规则保持。未修改 Gallery、另一前端、数据包源码或 pin，未验收双前端同步发布、生产迁移 / SMTP / CAPTCHA / 外部审查、全部作品交互、移动端或多浏览器；本仓没有 build / check:intake 脚本。Gallery 与后端须同时发布 v2。
+- [本轮归档](docs/archive/2026-10-03-unified-authorship-api-v2-wsnxxxs.md)。本地证据在忽略目录 output/unify-authorship-20261003-parent；旧外部临时目录的清理被自动审批拒绝（见归档），未无差别清理。
+
 ## 共池分支发布（2026-10-03，发布准备完成）
 
 - 用户明确授权发布，并选择统一开启当前数据包作品的正式盲评；计划只恢复当前目录内 90 件关闭的作品，其他 87 件已开启，保留退役记录、校准、其他门面开关及全部业务数据。

@@ -4,6 +4,7 @@ import { createHash, randomBytes, scrypt, scryptSync, timingSafeEqual } from 'no
 import { AVATARS } from './config.mjs';
 import { fail, HttpError, uniqueCookie } from './http.mjs';
 import { transaction } from './db.mjs';
+import { roleOf, isStaff, isSenior } from './roles.mjs';
 
 const COOKIE = 'sp_session';
 const SCRYPT = { N: 16384, r: 8, p: 1 };
@@ -51,7 +52,7 @@ export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', 
   const hashPassword = async (password, salt) => (await derive(password, salt, 32, SCRYPT)).toString('hex');
   // Synchronous hashing is limited to password reset and CLI admin creation.
   const hashPasswordSync = (password, salt) => scryptSync(password, salt, 32, SCRYPT).toString('hex');
-  const roleFor = (user) => (admins.includes(user.name_key) ? 'admin' : user.role);
+  const roleFor = (user) => (admins.includes(user.name_key) ? 'admin' : roleOf(user.role));
 
   function syncRole(user) {
     const role = roleFor(user);
@@ -74,7 +75,7 @@ export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', 
   }
 
   return {
-    public: (user) => (user ? { id: user.id, name: user.name, nickname: user.nickname || user.name, avatar: avatarOf(user), role: user.role } : null),
+    public: (user) => (user ? { id: user.id, name: user.name, nickname: user.nickname || user.name, avatar: avatarOf(user), role: roleOf(user.role) } : null),
     isAdminName(rawName) {
       const key = nameKey(String(rawName ?? ''));
       const user = q.userByKey.get(key);
@@ -124,9 +125,9 @@ export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', 
         transaction(db, () => {
           registration.consumeCode();
           const now = Date.now();
-          q.insertVerifiedUser.run(id, name, key, 'member', salt, hash, now, registration.email, now);
+          q.insertVerifiedUser.run(id, name, key, 'user', salt, hash, now, registration.email, now);
         });
-      } else q.insertUser.run(id, name, key, 'member', salt, hash, Date.now());
+      } else q.insertUser.run(id, name, key, 'user', salt, hash, Date.now());
       return q.userById.get(id);
     },
 
@@ -200,7 +201,7 @@ export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', 
       const now = Date.now();
       const user = q.session.get(tokenHash, now);
       if (!user) return null;
-      const idleTtl = roleFor(user) === 'admin' ? adminSessionIdleTtl : sessionIdleTtl;
+      const idleTtl = isStaff({ role: roleFor(user) }) ? adminSessionIdleTtl : sessionIdleTtl;
       if (now - user.last_seen_at >= idleTtl) {
         q.deleteSession.run(tokenHash);
         return null;
@@ -211,8 +212,10 @@ export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', 
     },
 
     promote(rawName, role = 'admin') {
+      if (!['admin', 'moderator', 'user'].includes(role)) fail(400, '角色无效');
       const user = q.userByKey.get(nameKey(String(rawName ?? '')));
       if (!user) return null;
+      if (admins.includes(user.name_key) && role !== 'admin') fail(409, '该账号由 ADMIN_USERNAMES 固定为管理员，请先修改服务器配置');
       q.setRole.run(role, user.id);
       return { ...user, role };
     },
@@ -223,7 +226,8 @@ export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', 
     },
 
     setRole(actor, userId, role) {
-      if (!['admin', 'member'].includes(role)) fail(400, '角色无效');
+      if (!isSenior(actor)) fail(403, '仅高级管理员可以操作');
+      if (!['admin', 'moderator', 'user'].includes(role)) fail(400, '角色无效');
       const user = q.userById.get(String(userId ?? ''));
       if (!user) fail(404, '用户不存在');
       if (user.id === actor.id) fail(409, '不能修改自己的角色，避免把自己锁在管理端之外');

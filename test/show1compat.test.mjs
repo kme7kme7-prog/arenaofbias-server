@@ -786,7 +786,7 @@ describe('auth dual shape', () => {
     assert.equal(registered.status, 200);
     assert.equal(registered.data.user.name, 'show1user', 'platform fields stay');
     assert.equal(registered.data.user.nickname, 'show1user');
-    assert.equal(registered.data.user.role, 'member');
+    assert.equal(registered.data.user.role, 'user');
     assert.equal(registered.data.user.username, 'show1user');
     assert.equal(registered.data.user.email, email);
 

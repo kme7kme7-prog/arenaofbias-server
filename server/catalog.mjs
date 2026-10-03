@@ -1,4 +1,4 @@
-// Curated archive snapshots are bound to the real directory behind DIST_DIR.
+// Package snapshots are bound to the real directory behind DIST_DIR.
 // Deployments keep each published directory immutable while matches use it.
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
@@ -35,6 +35,7 @@ function readSnapshot(root) {
   ].map((item) => [item.id, item]));
   const tasks = new Map(data.tasks.map((task) => [task.id, {
     id: task.id, title: task.title, summary: task.summary, prompt: task.prompt,
+    version: task.version ?? 1, date: task.date ?? null, createdAt: task.createdAt ?? null, tags: task.tags ?? [],
     arenaId: task.arenaId ?? null, kind: task.kind ?? 'web', category: task.category ?? '', domains: task.domains ?? [],
     templates: templatesOf(task),
     promptVariants: (task.promptVariants ?? []).map(({ id, label, prompt }) => ({ id, label, prompt })),
@@ -55,7 +56,7 @@ function readSnapshot(root) {
       }];
     })),
   }]));
-  // Entry-page digests identify the exact curated content a vote saw; computed once per work.
+  // Entry-page digests identify the exact package content a vote saw; computed once per work.
   const entryDigests = new Map();
   const entryDigest = (work) => {
     const key = `${work.taskId}/${work.id}`;
@@ -145,7 +146,7 @@ export function createCatalog(dist, questions = null) {
     scheduleTakeover(current);
     return current;
   }
-  return {
+  const catalog = {
     onChange(callback) { onChange = callback; scheduleTakeover(refresh()); },
     refresh, snapshot: refresh,
     // The package a match was created with. A match without one, or whose release has been
@@ -163,12 +164,12 @@ export function createCatalog(dist, questions = null) {
     get catalogDigest() { return refresh().catalogDigest; },
     get title() { return refresh().title; },
     task(id, viewer = null) {
-      const curated = refresh().task(id);
-      if (curated) return curated;
-      const question = questions?.get(id, viewer);
-      return question ? { ...question, acceptsUploads: true, works: new Map() } : null;
+      const packaged = refresh().task(id);
+      if (!questions) return packaged;
+      const question = questions.get(id, viewer);
+      return question ? { ...packaged, ...question, works: packaged?.works ?? new Map() } : null;
     },
-    tasks() { return [...refresh().tasks(), ...(questions?.all() ?? []).map((question) => ({ ...question, acceptsUploads: true, works: new Map() }))]; },
+    tasks() { return questions ? questions.all().map((question) => ({ ...refresh().task(question.id), ...question, works: refresh().task(question.id)?.works ?? new Map() })) : refresh().tasks(); },
     tags() { return [...new Set([...refresh().tags(), ...(questions?.all() ?? []).flatMap((task) => task.tags ?? [])])]; },
     model(id) { return refresh().model(id); },
     models() { return refresh().models(); },
@@ -180,4 +181,6 @@ export function createCatalog(dist, questions = null) {
     works(taskId) { return refresh().works(taskId); },
     duplicateOf(digest) { return refresh().duplicateOf(digest); },
   };
+  questions?.bindCatalog(catalog);
+  return catalog;
 }

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -68,6 +68,7 @@ test('admin question edits validate metadata, preserve decisions and protect exi
     const admin = { id: 'admin', name: 'root', role: 'admin' };
     const body = { title: 'Question', summary: 'Summary', prompt: 'Original\nprompt', category: '静态网页', templates: ['static'], tags: ['建模', 'UI'] };
     const question = questions.create(owner, body);
+    assert.equal(question.version, 1);
     const row = () => db.prepare('SELECT * FROM questions WHERE id = ?').get(question.id);
     const failure = (data, status = 400, actor = admin) => assert.throws(() => questions.edit(actor, question.id, data), error => error.status === status);
     failure({ title: 'Title' }, 403, owner);
@@ -114,7 +115,7 @@ test('admin question edits validate metadata, preserve decisions and protect exi
   } finally { db.close(); }
 });
 
-describe('community question and sample review lifecycle', () => {
+describe('question and sample review lifecycle', () => {
   let root, platform, site, content, base;
   const cookies = new Map();
   const questionBody = { title: 'Question', summary: 'Test interaction', prompt: 'Build a page.\nKeep this text.', category: '静态网页', tags: ['UI'], templates: ['static'] };
@@ -312,12 +313,14 @@ describe('community question and sample review lifecycle', () => {
     assert.equal(platform.db.prepare('SELECT count(*) AS n FROM audit').get().n, audits);
   });
 
-  test('three pending questions without samples block a fourth', async () => {
+  test('staff questions stay pending and are exempt from the pending limit', async () => {
     assert.equal((await call('root', 'POST', '/api/questions', questionBody)).status, 200);
     assert.equal((await call('root', 'POST', '/api/questions', questionBody)).status, 200);
     assert.equal((await call('root', 'POST', '/api/questions', questionBody)).status, 200);
-    assert.equal((await call('root', 'POST', '/api/questions', questionBody)).status, 429);
-    assert.equal((await call('root', 'GET', '/api/me')).data.questions.filter(q => q.moderation.status === 'pending').length, 3);
+    assert.equal((await call('root', 'POST', '/api/questions', questionBody)).status, 200);
+    const mine = (await call('root', 'GET', '/api/me')).data.questions.filter(q => q.moderation.status === 'pending');
+    assert.equal(mine.length, 4);
+    assert.ok(mine.every(q => q.author.role === 'admin' && q.author.name === null && q.mine));
   });
 
   test('question and sample appear privately, admin previews work, and approval gates public surfaces', async () => {
@@ -330,7 +333,7 @@ describe('community question and sample review lifecycle', () => {
     assert.ok((await call('author', 'GET', '/api/me')).data.questions.some(q => q.id === question.id && q.moderation.status === 'pending'));
     assert.equal((await call('author', 'GET', '/api/admin/questions')).status, 403);
     const admin = (await call('root', 'GET', '/api/admin/questions')).data.questions.find(q => q.id === question.id);
-    assert.equal(admin.ownerName, 'author'); assert.equal(admin.works, 1);
+    assert.equal(admin.author.name, 'author'); assert.equal(admin.works, 1);
     const sample = admin.samples[0];
     for (const field of ['id', 'task', 'title', 'modelName', 'effort', 'status', 'moderation', 'scene']) assert.ok(Object.hasOwn(sample, field), field);
     assert.match(new URL(sample.scene).hostname, /^p/); assert.equal(await fetchScene(sample.scene), 200);
@@ -492,4 +495,58 @@ describe('community question and sample review lifecycle', () => {
     const rejected = await create('deletion'); await moderate(rejected.question.id, 'rejected', 'Remove test');
     assert.equal((await call('deletion', 'DELETE', `/api/questions/${rejected.question.id}`)).status, 200);
   });
+});
+
+test('package and database questions share overrides, visibility, counts and deletion rules', () => {
+  const root = mkdtempSync(join(tmpdir(), 'question-package-'));
+  const db = openDatabase(':memory:');
+  try {
+    const file = join(root, 'data.json');
+    writeFileSync(file, JSON.stringify({ title: 'Test', models: [], tasks: [
+      { id: 'pack', title: 'Package question', summary: 'Summary', prompt: 'Prompt', category: '静态网页', domains: ['数学'], results: [{ id: 'same', model: 'model', title: 'Pack work' }] },
+      { id: 'other', title: 'Other', summary: 'Summary', prompt: 'Prompt', category: '静态网页', promptPending: true, results: [{ id: 'other-only', model: 'model', title: 'Other work' }] },
+    ] }));
+    const original = readFileSync(file);
+    const questions = createQuestions(db), catalog = createCatalog(root, questions);
+    const admin = { id: 'admin', role: 'admin', name: 'Operator' }, moderator = { id: 'moderator', role: 'moderator', name: 'Moderator' };
+    for (const actor of [admin, moderator]) db.prepare('INSERT INTO users (id, name, name_key, role, salt, hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(actor.id, actor.name, actor.id, actor.role, 'salt', 'hash', 1);
+    db.prepare(`INSERT INTO works (id, task_id, owner_id, title, model_other, content_key, source_name, root, entry, file_count, bytes, digest, checks, created_at, updated_at)
+      VALUES ('upload', 'pack', 'moderator', 'Upload', 'Model', 'upload-key', 'file.html', '', 'index.html', 1, 1, 'digest', '[]', 1, 1)`).run();
+    const body = { title: 'New', summary: 'Summary', prompt: 'Prompt', category: '静态网页', domains: ['数学'], templates: ['static'] };
+    const created = questions.createByAdmin(admin, body);
+    assert.equal(created.moderation.status, 'pending'); assert.deepEqual(created.author, { role: 'admin', name: null, avatar: null }); assert.equal(created.mine, true);
+    const byModerator = questions.create(moderator, body);
+    assert.equal(byModerator.moderation.status, 'pending'); assert.equal(byModerator.author.role, 'moderator'); assert.equal(byModerator.author.name, null);
+    assert.deepEqual(questions.all().map(item => item.id), ['pack', 'other']);
+    assert.equal(questions.get('other').acceptsUploads, false);
+    assert.equal(questions.adminAll(admin).find(item => item.id === 'pack').works, 2);
+    assert.deepEqual(questions.adminAll(admin).find(item => item.id === 'pack').samples, []);
+    assert.equal(questions.adminAll(admin).find(item => item.id === created.id).author.name, 'Operator');
+    assert.throws(() => questions.edit(moderator, 'pack', { title: 'Edited' }), error => error.status === 403);
+    assert.throws(() => questions.review(moderator, 'pack', { status: 'approved' }), error => error.status === 403);
+    assert.throws(() => questions.remove(moderator, 'pack'), error => error.status === 403);
+    assert.throws(() => questions.edit(admin, 'pack', { prompt: 'Changed' }), error => error.status === 409);
+    assert.throws(() => questions.edit(admin, 'pack', { category: '文学' }), error => error.status === 409);
+    assert.throws(() => questions.edit(admin, 'pack', { cover: 'other-only' }), error => error.status === 400);
+    questions.edit(admin, 'pack', { title: 'Edited', summary: 'Updated', domains: ['天文'], acceptsUploads: false, cover: 'upload' });
+    const edited = questions.all().find(item => item.id === 'pack');
+    assert.equal(edited.title, 'Edited'); assert.deepEqual(edited.domains, ['天文']); assert.equal(edited.acceptsUploads, false); assert.equal(edited.cover, 'upload');
+    assert.equal(catalog.task('pack').title, 'Edited'); assert.equal(catalog.snapshot().task('pack').title, 'Package question');
+    questions.edit(admin, 'pack', { cover: null }); assert.equal(questions.get('pack').cover, null);
+    questions.review(admin, 'pack', { status: 'rejected', reason: '撤下' });
+    assert.equal(catalog.task('pack'), null); assert.ok(!questions.all().some(item => item.id === 'pack'));
+    assert.equal(questions.adminAll(admin).find(item => item.id === 'pack').moderation.status, 'rejected');
+    questions.review(admin, 'pack', { status: 'approved' }); assert.equal(catalog.task('pack').title, 'Edited');
+    db.prepare(`INSERT INTO votes (id, match_id, task_id, a_work, b_work, pair_key, choice, created_at) VALUES ('v', 'v', 'pack', 'same', 'upload', 'pair', 'a', 1)`).run();
+    assert.equal(questions.adminAll(admin).find(item => item.id === 'pack').votes, 1);
+    assert.throws(() => questions.remove(admin, 'pack'), error => error.status === 409);
+    db.exec("DELETE FROM votes WHERE id='v'");
+    questions.remove(admin, 'pack'); assert.equal(catalog.task('pack', admin), null);
+    assert.ok(db.prepare("SELECT deleted_at FROM question_overrides WHERE task_id='pack'").get().deleted_at);
+    assert.ok(db.prepare("SELECT deleted_at FROM works WHERE id='upload'").get().deleted_at);
+    assert.ok(!questions.adminAll(admin).some(item => item.id === 'pack'));
+    assert.deepEqual(readFileSync(file), original);
+    for (const item of [...questions.all(admin), ...questions.byOwner(admin.id, admin)]) for (const key of ['owner', 'ownerName', 'ownerAvatar', 'curated', 'community', 'source']) assert.ok(!Object.hasOwn(item, key));
+  } finally { db.close(); rmSync(root, { recursive: true, force: true }); }
 });

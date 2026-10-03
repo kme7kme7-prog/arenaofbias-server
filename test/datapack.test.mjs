@@ -104,7 +104,7 @@ test('a match keeps its original package and vote identity across a same-mtime s
       const boot = await (await fetch(`${base}/api/bootstrap`)).json();
       assert.equal(boot.datapack, SHA_B);
       assert.equal(boot.catalogDigest, createHash('sha256').update(readFileSync(join(b, 'data.json'))).digest('hex'));
-      assert.equal(boot.apiVersion, 1);
+      assert.equal(boot.apiVersion, 2);
       assert.ok(boot.serverVersion);
       const preflight = await fetch(`${base}/api/arena/matches`, { method: 'OPTIONS', headers: {
         Origin: 'http://localhost', 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type,x-datapack-version',
@@ -138,6 +138,41 @@ test('a match keeps its original package and vote identity across a same-mtime s
   }
 });
 
+test('new ballot identities omit storage flags and old identities remain readable and unchanged', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'identity-v2-'));
+  const dist = join(root, 'pack');
+  pack(dist, SHA_A, 'm-a');
+  const platform = createPlatform({ config: { dist, dataDir: join(root, 'state'),
+    contentTemplate: 'http://{token}.localhost', siteOrigins: ['http://localhost'],
+    admins: [], cdn: [], capture: false, secureCookies: false, trustProxy: false }, limits });
+  try {
+    const user = await verifiedUser(platform.auth, 'voter', 'correct horse');
+    const match = await platform.arena.createMatch(user, 'one');
+    const current = platform.db.prepare('SELECT a_identity, b_identity FROM matches WHERE id = ?').get(match.id);
+    for (const value of Object.values(current)) {
+      assert.equal(Object.hasOwn(JSON.parse(value), 'curated'), false);
+      assert.match(JSON.parse(value).digest, /^[0-9a-f]{64}$/);
+    }
+    const historical = Object.fromEntries(Object.entries(current).map(([key, value]) =>
+      [key, JSON.stringify({ ...JSON.parse(value), curated: true })]));
+    platform.db.prepare('UPDATE matches SET a_identity = ?, b_identity = ? WHERE id = ?')
+      .run(historical.a_identity, historical.b_identity, match.id);
+    assert.equal(platform.arena.vote(user, match.id, 'a').counted, true);
+    const vote = platform.db.prepare('SELECT * FROM votes WHERE match_id = ?').get(match.id);
+    assert.equal(vote.a_identity, historical.a_identity);
+    assert.equal(vote.b_identity, historical.b_identity);
+    assert.ok((await platform.arena.leaderboard({ task: 'one' })).rows.length > 0);
+    const admin = platform.auth.promote('voter', 'admin');
+    const correction = platform.arena.correctVote(admin, vote.id, 'a', { modelName: 'Corrected name' }, 'Correct the display name');
+    assert.equal(Object.hasOwn(correction, 'curated'), false);
+    assert.equal(platform.db.prepare('SELECT a_identity FROM votes WHERE id = ?').get(vote.id).a_identity,
+      historical.a_identity);
+  } finally {
+    await platform.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('an old database migrates votes as legacy without inventing identity snapshots', () => {
   const root = mkdtempSync(join(tmpdir(), 'legacy-db-'));
   const file = join(root, 'platform.db');
@@ -152,7 +187,7 @@ test('an old database migrates votes as legacy without inventing identity snapsh
       a_token TEXT UNIQUE, b_token TEXT UNIQUE, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, choice TEXT, decided_at INTEGER);
       CREATE TABLE votes (id TEXT PRIMARY KEY, match_id TEXT UNIQUE, user_id TEXT, task_id TEXT NOT NULL, a_work TEXT NOT NULL,
       b_work TEXT NOT NULL, pair_key TEXT NOT NULL, choice TEXT NOT NULL, created_at INTEGER NOT NULL);
-      CREATE TABLE works (id TEXT PRIMARY KEY, status TEXT NOT NULL, task_id TEXT NOT NULL, deleted_at INTEGER, reviewed_at INTEGER, updated_at INTEGER);
+      CREATE TABLE works (id TEXT PRIMARY KEY, status TEXT NOT NULL, task_id TEXT NOT NULL, owner_id TEXT, deleted_at INTEGER, reviewed_at INTEGER, updated_at INTEGER);
       INSERT INTO matches VALUES ('old', NULL, 'one', 'a1', 'b1', 'ma', 'mb', 1, 9999999999999, 'a', 2);
       INSERT INTO votes VALUES ('old-vote', 'old', NULL, 'one', 'a1', 'b1', 'one:a1+b1', 'a', 2);
       CREATE TABLE audit (id INTEGER PRIMARY KEY, at INTEGER, actor_id TEXT, actor_name TEXT, action TEXT, task_id TEXT, work_id TEXT, detail TEXT);

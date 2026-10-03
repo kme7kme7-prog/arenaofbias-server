@@ -50,10 +50,10 @@ async function withPlatform(run, configOptions = {}) {
   for (const id of ['a', 'b']) writeFileSync(join(dist, 'results', 'one', id, 'index.html'), html);
   writeFileSync(join(dist, 'data.json'), JSON.stringify({ schemaVersion: 1, title: '测试馆藏', models: [
     { id: 'ma', name: '模型甲', vendor: '甲' }, { id: 'mb', name: '模型乙', vendor: '乙' },
-  ], tasks: [{ id: 'one', title: '测试题', arenaId: '901', results: [
+  ], tasks: [{ id: 'one', title: '测试题', arenaId: '901', category: '建模', domains: ['物理'], prompt: '测试题提示词', templates: ['static'], results: [
     { id: 'a', title: '精选甲', model: 'ma', scene: 'results/one/a/', generationMode: 'single-turn', humanIntervention: 'none' },
     { id: 'b', title: '精选乙', model: 'mb', scene: 'results/one/b/', generationMode: 'single-turn', humanIntervention: 'none' },
-  ] }, { id: 'two', title: '第二题', results: [] }] }));
+  ] }, { id: 'two', title: '第二题', category: '建模', domains: ['物理'], prompt: '第二题提示词', templates: ['static'], results: [] }] }));
   const platform = createPlatform({ config: { dist, dataDir: join(root, 'state'), admin: join(process.cwd(), 'admin'),
     contentTemplate: 'http://{token}.localhost', siteOrigins: [], admins: ['root'], cdn: [], capture: false,
     secureCookies: false, trustProxy: false, ...configOptions }, limits });
@@ -163,8 +163,8 @@ test('a first verification decides both faces and face settings preserve status'
   const restamped = await uploaded();
   assert.equal(restamped.reviewed.gallery, galleryReviewed.reviewed.gallery);
   assert.equal(restamped.reviewed.arena, settings.data.work.reviewed.arena);
-  const curated = (await call('root', 'GET', '/api/admin/works?source=curated')).data.works;
-  assert.ok(curated.every((work) => !Object.hasOwn(work, 'reviewed')));
+  const packaged = (await call('root', 'GET', '/api/admin/works?author=admin')).data.works;
+  assert.ok(packaged.every((work) => work.author.role === 'admin'));
 }));
 
 test('verification clears the gallery review count whichever face the request names', async () => withPlatform(async ({ call }) => {
@@ -322,13 +322,16 @@ test('admin API merges curated and upload works, applies face settings, calibrat
   const upload = await call('root', 'POST', '/api/admin/works/upload?effort=Default&providerId=official&task=one&name=work.html&title=代传作品&modelName=模型丙&show_gallery=1&show_arena=1', html, true);
   assert.equal(upload.status, 200, JSON.stringify(upload.data));
   const id = upload.data.work.id;
-  assert.equal(upload.data.work.status, 'verified');
+  assert.equal(upload.data.work.status, 'unverified');
+  assert.equal(upload.data.work.moderation.status, 'approved');
+  assert.equal((await call('root', 'POST', `/api/works/one/${id}/review`, { status: 'verified' })).status, 200);
   assert.equal(platform.db.prepare('SELECT COUNT(*) AS n FROM drafts').get().n, 0);
   assert.equal((await call('voter', 'GET', '/api/admin/works')).status, 403);
   let list = await call('root', 'GET', '/api/admin/works?task=one&pageSize=2&page=1');
   assert.equal(list.data.total, 3);
   assert.equal(list.data.works.length, 2);
-  assert.equal((await call('root', 'GET', '/api/admin/works?source=upload')).data.works.length, 1);
+  assert.equal((await call('root', 'GET', '/api/admin/works?author=admin')).data.works.length, 3);
+  assert.equal((await call('root', 'GET', '/api/admin/works?author=user')).data.works.length, 0);
   const uploadSettings = await call('root', 'POST', `/api/admin/works/one/${id}/face-settings`, { show_arena: false });
   assert.equal(uploadSettings.status, 200);
   assert.equal(platform.db.prepare('SELECT show_gallery, show_arena FROM works WHERE id = ?').get(id).show_arena, 0);
@@ -490,7 +493,8 @@ test('editorial validates weights, traffic aggregates, and arena switches remove
 test('the entertainment switch opts uploads and curated works into the Show1 pool', async () => withPlatform(async ({ platform, call }) => {
   const upload = await call('root', 'POST', '/api/admin/works/upload?effort=Default&providerId=official&task=one&name=work.html&title=娱乐作品&modelName=模型丙&show_gallery=1', html, true);
   const id = upload.data.work.id;
-  assert.equal(upload.data.work.show_entertainment, true, 'admin upload is a first verification, so entertainment opens with both faces');
+  assert.equal(upload.data.work.status, 'unverified', 'admin uploads await manual verification');
+  assert.equal((await call('root', 'POST', `/api/works/one/${id}/review`, { status: 'verified' })).status, 200);
   const on = await call('root', 'POST', `/api/admin/works/one/${id}/face-settings`, { show_entertainment: true });
   assert.equal(on.status, 200);
   assert.equal(on.data.work.show_entertainment, true);
@@ -538,7 +542,8 @@ test('entertainment follows publish-on-verify and the inbox checkbox hides a pas
     title: '娱乐新题', summary: '给收件箱归属', prompt: '做一件小事', category: '静态网页', templates: ['static'], domains: ['游戏娱乐'],
   });
   assert.equal(question.status, 200, JSON.stringify(question.data));
-  assert.equal(question.data.question.moderation.status, 'approved');
+  assert.equal(question.data.question.moderation.status, 'pending');
+  assert.equal((await call('root', 'POST', `/api/questions/${question.data.question.id}/moderation`, { status: 'approved' })).status, 200);
   const assigned = await call('root', 'POST', '/api/admin/works/batch-inbox', {
     works: [{ task: 'one', id }], task: question.data.question.id, entertainment: true,
   });
@@ -564,12 +569,121 @@ test('entertainment follows publish-on-verify and the inbox checkbox hides a pas
   assert.equal(kept.entertainment_route, 0);
 }));
 
-test('a curated display override changes the admin title and leaves the datapack model id', async () => withPlatform(async ({ call }) => {
-  const saved = await call('root', 'POST', '/api/admin/works/one/a/display', { title: '改名后的馆藏', modelName: '展签名' });
+test('package metadata uses the unified endpoint and removes the old display route', async () => withPlatform(async ({ call }) => {
+  assert.equal((await call('root', 'POST', '/api/admin/works/one/a/display', { title: '旧路由' })).status, 404);
+  const saved = await call('root', 'POST', '/api/admin/works/one/a/meta', { title: '改名后的作品', modelName: '展签名' });
   assert.equal(saved.status, 200, JSON.stringify(saved.data));
-  assert.equal(saved.data.work.title, '改名后的馆藏');
+  assert.equal(saved.data.work.title, '改名后的作品');
   assert.equal(saved.data.work.modelName, '展签名');
-  assert.equal(saved.data.work.model, 'ma');
-  const listed = (await call('root', 'GET', '/api/admin/works?source=curated')).data.works.find((work) => work.id === 'a');
-  assert.equal(listed.title, '改名后的馆藏');
+  assert.equal(saved.data.work.model, null);
+  const listed = (await call('root', 'GET', '/api/admin/works?author=admin')).data.works.find((work) => work.id === 'a');
+  assert.equal(listed.title, '改名后的作品');
+  assert.equal((await call('root', 'GET', '/api/bootstrap')).data.works.find((work) => work.id === 'a').title, '改名后的作品');
+}));
+
+test('moderator routes enforce senior permissions and forbid decisions on own works', async () => withPlatform(async ({ platform, call }) => {
+  const senior = platform.db.prepare("SELECT * FROM users WHERE name = 'root'").get();
+  const staff = await platform.auth.register('staff', 'correct horse');
+  platform.auth.bindEmail(staff.id, 'staff@example.test');
+  platform.auth.setRole(senior, staff.id, 'moderator');
+  assert.equal((await call('staff', 'POST', '/api/auth/login', { name: 'staff', password: 'correct horse' })).status, 200);
+  assert.equal((await call('staff', 'GET', '/api/auth/me')).data.user.role, null, 'legacy Show1 role remains null for moderators');
+  assert.equal((await call('staff', 'GET', '/api/bootstrap')).data.user.role, 'moderator');
+  assert.equal((await call('staff', 'GET', '/api/bootstrap')).data.review.questions, 0);
+  const draft = await call('staff', 'POST', '/api/drafts?task=one&name=staff.html', html, true);
+  const submitted = await call('staff', 'POST', '/api/works', { draftId: draft.data.draft.id, confirmed: true,
+    title: '管理员作品', modelName: '模型', effort: 'Default', providerId: 'official' });
+  assert.equal(submitted.status, 200, JSON.stringify(submitted.data));
+  const id = submitted.data.work.id;
+  assert.equal(submitted.data.work.status, 'unverified');
+  assert.equal(submitted.data.work.moderation.status, 'approved');
+  assert.equal(submitted.data.work.author.role, 'moderator');
+  assert.equal(submitted.data.work.author.name, null, 'public publication response hides staff name');
+  const denied = [
+    ['GET', '/api/admin/questions'], ['POST', '/api/admin/questions', {}],
+    ['POST', '/api/questions/one/moderation', { status: 'approved' }],
+    ['POST', '/api/admin/questions/batch-moderation', { ids: ['one'], status: 'approved' }],
+    ['POST', '/api/admin/questions/one/meta', { title: '不得修改' }], ['DELETE', '/api/questions/one'],
+    ['DELETE', '/api/works/one/a'], ['GET', '/api/admin/users'],
+    ['POST', `/api/admin/users/${staff.id}/role`, { role: 'admin' }],
+    ['GET', '/api/admin/tasks/one/editorial'], ['POST', '/api/admin/tasks/one/editorial', {}],
+    ['GET', '/api/admin/traffic'], ['POST', '/api/admin/works/upload?task=one&name=forbidden.html', html, true],
+  ];
+  for (const [method, path, body, raw] of denied) assert.equal((await call('staff', method, path, body, raw)).status, 403, `${method} ${path}`);
+  const ownDecisions = [
+    [`/api/works/one/${id}/review`, { status: 'verified' }],
+    [`/api/works/one/${id}/moderation`, { status: 'approved' }],
+    [`/api/works/one/${id}/moderation/retry`, undefined],
+    [`/api/admin/works/one/${id}/face-settings`, { show_gallery: false }],
+    [`/api/admin/works/one/${id}/calibration`, { face: 'gallery', calibration: {} }],
+    ['/api/admin/works/batch-face-settings', { works: [{ task: 'one', id }], show_gallery: false }],
+  ];
+  for (const [path, body] of ownDecisions) assert.equal((await call('staff', 'POST', path, body)).status, 403, path);
+  platform.db.prepare('UPDATE works SET entertainment_route = 1 WHERE id = ?').run(id);
+  assert.equal((await call('staff', 'POST', '/api/admin/works/batch-inbox', { works: [{ task: 'one', id }], task: 'two' })).status, 403);
+  platform.db.prepare('UPDATE works SET entertainment_route = 0 WHERE id = ?').run(id);
+  for (const endpoint of ['batch-review', 'batch-moderation']) {
+    const result = await call('staff', 'POST', `/api/admin/works/${endpoint}`, { works: [{ task: 'one', id }], status: endpoint === 'batch-review' ? 'verified' : 'approved' });
+    assert.equal(result.status, 200);
+    assert.equal(result.data.results[0].error.status, 403);
+  }
+  assert.equal((await call('staff', 'POST', `/api/admin/works/one/${id}/meta`, { title: '自己可编辑' })).status, 200);
+  assert.equal((await call('staff', 'POST', `/api/admin/works/one/${id}/preview`)).status, 200);
+  const staffView = (await call('staff', 'GET', '/api/admin/works?author=admin')).data.works.find((work) => work.id === id);
+  assert.equal(staffView.mine, true);
+  assert.equal(staffView.author.name, 'staff');
+  assert.equal((await call('staff', 'GET', '/api/review')).status, 200);
+  assert.equal((await call('staff', 'GET', '/api/admin/inbox')).status, 200);
+  assert.equal((await call('staff', 'GET', '/api/admin/inbox/works')).status, 200);
+  assert.equal((await call('staff', 'POST', '/api/admin/works/one/a/meta', { title: '可编辑他人作品' })).status, 200);
+  assert.equal((await call('staff', 'POST', '/api/admin/works/one/a/face-settings', { show_gallery: true })).status, 200);
+  const packReview = await call('staff', 'POST', '/api/works/one/a/review', { status: 'verified', effort: 'Default', providerId: 'official' });
+  assert.equal(packReview.status, 200, JSON.stringify(packReview.data));
+  assert.equal((await call('root', 'POST', `/api/works/one/${id}/review`, { status: 'verified' })).status, 200);
+  const visible = (await call('root', 'GET', '/api/bootstrap')).data.works.find((work) => work.id === id);
+  assert.deepEqual(visible.author, { role: 'moderator', name: null, avatar: null }, 'even senior public reads hide staff identities');
+  assert.deepEqual((await call('staff', 'GET', '/api/me')).data.works.find((work) => work.id === id).author, visible.author);
+}));
+
+test('bootstrap v2 unifies questions and works with package overrides and resource boundaries', async () => withPlatform(async ({ platform, call }) => {
+  const body = { title: '用户题目', summary: '题目简述', prompt: '请生成一个简单页面', category: '建模', domains: ['物理'], templates: ['static'] };
+  const created = await call('voter', 'POST', '/api/questions', body);
+  assert.equal(created.status, 200, JSON.stringify(created.data));
+  const questionId = created.data.question.id;
+  assert.equal((await call('root', 'POST', `/api/questions/${questionId}/moderation`, { status: 'approved' })).status, 200);
+  const adminCreated = await call('root', 'POST', '/api/admin/questions', { ...body, title: '高级管理员题目' });
+  assert.equal(adminCreated.data.question.moderation.status, 'pending');
+  assert.equal((await call('root', 'POST', `/api/questions/${adminCreated.data.question.id}/moderation`, { status: 'approved' })).status, 200, 'senior can review own question');
+  assert.equal((await call('root', 'POST', '/api/admin/questions/one/meta', { title: '统一题目', acceptsUploads: false, cover: 'a' })).status, 200);
+  let bootstrap = (await call('root', 'GET', '/api/bootstrap')).data;
+  assert.equal(bootstrap.apiVersion, 2);
+  assert.equal(bootstrap.questions.length, 4);
+  assert.equal(bootstrap.works.length, 2);
+  const question = bootstrap.questions.find((item) => item.id === 'one');
+  assert.equal(question.title, '统一题目');
+  assert.equal(question.acceptsUploads, false);
+  assert.equal(question.cover, 'a');
+  assert.deepEqual(question.author, { role: 'admin', name: null, avatar: null });
+  assert.equal(question.mine, false);
+  assert.deepEqual(bootstrap.questions.find((item) => item.id === questionId).author.role, 'user');
+  assert.ok(Object.values(bootstrap.arena).every((stats) => !Object.hasOwn(stats, 'uploads')));
+  for (const work of bootstrap.works) {
+    for (const field of ['owner', 'ownerName', 'ownerAvatar', 'source', 'curated', 'community', 'curatedAs', 'nominatedAt', 'scene', 'captures', 'cover', 'files', 'bytes', 'checks', 'trial', 'sourceName', 'root', 'entry']) assert.equal(Object.hasOwn(work, field), false, field);
+    assert.deepEqual(work.author, { role: 'admin', name: null, avatar: null });
+  }
+  const adminQuestions = (await call('root', 'GET', '/api/admin/questions')).data.questions;
+  assert.equal(adminQuestions.find((item) => item.id === 'one').works, 2);
+  assert.deepEqual(adminQuestions.find((item) => item.id === 'one').samples, []);
+  assert.ok(adminQuestions.every((item) => !Object.hasOwn(item, 'ownerId')));
+  assert.equal((await call('root', 'POST', '/api/questions/one/moderation', { status: 'rejected', reason: '暂时撤下' })).status, 200);
+  assert.equal((await call('root', 'GET', '/api/admin/works?task=one')).data.total, 2, 'staff can manage works on withdrawn questions');
+  bootstrap = (await call('root', 'GET', '/api/bootstrap')).data;
+  assert.equal(bootstrap.questions.some((item) => item.id === 'one'), false);
+  assert.equal(bootstrap.works.some((item) => item.task === 'one'), false);
+  assert.equal((await call('root', 'POST', '/api/questions/one/moderation', { status: 'approved' })).status, 200);
+  assert.equal((await call('root', 'DELETE', '/api/works/one/a')).status, 200);
+  assert.equal((await call('root', 'GET', '/api/bootstrap')).data.works.length, 1);
+  assert.equal((await call('root', 'DELETE', '/api/questions/one')).status, 200);
+  assert.equal((await call('root', 'GET', '/api/bootstrap')).data.works.length, 0);
+  assert.equal(platform.db.prepare('SELECT COUNT(*) AS n FROM question_overrides WHERE deleted_at IS NOT NULL').get().n, 1);
 }));

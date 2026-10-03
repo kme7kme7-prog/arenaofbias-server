@@ -336,7 +336,7 @@ test('rechecks seed a baseline, skip unchanged works and hold changed ones unles
   }, { recheckHours: 24 });
 });
 
-test('ordinary verification requires content approval while admin publication records manual approval', async () => {
+test('ordinary verification requires content approval while staff publication waits for verification', async () => {
   await setup(async ({ platform, call, submit, readContent, received }) => {
     const work = await submit();
     await platform.moderator.idle();
@@ -374,38 +374,42 @@ test('ordinary verification requires content approval while admin publication re
     assert.deepEqual(Object.keys((await call('owner', 'GET', '/api/me')).data.works[0].moderation).sort(), ['at', 'status']);
     const adminUpload = await call('admin', 'POST', '/api/admin/works/upload?task=one&name=a.html&title=管理员作品&modelId=m&effort=Default&providerId=official', PAGE, true);
     assert.equal(adminUpload.status, 200);
-    assert.equal(adminUpload.data.work.status, 'verified');
+    assert.equal(adminUpload.data.work.status, 'unverified');
     assert.equal(adminUpload.data.work.moderation.status, 'approved');
     assert.equal(adminUpload.data.work.moderation.source, 'human');
     assert.equal(adminUpload.data.work.moderation.reviewer, 'admin');
-    assert.equal(adminUpload.data.work.moderation.reason, '管理员上传');
+    assert.equal(adminUpload.data.work.moderation.reason, '管理员发布');
     assert.equal((await call('admin', 'POST', '/api/admin/inbox?name=inbox.html', PAGE, true)).status, 200);
     const inbox = (await call('admin', 'GET', '/api/admin/inbox')).data.entries[0];
     const registered = await call('admin', 'POST', '/api/admin/inbox/register', { id: inbox.id, task: 'one', title: '收件箱作品', modelId: 'm', effort: 'Default', providerId: 'official', publish: true });
     assert.equal(registered.status, 200);
-    assert.equal(registered.data.work.status, 'verified');
+    assert.equal(registered.data.work.status, 'unverified');
     assert.equal(registered.data.work.moderation.status, 'approved');
     assert.equal(registered.data.work.moderation.source, 'human');
     assert.equal(registered.data.work.moderation.reviewer, 'admin');
-    assert.equal(registered.data.work.moderation.reason, '管理员上传');
+    assert.equal(registered.data.work.moderation.reason, '管理员发布');
     assert.equal((await call('admin', 'POST', '/api/admin/inbox?name=private.html', PAGE, true)).status, 200);
     const privateInbox = (await call('admin', 'GET', '/api/admin/inbox')).data.entries[0];
     const privateRegistration = await call('admin', 'POST', '/api/admin/inbox/register', { id: privateInbox.id, task: 'one', title: '待审收件箱作品', modelId: 'm', effort: 'Default', providerId: 'official', publish: false });
     assert.equal(privateRegistration.status, 200);
     assert.equal(privateRegistration.data.work.status, 'unverified');
-    assert.equal(privateRegistration.data.work.moderation.status, 'pending');
+    assert.equal(privateRegistration.data.work.moderation.status, 'approved');
     await platform.moderator.idle();
-    assert.equal(platform.library.work('one', privateRegistration.data.work.id).moderation.status, 'review');
-    assert.notEqual(platform.library.work('one', privateRegistration.data.work.id).moderation.source, 'human');
+    assert.equal(platform.library.work('one', privateRegistration.data.work.id).moderation.status, 'approved');
+    assert.equal(platform.library.work('one', privateRegistration.data.work.id).moderation.source, 'human');
     for (const item of [adminUpload.data.work, registered.data.work]) {
       const saved = platform.library.work('one', item.id);
-      assert.equal(saved.status, 'verified');
+      assert.equal(saved.status, 'unverified');
       assert.deepEqual(saved.moderation, item.moderation);
-      const audit = platform.library.auditLog().find(log => log.action === 'content-review' && log.work === item.id);
+      const audit = platform.library.auditLog().find(log => log.action === 'submit' && log.work === item.id);
       assert.ok(audit);
-      assert.deepEqual(JSON.parse(audit.detail), item.moderation);
+      assert.equal(platform.library.visibleTo(saved, 'show2'), false);
     }
     assert.equal(received.length, 0);
+    assert.equal((await call(null, 'GET', '/api/bootstrap')).data.works.length, 0);
+    for (const item of [adminUpload.data.work, registered.data.work]) {
+      assert.equal((await call('admin', 'POST', `/api/works/one/${item.id}/review`, { status: 'verified' })).status, 200);
+    }
     assert.equal((await call(null, 'GET', '/api/bootstrap')).data.works.length, 2);
   }, { capture: false });
 });
@@ -424,12 +428,13 @@ test('uncertain, refused, malformed and failed Flex responses stay held, with no
     ];
     for (const item of cases) {
       setResponse(async () => item);
-      const work = await submit('admin');
+      const work = await submit('owner');
       await platform.moderator.idle();
       const result = platform.library.work('one', work.id).moderation;
       assert.equal(result.status, item.expected);
       if (item.error) assert.equal(result.error, item.error);
       assert.equal(platform.library.contentAllowed(platform.library.work('one', work.id)), false);
+      platform.db.prepare('UPDATE works SET deleted_at = ? WHERE id = ?').run(Date.now(), work.id);
     }
     assert.equal(received.length, cases.length);
     assert.ok(received.every((item) => item.body.service_tier === 'flex'));

@@ -136,11 +136,30 @@ test('role edits cannot report demoting an administrator fixed by configuration'
     const auth = createAuth(db, { ...options, admins: ['reserved'] });
     const actor = auth.createAdmin('operator', 'correct password');
     const fixed = auth.createAdmin('reserved', 'correct password');
-    assert.throws(() => auth.setRole(actor, fixed.id, 'member'), (error) => error.status === 409);
+    assert.throws(() => auth.setRole(actor, fixed.id, 'user'), (error) => error.status === 409);
+    assert.throws(() => auth.promote('reserved', 'user'), (error) => error.status === 409);
     assert.equal(auth.isAdminName(' OPERATOR '), true);
     assert.equal(auth.isAdminName('ＲＥＳＥＲＶＥＤ'), true);
     assert.equal(auth.isAdminName('unknown'), false);
     assert.equal(auth.setRole(actor, fixed.id, 'admin').role, 'admin');
+  } finally { db.close(); }
+});
+
+test('role management exposes three roles and reserves editing for senior administrators', async () => {
+  const db = openDatabase(':memory:');
+  try {
+    const auth = createAuth(db, options);
+    const senior = auth.createAdmin('operator', 'correct password');
+    const user = await auth.register('reader', 'correct password');
+    assert.equal(auth.public(user).role, 'user');
+    for (const role of ['admin', 'moderator', 'user']) {
+      assert.equal(auth.setRole(senior, user.id, role).role, role);
+      assert.equal(auth.public(auth.promote('reader', role)).role, role);
+    }
+    assert.throws(() => auth.setRole({ ...senior, role: 'moderator' }, user.id, 'admin'), error => error.status === 403);
+    assert.throws(() => auth.setRole(senior, user.id, 'member'), error => error.status === 400);
+    assert.throws(() => auth.promote('reader', 'member'), error => error.status === 400);
+    assert.equal(auth.public({ ...user, role: 'member' }).role, 'user');
   } finally { db.close(); }
 });
 

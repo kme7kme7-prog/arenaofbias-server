@@ -159,7 +159,12 @@ const ACTIONS = { submit: '提交作品', verified: '通过核验', questioned: 
 // carry explicit show_gallery/show_arena.
 const AUDIENCE_FACE = { gallery: ['show2', 'both'], arena: ['show1', 'both'] };
 const contentHeld = (w) => ['pending', 'review', 'rejected'].includes(w.moderation?.status);
-const contentReady = (w) => w.source === 'curated' || ['legacy', 'approved'].includes(w.moderation?.status);
+const contentReady = (w) => ['legacy', 'approved'].includes(w.moderation?.status);
+const isStaff = (user) => ['admin', 'moderator'].includes(user?.role);
+const isSenior = () => state.user?.role === 'admin';
+const canDecide = (work) => isSenior() || !work.mine;
+const ROLE_LABELS = { admin: '高级管理员', moderator: '普通管理员', user: '普通用户' };
+const publisher = (item) => item.author?.role === 'user' ? '用户' : '管理员';
 const faceOn = (w, face = state.system) => !contentHeld(w) && Boolean(w[`show_${face}`] ?? AUDIENCE_FACE[face].includes(w.audience));
 const CONTENT_STATUS = { pending: '自动审核中', approved: '内容已通过', review: '内容待人工审核', rejected: '内容未通过', legacy: '历史作品' };
 const QUESTION_STATUS = { pending: '待审核', approved: '已通过', rejected: '已拒绝', legacy: '历史题目' };
@@ -180,9 +185,9 @@ const state = { user: undefined, data: null, works: null, audit: [], users: null
   workCache: new Map(), workKey: '', workLoading: false, trafficLoading: false, requestId: 0,
   sidebarCollapsed: store.get('admin-sidebar-collapsed') === '1',
   workPage: 1, workTask: '', workStatus: '', workShow: '', workHarness: '', workProvider: '', workSearch: '', traffic: null,
-  workModel: '', workEffort: '', workGenerationMode: '', workHumanIntervention: '', workEfforts: [],
+  workModel: '', workEffort: '', workAuthor: '', workGenerationMode: '', workHumanIntervention: '', workEfforts: [],
   inbox: null, inboxForms: {}, intake: null, adminQuestions: null, reviewCounts: null };
-const taskTitle = (id) => [...(state.data?.tasks ?? []), ...(state.questions ?? []), ...(state.adminQuestions ?? [])].find((t) => t.id === id)?.title ?? id;
+const taskTitle = (id) => [...(state.adminQuestions ?? []), ...(state.questions ?? [])].find((t) => t.id === id)?.title ?? id;
 
 async function loadCatalog() {
   if (state.data) return;
@@ -209,7 +214,7 @@ async function loadInbox() {
 async function removeWork(w) {
   const ok = await confirmDialog({
     title: '删除这件作品？',
-    message: `「${w.title}」的文件会被永久删除，展厅中不再显示。参与过盲评（有对局记录）的作品会被拒绝删除，请改用「标记存疑」让它下线。操作会记入审核记录。`,
+    message: `「${w.title}」会从公开目录删除。有投票记录的作品不能删除，请改用审核或门面开关调整。操作会记入审核记录。`,
     confirm: '删除',
     danger: true,
   });
@@ -256,10 +261,10 @@ const SUBMIT_URL = 'https://gallery.arenaofbias.icu/#/submit';
 const REVIEW_URL = 'https://gallery.arenaofbias.icu/#/review';
 const systemSwitch = () => `<div class="system-switch" role="group" aria-label="管理系统"><button type="button" data-system="gallery" aria-pressed="${state.system === 'gallery'}">展览馆系统</button><button type="button" data-system="arena" aria-pressed="${state.system === 'arena'}">竞技场系统</button><button type="button" data-system="common" aria-pressed="${state.system === 'common'}">通用后台</button></div>`;
 
-const routeAllowed = (route, sub) => state.system === 'common'
+const routeAllowed = (route, sub) => !isSenior() ? (state.system === 'common' ? route === 'upload' : ['works', 'intake'].includes(route)) : state.system === 'common'
   ? COMMON_TABS.some((tab) => tab.id === route)
   : TABS.some((tab) => tab.id === route) || (state.system === 'arena' && ['guess', 'activity', 'intake'].includes(route));
-const tabsForSystem = () => state.system === 'common' ? COMMON_TABS : TABS;
+const tabsForSystem = () => (state.system === 'common' ? COMMON_TABS : TABS).filter((tab) => isSenior() || ['works', 'upload'].includes(tab.id));
 
 function topbar(route) {
   if (state.system === 'arena') return `<header class="topbar arena-topbar">
@@ -269,7 +274,7 @@ function topbar(route) {
     <button class="icon-btn" data-logout title="退出登录" aria-label="退出登录">${icon('logout')}</button>
   </header>`;
   return `<header class="topbar">
-    <a class="brand" href="${state.system === 'common' ? '#/dashboard' : '#/works'}">${LOGO}<span class="brand-name">同题异答<b>${state.system === 'common' ? '通用后台' : '管理后台'}</b></span></a>
+    <a class="brand" href="${state.system === 'common' ? (isSenior() ? '#/dashboard' : '#/upload') : '#/works'}">${LOGO}<span class="brand-name">同题异答<b>${state.system === 'common' ? '通用后台' : '管理后台'}</b></span></a>
     ${systemSwitch()}
     <nav class="tabs" aria-label="管理">
       ${tabsForSystem().map((tab) => `<a href="#/${tab.id}"${tab.id === route ? ' aria-current="page"' : ''}>${icon(tab.icon)}${tab.label}</a>`).join('')}
@@ -286,7 +291,7 @@ function arenaSidebar(route, sub) {
   return `<aside class="workspace-sidebar" aria-label="竞技场工作台导航">
     <div class="sidebar-head"><a class="sidebar-brand" href="#/works">${LOGO}<span class="sidebar-copy"><b>偏见试验场</b><small>竞技场管理工作台</small></span></a>
       <button class="icon-btn sidebar-collapse" type="button" data-sidebar-collapse aria-label="${state.sidebarCollapsed ? '展开侧栏' : '折叠侧栏'}" aria-expanded="${!state.sidebarCollapsed}" title="${state.sidebarCollapsed ? '展开侧栏' : '折叠侧栏'}">${icon('panel')}</button></div>
-    <nav class="sidebar-nav">${ARENA_NAV.map(([group, items]) => `<div class="sidebar-group"><span class="sidebar-caption">${group}</span>${items.map(([id, label, glyph, href]) => `<a href="${href}" title="${label}"${href.startsWith('http') ? ' target="_blank" rel="noopener"' : ''}${selected === id ? ' aria-current="page"' : ''}>${icon(glyph)}<span class="sidebar-label">${label}</span></a>`).join('')}</div>`).join('')}</nav>
+    <nav class="sidebar-nav">${ARENA_NAV.map(([group, items]) => [group, items.filter(([id]) => isSenior() || ['works', 'intake', 'gallery-review'].includes(id))]).filter(([, items]) => items.length).map(([group, items]) => `<div class="sidebar-group"><span class="sidebar-caption">${group}</span>${items.map(([id, label, glyph, href]) => `<a href="${href}" title="${label}"${href.startsWith('http') ? ' target="_blank" rel="noopener"' : ''}${selected === id ? ' aria-current="page"' : ''}>${icon(glyph)}<span class="sidebar-label">${label}</span></a>`).join('')}</div>`).join('')}</nav>
     <div class="sidebar-foot"><span>共享数据 · 双系统门面</span><small>竞技场 / 管理后台</small></div>
   </aside>`;
 }
@@ -305,11 +310,10 @@ function pageHero(kicker, title, lead, stats) {
 // -- review tab --
 // -- admin staging inbox (代传收件箱) -----------------------------------------------
 // Files wait here until an admin previews them and registers them as works;
-// registration reuses the platform draft pipeline, so uploads default to
-// 展览馆开 / 正式盲测关 and never auto-publish.
+// Registration reuses the platform draft pipeline and awaits manual verification.
 function inboxPanel() {
   const entries = state.inbox ?? [];
-  const tasks = [...(state.data?.tasks ?? []), ...(state.questions ?? [])];
+  const tasks = state.questions ?? [];
   const taskOptions = (selected) => tasks.map((t) => `<option value="${esc(t.id)}"${t.id === selected ? ' selected' : ''}>${esc(t.title)}</option>`).join('');
   const modelOptions = (selected) => (state.data?.models ?? []).map((m) => `<option value="${esc(m.id)}"${m.id === selected ? ' selected' : ''}>${esc(m.name)}</option>`).join('');
   const cards = entries.map((entry) => {
@@ -335,7 +339,7 @@ function inboxPanel() {
         <label class="field"><span class="field-label">摘要</span><input class="input" name="summary" maxlength="200" value="${value('summary')}"></label>
         ${provenanceFields({ harness: { choice: form.harnessChoice, other: form.harnessOther }, provider: { choice: form.providerChoice } })}
         ${generationFields(form)}
-        <p class="fine">管理员代传视为已通过内容审核和核验：登记后直接上展览馆，不进正式盲测；进不进盲测在竞技场系统里决定。</p>
+        <p class="fine">管理员发布跳过内容审核，登记后进入人工核验队列。普通管理员的作品须由其他管理员核验。</p>
         <p class="form-error" role="alert"></p>
         <div class="actions"><button type="button" class="btn sm danger ghost" data-inbox-remove>${icon('trash')}移除</button><span class="spacer"></span><button class="btn sm primary" type="submit">${icon('check')}登记入库</button></div>
       </form>
@@ -412,15 +416,15 @@ function adminWorkRow(w, face = state.system) {
   return `<tr data-work-key="${esc(`${w.task}/${w.id}`)}">
     <td><div class="admin-work-title">${thumb(w)}<div><b>${esc(w.title)}</b><small>${esc(taskTitle(w.task))} · ${w.votes ?? 0} 票</small>${w.entertainment_route === 1 ? '<span class="badge">在收件箱</span>' : ''}</div></div></td>
     <td>${esc(w.modelName)}${provenanceText(w) ? `<small class="work-provenance">${esc(provenanceText(w))}</small>` : ''}</td><td>${statusBadge(w.status)}</td>
-    <td>${w.show_gallery ? '进入展览馆' : '未进展览馆'}</td>
+    <td>${publisher(w)}${w.author?.name ? `<small>${esc(w.author.name)}</small>` : ''}</td><td>${w.show_gallery ? '进入展览馆' : '未进展览馆'}</td>
     ${face === 'arena' ? `<td>${formal}</td><td>${entertainment}</td>` : '<td>—</td>'}
-    <td><div class="actions"><button class="btn sm" data-calibrate="${esc(w.id)}">${label}取景</button><button class="btn sm" data-task-note="${esc(w.task)}">${face === 'gallery' ? '策展笔记' : '题目点评'}</button><button class="btn sm" data-edit="${esc(w.id)}">编辑</button><a class="btn sm" href="${REVIEW_URL}" target="_blank" rel="noopener">审核</a></div></td>
+    <td><div class="actions"><button class="btn sm" data-preview="${esc(`${w.task}/${w.id}`)}">预览</button>${canDecide(w) ? `<button class="btn sm" data-calibrate="${esc(`${w.task}/${w.id}`)}">${label}取景</button>` : ''}${isSenior() ? `<button class="btn sm" data-task-note="${esc(w.task)}">${face === 'gallery' ? '策展笔记' : '题目点评'}</button>` : ''}<button class="btn sm" data-edit="${esc(`${w.task}/${w.id}`)}">编辑</button>${canDecide(w) ? `<a class="btn sm" href="${REVIEW_URL}" target="_blank" rel="noopener">审核</a>` : '<small>需由其他管理员审核</small>'}${isSenior() ? `<button class="btn sm danger" data-delete="${esc(`${w.task}/${w.id}`)}">删除</button>` : ''}</div></td>
   </tr>`;
 }
 function systemWorksView() {
   const face = state.system;
   const works = state.adminWorks;
-  const tasks = [...(state.data?.tasks ?? []), ...(state.questions ?? [])];
+  const tasks = state.questions ?? [];
   const options = tasks.map((t) => `<option value="${esc(t.id)}" ${state.workTask === t.id ? 'selected' : ''}>${esc(t.title)}</option>`).join('');
   const pages = Math.max(1, Math.ceil(state.workTotal / 30));
   const rows = works.map((w) => adminWorkRow(w, face)).join('');
@@ -429,6 +433,7 @@ function systemWorksView() {
       <input class="input" name="search" value="${esc(state.workSearch)}" placeholder="搜索作品或模型" aria-label="搜索作品或模型">
       <select class="input" name="task" aria-label="筛选题目"><option value="">全部题目</option>${options}</select>
       <select class="input" name="status" aria-label="筛选状态"><option value="">全部状态</option>${Object.entries(WORKS_FILTERS).filter(([id]) => id !== 'all').map(([id, label]) => `<option value="${id}" ${state.workStatus === id ? 'selected' : ''}>${label}</option>`).join('')}</select>
+      <select class="input" name="author" aria-label="筛选发布者"><option value="">全部发布者</option><option value="admin"${state.workAuthor === 'admin' ? ' selected' : ''}>管理员</option><option value="user"${state.workAuthor === 'user' ? ' selected' : ''}>用户</option></select>
       <select class="input" name="show" aria-label="筛选开关"><option value="">全部开关</option><option value="on" ${state.workShow === 'on' ? 'selected' : ''}>已开启</option><option value="off" ${state.workShow === 'off' ? 'selected' : ''}>已关闭</option></select>
       <select class="input" name="model" aria-label="筛选模型"><option value="">全部模型</option><option value="other"${state.workModel === 'other' ? ' selected' : ''}>未登记模型</option>${(state.data?.models ?? []).map((model) => `<option value="${esc(model.id)}"${state.workModel === model.id ? ' selected' : ''}>${esc(model.name)}</option>`).join('')}</select>
       <select class="input" name="effort" aria-label="筛选推理档位"><option value="">全部档位</option><option value="unset"${state.workEffort === 'unset' ? ' selected' : ''}>未注明档位</option>${[...new Set(['Default', 'Low', 'Medium', 'High', 'XHigh', 'Max', ...state.workEfforts, state.workEffort].filter((value) => value && value !== 'unset'))].map((value) => `<option value="${esc(value)}"${state.workEffort === value ? ' selected' : ''}>${esc(value === 'Default' ? '默认档位' : value)}</option>`).join('')}</select>
@@ -442,27 +447,65 @@ function systemWorksView() {
         return `<select class="input" name="${type}" aria-label="筛选${PROVENANCE[type].label}"><option value="">全部${PROVENANCE[type].label}</option>${choices.map(([value, label]) => `<option value="${esc(value)}"${current === value ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select>`;
       }).join('')}
       <button class="btn" type="submit">筛选</button></form>
-      <div class="work-results" aria-busy="${state.workLoading}">${state.workLoading ? skeleton(7) : rows ? `<div class="table-wrap"><table class="board admin-work-table"><thead><tr><th>作品</th><th>模型</th><th>状态</th><th>进入展览馆</th><th>${face === 'arena' ? '正式盲测池' : '备注'}</th>${face === 'arena' ? '<th>娱乐池</th>' : ''}<th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="board-empty">没有符合条件的作品。</p>'}</div>
+      <div class="work-results" aria-busy="${state.workLoading}">${state.workLoading ? skeleton(7) : rows ? `<div class="table-wrap"><table class="board admin-work-table"><thead><tr><th>作品</th><th>模型</th><th>状态</th><th>发布者</th><th>进入展览馆</th><th>${face === 'arena' ? '正式盲测池' : '备注'}</th>${face === 'arena' ? '<th>娱乐池</th>' : ''}<th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="board-empty">没有符合条件的作品。</p>'}</div>
       <div class="admin-pagination"><button class="btn sm" data-page="${state.workPage - 1}" ${state.workPage <= 1 ? 'disabled' : ''}>上一页</button><span>第 ${state.workPage} / ${pages} 页</span><button class="btn sm" data-page="${state.workPage + 1}" ${state.workPage >= pages ? 'disabled' : ''}>下一页</button></div>
     </section>`;
 }
 
 const QUESTION_DOMAINS = ['数学', '物理', '化学', '生物', '天文', '建筑', '自然景观', '交通与机械', '产品与品牌', '文学艺术', '游戏娱乐'];
 function tasksView() {
-  const tasks = [...(state.data?.tasks ?? []), ...(state.questions ?? [])];
-  return `${pageHero('题目管理', `${faceLabel()}题目`, state.system === 'gallery' ? '为每道题编辑策展文案。' : '为每道题编辑点评和六维权重。', [['题目', tasks.length]])}
-    <section class="block">${state.system === 'arena' ? '<div class="actions"><button class="btn primary" type="button" data-new-question>新建题目</button></div>' : ''}<div class="admin-task-list">${tasks.map((task) => `<article class="admin-task"><div><h3>${esc(task.title)}</h3><p class="muted">${esc(task.id)}</p></div><button class="btn" data-task-note="${esc(task.id)}">${state.system === 'gallery' ? '编辑策展文案' : '编辑点评与权重'}</button></article>`).join('')}</div></section>`;
+  const tasks = state.adminQuestions ?? [];
+  return `${pageHero('题目管理', `${faceLabel()}题目`, '统一管理题目信息、投稿开关和审核状态。新题目须经人工审核。', [['题目', tasks.length]])}
+    <section class="block"><div class="actions"><button class="btn primary" type="button" data-new-question>新建题目</button></div><div class="admin-task-list">${tasks.map((task) => `<article class="admin-task"><div><h3>${esc(task.title)}</h3><p class="muted">${publisher(task)} · ${esc(QUESTION_STATUS[task.moderation?.status] ?? '')} · ${task.works ?? 0} 件作品 · ${task.votes ?? 0} 票</p></div><div class="actions"><button class="btn" data-question-edit="${esc(task.id)}">编辑与审核</button><button class="btn" data-task-note="${esc(task.id)}">${state.system === 'gallery' ? '编辑策展文案' : '编辑点评与权重'}</button><button class="btn danger" data-question-delete="${esc(task.id)}"${task.votes ? ' disabled title="有票题目不能删除"' : ''}>删除</button></div></article>`).join('')}</div></section>`;
+}
+function questionDialog(question) {
+  const sheet = openDialog({ title: `编辑与审核 · ${question.title}`, body: `<form class="admin-editor">
+    <label class="field"><span class="field-label">标题</span><input class="input" name="title" maxlength="70" value="${esc(question.title)}" required></label>
+    <label class="field"><span class="field-label">简述</span><textarea class="input" name="summary" maxlength="400">${esc(question.summary)}</textarea></label>
+    <label class="field"><span class="field-label">提示词</span><textarea class="input" name="prompt"${question.works && question.moderation?.status === 'approved' ? ' disabled' : ''}>${esc(question.prompt)}</textarea></label>
+    <label class="field"><span class="field-label">题型</span><select class="input" name="category">${['文学', '静态网页', '建模'].map((value) => `<option${value === question.category ? ' selected' : ''}>${value}</option>`).join('')}</select></label>
+    <div class="field"><span class="field-label">领域</span><div class="face-checks">${QUESTION_DOMAINS.map((domain) => `<label><input type="checkbox" name="domains" value="${esc(domain)}"${question.domains?.includes(domain) ? ' checked' : ''}>${esc(domain)}</label>`).join('')}</div></div>
+    <label class="face-checks"><input type="checkbox" name="acceptsUploads"${question.acceptsUploads ? ' checked' : ''}>接受投稿</label>
+    <label class="field"><span class="field-label">封面作品 id<small>留空使用默认封面</small></span><input class="input" name="cover" value="${esc(question.cover)}"></label>
+    <p class="form-error" role="alert"></p><button class="btn primary" type="submit">保存信息</button></form>
+    <div class="actions"><button class="btn primary" data-question-decision="approved">通过 / 恢复</button><button class="btn danger" data-question-decision="rejected">拒绝 / 撤下</button></div>` });
+  const form = $('form', sheet.el);
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const done = busy($('button[type="submit"]', form));
+    try {
+      await api(`admin/questions/${encodeURIComponent(question.id)}/meta`, { method: 'POST', body: {
+        title: form.title.value, summary: form.summary.value, ...(!form.prompt.disabled ? { prompt: form.prompt.value } : {}),
+        category: form.category.value, domains: $$('[name="domains"]:checked', form).map((input) => input.value),
+        acceptsUploads: form.acceptsUploads.checked, cover: form.cover.value.trim() || null,
+      } });
+      sheet.close(); await reload(); toast('题目信息已更新');
+    } catch (error) { $('.form-error', form).textContent = error.message; done(); }
+  });
+  $$('[data-question-decision]', sheet.el).forEach((button) => button.addEventListener('click', async () => {
+    const status = button.dataset.questionDecision;
+    let reason = '';
+    if (status === 'rejected') {
+      reason = prompt('请填写拒绝或撤下理由');
+      if (!reason?.trim()) return;
+    }
+    const done = busy(button);
+    try {
+      await api(`questions/${encodeURIComponent(question.id)}/moderation`, { method: 'POST', body: { status, reason } });
+      sheet.close(); await reload(); toast('审核结果已保存');
+    } catch (error) { $('.form-error', form).textContent = error.message; done(); }
+  }));
 }
 function intakeView() {
   const works = state.intake ?? [];
   const tasks = [...(state.data?.tasks ?? []), ...(state.questions ?? [])];
   const options = tasks.map((task) => `<option value="${esc(task.id)}">${esc(task.title)}</option>`).join('');
   const rows = works.map((work) => `<tr>
-    <td><input type="checkbox" data-intake-task="${esc(work.task)}" data-intake-id="${esc(work.id)}" aria-label="选择${esc(work.title)}"></td>
+    <td><input type="checkbox" data-intake-task="${esc(work.task)}" data-intake-id="${esc(work.id)}"${canDecide(work) ? '' : ' disabled'} aria-label="选择${esc(work.title)}"></td>
     <td><b>${esc(work.title)}</b><small>${esc(work.modelName)}</small></td>
     <td>${esc(taskTitle(work.task))}</td>
     <td>${formatTime(work.addedAt)}</td>
-    <td><button class="btn sm" data-edit="${esc(work.id)}">补信息</button></td>
+    <td><button class="btn sm" data-edit="${esc(`${work.task}/${work.id}`)}">补信息</button></td>
   </tr>`).join('');
   return `${pageHero('收件箱 · 娱乐作品', '待归属', '归属到题目后自动离开收件箱。只补信息则继续留在这里。', [['待处理', works.length]])}
     <section class="block"><form id="intake-assign" class="admin-filter">
@@ -505,7 +548,7 @@ function newQuestionDialog() {
         domains: [form.domain.value], templates: category === '文学' ? ['text'] : ['static'],
       } });
       sheet.close();
-      toast('题目已创建');
+      toast('题目已创建，等待审核');
       await reload();
     } catch (error) { $('.form-error', form).textContent = error.message; done(); }
   });
@@ -617,23 +660,20 @@ const auditList = (limit) => {
 
 
 function editDialog(w) {
-  const curated = w.source === 'curated';
   const models = state.data?.models ?? [];
-  const tasks = [...(state.data?.tasks ?? []), ...(state.questions ?? [])];
-  const taskOptions = tasks.map((t) => `<option value="${esc(t.id)}"${t.id === w.task ? ' selected' : ''}>${esc(t.title)}</option>`).join('');
   const sheet = openDialog({ title: `编辑信息 · ${w.title}`, body: `<form class="admin-editor">
-    <label class="field"><span class="field-label">归属题目<small>${curated ? '馆藏归属随数据包' : '改归属会连历史投票、评论、表情一起搬过去'}</small></span><select class="input" name="task"${curated ? ' disabled' : ''}>${taskOptions}</select></label>
+    <p class="fine">归属题目：${esc(taskTitle(w.task))}${canDecide(w) ? '' : ' · 自己发布的作品须由其他管理员处理审核与开关'}</p>
     <label class="field"><span class="field-label">作品标题</span><input class="input" name="title" maxlength="40" value="${esc(w.title)}" required></label>
     <div class="field-row">
       <label class="field"><span class="field-label">模型名称</span><input class="input" name="modelName" maxlength="60" value="${esc(w.modelName)}" required></label>
       ${effortField(w.effort)}
     </div>
-    <label class="field"><span class="field-label">登记为模型</span><select class="input" name="modelId"${curated ? ' disabled' : ''}><option value="">不登记（保持自由文本）</option>${models.map((m) => `<option value="${esc(m.id)}"${m.id === w.model ? ' selected' : ''}>${esc(m.name)}</option>`).join('')}</select></label>
+    <label class="field"><span class="field-label">登记为模型</span><select class="input" name="modelId"><option value="">不登记（保持自由文本）</option>${models.map((m) => `<option value="${esc(m.id)}"${m.id === w.model ? ' selected' : ''}>${esc(m.name)}</option>`).join('')}</select></label>
     <label class="field"><span class="field-label">作品摘要</span><textarea class="input" name="summary" maxlength="200" rows="2">${esc(w.summary ?? '')}</textarea></label>
     ${provenanceFields({ harness: currentProvenance(w, 'harness'), provider: currentProvenance(w, 'provider') })}
     ${generationFields(w)}
-    <label class="face-checks"><input type="checkbox" name="enterGallery"${w.show_gallery ? ' checked' : ''}> 进入展览馆<small>同时写入展览馆和正式盲测</small></label>
-    <label class="face-checks"><input type="checkbox" name="pool"${w.show_entertainment ? ' checked' : ''}> 娱乐盲测</label>
+    <label class="face-checks"><input type="checkbox" name="enterGallery"${w.show_gallery ? ' checked' : ''}${canDecide(w) ? '' : ' disabled'}> 进入展览馆<small>同时写入展览馆和正式盲测</small></label>
+    <label class="face-checks"><input type="checkbox" name="pool"${w.show_entertainment ? ' checked' : ''}${canDecide(w) ? '' : ' disabled'}> 娱乐盲测</label>
     <p class="form-error" role="alert"></p><button class="btn primary" type="submit">保存</button></form>` });
   const form = $('form', sheet.el);
   form.addEventListener('submit', async (e) => {
@@ -645,9 +685,8 @@ function editDialog(w) {
     const enter = form.enterGallery.checked;
     const fields = { title: form.title.value, summary: form.summary.value, modelName: form.modelName.value, effort: form.effort.value, ...provenance, ...generationBody((name) => form.elements.namedItem(name)?.value, w) };
     try {
-      if (curated) await api(`admin/works/${workKey(w)}/display`, { method: 'POST', body: fields });
-      else await api(`admin/works/${workKey(w)}/meta`, { method: 'POST', body: { ...fields, ...(form.task.value !== w.task ? { task: form.task.value } : {}), modelId: form.modelId.value || undefined } });
-      await api(`admin/works/${workKey(w)}/face-settings`, { method: 'POST', body: { show_gallery: enter, show_arena: enter, show_entertainment: form.pool.checked } });
+      await api(`admin/works/${workKey(w)}/meta`, { method: 'POST', body: { ...fields, modelId: form.modelId.value || null } });
+      if (canDecide(w)) await api(`admin/works/${workKey(w)}/face-settings`, { method: 'POST', body: { show_gallery: enter, show_arena: enter, show_entertainment: form.pool.checked } });
       sheet.close();
       toast('信息已更新');
       await reload();
@@ -732,7 +771,7 @@ function calibrationDialog(w) {
     try { await api(`admin/works/${workKey(w)}/calibration`, { method: 'POST', body: { face, calibration } }); sheet.close(); toast('取景已保存'); await reload(); }
     catch (error) { $('.form-error', form).textContent = error.message; done(); $('[data-clear-calibration]', form).disabled = false; }
   };
-  // Live preview: a short-lived content-origin key makes any work (curated or upload)
+  // Live preview: a short-lived content-origin key makes any work
   // viewable, with the bridge answering the camera handshake (?aob=bridge&face=…).
   (async () => {
     try {
@@ -846,12 +885,11 @@ function usersView() {
   const users = state.users ?? [];
   const rows = users.map((u) => {
     const self = u.id === state.user.id;
-    const target = u.role === 'admin' ? 'member' : 'admin';
     return `<tr>
       <td class="c-title"><span class="avatar" aria-hidden="true">${esc(u.name.slice(0, 1).toUpperCase())}</span><b>${esc(u.name)}</b>${self ? '<span class="badge">当前账号</span>' : ''}</td>
-      <td><span class="status role-${esc(u.role)}">${icon(u.role === 'admin' ? 'shield' : 'user')}${u.role === 'admin' ? '管理员' : '成员'}</span></td>
+      <td><span class="status role-${esc(u.role)}">${icon(isStaff(u) ? 'shield' : 'user')}${ROLE_LABELS[u.role] ?? '普通用户'}</span></td>
       <td><time>${formatTime(u.createdAt)}</time></td>
-      <td class="c-actions"><button class="btn sm${target === 'admin' ? ' primary' : ''}" data-role="${esc(u.id)}" data-target="${target}"${self ? ' disabled title="不能修改自己的角色"' : ''}>${target === 'admin' ? '设为管理员' : '设为成员'}</button></td>
+      <td class="c-actions"><select class="input" data-user-role="${esc(u.id)}" aria-label="调整${esc(u.name)}的角色"${self ? ' disabled title="不能修改自己的角色"' : ''}>${Object.entries(ROLE_LABELS).map(([role, label]) => `<option value="${role}"${role === u.role ? ' selected' : ''}>${label}</option>`).join('')}</select></td>
     </tr>`;
   }).join('');
   return `${pageHero('用户管理', '用户', '账号与角色。管理员可以审核作品、调整其他账号的角色；自己的角色只能由别的管理员修改。', [['账号', users.length], ['管理员', users.filter((u) => u.role === 'admin').length]])}
@@ -967,6 +1005,7 @@ function worksQuery() {
   const query = new URLSearchParams({ page: state.workPage, pageSize: 30, face: state.system });
   if (state.workTask) query.set('task', state.workTask);
   if (state.workStatus) query.set('status', state.workStatus);
+  if (state.workAuthor) query.set('author', state.workAuthor);
   if (state.workShow) query.set('show', state.workShow);
   if (state.workHarness) query.set('harness', state.workHarness);
   if (state.workProvider) query.set('provider', state.workProvider);
@@ -979,7 +1018,7 @@ function worksQuery() {
 }
 // Works filters live in the hash (#/works?task=…&status=…) so views can be shared as links.
 function syncWorksHash() {
-  const hash = `#/works${[state.workTask, state.workStatus, state.workShow, state.workHarness, state.workProvider, state.workModel, state.workEffort, state.workGenerationMode, state.workHumanIntervention, state.workSearch].some(Boolean) || state.workPage > 1 ? `?${worksQuery()}` : ''}`;
+  const hash = `#/works${[state.workTask, state.workStatus, state.workAuthor, state.workShow, state.workHarness, state.workProvider, state.workModel, state.workEffort, state.workGenerationMode, state.workHumanIntervention, state.workSearch].some(Boolean) || state.workPage > 1 ? `?${worksQuery()}` : ''}`;
   history.replaceState(null, '', hash);
 }
 function applyWorksHash() {
@@ -988,6 +1027,7 @@ function applyWorksHash() {
   state.workPage = Math.max(1, Number(pick('page', '1')) || 1);
   state.workTask = pick('task', state.workTask);
   state.workStatus = pick('status', state.workStatus);
+  state.workAuthor = pick('author', state.workAuthor);
   state.workShow = pick('show', state.workShow);
   state.workHarness = pick('harness', state.workHarness);
   state.workProvider = pick('provider', state.workProvider);
@@ -1043,7 +1083,7 @@ async function reload({ navigation = false } = {}) {
   const [route = 'works'] = routeParts();
   const system = state.system;
   if (route === 'review') { location.replace(REVIEW_URL); return; }
-  if (!routeAllowed(route)) { location.hash = system === 'common' ? '#/dashboard' : '#/works'; return; }
+  if (!routeAllowed(route)) { location.hash = system === 'common' ? (isSenior() ? '#/dashboard' : '#/upload') : '#/works'; return; }
   let key = '';
   if (route === 'works') {
     if (navigation) applyWorksHash();
@@ -1059,9 +1099,10 @@ async function reload({ navigation = false } = {}) {
   if (navigation || !app().dataset.shell) render({ soft: route === 'works' && !state.workLoading });
   try {
     if (route === 'users') state.users = (await api('admin/users')).users;
+    else if (route === 'tasks') state.adminQuestions = (await api('admin/questions')).questions;
     else if (route === 'works') {
       const data = await api(`admin/works?${key}`);
-      if (requestId !== state.requestId || system !== state.system || routeParts()[0] !== 'works') return;
+      if (requestId !== state.requestId || system !== state.system || (routeParts()[0] || 'works') !== 'works') return;
       state.workCache.set(key, data);
       if (state.workCache.size > 24) state.workCache.delete(state.workCache.keys().next().value);
       state.adminWorks = data.works;
@@ -1093,10 +1134,10 @@ function render({ soft = false, world = false } = {}) {
   syncThemeUi();
   if (state.user === undefined) { app().innerHTML = `<main class="gate">${skeleton(3)}</main>`; return; }
   if (!state.user) return loginView();
-  if (state.user.role !== 'admin') return forbiddenView();
+  if (!isStaff(state.user)) return forbiddenView();
   const [route = 'works', sub] = routeParts();
   if (route === 'review') { location.replace(REVIEW_URL); return; }
-  if (!routeAllowed(route, sub)) { location.hash = state.system === 'common' ? '#/dashboard' : '#/works'; return; }
+  if (!routeAllowed(route, sub)) { location.hash = state.system === 'common' ? (isSenior() ? '#/dashboard' : '#/upload') : '#/works'; return; }
   const body = state.system === 'common'
     ? route === 'upload' ? uploadView() : route === 'users' ? usersView() : route === 'traffic' ? trafficView() : dashboardView()
     : route === 'works' ? systemWorksView() : route === 'intake' ? intakeView() : route === 'tasks' ? tasksView() : placeholderView(route);
@@ -1154,7 +1195,7 @@ async function boot() {
   } catch {
     state.user = null;
   }
-  if (state.user?.role === 'admin') {
+  if (isStaff(state.user)) {
     applySystemTheme();
     state.works = null;
     state.users = null;
@@ -1173,7 +1214,7 @@ document.addEventListener('click', async (e) => {
     state.system = system.dataset.system; store.set('admin-system', state.system); state.workPage = 1;
     applySystemTheme();
     if (routeParts()[0] === 'review') { location.replace(REVIEW_URL); return; }
-    if (!routeAllowed(routeParts()[0])) location.hash = state.system === 'common' ? '#/dashboard' : '#/works';
+    if (!routeAllowed(routeParts()[0])) location.hash = state.system === 'common' ? (isSenior() ? '#/dashboard' : '#/upload') : '#/works';
     if (routeParts()[0] === 'works') {
       const cached = state.workCache.get(worksQuery().toString());
       state.adminWorks = cached?.works ?? [];
@@ -1237,14 +1278,31 @@ document.addEventListener('click', async (e) => {
     return;
   }
   const calibrate = e.target.closest('[data-calibrate]');
-  if (calibrate) { const w = state.adminWorks.find((item) => item.id === calibrate.dataset.calibrate); if (w) calibrationDialog(w); return; }
+  if (calibrate) { const w = state.adminWorks.find((item) => `${item.task}/${item.id}` === calibrate.dataset.calibrate); if (w && canDecide(w)) calibrationDialog(w); return; }
+  const preview = e.target.closest('[data-preview]');
+  if (preview) {
+    const work = state.adminWorks.find((item) => `${item.task}/${item.id}` === preview.dataset.preview);
+    if (work) {
+      const sheet = openDialog({ title: `预览 · ${work.title}`, body: '<p class="fine">正在载入…</p>' });
+      try { const data = await api(`admin/works/${workKey(work)}/preview`, { method: 'POST' }); $('.sheet-body', sheet.el).innerHTML = `<iframe src="${esc(data.url)}" title="${esc(work.title)}" sandbox="allow-scripts allow-pointer-lock" style="width:100%;height:65vh;border:0"></iframe>`; }
+      catch (error) { $('.sheet-body', sheet.el).textContent = error.message; }
+    }
+    return;
+  }
   const editBtn = e.target.closest('[data-edit]');
   if (editBtn) {
-    const w = [...state.adminWorks, ...(state.intake ?? [])].find((item) => item.id === editBtn.dataset.edit);
+    const w = [...state.adminWorks, ...(state.intake ?? [])].find((item) => `${item.task}/${item.id}` === editBtn.dataset.edit);
     if (w) editDialog(w);
     return;
   }
   if (e.target.closest('[data-new-question]')) { newQuestionDialog(); return; }
+  const questionEdit = e.target.closest('[data-question-edit]');
+  if (questionEdit) { const question = state.adminQuestions?.find((item) => item.id === questionEdit.dataset.questionEdit); if (question) questionDialog(question); return; }
+  const questionDelete = e.target.closest('[data-question-delete]');
+  if (questionDelete && !questionDelete.disabled && await confirmDialog({ title: '删除题目？', message: '题目与题下作品将不再公开。有票的题目不能删除。', confirm: '删除', danger: true })) {
+    try { await api(`questions/${encodeURIComponent(questionDelete.dataset.questionDelete)}`, { method: 'DELETE' }); await reload(); toast('题目已删除'); } catch (error) { toast(error.message); }
+    return;
+  }
   const note = e.target.closest('[data-task-note]');
   if (note) { await editorialDialog(note.dataset.taskNote); return; }
   if (e.target.closest('[data-logout]')) {
@@ -1261,7 +1319,7 @@ document.addEventListener('click', async (e) => {
   if (filter) { state.worksFilter = filter.dataset.filter; render(); return; }
   const deleteBtn = e.target.closest('[data-delete]');
   if (deleteBtn) {
-    const work = state.works?.find((w) => w.id === deleteBtn.dataset.delete);
+    const work = state.adminWorks.find((w) => `${w.task}/${w.id}` === deleteBtn.dataset.delete);
     if (work && await removeWork(work)) await reload();
     return;
   }
@@ -1282,6 +1340,13 @@ document.addEventListener('click', async (e) => {
   }
 });
 document.addEventListener('change', async (e) => {
+  const roleSelect = e.target.closest('[data-user-role]');
+  if (roleSelect) {
+    roleSelect.disabled = true;
+    try { await api(`admin/users/${encodeURIComponent(roleSelect.dataset.userRole)}/role`, { method: 'POST', body: { role: roleSelect.value } }); await reload(); toast('角色已更新'); }
+    catch (error) { toast(error.message); roleSelect.disabled = false; }
+    return;
+  }
   const selectAll = e.target.closest('[data-select-all]');
   if (selectAll) {
     $$('[data-select-work]:not(:disabled)', $('.work-results', app())).forEach((input) => { input.checked = selectAll.checked; });
@@ -1362,7 +1427,7 @@ document.addEventListener('submit', async (e) => {
       store.set('admin-inbox-task', stored.task);
       delete state.inboxForms[id];
       state.workCache.clear();
-      toast(`已入库并上展览馆：${data.work.title}`);
+      toast(`已登记，等待人工核验：${data.work.title}`);
       await loadInbox();
       render({ soft: true });
     } catch (err) { error.textContent = err.message; done(); }
@@ -1390,6 +1455,7 @@ document.addEventListener('submit', async (e) => {
   state.workSearch = form.elements.namedItem('search').value.trim();
   state.workTask = form.elements.namedItem('task').value;
   state.workStatus = form.elements.namedItem('status').value;
+  state.workAuthor = form.elements.namedItem('author').value;
   state.workShow = form.elements.namedItem('show').value;
   state.workHarness = form.elements.namedItem('harness').value;
   state.workProvider = form.elements.namedItem('provider').value;
@@ -1420,6 +1486,6 @@ document.addEventListener('drop', async (e) => {
   zone.classList.remove('dragging');
   if (e.dataTransfer?.files?.length) await inboxUpload(e.dataTransfer.files);
 });
-addEventListener('hashchange', () => { if (state.user?.role === 'admin') reload({ navigation: true }); });
+addEventListener('hashchange', () => { if (isStaff(state.user)) reload({ navigation: true }); });
 
 boot();

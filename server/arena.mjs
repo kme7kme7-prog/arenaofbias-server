@@ -25,9 +25,9 @@ const ANONYMOUS_MATCH_MAX = 10000;
 const RANK_WORKER_ENTRY_THRESHOLD = 200;
 export const pairKey = (taskId, a, b) => `${taskId}:${[a, b].sort().join('+')}`;
 const token = () => `m${randomBytes(16).toString('hex')}`;
-// `digest` pins the exact content: the entry page of a curated work, the upload digest otherwise.
+// `digest` pins the exact content: the packaged entry page or the uploaded file digest.
 const identityOf = (work, digest = work.digest ?? null) => ({
-  taskId: work.taskId, id: work.id, curated: work.curated, digest,
+  taskId: work.taskId, id: work.id, digest,
   title: work.title, modelId: work.modelId, modelName: work.modelName,
   vendor: work.vendor, effort: work.effort, effortKey: effortKey(work.effort),
   harnessId: work.harnessId ?? null, providerId: providerOf(work.providerId, work.providerOther),
@@ -401,7 +401,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       const original = fromIdentity(row[`${side}_identity`]);
       if (!original || !row.a_identity || !row.b_identity) fail(409, '旧票没有完整的当时身份快照，不能推断更正');
       const previous = fromIdentity(row[`${side}_correction`]) ?? original;
-      const next = identityOf({ ...previous, ...replacement, taskId: previous.taskId, id: previous.id, curated: previous.curated, ownerId: previous.ownerId });
+      const next = identityOf({ ...previous, ...replacement, taskId: previous.taskId, id: previous.id, ownerId: previous.ownerId });
       transaction(db, () => {
         (side === 'a' ? q.correctA : q.correctB).run(JSON.stringify(next), voteId);
         q.audit.run(Date.now(), admin.id, admin.name, 'vote-identity-correction', row.task_id, row[`${side}_work`],

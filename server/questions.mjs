@@ -1,21 +1,20 @@
-// Community questions need human approval before joining the public catalog.
-// Prompt text is stored verbatim (apart from outer whitespace), at version 1.
+// Questions share one lifecycle while package resources stay immutable.
 import { randomBytes } from 'node:crypto';
 import { avatarOf } from './auth.mjs';
 import { transaction } from './db.mjs';
 import { fail } from './http.mjs';
+import { authorOf, isSenior, isStaff, roleOf } from './roles.mjs';
 import { compatibleTemplates, defaultTemplates, requireCategory, requireDomains } from './categories.mjs';
 
 const tagName = (value) => String(value).normalize('NFKC').trim().replace(/^#+/, '').trim();
 const tagKey = (value) => tagName(value).toLowerCase();
-const authorModeration = ({ status, reason, at }) => ({ status, ...(status === 'rejected' ? { reason } : {}), at });
-
+const authorModeration = ({ status, reason, at }) => ({ status, ...(status === 'rejected' ? { reason } : {}), ...(at ? { at } : {}) });
+const publicQuestion = (question) => ['legacy', 'approved'].includes(question.moderation.status);
 function required(value, label, max) {
   if (typeof value !== 'string' || !value.trim()) fail(400, `请填写${label}`);
   if (value.trim().length > max) fail(400, `${label}最多 ${max} 字`);
   return value.trim();
 }
-
 export function normalizeTags(input = [], existing = [], category = null) {
   if (!Array.isArray(input)) fail(400, '标签格式不正确');
   const names = new Map(existing.map((name) => [tagKey(name), name]));
@@ -30,166 +29,177 @@ export function normalizeTags(input = [], existing = [], category = null) {
   if (unique.size > 6) fail(400, '每道题最多添加 6 个标签');
   return [...unique.values()];
 }
-
 export function createQuestions(db) {
-  const select = `SELECT questions.*, COALESCE(NULLIF(users.nickname, ''), users.name) AS owner_name, users.avatar AS owner_avatar FROM questions JOIN users ON users.id = questions.owner_id`;
-  const publicRow = (row) => ['legacy', 'approved'].includes(JSON.parse(row.moderation).status);
+  let catalog = null;
+  const select = `SELECT questions.*, COALESCE(NULLIF(users.nickname, ''), users.name) AS owner_name, users.avatar AS owner_avatar
+    FROM questions LEFT JOIN users ON users.id = questions.owner_id`;
   const all = db.prepare(`${select} WHERE questions.deleted_at IS NULL ORDER BY questions.created_at DESC, questions.id`);
   const one = db.prepare(`${select} WHERE questions.id = ? AND questions.deleted_at IS NULL`);
   const owned = db.prepare(`${select} WHERE questions.owner_id = ? AND questions.deleted_at IS NULL ORDER BY questions.created_at DESC, questions.id`);
   const pending = db.prepare(`SELECT COUNT(*) AS n FROM questions WHERE owner_id = ? AND deleted_at IS NULL AND json_extract(moderation, '$.status') = 'pending'`);
-  const insert = db.prepare(`INSERT INTO questions (id, owner_id, title, summary, prompt, tags, templates, created_at, moderation, category, domains) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const insert = db.prepare(`INSERT INTO questions (id, owner_id, title, summary, prompt, tags, templates, created_at, moderation, category, domains, author_role) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const audit = db.prepare('INSERT INTO audit (at, actor_id, actor_name, action, task_id, work_id, detail) VALUES (?, ?, ?, ?, ?, ?, ?)');
-  const works = db.prepare('SELECT id, owner_id, task_id FROM works WHERE task_id = ? AND deleted_at IS NULL ORDER BY created_at, id');
+  const works = db.prepare('SELECT id, owner_id, task_id FROM works WHERE task_id = ? AND deleted_at IS NULL AND curated_as IS NULL ORDER BY created_at, id');
   const votes = db.prepare('SELECT COUNT(*) AS n FROM votes WHERE task_id = ?');
-  const deleteWork = db.prepare('UPDATE works SET deleted_at = ?, updated_at = ? WHERE id = ?');
-  const deleteQuestion = db.prepare('UPDATE questions SET deleted_at = ? WHERE id = ?');
-  const setModeration = db.prepare('UPDATE questions SET moderation = ?, category = ?, templates = ?, tags = ?, domains = ? WHERE id = ?');
-  const setMeta = db.prepare('UPDATE questions SET title = ?, summary = ?, prompt = ?, category = ?, templates = ?, tags = ?, domains = ? WHERE id = ?');
-  const fromRow = (row, privateView = false) => row ? {
-    id: row.id, title: row.title, summary: row.summary, prompt: row.prompt,
-    category: row.category, domains: JSON.parse(row.domains), tags: JSON.parse(row.tags), templates: JSON.parse(row.templates),
-    owner: row.owner_name, ownerAvatar: avatarOf({ id: row.owner_id, avatar: row.owner_avatar }), version: row.version, community: true,
-    createdAt: new Date(row.created_at).toISOString(),
-    date: new Date(row.created_at).toISOString().slice(0, 10),
-    ...(privateView ? { moderation: privateView === 'admin' ? JSON.parse(row.moderation) : authorModeration(JSON.parse(row.moderation)) } : {}),
-  } : null;
-
+  const override = db.prepare('SELECT * FROM question_overrides WHERE task_id = ?');
+  const saveOverride = db.prepare(`INSERT INTO question_overrides (task_id, display_json, moderation, accepts_uploads, cover_work, deleted_at, updated_by, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(task_id) DO UPDATE SET display_json = excluded.display_json,
+    moderation = excluded.moderation, accepts_uploads = excluded.accepts_uploads, cover_work = excluded.cover_work,
+    deleted_at = excluded.deleted_at, updated_by = excluded.updated_by, updated_at = excluded.updated_at`);
+  const deletedPackWork = db.prepare('SELECT deleted_at FROM work_overrides WHERE task_id = ? AND work_id = ?');
+  function fromRow(row) {
+    if (!row) return null;
+    return { ...row, packaged: false, domains: JSON.parse(row.domains), tags: JSON.parse(row.tags), templates: JSON.parse(row.templates),
+      moderation: JSON.parse(row.moderation), acceptsUploads: Boolean(row.accepts_uploads), cover: row.cover_work,
+      createdAt: new Date(row.created_at).toISOString(), date: new Date(row.created_at).toISOString().slice(0, 10) };
+  }
+  function fromPack(task) {
+    if (!task) return null;
+    const overlay = override.get(task.id);
+    if (overlay?.deleted_at != null) return null;
+    return { ...task, tags: task.tags ?? [], ...JSON.parse(overlay?.display_json ?? '{}'), packaged: true,
+      author_role: 'admin', owner_id: null, owner_name: null, owner_avatar: null,
+      moderation: JSON.parse(overlay?.moderation ?? '{"status":"approved"}'),
+      acceptsUploads: overlay?.accepts_uploads == null ? task.acceptsUploads : Boolean(overlay.accepts_uploads),
+      cover: overlay?.cover_work ?? null, version: task.version ?? 1, createdAt: task.createdAt ?? null, date: task.date ?? null };
+  }
+  const lookup = (id) => fromPack(catalog?.snapshot().task(id)) ?? fromRow(one.get(id));
+  const allQuestions = () => [...(catalog?.snapshot().tasks() ?? []).map(fromPack).filter(Boolean), ...all.all().map(fromRow)];
+  function dto(question, viewer = null, moderationView = false, adminView = false) {
+    return { id: question.id, title: question.title, summary: question.summary, prompt: question.prompt,
+      category: question.category, domains: question.domains, tags: question.tags, templates: question.templates,
+      version: question.version, date: question.date, createdAt: question.createdAt,
+      author: authorOf({ role: question.author_role, name: question.owner_name,
+        avatar: question.owner_id && question.owner_name ? avatarOf({ id: question.owner_id, avatar: question.owner_avatar }) : null }, adminView),
+      mine: Boolean(viewer?.id && viewer.id === question.owner_id), acceptsUploads: question.acceptsUploads, cover: question.cover,
+      ...(moderationView ? { moderation: moderationView === 'admin' ? question.moderation : authorModeration(question.moderation) } : {}) };
+  }
+  function packWorks(id) {
+    return (catalog?.snapshot().works(id) ?? []).filter((work) => deletedPackWork.get(id, work.id)?.deleted_at == null);
+  }
+  const itemsFor = (id) => [...packWorks(id), ...works.all(id)];
+  function writePack(actor, question, changes) {
+    const next = { ...(override.get(question.id) ?? {}), ...changes };
+    saveOverride.run(question.id, next.display_json ?? null, next.moderation ?? null, next.accepts_uploads ?? null,
+      next.cover_work ?? null, next.deleted_at ?? null, actor.id, Date.now());
+  }
+  function adminQuestion(question, viewer) {
+    return { ...dto(question, viewer, 'admin', true), ownerId: question.owner_id,
+      works: itemsFor(question.id).length, votes: votes.get(question.id).n,
+      samples: question.packaged ? [] : works.all(question.id).filter((work) => work.owner_id === question.owner_id)
+        .map((work) => ({ id: work.id, taskId: work.task_id })) };
+  }
+  function meta(question, body) {
+    const fields = ['title', 'summary', 'prompt', 'category', 'domains', 'templates', 'acceptsUploads', 'cover'];
+    if (!body || typeof body !== 'object' || Array.isArray(body) || !fields.some((field) => Object.hasOwn(body, field))) fail(400, '请提供要修改的题目信息');
+    const title = Object.hasOwn(body, 'title') ? required(body.title, '题目标题', 70) : question.title;
+    const summary = Object.hasOwn(body, 'summary') ? required(body.summary, '测试简述', 400) : question.summary;
+    const prompt = Object.hasOwn(body, 'prompt') ? required(body.prompt, '完整提示词', 20000) : question.prompt;
+    const category = Object.hasOwn(body, 'category') ? requireCategory(body.category) : question.category;
+    const domains = Object.hasOwn(body, 'domains') ? requireDomains(body.domains) : question.domains;
+    let templates = question.templates;
+    if (Object.hasOwn(body, 'templates')) {
+      if (!compatibleTemplates(category, body.templates)) fail(400, '提交格式与题目分类不匹配');
+      templates = [...new Set(body.templates)];
+    } else if (category !== question.category && !compatibleTemplates(category, templates)) templates = defaultTemplates(category);
+    const items = itemsFor(question.id);
+    if (prompt !== question.prompt && publicQuestion(question) && items.length) fail(409, '已有作品的题目不能修改提示词');
+    if (JSON.stringify(templates) !== JSON.stringify(question.templates) && items.length) fail(409, '已有作品的题目不能修改提交格式');
+    if (Object.hasOwn(body, 'acceptsUploads') && typeof body.acceptsUploads !== 'boolean') fail(400, '投稿开关无效');
+    const acceptsUploads = body.acceptsUploads ?? question.acceptsUploads;
+    const cover = Object.hasOwn(body, 'cover') ? body.cover : question.cover;
+    if (Object.hasOwn(body, 'cover') && cover !== null && (typeof cover !== 'string' || !items.some((work) => work.id === cover))) fail(400, '封面必须是本题现有作品');
+    const tags = category !== question.category ? question.tags.filter((tag) => tagKey(tag) !== tagKey(category)) : question.tags;
+    return { title, summary, prompt, category, domains, templates, tags, acceptsUploads, cover };
+  }
+  function saveMeta(actor, question, next) {
+    if (question.packaged) writePack(actor, question, {
+      display_json: JSON.stringify({ ...JSON.parse(override.get(question.id)?.display_json ?? '{}'),
+        ...Object.fromEntries(['title', 'summary', 'prompt', 'category', 'domains', 'templates', 'tags'].map((key) => [key, next[key]])) }),
+      accepts_uploads: Number(next.acceptsUploads), cover_work: next.cover,
+    });
+    else db.prepare('UPDATE questions SET title = ?, summary = ?, prompt = ?, category = ?, domains = ?, templates = ?, tags = ?, accepts_uploads = ?, cover_work = ? WHERE id = ?')
+      .run(next.title, next.summary, next.prompt, next.category, JSON.stringify(next.domains), JSON.stringify(next.templates), JSON.stringify(next.tags), Number(next.acceptsUploads), next.cover, question.id);
+  }
   return {
-    all: () => all.all().filter(publicRow).map((row) => fromRow(row)),
+    bindCatalog(value) { catalog = value; },
+    all: (viewer = null) => allQuestions().filter(publicQuestion).map((question) => dto(question, viewer)),
     get(id, viewer = null) {
-      const row = one.get(id);
-      const privileged = row && (viewer?.id === row.owner_id || viewer?.role === 'admin');
-      return row && (publicRow(row) || privileged) ? fromRow(row, viewer?.role === 'admin' ? 'admin' : privileged) : null;
+      const question = lookup(id);
+      const privileged = question && (viewer?.id === question.owner_id || isStaff(viewer));
+      return question && (publicQuestion(question) || privileged) ? dto(question, viewer, privileged ? isSenior(viewer) ? 'admin' : true : false) : null;
     },
-    byOwner: (id, viewer = null) => owned.all(id).map((row) => fromRow(row, viewer?.role === 'admin' ? 'admin' : true)),
-    pendingCount: () => all.all().filter((row) => JSON.parse(row.moderation).status === 'pending').length,
-    adminAll() {
-      return all.all().map((row) => {
-        const samples = works.all(row.id).map((work) => ({ id: work.id, taskId: work.task_id }));
-        return { ...fromRow(row, 'admin'), ownerId: row.owner_id, ownerName: row.owner_name, works: samples.length, samples };
-      });
-    },
+    byOwner: (id, viewer = null) => owned.all(id).map((row) => dto(fromRow(row), viewer, isSenior(viewer) ? 'admin' : true)),
+    pendingCount: () => allQuestions().filter((question) => question.moderation.status === 'pending').length,
+    adminAll: (viewer = null) => allQuestions().map((question) => adminQuestion(question, viewer)),
     create(user, body, existingTags = []) {
       const category = requireCategory(body.category);
-      // Older clients send no domains; the question then waits for the reviewer to add them.
       const domains = body.domains === undefined ? [] : requireDomains(body.domains);
-      const title = required(body.title, '题目标题', 70);
-      const summary = required(body.summary, '测试简述', 400);
-      const prompt = required(body.prompt, '完整提示词', 20000);
+      const title = required(body.title, '题目标题', 70), summary = required(body.summary, '测试简述', 400), prompt = required(body.prompt, '完整提示词', 20000);
       const tags = normalizeTags(body.tags, existingTags, category);
       if (!compatibleTemplates(category, body.templates)) fail(400, '提交格式与题目分类不匹配');
-      const templates = [...new Set(body.templates)];
-      if (pending.get(user.id).n >= 3) fail(429, '你已有 3 道题目在等待审核');
-      const id = `q-${randomBytes(8).toString('hex')}`;
-      const now = Date.now();
-      insert.run(id, user.id, title, summary, prompt, JSON.stringify(tags), JSON.stringify(templates), now, JSON.stringify({ status: 'pending', at: now }), category, JSON.stringify(domains));
+      if (!isStaff(user) && pending.get(user.id).n >= 3) fail(429, '你已有 3 道题目在等待审核');
+      const id = `q-${randomBytes(8).toString('hex')}`, now = Date.now();
+      insert.run(id, user.id, title, summary, prompt, JSON.stringify(tags), JSON.stringify([...new Set(body.templates)]), now,
+        JSON.stringify({ status: 'pending', at: now }), category, JSON.stringify(domains), roleOf(user.role));
       audit.run(now, user.id, user.name, 'question-create', id, null, title);
-      return fromRow(one.get(id), user.role === 'admin' ? 'admin' : true);
+      return dto(fromRow(one.get(id)), user, true);
     },
     createByAdmin(admin, body, existingTags = []) {
-      if (admin?.role !== 'admin') fail(403, '仅管理员可以操作');
-      const category = requireCategory(body.category);
-      const domains = body.domains === undefined ? [] : requireDomains(body.domains);
-      const title = required(body.title, '题目标题', 70);
-      const summary = required(body.summary, '测试简述', 400);
-      const prompt = required(body.prompt, '完整提示词', 20000);
-      const tags = normalizeTags(body.tags, existingTags, category);
-      if (!compatibleTemplates(category, body.templates)) fail(400, '提交格式与题目分类不匹配');
-      const templates = [...new Set(body.templates)];
-      const id = `q-${randomBytes(8).toString('hex')}`;
-      const now = Date.now();
-      const moderation = { status: 'approved', source: 'human', reviewer: admin.name, reason: '管理员创建', at: now };
-      transaction(db, () => {
-        insert.run(id, admin.id, title, summary, prompt, JSON.stringify(tags), JSON.stringify(templates), now, JSON.stringify(moderation), category, JSON.stringify(domains));
-        audit.run(now, admin.id, admin.name, 'question-create', id, null, title);
-      });
-      return fromRow(one.get(id), 'admin');
+      if (!isSenior(admin)) fail(403, '仅高级管理员可以操作');
+      return transaction(db, () => this.create(admin, body, existingTags));
     },
     edit(actor, id, body) {
-      if (actor.role !== 'admin') fail(403, '仅管理员可以操作');
-      const row = one.get(id);
-      if (!row) fail(404, '题目不存在');
-      const fields = ['title', 'summary', 'prompt', 'category', 'domains'];
-      if (!body || typeof body !== 'object' || Array.isArray(body)
-        || !fields.some((field) => Object.hasOwn(body, field))) fail(400, '请提供要修改的题目信息');
-      const title = Object.hasOwn(body, 'title') ? required(body.title, '题目标题', 70) : row.title;
-      const summary = Object.hasOwn(body, 'summary') ? required(body.summary, '测试简述', 400) : row.summary;
-      const prompt = Object.hasOwn(body, 'prompt') ? required(body.prompt, '完整提示词', 20000) : row.prompt;
-      const category = Object.hasOwn(body, 'category') ? requireCategory(body.category) : row.category;
-      const previousDomains = JSON.parse(row.domains);
-      const domains = Object.hasOwn(body, 'domains') ? requireDomains(body.domains) : previousDomains;
-      const previousTemplates = JSON.parse(row.templates);
-      const templates = category !== row.category && !compatibleTemplates(category, previousTemplates)
-        ? defaultTemplates(category) : previousTemplates;
-      const items = works.all(id);
-      if (prompt !== row.prompt && publicRow(row) && items.length) fail(409, '已有作品的题目不能修改提示词');
-      if (templates !== previousTemplates && items.length) fail(409, '已有作品的题目不能修改提交格式');
-      const previousTags = JSON.parse(row.tags);
-      const tags = category !== row.category ? previousTags.filter((tag) => tagKey(tag) !== tagKey(category)) : previousTags;
-      const detail = {};
-      for (const [field, from, to] of [
-        ['title', row.title, title], ['summary', row.summary, summary], ['category', row.category, category],
-        ['domains', previousDomains, domains], ['templates', previousTemplates, templates], ['tags', previousTags, tags],
-      ]) {
-        if (JSON.stringify(from) !== JSON.stringify(to)) detail[field] = { from, to };
+      if (!isSenior(actor)) fail(403, '仅高级管理员可以操作');
+      const question = lookup(id);
+      if (!question) fail(404, '题目不存在');
+      const next = meta(question, body), detail = {};
+      for (const field of ['title', 'summary', 'category', 'domains', 'templates', 'tags', 'acceptsUploads', 'cover']) {
+        if (JSON.stringify(question[field]) !== JSON.stringify(next[field])) detail[field] = { from: question[field], to: next[field] };
       }
-      if (prompt !== row.prompt) detail.prompt = { changed: '已修改', fromLength: row.prompt.length, toLength: prompt.length };
-      transaction(db, () => {
-        setMeta.run(title, summary, prompt, category, JSON.stringify(templates), JSON.stringify(tags), JSON.stringify(domains), id);
-        audit.run(Date.now(), actor.id, actor.name, 'question-edit', id, null, JSON.stringify(detail));
-      });
-      return fromRow(one.get(id), 'admin');
+      if (next.prompt !== question.prompt) detail.prompt = { changed: '已修改', fromLength: question.prompt.length, toLength: next.prompt.length };
+      transaction(db, () => { saveMeta(actor, question, next); audit.run(Date.now(), actor.id, actor.name, 'question-edit', id, null, JSON.stringify(detail)); });
+      return dto(lookup(id), actor, 'admin', true);
     },
     review(actor, id, body) {
-      if (actor.role !== 'admin') fail(403, '仅管理员可以操作');
-      const row = one.get(id);
-      if (!row) fail(404, '题目不存在');
+      if (!isSenior(actor)) fail(403, '仅高级管理员可以操作');
+      const question = lookup(id);
+      if (!question) fail(404, '题目不存在');
       if (!['approved', 'rejected'].includes(body.status)) fail(400, '题目审核结果无效');
       if (body.reason != null && typeof body.reason !== 'string') fail(400, '审核理由格式不正确');
       const reason = (body.reason ?? '').trim();
       if (reason.length > 500) fail(400, '审核理由最多 500 字');
       if (body.status === 'rejected' && !reason) fail(400, '请填写拒绝理由');
-      const category = body.status === 'approved'
-        ? requireCategory(Object.hasOwn(body, 'category') ? body.category : row.category) : row.category;
-      const previousDomains = JSON.parse(row.domains);
-      const domains = body.status === 'approved' && body.domains !== undefined ? requireDomains(body.domains) : previousDomains;
-      const changedDomains = domains.join('|') !== previousDomains.join('|');
-      const previousTemplates = JSON.parse(row.templates);
-      const changedCategory = category !== row.category;
-      const templates = changedCategory && !compatibleTemplates(category, previousTemplates)
-        ? defaultTemplates(category) : previousTemplates;
-      const tags = body.status === 'approved' ? JSON.parse(row.tags).filter((tag) => tagKey(tag) !== tagKey(category)) : JSON.parse(row.tags);
-      const moderation = { status: body.status, source: 'human', reason, reviewer: actor.name, at: Date.now() };
-      const detail = { ...moderation,
-        ...(changedCategory ? { category: { from: row.category, to: category } } : {}),
-        ...(changedDomains ? { domains: { from: previousDomains, to: domains } } : {}),
-        ...(templates !== previousTemplates ? { templates: { from: previousTemplates, to: templates } } : {}),
-      };
+      const next = body.status === 'approved' ? meta(question, { category: body.category ?? question.category,
+        ...(body.domains !== undefined ? { domains: body.domains } : {}) }) : question;
+      const moderation = { status: body.status, source: 'human', reason, reviewer: actor.name, at: Date.now() }, detail = { ...moderation };
+      for (const field of ['category', 'domains', 'templates']) if (JSON.stringify(question[field]) !== JSON.stringify(next[field])) detail[field] = { from: question[field], to: next[field] };
       transaction(db, () => {
-        setModeration.run(JSON.stringify(moderation), category, JSON.stringify(templates), JSON.stringify(tags), JSON.stringify(domains), id);
+        saveMeta(actor, question, next);
+        if (question.packaged) writePack(actor, question, { moderation: JSON.stringify(moderation) });
+        else db.prepare('UPDATE questions SET moderation = ? WHERE id = ?').run(JSON.stringify(moderation), id);
         audit.run(moderation.at, actor.id, actor.name, 'question-review', id, null, JSON.stringify(detail));
       });
-      return fromRow(one.get(id), 'admin');
+      return dto(lookup(id), actor, 'admin', true);
     },
     remove(actor, id) {
-      const row = one.get(id);
-      if (!row) fail(404, '题目不存在');
-      if (actor.id !== row.owner_id && actor.role !== 'admin') fail(403, '只能删除自己发起的题目');
-      const items = works.all(id);
-      if (actor.role === 'admin' && votes.get(id).n > 0) fail(409, '这道题目已有投票记录，不能删除');
-      if (actor.role !== 'admin' && publicRow(row) && (votes.get(id).n > 0 || items.some((work) => work.owner_id !== actor.id))) fail(409, '已经有人作答的题目不能删除');
-      const removed = actor.role === 'admin' ? items : items.filter((work) => work.owner_id === actor.id);
-      const now = Date.now();
+      const question = lookup(id);
+      if (!question) fail(404, '题目不存在');
+      if (actor.id !== question.owner_id && !isSenior(actor)) fail(403, '只能删除自己发起的题目');
+      const items = itemsFor(id), count = votes.get(id).n;
+      if (isSenior(actor) && count > 0) fail(409, '这道题目已有投票记录，不能删除');
+      if (!isSenior(actor) && publicQuestion(question) && (count > 0 || items.some((work) => (work.owner_id ?? work.ownerId) !== actor.id))) fail(409, '已经有人作答的题目不能删除');
+      const removed = works.all(id).filter((work) => isSenior(actor) || work.owner_id === actor.id), now = Date.now();
       transaction(db, () => {
         for (const work of removed) {
-          deleteWork.run(now, now, work.id);
+          db.prepare('UPDATE works SET deleted_at = ?, updated_at = ? WHERE id = ?').run(now, now, work.id);
           audit.run(now, actor.id, actor.name, 'delete', id, work.id, '随题目删除');
         }
-        deleteQuestion.run(now, id);
-        audit.run(now, actor.id, actor.name, 'question-delete', id, null, row.title);
+        if (question.packaged) writePack(actor, question, { deleted_at: now });
+        else db.prepare('UPDATE questions SET deleted_at = ? WHERE id = ?').run(now, id);
+        audit.run(now, actor.id, actor.name, 'question-delete', id, null, question.title);
       });
-      return { ok: true, deletedWorks: removed.map((work) => work.id) };
+      return { ok: true, deletedWorks: [...removed.map((work) => work.id), ...(question.packaged ? packWorks(id).map((work) => work.id) : [])] };
     },
   };
 }

@@ -26,12 +26,12 @@ export function createAdmin({ db, catalog, library }) {
     SELECT task_id, a_work AS work_id FROM votes WHERE choice != 'skip'
     UNION ALL SELECT task_id, b_work FROM votes WHERE choice != 'skip') GROUP BY task_id, work_id`);
 
-  const task = (id) => catalog.task(id) ?? fail(404, '题目不存在', 'not_found');
+  const task = (id, viewer) => catalog.task(id, viewer) ?? fail(404, '题目不存在', 'not_found');
   const iso = (ms) => new Date(ms).toISOString();
   return {
-    works(query) {
+    works(query, viewer) {
       const taskId = query.get('task') || null;
-      if (taskId) task(taskId);
+      if (taskId) task(taskId, viewer);
       const status = query.get('status') || null;
       if (status && !['verified', 'unverified', 'questioned'].includes(status)) fail(400, '状态筛选无效', 'invalid_query');
       const face = query.get('face') || null;
@@ -39,8 +39,8 @@ export function createAdmin({ db, catalog, library }) {
       const show = query.get('show') || null;
       if (show && !['on', 'off'].includes(show)) fail(400, '开关筛选无效', 'invalid_query');
       if (show && !face) fail(400, '请指定筛选门面', 'invalid_query');
-      const source = query.get('source') || null;
-      if (source && !['curated', 'upload'].includes(source)) fail(400, '来源筛选无效', 'invalid_query');
+      const author = query.get('author') || null;
+      if (author && !['admin', 'user'].includes(author)) fail(400, '发布者筛选无效', 'invalid_query');
       // Harness supports free text; providers are official, unofficial or unset.
       const provenance = Object.fromEntries(['harness', 'provider'].map((field) => {
         const value = query.get(field) || null;
@@ -60,14 +60,12 @@ export function createAdmin({ db, catalog, library }) {
       const page = intParam(query.get('page'), 1, 100000, '页码');
       const pageSize = intParam(query.get('pageSize'), 30, 100, '每页数量');
       const search = String(query.get('search') ?? '').trim().toLocaleLowerCase();
-      const curated = catalog.tasks().flatMap((t) => [...t.works.values()]);
-      const uploads = library.uploads();
       const voteCounts = new Map(votesPerWork.all().map((row) => [`${row.task_id}/${row.work_id}`, row.votes]));
-      const allWorks = [...curated, ...uploads].map((work) => ({ ...library.adminWork(work), votes: voteCounts.get(`${work.taskId}/${work.id}`) ?? 0 }));
+      const allWorks = library.allWorks().map((work) => ({ ...library.adminWork(work, viewer), votes: voteCounts.get(`${work.taskId}/${work.id}`) ?? 0 }));
       const efforts = [...new Set(allWorks.map((work) => work.effort).filter(Boolean))].sort();
       const rows = allWorks.filter((work) =>
         (!taskId || work.task === taskId) && (!status || work.status === status) &&
-        (!source || work.source === source) && (!face || !show || Boolean(work[`show_${face}`]) === (show === 'on')) &&
+        (!author || (work.author.role === 'user' ? 'user' : 'admin') === author) && (!face || !show || Boolean(work[`show_${face}`]) === (show === 'on')) &&
         Object.entries(provenance).every(([field, value]) => !value || provenanceOf(work, field) === value) &&
         (!model || (model === 'other' ? !work.model : work.model === model)) &&
         (!effort || (effort === 'unset' ? !work.effort : effortKey(work.effort) === effortKey(effort))) &&
@@ -76,15 +74,15 @@ export function createAdmin({ db, catalog, library }) {
       rows.sort((a, b) => a.task.localeCompare(b.task) || a.title.localeCompare(b.title, 'zh-CN') || a.id.localeCompare(b.id));
       return { works: rows.slice((page - 1) * pageSize, page * pageSize), total: rows.length, page, pageSize, efforts };
     },
-    getEditorial(id, rawFace) {
-      task(id);
+    getEditorial(id, rawFace, viewer) {
+      task(id, viewer);
       const face = faceOf(rawFace);
       const row = editorial.get(id, face);
       return { task: id, face, commentary: row?.commentary ?? '', weights: row?.weights_json ? JSON.parse(row.weights_json) : null,
         updatedAt: row ? iso(row.updated_at) : null };
     },
     saveEditorial(admin, id, body) {
-      task(id);
+      task(id, admin);
       const face = faceOf(body?.face);
       if (typeof body.commentary !== 'string' || body.commentary.length > 4000) fail(400, '点评或策展文案无效', 'invalid_editorial');
       let weights = null;
@@ -98,7 +96,7 @@ export function createAdmin({ db, catalog, library }) {
         setEditorial.run(id, face, body.commentary.trim(), weights ? JSON.stringify(weights) : null, admin.id, Date.now());
         library.audit(admin, 'editorial', { taskId: id }, JSON.stringify({ face, commentary: body.commentary.trim(), weights }));
       });
-      return this.getEditorial(id, face);
+      return this.getEditorial(id, face, admin);
     },
     traffic(rawDays) {
       const days = intParam(rawDays, 30, 90, '天数');

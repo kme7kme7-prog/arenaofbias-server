@@ -12,7 +12,8 @@ async function withPlatform(readLimits, run) {
   const root = mkdtempSync(join(tmpdir(), 'read-guard-'));
   const dist = join(root, 'dist');
   mkdirSync(dist);
-  writeFileSync(join(dist, 'data.json'), JSON.stringify({ title: 'Private catalog', models: [], tasks: [] }));
+  writeFileSync(join(dist, 'data.json'), JSON.stringify({ title: 'Private catalog', models: [],
+    tasks: [{ id: 'task', title: 'Task', results: [{ id: 'work', model: 'fixture', title: 'Work', scene: './' }] }] }));
   writeFileSync(join(dist, '.datapack-source.json'), JSON.stringify({ source: 'local', path: dist }));
   writeFileSync(join(dist, 'index.html'), '<!doctype html><h1>Work</h1>');
   writeFileSync(join(dist, 'app.js'), 'console.log("work");');
@@ -21,7 +22,7 @@ async function withPlatform(readLimits, run) {
   const platform = createPlatform({ config: { dist, dataDir: join(root, 'data'),
     contentTemplate: 'http://{token}.localhost', siteOrigins: [origin], admins: [], cdn: [],
     capture: false, secureCookies: false, trustProxy: true, readLimits }, limits });
-  platform.library.byContentKey = () => ({ dir: dist, entry: 'index.html', curated: true, moderation: { status: 'legacy' } });
+  platform.library.byContentKey = () => ({ ...platform.library.work('task', 'work'), entry: 'index.html' });
   const site = createServer(platform.handleSite);
   const content = createServer(platform.handleContent);
   await Promise.all([site, content].map(server => new Promise(resolve => server.listen(0, '127.0.0.1', resolve))));

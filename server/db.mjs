@@ -471,6 +471,49 @@ const MIGRATIONS = [
     const columns = new Set(db.prepare('PRAGMA table_info(works)').all().map((column) => column.name));
     if (!columns.has('model_vendor')) db.exec("ALTER TABLE works ADD COLUMN model_vendor TEXT NOT NULL DEFAULT ''");
   },
+  // Creation-time authorship and persistent decisions over immutable package entries.
+  Object.assign((db) => {
+    // Foreign keys are disabled around this migration's transaction by openDatabase
+    // so rebuilding users preserves dependent rows. member stays readable for legacy imports.
+    const schema = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'").get().sql;
+    if (!schema.includes("'moderator'")) {
+      const next = schema.replace(/^CREATE TABLE ["`\[]?users["`\]]?/i, 'CREATE TABLE users_v37').replace("DEFAULT 'member'", "DEFAULT 'user'")
+        .replace("role IN ('member', 'admin')", "role IN ('member', 'admin', 'moderator', 'user')");
+      const indexes = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'users' AND sql IS NOT NULL").all();
+      const columns = db.prepare('PRAGMA table_info(users)').all().map((column) => `"${column.name}"`).join(', ');
+      db.exec(next);
+      db.exec(`INSERT INTO users_v37 (${columns}) SELECT ${columns} FROM users; DROP TABLE users; ALTER TABLE users_v37 RENAME TO users;`);
+      for (const { sql } of indexes) db.exec(sql);
+    }
+    db.exec("UPDATE users SET role = 'user' WHERE role = 'member'");
+    for (const table of ['questions', 'works']) {
+      const columns = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((column) => column.name));
+      if (!columns.has('author_role')) db.exec(`ALTER TABLE ${table} ADD COLUMN author_role TEXT`);
+    }
+    const questions = new Set(db.prepare('PRAGMA table_info(questions)').all().map((column) => column.name));
+    if (!questions.has('accepts_uploads')) db.exec('ALTER TABLE questions ADD COLUMN accepts_uploads INTEGER NOT NULL DEFAULT 1');
+    if (!questions.has('cover_work')) db.exec('ALTER TABLE questions ADD COLUMN cover_work TEXT');
+    const overrides = new Set(db.prepare('PRAGMA table_info(work_overrides)').all().map((column) => column.name));
+    for (const [name, type] of Object.entries({ status: 'TEXT', reason: "TEXT NOT NULL DEFAULT ''", reviewer_id: 'TEXT', reviewed_at: 'INTEGER', deleted_at: 'INTEGER' })) {
+      if (!overrides.has(name)) db.exec(`ALTER TABLE work_overrides ADD COLUMN ${name} ${type}`);
+    }
+    db.exec(`CREATE TABLE IF NOT EXISTS question_overrides (
+      task_id TEXT PRIMARY KEY, display_json TEXT, moderation TEXT,
+      accepts_uploads INTEGER, cover_work TEXT, deleted_at INTEGER,
+      updated_by TEXT, updated_at INTEGER
+    );
+    UPDATE questions SET author_role = CASE
+      WHEN json_extract(moderation, '$.reason') = '管理员创建' THEN 'admin'
+      WHEN EXISTS (SELECT 1 FROM audit WHERE audit.task_id = questions.id AND audit.action = 'question-create-admin') THEN 'admin'
+      ELSE COALESCE((SELECT CASE WHEN role IN ('admin', 'moderator') THEN role ELSE 'user' END FROM users WHERE users.id = questions.owner_id), 'user') END
+      WHERE author_role IS NULL;
+    UPDATE works SET author_role = CASE
+      WHEN json_extract(moderation, '$.reason') = '管理员上传' THEN 'admin'
+      WHEN EXISTS (SELECT 1 FROM audit WHERE audit.work_id = works.id AND (audit.action IN ('inbox-register', 'inbox-upload', 'admin-upload')
+        OR (audit.action = 'content-review' AND json_valid(audit.detail) AND json_extract(audit.detail, '$.reason') = '管理员上传'))) THEN 'admin'
+      ELSE COALESCE((SELECT CASE WHEN role IN ('admin', 'moderator') THEN role ELSE 'user' END FROM users WHERE users.id = works.owner_id), 'user') END
+      WHERE author_role IS NULL;`);
+  }, { foreignKeysOff: true }),
 ];
 
 // Exported so tests can build databases at an intermediate schema version.
@@ -482,11 +525,16 @@ export function openDatabase(file) {
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 3000;');
   const { user_version: version } = db.prepare('PRAGMA user_version').get();
   for (let step = version; step < MIGRATIONS.length; step++) {
-    transaction(db, () => {
-      if (typeof MIGRATIONS[step] === 'function') MIGRATIONS[step](db);
-      else db.exec(MIGRATIONS[step]);
-      db.exec(`PRAGMA user_version = ${step + 1}`);
-    });
+    if (MIGRATIONS[step].foreignKeysOff) db.exec('PRAGMA foreign_keys = OFF');
+    try {
+      transaction(db, () => {
+        if (typeof MIGRATIONS[step] === 'function') MIGRATIONS[step](db);
+        else db.exec(MIGRATIONS[step]);
+        db.exec(`PRAGMA user_version = ${step + 1}`);
+      });
+    } finally {
+      if (MIGRATIONS[step].foreignKeysOff) db.exec('PRAGMA foreign_keys = ON');
+    }
   }
   return db;
 }

@@ -8,6 +8,8 @@ import { test } from 'node:test';
 import { createPlatform } from '../server/app.mjs';
 import { verifiedUser } from './helpers/email.mjs';
 import { createCatalog } from '../server/catalog.mjs';
+import { createAuth } from '../server/auth.mjs';
+import { createLibrary } from '../server/library.mjs';
 import { limits } from '../server/config.mjs';
 import { MIGRATIONS, openDatabase } from '../server/db.mjs';
 
@@ -75,6 +77,93 @@ test('catalog tolerates an old pack with no registries', () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('staff publishing waits for verification, preserves authorship and guards moderator decisions', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'staff-work-'));
+  const db = openDatabase(join(root, 'platform.db'));
+  const catalog = createCatalog(pack(root));
+  const config = { dataDir: join(root, 'files'), contentTemplate: 'http://{token}.localhost', cdn: [], moderation: { enabled: true } };
+  const library = createLibrary({ db, catalog, config, limits });
+  const auth = createAuth(db, { admins: ['root'], secureCookies: false, sessionTtl: 60000 });
+  try {
+    const senior = auth.createAdmin('root', 'correct horse');
+    const moderator = await verifiedUser(auth, 'moderator');
+    db.prepare("UPDATE users SET role = 'moderator', nickname = 'Mod nickname' WHERE id = ?").run(moderator.id);
+    moderator.role = 'moderator'; moderator.nickname = 'Mod nickname';
+    const draft = library.createDraft(moderator, 'one', 'staff.html', Buffer.from(PAGE));
+    const work = library.submit(moderator, { draftId: draft.id, confirmed: true, title: 'Staff work', modelId: 'm-a',
+      effort: 'High', providerId: 'official', generationMode: 'single-turn', humanIntervention: 'none' });
+    assert.equal(work.status, 'unverified');
+    assert.deepEqual([work.moderation.status, work.moderation.source, work.moderation.reason], ['approved', 'human', '管理员发布']);
+    assert.equal(library.pendingLimit(moderator), null);
+    assert.equal(library.publicContent(work), false);
+    assert.equal(library.visibleTo(work), false);
+    assert.ok(library.reviewQueue().some((item) => item.id === work.id));
+    assert.deepEqual(library.authorWorks(moderator)[0].author, { role: 'moderator', name: null, avatar: null });
+    assert.equal(library.authorWorks(moderator)[0].mine, true);
+    assert.equal(library.adminWork(work, moderator).author.name, 'Mod nickname');
+    assert.equal(library.adminWork(work, moderator).mine, true);
+    library.setMeta(moderator, 'one', work.id, { title: 'Edited staff work' }, { author: true });
+    assert.equal(library.work('one', work.id).moderation.status, 'approved', 'staff edits do not enter automatic review');
+    const ownDecision = (action) => assert.throws(action, (error) => error.status === 403 && /其他管理员/.test(error.message));
+    ownDecision(() => library.review(moderator, 'one', work.id, { status: 'verified' }));
+    ownDecision(() => library.reviewContent(moderator, 'one', work.id, { status: 'approved' }));
+    ownDecision(() => library.retryModeration(moderator, 'one', work.id));
+    ownDecision(() => library.setFaceSettings(moderator, 'one', work.id, { show_gallery: false }));
+    ownDecision(() => library.setFaceCalibration(moderator, 'one', work.id, 'gallery', null));
+    ownDecision(() => library.setCalibration(moderator, work.id, null));
+    ownDecision(() => library.batchSetFaceSettings(moderator, [{ task: 'one', id: 'a1' }, { task: 'one', id: work.id }], { show_gallery: false }));
+    assert.equal(library.flagsOf(library.work('one', 'a1')).show_gallery, true, 'a blocked batch rolls back earlier updates');
+    assert.equal(library.review(senior, 'one', work.id, { status: 'verified' }).status, 'verified');
+    assert.equal(library.visibleTo(library.work('one', work.id)), true);
+    db.prepare("UPDATE users SET role = 'user' WHERE id = ?").run(moderator.id);
+    assert.equal(library.toPublic(library.work('one', work.id)).author.role, 'moderator', 'authorship keeps the creation role');
+    assert.equal(library.toPublic(library.work('one', work.id)).author.name, null);
+    const adminDraft = library.createDraft(senior, 'one', 'admin.html', Buffer.from(PAGE));
+    const own = library.submit(senior, { draftId: adminDraft.id, confirmed: true, title: 'Admin work', modelId: 'm-b', effort: 'High', providerId: 'official' });
+    assert.equal(library.review(senior, 'one', own.id, { status: 'verified' }).status, 'verified', 'senior staff may verify their own work');
+  } finally { db.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test('package metadata and review decisions apply everywhere while files and scoring identity remain intact', () => {
+  const root = mkdtempSync(join(tmpdir(), 'package-work-'));
+  const db = openDatabase(join(root, 'platform.db'));
+  const dist = pack(root), catalog = createCatalog(dist);
+  const library = createLibrary({ db, catalog, config: { dataDir: join(root, 'files'), contentTemplate: '', cdn: [] }, limits });
+  const senior = { id: 'root', role: 'admin', name: 'root' }, moderator = { id: 'mod', role: 'moderator', name: 'mod' };
+  try {
+    const entry = join(dist, 'results', 'one', 'a1', 'index.html'), original = readFileSync(entry);
+    const edited = library.setMeta(moderator, 'one', 'a1', { title: 'Changed title', summary: 'Changed summary', modelId: 'm-b', effort: 'Max',
+      harnessOther: 'Custom CLI', providerId: 'unofficial', generationMode: 'single-turn', humanIntervention: 'none', note: 'New note' });
+    assert.deepEqual([edited.title, edited.summary, edited.model, edited.modelName, edited.effort, edited.harnessName, edited.provider, edited.note],
+      ['Changed title', 'Changed summary', 'm-b', 'Model B', 'Max', 'Custom CLI', 'unofficial', 'New note']);
+    assert.equal(library.work('one', 'a1').modelId, 'm-a', 'package display corrections preserve the scoring model');
+    assert.equal(library.toPublic(library.eligible('one').find((item) => item.id === 'a1')).title, 'Changed title');
+    assert.deepEqual(edited.author, { role: 'admin', name: null, avatar: null });
+    for (const field of ['owner', 'ownerName', 'ownerAvatar', 'curated', 'community', 'source', 'curatedAs', 'nominatedAt',
+      'scene', 'captures', 'cover', 'files', 'bytes', 'checks', 'trial', 'sourceName', 'root', 'entry']) assert.equal(field in edited, false, field);
+    library.review(moderator, 'one', 'a1', { status: 'questioned', reason: 'Needs correction' });
+    assert.equal(library.toPublic(catalog.work('one', 'a1')).status, 'questioned');
+    assert.equal(library.toPublic(catalog.work('one', 'a1')).reason, 'Needs correction');
+    assert.equal(library.isEligible(catalog.work('one', 'a1')), false, 'raw package callers also read the decision');
+    assert.equal(library.isInteractive(catalog.work('one', 'a1')), false);
+    library.review(moderator, 'one', 'a1', { status: 'unverified' });
+    assert.equal(library.publicContent(catalog.work('one', 'a1')), false);
+    assert.ok(library.reviewQueue().some((item) => item.id === 'a1'));
+    library.review(moderator, 'one', 'a1', { status: 'verified' });
+    assert.equal(library.isEligible(catalog.work('one', 'a1')), true);
+    assert.throws(() => library.remove(moderator, 'one', 'b1'), (error) => error.status === 403);
+    db.prepare(`INSERT INTO votes (id, match_id, task_id, a_work, b_work, pair_key, choice, created_at)
+      VALUES ('v', 'm', 'one', 'a1', 'b1', 'a1/b1', 'a', 1)`).run();
+    assert.throws(() => library.remove(senior, 'one', 'a1'), (error) => error.status === 409 && /票/.test(error.message));
+    db.exec('DELETE FROM votes');
+    library.remove(senior, 'one', 'a1');
+    assert.equal(library.work('one', 'a1'), null);
+    assert.equal(library.visibleTo(catalog.work('one', 'a1')), false);
+    assert.equal(library.allWorks().some((item) => item.id === 'a1'), false);
+    assert.deepEqual(readFileSync(entry), original);
+  } finally { db.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
 test('v25 normalizes stored providers and can rerun without changing other metadata', () => {
   const root = mkdtempSync(join(tmpdir(), 'provider-migrate-'));
   const file = join(root, 'platform.db');
@@ -96,7 +185,7 @@ test('v25 normalizes stored providers and can rerun without changing other metad
     for (const [id, provider, name] of cases) insert.run(id, provider, name, `key-${id}`);
     const before = db.prepare('SELECT * FROM works ORDER BY id').all();
     // v26 adds the entertainment switch column; unverified rows default to 0.
-    for (const row of before) Object.assign(row, { show_entertainment: 0, reviewed_gallery_at: null, reviewed_arena_at: null, entertainment_route: 0, model_vendor: '' });
+    for (const row of before) Object.assign(row, { show_entertainment: 0, reviewed_gallery_at: null, reviewed_arena_at: null, entertainment_route: 0, model_vendor: '', author_role: 'user' });
     db.close();
     db = openDatabase(file);
     assert.equal(db.prepare('PRAGMA user_version').get().user_version, MIGRATIONS.length);

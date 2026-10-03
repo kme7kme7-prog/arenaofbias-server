@@ -37,7 +37,7 @@ function fixture(entries = results(), textEntries = []) {
   const library = createLibrary({ db, catalog, config, limits });
   const arena = createArena({ db, catalog, library, limits });
   const enable = () => {
-    for (const item of entries) library.setFaceSettings({ id: 'reviewer', name: 'reviewer' }, 'one', item.id, { show_arena: true });
+    for (const item of entries) library.setFaceSettings({ id: 'reviewer', name: 'reviewer', role: 'admin' }, 'one', item.id, { show_arena: true });
     arena.invalidate();
   };
   let n = 0;
@@ -86,7 +86,7 @@ test('admin views report pool membership, and text tasks are exempt from generat
   const f = fixture([work('a1'), work('multi', 'a', { generationMode: 'multi-turn' })],
     [work('t1', 'a', { scene: 'results/text/t1/', generationMode: '', humanIntervention: '' })]);
   try {
-    const reviewer = { id: 'reviewer', name: 'reviewer' };
+    const reviewer = { id: 'reviewer', name: 'reviewer', role: 'admin' };
     const view = (task, id) => f.library.adminWork(f.library.work(task, id));
     for (const [task, id] of [['one', 'a1'], ['one', 'multi'], ['text', 't1']]) f.library.setFaceSettings(reviewer, task, id, { show_arena: true });
     assert.deepEqual([view('text', 't1').arena_eligible, view('text', 't1').arena_generation_ok], [true, true]);
@@ -115,7 +115,7 @@ test('prompt variants never cross-match and configuration keys stay shared', asy
     const board = await f.arena.leaderboard({ task: 'one' });
     assert.equal(board.rows.length, 2);
     assert.ok(board.rows.every((row) => row.games === 2 && !row.key.includes('long') && !row.key.includes('short')));
-    for (const id of ['b1', 'b2']) f.library.setFaceSettings({ id: 'reviewer', name: 'reviewer' }, 'one', id, { show_arena: false });
+    for (const id of ['b1', 'b2']) f.library.setFaceSettings({ id: 'reviewer', name: 'reviewer', role: 'admin' }, 'one', id, { show_arena: false });
     await assert.rejects(() => f.arena.createMatch(null, 'one'), (error) => error.code === 'insufficient',
       'one configuration remains insufficient even when it has multiple prompt variants');
   } finally { f.close(); }
@@ -182,7 +182,7 @@ test('daily featured refresh is asynchronous, persists across restart, skips tex
     assert.equal(service.read().one.cover, 'a1', 'old result is returned while recomputing');
     await service.drain();
     assert.equal(service.read().one.cover, 'b1');
-    f.library.setFaceSettings({ id: 'reviewer', name: 'reviewer' }, 'one', 'b1', { show_arena: false });
+    f.library.setFaceSettings({ id: 'reviewer', name: 'reviewer', role: 'admin' }, 'one', 'b1', { show_arena: false });
     assert.deepEqual(service.read().one, { cover: null, models: { a: 'a1' } });
     assert.equal(calls, 2, 'removal does not force another same-day fit');
     assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM featured_picks WHERE work_id = ?').get('b1').n, 0);

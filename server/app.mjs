@@ -27,6 +27,7 @@ import { registerShow1Compat } from './show1compat.mjs';
 import { registerShow1Guess } from './show1/guess.mjs';
 import { turnstileEnabled, turnstileSiteKey, verifyTurnstile } from './turnstile.mjs';
 import { createReadGuard } from './read-guard.mjs';
+import { isSenior, isStaff } from './roles.mjs';
 
 const foldScript = readFileSync(new URL('./fold.js', import.meta.url));
 
@@ -91,7 +92,8 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     if (!user.email) fail(403, '请先绑定邮箱', 'email_required');
     return user;
   };
-  const adminOnly = (ctx) => (signedIn(ctx).role === 'admin' ? ctx.user : fail(403, '仅管理员可以操作'));
+  const adminOnly = (ctx) => (isSenior(signedIn(ctx)) ? ctx.user : fail(403, '仅高级管理员可以操作'));
+  const staffOnly = (ctx) => (isStaff(signedIn(ctx)) ? ctx.user : fail(403, '仅管理员可以操作'));
   const publicList = (works, viewer) => works.map((work) => library.toPublic(work, viewer));
   const batchDecision = (body, statuses, reasonRequired) => {
     if (!body || typeof body !== 'object' || !statuses.includes(body.status)) fail(400, '审核结果无效');
@@ -121,7 +123,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   };
   const checkDatapack = (ctx, taskId) => {
     const snapshot = catalog.snapshot();
-    if (!snapshot.task(taskId)) return snapshot; // Community questions are independent of the curated package.
+    if (!snapshot.task(taskId)) return snapshot; // Database questions are independent of the package.
     const supplied = ctx.req.headers['x-datapack-version'];
     if (supplied && supplied !== snapshot.commit) ctx.res.setHeader('X-Datapack-Stale', '1');
     return snapshot;
@@ -133,7 +135,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     return {
       datapack: snapshot.commit,
       catalogDigest: snapshot.catalogDigest,
-      apiVersion: 1,
+      apiVersion: 2,
       serverVersion,
       providers: snapshot.providers(),
       domains: DOMAINS,
@@ -149,24 +151,24 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         avatars: AVATARS,
         limits: { uploadBytes: limits.uploadBytes, coverBytes: limits.coverBytes, pendingPerUser: limits.pendingPerUser, provisionalGames: limits.provisionalGames },
       },
-      works: publicList(uploads.filter((work) => !work.curatedAs && library.visibleTo(work, 'show2')), user),
-      questions: questions.all(),
+      works: publicList(library.allWorks().filter((work) => library.visibleTo(work, 'show2')), user),
+      questions: questions.all(user),
       reactions: library.reactionSummary(user),
-      arena: Object.fromEntries(catalog.tasks().map((task) => [task.id, { ...arena.poolStats(task.id), uploads: task.acceptsUploads }])),
+      arena: Object.fromEntries(catalog.tasks().map((task) => [task.id, arena.poolStats(task.id)])),
       featured: featured.read(),
       totals: (await arena.leaderboard()).totals,
       me: user ? {
         votes: arena.votesBy(user.id), pending: library.pendingCount(user.id),
         pendingLimit: library.pendingLimit(user), updates: library.updatesCount(user.id),
       } : null,
-      review: user?.role === 'admin' ? {
+      review: isStaff(user) ? {
         // Same queue as the Gallery review page: released content on a public question that the
         // gallery has not decided yet, which includes uploads already verified for the arena.
         unverified: library.reviewQueue().length,
         content: uploads.filter((work) => work.moderation.status === 'review').length,
         autoRejected: uploads.filter((work) => work.moderation.status === 'rejected' && work.moderation.source !== 'human').length,
         injected: uploads.filter((work) => work.moderation.categories?.includes('prompt-injection')).length,
-        questions: questions.pendingCount(),
+        questions: isSenior(user) ? questions.pendingCount() : 0,
       } : null,
     };
   }
@@ -255,12 +257,12 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   });
   router.on('GET', '/api/admin/questions', (ctx) => {
     const admin = adminOnly(ctx);
-    return { questions: questions.adminAll().map(({ ownerId, ...question }) => ({
+    return { questions: questions.adminAll(admin).map(({ ownerId, ...question }) => ({
       ...question,
-      samples: library.uploadsOf(ownerId).filter((work) => work.taskId === question.id).map((work) => {
-        const { id, task, title, modelName, effort, status, moderation, scene } = library.toPublic(work, admin);
+      samples: ownerId ? library.uploadsOf(ownerId).filter((work) => work.taskId === question.id).map((work) => {
+        const { id, task, title, modelName, effort, status, moderation, scene } = library.adminWork(work, admin);
         return { id, task, title, modelName, effort, status, moderation, scene };
-      }),
+      }) : [],
     })) };
   });
   router.on('POST', '/api/questions/:id/moderation', async (ctx) => {
@@ -338,27 +340,27 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     return { ok: true };
   });
   router.on('POST', '/api/works/:task/:id/review', async (ctx) => {
-    const admin = adminOnly(ctx);
+    const admin = staffOnly(ctx);
     limit.write(admin.id);
     const body = await readJson(ctx.req);
     const work = library.review(admin, ctx.params.task, ctx.params.id, body);
     arena.invalidate();
-    return { work: library.toPublic(work, admin) };
+    return { work: library.adminWork(work, admin) };
   });
   router.on('POST', '/api/works/:task/:id/moderation', async (ctx) => {
-    const admin = adminOnly(ctx);
+    const admin = staffOnly(ctx);
     limit.write(admin.id);
     const work = library.reviewContent(admin, ctx.params.task, ctx.params.id, await readJson(ctx.req));
     arena.invalidate();
-    return { work: library.adminWork(work) };
+    return { work: library.adminWork(work, admin) };
   });
   router.on('POST', '/api/works/:task/:id/moderation/retry', (ctx) => {
-    const admin = adminOnly(ctx);
+    const admin = staffOnly(ctx);
     limit.write(admin.id);
     const work = library.retryModeration(admin, ctx.params.task, ctx.params.id);
     moderator.enqueue(work);
     arena.invalidate();
-    return { work: library.adminWork(work) };
+    return { work: library.adminWork(work, admin) };
   });
   router.on('POST', '/api/works/:task/:id/reactions', async (ctx) => {
     const user = emailBound(ctx);
@@ -408,10 +410,10 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   router.on('PATCH', '/api/works/:task/:id', async (ctx) => {
     const user = signedIn(ctx);
     limit.write(user.id);
-    const work = library.setMeta(user, ctx.params.task, ctx.params.id, await readJson(ctx.req), { author: user.role !== 'admin' });
-    if (user.role !== 'admin') moderator.enqueue(library.work(ctx.params.task, ctx.params.id));
+    const work = library.setMeta(user, ctx.params.task, ctx.params.id, await readJson(ctx.req), { author: !isStaff(user) });
+    if (!isStaff(user)) moderator.enqueue(library.work(ctx.params.task, ctx.params.id));
     arena.invalidate();
-    return { work };
+    return { work: library.toPublic(library.work(work.task, work.id), user) };
   });
   router.on('PATCH', '/api/me', async (ctx) => {
     const user = signedIn(ctx);
@@ -419,11 +421,8 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     return { user: auth.public(auth.updateProfile(user, await readJson(ctx.req))) };
   });
   router.on('GET', '/api/review', (ctx) => {
-    const admin = adminOnly(ctx);
-    // Per-face review covers both sides: uploads plus the curated collection (the
-    // other site's works), each waiting on its own face's flag.
-    const curated = catalog.tasks().flatMap((task) => [...task.works.values()]);
-    return { works: [...library.uploads().filter((work) => !work.curatedAs), ...curated].map((work) => library.adminWork(work)), audit: library.auditLog() };
+    const admin = staffOnly(ctx);
+    return { works: library.allWorks().map((work) => library.adminWork(work, admin)), audit: library.auditLog() };
   });
 
   // Account administration for the admin web app (the CLI in server/cli.mjs does the same).
@@ -436,34 +435,28 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     limit.write(admin.id);
     const body = await readJson(ctx.req);
     const user = auth.setRole(admin, ctx.params.id, String(body.role ?? ''));
-    library.audit(admin, 'role', null, `${user.name} → ${user.role === 'admin' ? '管理员' : '成员'}`);
+    library.audit(admin, 'role', null, `${user.name} → ${{ admin: '高级管理员', moderator: '普通管理员', user: '普通用户' }[user.role]}`);
     return { user };
   });
 
   router.on('GET', '/api/admin/works', (ctx) => {
-    adminOnly(ctx);
-    return adminService.works(ctx.url.searchParams);
+    const admin = staffOnly(ctx);
+    return adminService.works(ctx.url.searchParams, admin);
   });
   router.on('GET', '/api/admin/inbox/works', (ctx) => {
-    adminOnly(ctx);
-    return { works: library.inboxWorks() };
+    const admin = staffOnly(ctx);
+    return { works: library.inboxWorks(admin) };
   });
   router.on('POST', '/api/admin/works/batch-inbox', async (ctx) => {
-    const admin = adminOnly(ctx);
+    const admin = staffOnly(ctx);
     limit.write(admin.id);
     const body = await readJson(ctx.req);
     const works = library.assignInbox(admin, body.works, { task: body.task ?? null, entertainment: body.entertainment ?? false });
     arena.invalidate();
     return { works };
   });
-  router.on('POST', '/api/admin/works/:task/:id/display', async (ctx) => {
-    const admin = adminOnly(ctx);
-    limit.write(admin.id);
-    const work = library.setDisplay(admin, ctx.params.task, ctx.params.id, await readJson(ctx.req));
-    return { work };
-  });
   router.on('POST', '/api/admin/works/batch-face-settings', async (ctx) => {
-    const admin = adminOnly(ctx);
+    const admin = staffOnly(ctx);
     limit.write(admin.id);
     const { works: items, ...settings } = (await readJson(ctx.req)) ?? {};
     const works = library.batchSetFaceSettings(admin, items, settings);
@@ -471,19 +464,19 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     return { works };
   });
   router.on('POST', '/api/admin/works/batch-moderation', async (ctx) => {
-    const admin = adminOnly(ctx);
+    const admin = staffOnly(ctx);
     limit.write(admin.id);
     const body = await readJson(ctx.req);
     batchDecision(body, ['approved', 'rejected'], 'rejected');
     batchItems(body.works, 100);
     const results = body.works.map(({ task, id }) => batchResult({ task, id }, () => ({
-      work: library.adminWork(library.reviewContent(admin, task, id, { status: body.status, reason: body.reason })),
+      work: library.adminWork(library.reviewContent(admin, task, id, { status: body.status, reason: body.reason }), admin),
     })));
     arena.invalidate();
     return { results };
   });
   router.on('POST', '/api/admin/works/batch-review', async (ctx) => {
-    const admin = adminOnly(ctx);
+    const admin = staffOnly(ctx);
     limit.write(admin.id);
     const body = await readJson(ctx.req);
     batchDecision(body, ['verified', 'questioned'], 'questioned');
@@ -495,39 +488,39 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       work: library.adminWork(library.reviewWithMeta(admin, task, id, {
         status: body.status, reason: body.reason, meta: body.meta,
         ...(body.status === 'verified' ? { show_gallery: true, ...(body.show_arena !== undefined ? { show_arena: body.show_arena } : {}) } : {}),
-      })),
+      }), admin),
     })));
     arena.invalidate();
     return { results };
   });
   router.on('POST', '/api/admin/works/:task/:id/face-settings', async (ctx) => {
-    const admin = adminOnly(ctx);
+    const admin = staffOnly(ctx);
     limit.write(admin.id);
     const work = library.setFaceSettings(admin, ctx.params.task, ctx.params.id, await readJson(ctx.req));
     arena.invalidate();
     return { work };
   });
   router.on('POST', '/api/admin/works/:task/:id/calibration', async (ctx) => {
-    const admin = adminOnly(ctx);
+    const admin = staffOnly(ctx);
     limit.write(admin.id);
     const body = await readJson(ctx.req);
     const calibration = library.setFaceCalibration(admin, ctx.params.task, ctx.params.id, body.face, body.calibration);
     arena.invalidate();
     return { task: ctx.params.task, id: ctx.params.id, face: body.face, calibration };
   });
-  // Short-lived preview host for the admin calibration panel: works of either source
-  // (curated datapack or upload) become viewable on the content origin, where the
+  // Short-lived preview host for the admin calibration panel: all works become
+  // viewable on the content origin, where the
   // camera bridge answers the capture handshake. The key itself is the permission.
   router.on('POST', '/api/admin/works/:task/:id/preview', (ctx) => {
-    const admin = adminOnly(ctx);
+    const admin = staffOnly(ctx);
     limit.write(admin.id);
     const work = library.work(ctx.params.task, ctx.params.id);
     if (!work) fail(404, '作品不存在', 'not_found');
     return { url: `${library.previewOrigin(work)}/` };
   });
   router.on('GET', '/api/admin/tasks/:id/editorial', (ctx) => {
-    adminOnly(ctx);
-    return adminService.getEditorial(ctx.params.id, ctx.url.searchParams.get('face'));
+    const admin = adminOnly(ctx);
+    return adminService.getEditorial(ctx.params.id, ctx.url.searchParams.get('face'), admin);
   });
   router.on('POST', '/api/admin/tasks/:id/editorial', async (ctx) => {
     const admin = adminOnly(ctx);
@@ -564,42 +557,39 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       library.discardDraft(admin, draft.id);
       throw error;
     }
-    library.reviewContent(admin, task, submitted.id, { status: 'approved', reason: '管理员上传' });
-    const work = library.review(admin, task, submitted.id, { status: 'verified',
-      ...(gallery === null ? {} : { show_gallery: gallery === '1' }), ...(arenaFace === null ? {} : { show_arena: arenaFace === '1' }) });
-    queueWork(work);
+    queueWork(submitted);
     arena.invalidate();
-    return { work: library.adminWork(work) };
+    return { work: library.adminWork(submitted, admin) };
   });
 
   // Admin staging inbox: files wait here until they are previewed and registered as works.
   router.on('GET', '/api/admin/inbox', (ctx) => {
-    adminOnly(ctx);
+    staffOnly(ctx);
     return inbox.list();
   });
   router.on('POST', '/api/admin/inbox', async (ctx) => {
-    const admin = adminOnly(ctx);
+    const admin = staffOnly(ctx);
     limit.write(admin.id);
     const params = ctx.url.searchParams;
     const buffer = await readBody(ctx.req, limits.uploadBytes);
     return inbox.upload(admin, params.get('name'), buffer, params.get('overwrite') === '1');
   });
   router.on('POST', '/api/admin/inbox/register', async (ctx) => {
-    const admin = adminOnly(ctx);
+    const admin = staffOnly(ctx);
     limit.write(admin.id);
     const work = inbox.register(admin, await readJson(ctx.req));
     queueWork(work);
     arena.invalidate();
-    return { work: library.adminWork(work) };
+    return { work: library.adminWork(work, admin) };
   });
   router.on('DELETE', '/api/admin/inbox', (ctx) => {
-    const admin = adminOnly(ctx);
+    const admin = staffOnly(ctx);
     limit.write(admin.id);
     return inbox.remove(admin, ctx.url.searchParams.get('id') ?? '');
   });
-  // Inline edits (title/summary/model) from the works table; curated works stay repo-managed.
+  // Work metadata edits share one endpoint for package and database entries.
   router.on('POST', '/api/admin/works/:task/:id/meta', async (ctx) => {
-    const admin = adminOnly(ctx);
+    const admin = staffOnly(ctx);
     limit.write(admin.id);
     const work = library.setMeta(admin, ctx.params.task, ctx.params.id, await readJson(ctx.req));
     arena.invalidate();
@@ -649,7 +639,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     // Admin inbox previews stream straight from the staging directory; session-guarded
     // because these files are not published works yet.
     if (pathname.startsWith('/admin/inbox/')) {
-      if (auth.userFrom(req)?.role !== 'admin') {
+      if (!isStaff(auth.userFrom(req))) {
         res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
         return res.end('Not found');
       }
@@ -675,7 +665,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     // Only the admin UI needs the complete registry. Public frontends carry their
     // own display catalog; never expose package origin metadata on this host.
     if (packagePath === '.datapack-source.json'
-      || (packagePath === 'data.json' && auth.userFrom(req)?.role !== 'admin')) {
+      || (packagePath === 'data.json' && !isStaff(auth.userFrom(req)))) {
       return sendJson(res, 404, { error: '文件不存在' });
     }
     // The package contains executable works, not a trusted site shell. HTML may

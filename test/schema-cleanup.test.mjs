@@ -50,6 +50,7 @@ test('v18 preserves v16/v17 metadata, audit actors and frozen vote identities on
           ...(version === 16 ? { model_version: '', generation_mode: '', human_intervention: '', generated_on: '', evidence_url: '' } : {}),
           model_other: row.model_id ? '' : model_name,
           model_vendor: '',
+          author_role: 'user',
           moderation: '{"status":"legacy"}',
           prompt_variant: '',
           harness_other: row.harness_id ? '' : tool,

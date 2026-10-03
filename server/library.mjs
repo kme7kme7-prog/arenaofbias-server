@@ -1,4 +1,4 @@
-// Every work the platform knows: curated works from the build plus submitted uploads.
+// Every work the platform knows: data package files plus submitted uploads.
 // Uploads move through unverified → verified | questioned; drafts hold a staged upload
 // until its author has watched the trial load and submits it.
 import { randomBytes } from 'node:crypto';
@@ -7,6 +7,8 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { EFFORTS, EMOJIS } from './config.mjs';
 import { transaction } from './db.mjs';
 import { providerOf } from './catalog.mjs';
+import { avatarOf } from './auth.mjs';
+import { authorOf, isStaff, isSenior, roleOf } from './roles.mjs';
 import { fail } from './http.mjs';
 import { inspectUpload } from './inspect.mjs';
 import { isTextTask, templatesOf } from './categories.mjs';
@@ -55,12 +57,15 @@ function writeTree(target, files) {
 }
 
 export function createLibrary({ db, catalog, config, limits, legacyRounds = new Set() }) {
-  const contentAllowed = (work) => Boolean(work && (work.curated ||
-    (catalog.task(work.taskId) && ['legacy', 'approved'].includes(work.moderation?.status))));
+  const contentAllowedEffective = (work) => Boolean(work && !work.curatedAs && catalog.task(work.taskId) &&
+    (work.curated || ['legacy', 'approved'].includes(work.moderation?.status)));
+  const contentAllowed = (work) => contentAllowedEffective(withDisplay(work));
   // Public surfaces additionally wait for a human decision on uploads (a review status or a
   // manual content approval): an automatic approval alone only reaches owner and admin previews.
-  const publicContent = (work) => Boolean(contentAllowed(work) &&
+  const publicContentEffective = (work) => Boolean(contentAllowedEffective(work) &&
+    (!(work.curated || ['admin', 'moderator'].includes(work.authorRole)) || work.status !== 'unverified') &&
     (work.curated || work.status !== 'unverified' || work.moderation?.source === 'human'));
+  const publicContent = (work) => publicContentEffective(withDisplay(work));
   const dirs = { drafts: join(config.dataDir, 'drafts'), works: join(config.dataDir, 'works'), media: join(config.dataDir, 'media') };
   for (const dir of Object.values(dirs)) mkdirSync(dir, { recursive: true });
   const originOf = (key) => config.contentTemplate.replace('{token}', key);
@@ -79,7 +84,8 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     return key;
   }
 
-  const WORK = `SELECT works.*, COALESCE(NULLIF(owner.nickname, ''), owner.name) AS owner_name,
+  const WORK = `SELECT works.*, owner.avatar AS owner_avatar, owner.id AS author_id, owner.role AS owner_role,
+    COALESCE(NULLIF(owner.nickname, ''), owner.name) AS owner_name,
     COALESCE(NULLIF(reviewer.nickname, ''), reviewer.name, review_audit.actor_name) AS reviewer_name FROM works
     LEFT JOIN users owner ON owner.id = works.owner_id
     LEFT JOIN audit review_audit ON review_audit.id = (
@@ -132,8 +138,8 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     insertWork: db.prepare(`INSERT INTO works (id, task_id, owner_id, title, summary, model_id, model_other, model_vendor, effort,
       harness_id, harness_other, provider_id, provider_other, note, content_key,
       source_name, root, entry, file_count, bytes, digest, checks, trial, cover, created_at, updated_at,
-      generation_mode, human_intervention, moderation, prompt_variant, show_gallery, show_arena)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`),
+      generation_mode, human_intervention, moderation, prompt_variant, author_role, show_gallery, show_arena)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`),
     review: db.prepare(`UPDATE works SET status = ?, status_reason = ?, model_id = ?, model_other = ?, model_vendor = ?, effort = ?,
       harness_id = ?, harness_other = ?, provider_id = ?, provider_other = ?,
       generation_mode = ?, human_intervention = ?,
@@ -152,7 +158,8 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       generation_mode = ?, human_intervention = ?,
       prompt_variant = ?, note = ?, updated_at = ? WHERE id = ?`),
     votesOfWork: db.prepare('SELECT COUNT(*) AS n FROM votes WHERE task_id = ? AND (a_work = ? OR b_work = ?)'),
-    override: db.prepare('SELECT * FROM work_overrides WHERE task_id = ? AND work_id = ?'),
+    override: db.prepare(`SELECT work_overrides.*, COALESCE(NULLIF(reviewer.nickname, ''), reviewer.name) AS reviewer_name
+      FROM work_overrides LEFT JOIN users reviewer ON reviewer.id = work_overrides.reviewer_id WHERE task_id = ? AND work_id = ?`),
     setOverride: db.prepare(`INSERT INTO work_overrides (task_id, work_id, show_gallery, show_arena, show_entertainment, updated_by, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(task_id, work_id) DO UPDATE SET
       show_gallery = excluded.show_gallery, show_arena = excluded.show_arena, show_entertainment = excluded.show_entertainment,
@@ -160,6 +167,13 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     setDisplay: db.prepare(`INSERT INTO work_overrides (task_id, work_id, display_json, updated_by, updated_at)
       VALUES (?, ?, ?, ?, ?) ON CONFLICT(task_id, work_id) DO UPDATE SET
       display_json = excluded.display_json, updated_by = excluded.updated_by, updated_at = excluded.updated_at`),
+    reviewPack: db.prepare(`INSERT INTO work_overrides (task_id, work_id, status, reason, reviewer_id, reviewed_at, updated_by, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(task_id, work_id) DO UPDATE SET status = excluded.status,
+      reason = excluded.reason, reviewer_id = excluded.reviewer_id, reviewed_at = excluded.reviewed_at,
+      updated_by = excluded.updated_by, updated_at = excluded.updated_at`),
+    removePack: db.prepare(`INSERT INTO work_overrides (task_id, work_id, deleted_at, updated_by, updated_at)
+      VALUES (?, ?, ?, ?, ?) ON CONFLICT(task_id, work_id) DO UPDATE SET deleted_at = excluded.deleted_at,
+      updated_by = excluded.updated_by, updated_at = excluded.updated_at`),
     setRoute: db.prepare('UPDATE works SET entertainment_route = ?, updated_at = ? WHERE id = ?'),
     setCuratedCalibration: db.prepare(`INSERT INTO work_overrides (task_id, work_id, show_gallery, show_arena, calibration_gallery, calibration_arena, updated_by, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(task_id, work_id) DO UPDATE SET
@@ -210,6 +224,8 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       note: row.note,
       ownerId: row.owner_id,
       ownerName: row.owner_name ?? null,
+      authorRole: roleOf(row.author_role ?? row.owner_role),
+      ownerAvatar: row.author_id ? avatarOf({ id: row.author_id, avatar: row.owner_avatar }) : null,
       reviewerName: row.reviewer_name ?? null,
       reviewedAt: row.reviewed_at,
       reviewedGalleryAt: row.reviewed_gallery_at,
@@ -240,7 +256,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
   }
 
   function pendingLimit(user) {
-    if (user.role === 'admin') return null;
+    if (isStaff(user)) return null;
     const since = Date.now() - 90 * 24 * 3600e3;
     const credit = q.trustOf.get(since, user.id, since, user.id);
     return credit.verified >= limits.trustedMinVerified && credit.questioned === 0
@@ -284,36 +300,40 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     }
   }
 
-  const flagsOf = (work) => {
+  const flagsOf = (work, override = undefined) => {
     if (!work) return { show_gallery: false, show_arena: false, show_entertainment: false };
     if (work.curated) {
-      const row = q.override.get(work.taskId, work.id);
+      const row = override === undefined ? q.override.get(work.taskId, work.id) : override;
       // 数据包作品视同已核验的投稿：默认三面都开，管理员可逐件关闭。旧 Show1 快照
       // 已有的轮次里同一作品早以投稿身份在娱乐名单中，这些题的娱乐面默认关闭。
-      const entertainment = !legacyRounds.has(catalog.task(work.taskId)?.arenaId);
+      const entertainment = !legacyRounds.size || !legacyRounds.has(catalog.task(work.taskId)?.arenaId);
       return { show_gallery: Boolean(row?.show_gallery ?? 1), show_arena: Boolean(row?.show_arena ?? 1), show_entertainment: Boolean(row?.show_entertainment ?? entertainment) };
     }
     return { show_gallery: work.showGallery, show_arena: work.showArena, show_entertainment: Boolean(work.showEntertainment) };
   };
   const inInbox = (work) => Boolean(work && !work.curated && work.entertainmentRoute === 1);
-  const visibleTo = (work, site = 'show2') => Boolean(!inInbox(work) && publicContent(work) && (site === 'show1' ? flagsOf(work).show_arena : flagsOf(work).show_gallery));
+  const visibleEffective = (work, site) => Boolean(work && !inInbox(work) && publicContentEffective(work) &&
+    (site === 'show1' ? work.showArena : work.showGallery));
+  const visibleTo = (work, site = 'show2') => visibleEffective(withDisplay(work), site);
   // Text tasks keep their earlier rules; other works must be single-turn without human intervention.
   const generationQualified = (work) => isTextTask(catalog.task(work.taskId)) ||
     generationOf(work).generationMode === 'single-turn' && work.humanIntervention === 'none';
-  const isEligible = (work) => Boolean(work && work.status === 'verified' && work.dir && !work.curatedAs && !inInbox(work) && visibleTo(work, 'show1') &&
-    generationQualified(work));
+  const eligibleEffective = (work) => Boolean(work && work.status === 'verified' && work.dir && !work.curatedAs &&
+    visibleEffective(work, 'show1') && generationQualified(work));
+  const isEligible = (work) => eligibleEffective(withDisplay(work));
   // The blind-pool rule read once for every client: in the pool, turned off by an admin, or why not.
   const arenaState = (work) => {
-    if (isEligible(work)) return { state: 'in_pool' };
-    if (work.status !== 'verified' || !publicContent(work)) return { state: 'waiting' };
-    if (work.curatedAs) return { state: 'curated' };
-    if (!flagsOf(work).show_arena) return { state: 'off' };
+    if (eligibleEffective(work)) return { state: 'in_pool' };
+    if (work.status !== 'verified' || !publicContentEffective(work)) return { state: 'waiting' };
+    if (!work.showArena) return { state: 'off' };
     const { generationMode, humanIntervention } = generationOf(work);
     return { state: 'not_qualified', reason: generationMode === 'multi-turn' ? '多轮生成'
       : humanIntervention && humanIntervention !== 'none' ? '有人工介入' : '生成方式未填写' };
   };
-  const isInteractive = (work) => Boolean(work && work.status !== 'questioned' &&
-    (visibleTo(work, 'show1') || visibleTo(work, 'show2')));
+  const isInteractive = (raw) => {
+    const work = withDisplay(raw);
+    return Boolean(work && work.status !== 'questioned' && (visibleEffective(work, 'show1') || visibleEffective(work, 'show2')));
+  };
 
   function reactionsOf(taskId, id) {
     return Object.fromEntries(q.workReactions.all(taskId, id).map((row) => [row.emoji, row.n]));
@@ -427,19 +447,37 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     const known = EFFORTS.find((item) => item.toLowerCase() === effort.toLowerCase());
     return known ?? effort;
   };
-  const DISPLAY_KEYS = ['title', 'summary', 'modelName', 'effort', 'harnessId', 'harnessOther', 'providerId', 'generationMode', 'humanIntervention'];
+  const DISPLAY_KEYS = ['title', 'summary', 'modelId', 'modelName', 'vendor', 'effort', 'harnessId', 'harnessOther', 'providerId', 'generationMode', 'humanIntervention', 'promptVariant', 'note'];
   function withDisplay(work) {
     if (!work?.curated) return work;
     const row = q.override.get(work.taskId, work.id);
-    if (!row?.display_json) return work;
-    let patch;
-    try { patch = JSON.parse(row.display_json); } catch { return work; }
-    const next = { ...work };
-    for (const key of DISPLAY_KEYS) if (typeof patch[key] === 'string') next[key] = patch[key];
+    if (row?.deleted_at) return null;
+    let patch = {};
+    try { patch = JSON.parse(row?.display_json || '{}'); } catch { /* ignore malformed display data */ }
+    const next = { ...work, status: row?.status ?? 'verified', reason: row?.reason ?? '',
+      moderation: { status: 'approved', source: 'human' }, reviewedAt: row?.reviewed_at ?? null, reviewerName: row?.reviewer_name ?? null };
+    for (const key of DISPLAY_KEYS) if (typeof patch[key] === 'string' || patch[key] === null) {
+      if (key === 'modelId') next.displayModelId = patch[key];
+      else next[key] = patch[key];
+    }
+    const flags = flagsOf(work, row ?? null);
+    Object.assign(next, {
+      showGallery: flags.show_gallery, showArena: flags.show_arena,
+      showEntertainment: flags.show_entertainment,
+      audience: flags.show_gallery ? (flags.show_arena ? 'both' : 'show2') : (flags.show_arena ? 'show1' : 'hidden'),
+    });
     if (next.harnessId) next.tool = catalog.harness(next.harnessId)?.name ?? next.harnessId;
     else if (next.harnessOther) next.tool = next.harnessOther;
+    else if (Object.hasOwn(patch, 'harnessId') || Object.hasOwn(patch, 'harnessOther')) next.tool = '';
     return next;
   }
+
+  function requireStaff(actor, work, decision = true) {
+    if (!isStaff(actor)) fail(403, '需要管理员权限');
+    if (decision && !isSenior(actor) && work?.ownerId === actor.id) fail(403, '需由其他管理员处理自己发布的作品');
+  }
+  const displayIdentity = (work) => work.curated && Object.hasOwn(work, 'displayModelId')
+    ? { ...work, modelId: work.displayModelId } : work;
 
   return {
     isEligible,
@@ -452,13 +490,14 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     contentAllowed,
     publicContent,
     canRead(work, viewer) {
-      return Boolean(work && (publicContent(work) || viewer && (viewer.id === work.ownerId || viewer.role === 'admin')));
+      work = withDisplay(work);
+      return Boolean(work && (publicContentEffective(work) || viewer && (viewer.id === work.ownerId || isStaff(viewer))));
     },
     previewOrigin(work) { return originOf(previewKey(work)); },
     previewByKey(key) {
       const value = previews.get(key);
       if (!value || value.expiresAt <= Date.now()) { previews.delete(key); return null; }
-      // Curated works preview from the datapack directory; uploads from their own dir.
+      // Package works preview from the datapack directory; uploads from their own dir.
       return this.work(value.task, value.id);
     },
     uploadById(id) {
@@ -475,23 +514,27 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       const row = q.workByKey.get(key);
       return row ? fromRow(row) : null;
     },
-    // Curated works plus verified uploads: the pool blind comparisons draw from.
+    // Package works plus verified uploads: the pool blind comparisons draw from.
     eligible(taskId, snapshot = null) {
       const archive = snapshot ?? catalog.snapshot();
-      return [...archive.works(taskId), ...q.worksOfTask.all(taskId).map((row) => fromRow(row, archive))].filter(isEligible);
+      return [...archive.works(taskId).map(withDisplay), ...q.worksOfTask.all(taskId).map((row) => fromRow(row, archive))].filter(isEligible);
+    },
+    allWorks() {
+      return [...catalog.snapshot().tasks().flatMap((task) => [...task.works.values()].map(withDisplay)), ...this.uploads()]
+        .filter((work) => work && !work.curatedAs && catalog.task(work.taskId, { role: 'admin' }));
     },
     uploads() {
-      return q.works.all().map((row) => fromRow(row));
+      return q.works.all().map((row) => fromRow(row)).filter((work) => !work.curatedAs);
     },
     published(site) {
       return q.works.all().map((row) => fromRow(row)).filter((work) => !work.curatedAs && work.status === 'verified' && visibleTo(work, site));
     },
     uploadsOf(userId) {
-      return q.worksOfOwner.all(userId).map((row) => fromRow(row));
+      return q.worksOfOwner.all(userId).map((row) => fromRow(row)).filter((work) => !work.curatedAs);
     },
     // Gallery's queue also includes arena-verified uploads awaiting a gallery decision.
     reviewQueue() {
-      return this.uploads().filter((work) => !work.curatedAs && work.status !== 'questioned' && !work.reviewedGalleryAt
+      return this.allWorks().filter((work) => !work.curatedAs && work.status !== 'questioned' && (work.curated ? work.status === 'unverified' : !work.reviewedGalleryAt)
         && contentAllowed(work)).sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
     },
     authorWorks(user) {
@@ -510,16 +553,21 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       return { medianHours: samples.length % 2 ? samples[middle] : (samples[middle - 1] + samples[middle]) / 2 };
     },
 
-    toPublic(work, viewer) {
+    toPublic(work, viewer, { admin = false } = {}) {
+      work = withDisplay(work);
+      if (!work) return null;
       if (work.curated) {
-        work = withDisplay(work);
-        return { task: work.taskId, id: work.id, curated: true, title: work.title, model: work.modelId, modelName: work.modelName, vendor: work.vendor, effort: work.effort, tool: work.tool, ...publicProvenance(work), cover: work.cover, status: 'verified', addedAt: work.addedAt };
+        return { task: work.taskId, id: work.id, author: authorOf({ role: 'admin', name: null, avatar: null }, admin), mine: false,
+          title: work.title, summary: work.summary, model: Object.hasOwn(work, 'displayModelId') ? work.displayModelId : work.modelId, modelName: work.modelName, vendor: work.vendor,
+          effort: work.effort, tool: work.tool, ...publicProvenance(work),
+          ...(work.promptVariant ? { promptVariant: work.promptVariant } : {}), note: work.note ?? '',
+          status: work.status, reason: work.reason, addedAt: work.addedAt, reviewedAt: iso(work.reviewedAt),
+          ...(admin ? { moderation: work.moderation, audience: work.audience, reviewer: work.reviewerName } : {}) };
       }
-      const privileged = viewer && (viewer.id === work.ownerId || viewer.role === 'admin');
+      const privileged = admin || viewer && (viewer.id === work.ownerId || isStaff(viewer));
       return {
         task: work.taskId,
         id: work.id,
-        curated: false,
         title: work.title,
         summary: work.summary,
         model: work.modelId,
@@ -531,10 +579,10 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
         ...(work.promptVariant ? { promptVariant: work.promptVariant } : {}),
         note: work.note,
         status: work.status,
-        ...(privileged ? { moderation: viewer.role === 'admin' ? work.moderation : authorModeration(work.moderation) } : {}),
+        ...(privileged ? { moderation: admin ? work.moderation : authorModeration(work.moderation) } : {}),
         ...(privileged ? { audience: work.audience, arena: arenaState(work) } : {}),
         reason: work.reason,
-        owner: work.ownerName,
+        author: authorOf({ role: work.authorRole, name: work.ownerName, avatar: work.ownerAvatar }, admin),
         mine: Boolean(viewer && viewer.id === work.ownerId),
         addedAt: iso(work.createdAt),
         reviewedAt: iso(work.reviewedAt),
@@ -548,7 +596,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       };
     },
 
-    // Effective per-face calibration for a work: admin overrides for curated works,
+    // Effective per-face calibration for a work: admin overrides for package works,
     // trial columns for uploads. Read-only; writers validate the shape.
     calibrationOf(work, face) {
       if (!work || (face !== 'arena' && face !== 'gallery')) return null;
@@ -561,19 +609,19 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       return face === 'arena' ? (work.calibrationArena ?? null) : (work.trial?.calibration ?? null);
     },
 
-    adminWork(work) {
+    adminWork(work, viewer = null) {
       work = withDisplay(work);
-      const flags = flagsOf(work);
+      const flags = { show_gallery: work.showGallery, show_arena: work.showArena, show_entertainment: work.showEntertainment };
       const override = work.curated ? q.override.get(work.taskId, work.id) : null;
       return {
-        ...this.toPublic(work, { role: 'admin' }), source: work.curated ? 'curated' : 'upload',
-        ...(work.curated ? {} : { curatedAs: work.curatedAs ?? null, nominatedAt: iso(work.nominatedAt),
+        ...this.toPublic(work, viewer, { admin: true }),
+        ...(work.curated ? {} : {
           reviewed: { gallery: iso(work.reviewedGalleryAt), arena: iso(work.reviewedArenaAt) } }),
         ...flags, calibration_gallery: work.curated ? (override?.calibration_gallery ? JSON.parse(override.calibration_gallery) : null) : work.trial.calibration ?? null,
         calibration_arena: work.curated ? (override?.calibration_arena ? JSON.parse(override.calibration_arena) : null) : work.calibrationArena,
         has_calibration_gallery: Boolean(work.curated ? override?.calibration_gallery : work.trial.calibration),
         has_calibration_arena: Boolean(work.curated ? override?.calibration_arena : work.calibrationArena),
-        arena_eligible: isEligible(work),
+        arena_eligible: eligibleEffective(work),
         arena_generation_ok: generationQualified(work),
         entertainment_route: work.entertainmentRoute ?? 0,
         arena: arenaState(work),
@@ -583,13 +631,14 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     setFaceSettings(admin, taskId, id, body, withinTransaction = false) {
       const work = this.work(taskId, id);
       if (!work) fail(404, '作品不存在', 'not_found');
+      requireStaff(admin, work);
       if (!body || typeof body !== 'object' || Array.isArray(body) || !Object.keys(body).length ||
         Object.keys(body).some((key) => !['show_gallery', 'show_arena', 'show_entertainment'].includes(key)) ||
         Object.values(body).some((value) => typeof value !== 'boolean')) fail(400, '门面开关无效', 'invalid_face_settings');
       const current = flagsOf(work);
       const gallery = body.show_gallery ?? current.show_gallery;
       const arena = body.show_arena ?? current.show_arena;
-      // 娱乐面对投稿和馆藏都开放：投稿落本行，馆藏落 override 列。
+      // Uploaded settings live on the row; package settings use the override table.
       const entertainment = body.show_entertainment ?? current.show_entertainment;
       const now = Date.now();
       const apply = () => {
@@ -600,7 +649,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       };
       if (withinTransaction) apply();
       else transaction(db, apply);
-      return this.adminWork(this.work(taskId, id));
+      return this.adminWork(this.work(taskId, id), admin);
     },
 
     batchSetFaceSettings(admin, items, settings) {
@@ -613,6 +662,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     setFaceCalibration(admin, taskId, id, face, patch) {
       const work = this.work(taskId, id);
       if (!work) fail(404, '作品不存在', 'not_found');
+      requireStaff(admin, work);
       if (!['gallery', 'arena'].includes(face)) fail(400, '门面参数无效', 'invalid_face');
       if (patch !== null && (!plainObject(patch) || !Object.keys(patch).length ||
         Object.keys(patch).some((key) => !['framing', 'camera'].includes(key)) ||
@@ -644,14 +694,15 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
 
     getCalibration(viewer, id) {
       const row = q.work.get(id);
-      if (!row || ((!contentAllowed(fromRow(row)) || row.status !== 'verified' || !row.show_gallery) && viewer?.id !== row.owner_id && viewer?.role !== 'admin')) fail(404, '作品不存在');
+      if (!row || ((!contentAllowed(fromRow(row)) || row.status !== 'verified' || !row.show_gallery) && viewer?.id !== row.owner_id && !isStaff(viewer))) fail(404, '作品不存在');
       return JSON.parse(row.trial).calibration ?? null;
     },
 
     setCalibration(user, id, patch) {
       const row = q.work.get(id);
       if (!row) fail(404, '作品不存在');
-      if (row.owner_id !== user.id && user.role !== 'admin') fail(403, '只能校准自己的作品');
+      if (isStaff(user)) requireStaff(user, fromRow(row));
+      else if (row.owner_id !== user.id) fail(403, '只能校准自己的作品');
       if (patch !== null && (!plainObject(patch) || !Object.keys(patch).length ||
         Object.keys(patch).some((key) => !['framing', 'camera'].includes(key)) ||
         (Object.hasOwn(patch, 'framing') && patch.framing !== null && !validFraming(patch.framing)) ||
@@ -675,7 +726,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     createDraft(user, taskId, filename, buffer, template = null) {
       const task = taskId === '__new__' ? { acceptsUploads: true, templates: ['static', 'vite', 'text'] } : catalog.task(taskId, user);
       if (!task) fail(404, '题目不存在');
-      if (!task.acceptsUploads) fail(409, '这道题的提示词原文尚未公开，暂不接受上传');
+      if (!task.acceptsUploads) fail(409, '这道题暂不接受上传');
       purgeDrafts();
       const allowed = templatesOf(task);
       if (template && !allowed.includes(template)) fail(400, '该题不支持此提交格式');
@@ -687,7 +738,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       inspected.checks.find((check) => check.id === 'format').template = format;
       const curatedTwin = catalog.duplicateOf(inspected.entryDigest);
       const uploadTwin = q.workByDigest.get(inspected.digest);
-      if (curatedTwin) inspected.checks.push({ id: 'duplicate', state: 'warn', label: '重复检测', detail: `入口页面与馆藏作品「${curatedTwin.title}」（${curatedTwin.modelName}）完全相同，核验时会重点比对。` });
+      if (curatedTwin) inspected.checks.push({ id: 'duplicate', state: 'warn', label: '重复检测', detail: `入口页面与已有作品「${curatedTwin.title}」（${curatedTwin.modelName}）完全相同，核验时会重点比对。` });
       else if (uploadTwin) inspected.checks.push({ id: 'duplicate', state: 'warn', label: '重复检测', detail: `与已上传的作品「${uploadTwin.title}」内容完全相同。` });
       else inspected.checks.push({ id: 'duplicate', state: 'ok', label: '重复检测', detail: '未发现与已有作品相同的内容' });
 
@@ -726,7 +777,11 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       const draft = q.draft.get(String(body.draftId ?? ''));
       if (!draft || draft.owner_id !== user.id || draft.expires_at <= Date.now()) fail(404, '试加载已过期，请重新选择文件');
       if (createQuestion ? draft.task_id !== '__new__' : draft.task_id === '__new__') fail(400, '新题目草稿只能用于发起题目');
-      if (!createQuestion && !catalog.task(draft.task_id, user)) fail(404, '题目不存在');
+      if (!createQuestion) {
+        const task = catalog.task(draft.task_id, user);
+        if (!task) fail(404, '题目不存在');
+        if (!task.acceptsUploads) fail(409, '这道题暂不接受上传');
+      }
       if (body.confirmed !== true) fail(400, '请先确认作品在试加载中运行正常');
       const title = clip(body.title, 40);
       if (!title) fail(400, '请填写作品标题');
@@ -737,8 +792,8 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       const effort = effortOf(body.effort);
       if (!effort) fail(400, '请选择或填写推理档位');
       if (!source.providerId) fail(400, '请选择服务商');
-      const promptVariant = promptVariantFrom(draft.task_id, body, '', user.role !== 'admin');
-      if (user.role !== 'admin' && !source.harnessId && !source.harnessOther) fail(400, '请选择或填写 Harness');
+      const promptVariant = promptVariantFrom(draft.task_id, body, '', !isStaff(user));
+      if (!isStaff(user) && !source.harnessId && !source.harnessOther) fail(400, '请选择或填写 Harness');
       const who = identity(body);
       const cover = coverFrom(body.cover);
       // Admins stage inbox registrations as unverified works in bulk; the per-user
@@ -777,7 +832,9 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
             who.modelId ? '' : who.vendor, effort, source.harnessId, source.harnessOther, source.providerId,
             source.providerOther, clip(body.note, 1000), token('w'), draft.source_name, draft.root, draft.entry, draft.file_count,
             draft.bytes, draft.digest, draft.checks, JSON.stringify(sanitizeTrial(body.trial)), coverName, now, now,
-            ...GENERATION_FIELDS.map((key) => generation[key]), JSON.stringify(config.moderation?.enabled ? pendingModeration() : { status: 'legacy' }), promptVariant);
+            ...GENERATION_FIELDS.map((key) => generation[key]), JSON.stringify(isStaff(user)
+              ? { status: 'approved', source: 'human', reviewer: user.nickname || user.name, reason: '管理员发布', at: now }
+              : config.moderation?.enabled ? pendingModeration() : { status: 'legacy' }), promptVariant, roleOf(user.role));
           q.deleteDraft.run(draft.id);
           q.audit.run(now, user.id, user.name, 'submit', taskId, id, `${who.modelName}${effortOf(body.effort) ? ` · ${effortOf(body.effort)}` : ''}`);
           if (cover) renameSync(pendingCover, join(media, coverName));
@@ -792,20 +849,23 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
 
     // Admins edit any upload; authors edit their own until it has been reviewed.
     setMeta(actor, taskId, id, body, { author = false, inTransaction = false } = {}) {
-      const work = upload(taskId, id);
+      const work = this.work(taskId, id);
       if (!work) fail(404, '作品不存在', 'not_found');
       const admin = !author;
+      if (admin) requireStaff(actor, work, false);
       if (!admin && work.ownerId !== actor.id) fail(403, '只能修改自己上传的作品');
       if (!admin && work.status !== 'unverified') fail(409, '作品已核验，信息不能再修改；如有错误请删除后重新上传');
       if (!plainObject(body) || !Object.keys(body).length ||
         Object.keys(body).some((key) => !['title', 'summary', 'note', 'modelName', 'modelId', 'vendor', 'effort', 'promptVariant', 'task',
           'harnessId', 'harnessOther', 'harnessVersion', 'providerId', ...GENERATION_FIELDS, ...IGNORED_GENERATION_FIELDS].includes(key))) fail(400, '没有可修改的内容');
-      if (Object.keys(body).every((key) => key === 'harnessVersion' || IGNORED_GENERATION_FIELDS.includes(key))) return admin ? this.adminWork(work) : this.toPublic(work, actor);
+      if (Object.keys(body).every((key) => key === 'harnessVersion' || IGNORED_GENERATION_FIELDS.includes(key))) return admin ? this.adminWork(work, actor) : this.toPublic(work, actor);
       // Re-homing to another task is an admin correction; the target must be a live
-      // catalog task or community question, and history moves along with the work.
+      // question, and history moves along with the work.
       let moved = null;
       if (body.task !== undefined && String(body.task) !== taskId) {
         if (!admin) fail(403, '只有管理员可以调整归属题目');
+        requireStaff(actor, work);
+        if (work.curated) fail(400, '数据包作品不能调整归属题目');
         const target = String(body.task);
         if (!catalog.task(target) && !q.questionExists.get(target)) fail(400, '目标题目不存在', 'invalid_task');
         moved = { from: taskId, to: target };
@@ -813,18 +873,27 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       const title = body.title === undefined ? work.title : clip(body.title, 40);
       if (!title) fail(400, '请填写作品标题');
       const summary = body.summary === undefined ? work.summary : clip(body.summary, 200);
+      const currentIdentity = displayIdentity(work);
       const who = body.modelId !== undefined || body.modelName !== undefined || body.vendor !== undefined
-        ? identity({ ...work, vendor: work.modelId ? '' : work.vendor,
-          ...(body.modelName !== undefined ? { modelId: null } : {}), ...body }) : work;
+        ? identity({ ...currentIdentity, vendor: currentIdentity.modelId ? '' : work.vendor,
+          ...(body.modelName !== undefined ? { modelId: null } : {}), ...body }) : currentIdentity;
       const effort = body.effort !== undefined ? effortOf(body.effort) : work.effort;
       const source = provenance(body, work);
       if (body.effort !== undefined && !effort) fail(400, '请选择或填写推理档位');
       if (Object.hasOwn(body, 'providerId') && !source.providerId) fail(400, '请选择服务商');
-      if (!admin && !source.harnessId && !source.harnessOther) fail(400, '请选择或填写 Harness');
+      if (!admin && !isStaff(actor) && !source.harnessId && !source.harnessOther) fail(400, '请选择或填写 Harness');
       const generation = generationFrom(body, work);
-      const promptVariant = promptVariantFrom(taskId, body, work.promptVariant, !admin);
+      const promptVariant = promptVariantFrom(taskId, body, work.promptVariant, !admin && !isStaff(actor));
       const note = body.note === undefined ? work.note : clip(body.note, 1000);
       const apply = () => {
+        if (work.curated) {
+          const patch = { title, summary, modelId: who.modelId, modelName: who.modelName, vendor: who.vendor, effort,
+            harnessId: source.harnessId, harnessOther: source.harnessOther, providerId: source.providerId,
+            ...generation, promptVariant, note: note ?? '' };
+          q.setDisplay.run(taskId, id, JSON.stringify(patch), actor.id, Date.now());
+          audit(actor, 'meta', work, `编辑信息${generationAudit(work, generation)}`);
+          return;
+        }
         if (moved) {
           q.moveWorkTask.run(moved.to, Date.now(), id);
           q.moveVotes.run(moved.to, moved.from, id, id);
@@ -837,11 +906,11 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
           ...GENERATION_FIELDS.map((key) => generation[key]), promptVariant, note, Date.now(), id);
         audit(actor, 'meta', work, `编辑信息${generationAudit(work, generation)}${moved ? `；归属题目 ${moved.from} → ${moved.to}` : ''}`);
         const next = upload(moved ? moved.to : taskId, id);
-        if (author && config.moderation?.enabled && moderationText(work) !== moderationText(next)) q.moderation.run(JSON.stringify(pendingModeration()), id);
+        if (author && !isStaff(actor) && config.moderation?.enabled && moderationText(work) !== moderationText(next)) q.moderation.run(JSON.stringify(pendingModeration()), id);
       };
       if (inTransaction) apply();
       else transaction(db, apply);
-      return admin ? this.adminWork(upload(moved ? moved.to : taskId, id)) : this.toPublic(upload(moved ? moved.to : taskId, id), actor);
+      return admin ? this.adminWork(this.work(moved ? moved.to : taskId, id), actor) : this.toPublic(this.work(moved ? moved.to : taskId, id), actor);
     },
 
     setCaptures(id, captures) {
@@ -857,8 +926,10 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       });
     },
     reviewContent(admin, taskId, id, body) {
-      const work = upload(taskId, id);
+      const work = this.work(taskId, id);
       if (!work) fail(404, '作品不存在');
+      requireStaff(admin, work);
+      if (work.curated) fail(409, '数据包作品已完成内容审核，请使用作品核验');
       if (!['approved', 'rejected'].includes(body.status)) fail(400, '内容审查结果无效');
       const reason = clip(body.reason, 500) || (body.status === 'approved' ? '人工复核通过' : '');
       if (!reason) fail(400, '请填写人工审查理由');
@@ -866,9 +937,11 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       return upload(taskId, id);
     },
     retryModeration(admin, taskId, id) {
-      if (!config.moderation?.enabled) fail(409, '自动内容审查未启用');
-      const work = upload(taskId, id);
+      const work = this.work(taskId, id);
       if (!work) fail(404, '作品不存在');
+      requireStaff(admin, work);
+      if (work.curated) fail(409, '数据包作品没有托管的上传文件，不能重新自动审核');
+      if (!config.moderation?.enabled) fail(409, '自动内容审查未启用');
       transaction(db, () => {
         q.moderation.run(JSON.stringify(pendingModeration()), id);
         audit(admin, 'content-retry', work, '重新提交自动内容审查');
@@ -878,16 +951,18 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
 
     // ---- review and removal -----------------------------------------------------------
     review(admin, taskId, id, body, { inTransaction = false } = {}) {
-      const work = upload(taskId, id);
+      const work = this.work(taskId, id);
       if (!work) fail(404, '作品不存在');
+      requireStaff(admin, work);
       const status = String(body.status ?? '');
       if (!['verified', 'questioned', 'unverified'].includes(status)) fail(400, '审核结果无效');
       if (status === 'verified' && !['legacy', 'approved'].includes(work.moderation?.status)) fail(409, '请先完成内容审核');
       const reason = clip(body.reason, 500);
       if (status === 'questioned' && !reason) fail(400, '标记存疑时请写明原因，作者和访客都会看到');
+      const currentIdentity = displayIdentity(work);
       const who = body.modelId !== undefined || body.modelName !== undefined || body.vendor !== undefined
-        ? identity({ ...work, vendor: work.modelId ? '' : work.vendor,
-          ...(body.modelName !== undefined ? { modelId: null } : {}), ...body }) : work;
+        ? identity({ ...currentIdentity, vendor: currentIdentity.modelId ? '' : work.vendor,
+          ...(body.modelName !== undefined ? { modelId: null } : {}), ...body }) : currentIdentity;
       const effort = body.effort !== undefined ? effortOf(body.effort) : work.effort;
       const source = provenance(body, work);
       const generation = generationFrom(body, work);
@@ -928,7 +1003,14 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       const now = Date.now();
       const labels = { verified: '通过验证', questioned: '标记存疑', unverified: '退回未验证' };
       const apply = () => {
-        q.review.run(status, status === 'verified' ? '' : reason, who.modelId, who.modelId ? '' : who.modelName, who.modelId ? '' : who.vendor, effort,
+        if (work.curated) {
+          q.reviewPack.run(taskId, id, status, status === 'verified' ? '' : reason, admin.id, now, admin.id, now);
+          const patch = { title, summary, modelId: who.modelId, modelName: who.modelName, vendor: who.vendor, effort,
+            harnessId: source.harnessId, harnessOther: source.harnessOther, providerId: source.providerId,
+            ...generation, promptVariant: work.promptVariant ?? '', note: work.note ?? '' };
+          q.setDisplay.run(taskId, id, JSON.stringify(patch), admin.id, now);
+          q.setOverride.run(taskId, id, Number(gallery), Number(arena), Number(entertainment), admin.id, now);
+        } else q.review.run(status, status === 'verified' ? '' : reason, who.modelId, who.modelId ? '' : who.modelName, who.modelId ? '' : who.vendor, effort,
           source.harnessId, source.harnessOther, source.providerId, source.providerOther,
           ...GENERATION_FIELDS.map((key) => generation[key]), Number(gallery), Number(arena), Number(entertainment), route, title, summary,
           work.note, now,
@@ -939,7 +1021,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       };
       if (inTransaction) apply();
       else transaction(db, apply);
-      return upload(taskId, id);
+      return this.work(taskId, id);
     },
 
     reviewWithMeta(admin, taskId, id, body) {
@@ -949,49 +1031,17 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       });
     },
 
-    inboxWorks() {
-      return this.uploads().filter((work) => work.entertainmentRoute === 1).map((work) => this.adminWork(work));
+    inboxWorks(viewer = null) {
+      return this.uploads().filter((work) => work.entertainmentRoute === 1).map((work) => this.adminWork(work, viewer));
     },
 
     setDisplay(admin, taskId, id, body) {
-      const work = this.work(taskId, id);
-      if (!work?.curated) fail(400, '只有馆藏作品可以写显示覆写', 'not_curated');
-      if (!plainObject(body) || !Object.keys(body).length
-        || Object.keys(body).some((key) => !DISPLAY_KEYS.includes(key))) fail(400, '没有可修改的内容');
-      const current = {};
-      try { Object.assign(current, JSON.parse(q.override.get(taskId, id)?.display_json || '{}')); } catch { /* replace a broken override */ }
-      const next = { ...current };
-      if (Object.hasOwn(body, 'title')) next.title = clip(body.title, 40);
-      if (Object.hasOwn(body, 'summary')) next.summary = clip(body.summary, 200);
-      if (Object.hasOwn(body, 'modelName')) next.modelName = clip(body.modelName, 60);
-      if (Object.hasOwn(body, 'effort')) next.effort = effortOf(body.effort);
-      if (Object.hasOwn(body, 'title') && !next.title) fail(400, '请填写作品标题');
-      if (Object.hasOwn(body, 'effort') && !next.effort) fail(400, '请选择或填写推理档位');
-      if (Object.hasOwn(body, 'providerId')) {
-        const provider = body.providerId === '' ? null : body.providerId;
-        if (provider !== null && (typeof provider !== 'string' || !catalog.provider(provider))) fail(400, '所选服务商不存在');
-        next.providerId = provider ?? '';
-      }
-      if (Object.hasOwn(body, 'harnessId') || Object.hasOwn(body, 'harnessOther')) {
-        const source = provenance(body, { ...work, ...next });
-        next.harnessId = source.harnessId ?? '';
-        next.harnessOther = source.harnessOther ?? '';
-      }
-      if (Object.hasOwn(body, 'generationMode') || Object.hasOwn(body, 'humanIntervention')) {
-        const generation = generationFrom(body, { ...work, ...next });
-        next.generationMode = generation.generationMode;
-        next.humanIntervention = generation.humanIntervention;
-      }
-      const now = Date.now();
-      transaction(db, () => {
-        q.setDisplay.run(taskId, id, JSON.stringify(next), admin.id, now);
-        audit(admin, 'display', work, JSON.stringify(next));
-      });
-      return this.adminWork(this.work(taskId, id));
+      return this.setMeta(admin, taskId, id, body);
     },
 
     // Assigning a task moves the work out of the inbox. Metadata alone leaves it there.
     assignInbox(admin, items, { task = null, entertainment = false } = {}) {
+      requireStaff(admin, null);
       if (!Array.isArray(items) || items.length < 1 || items.length > 200
         || items.some((item) => !plainObject(item) || typeof item.task !== 'string' || !item.task || typeof item.id !== 'string' || !item.id))
         fail(400, '作品列表无效（每次最多 200 件）', 'invalid_work_list');
@@ -1001,34 +1051,37 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       return transaction(db, () => items.map(({ task: from, id }) => {
         const work = upload(from, id);
         if (!work || work.entertainmentRoute !== 1) fail(404, '收件箱里没有这件作品', 'not_found');
+        requireStaff(admin, work);
         if (task != null && String(task) !== from) this.setMeta(admin, from, id, { task: String(task) }, { inTransaction: true });
         const home = task != null ? String(task) : from;
         if (task != null) q.setRoute.run(2, now, id);
         if (entertainment) this.setFaceSettings(admin, home, id, { show_entertainment: true }, true);
         audit(admin, task != null ? 'inbox-assign' : 'inbox-note', { taskId: home, id }, task != null ? `归属题目 ${from} → ${home}` : '补充信息');
-        return this.adminWork(this.work(home, id));
+        return this.adminWork(this.work(home, id), admin);
       }));
     },
 
     remove(user, taskId, id) {
-      if (catalog.work(taskId, id)) fail(409, '馆藏作品由仓库收录流程管理，需要在仓库中移除');
-      const work = upload(taskId, id);
+      const work = this.work(taskId, id);
       if (!work) fail(404, '作品不存在');
-      if (work.ownerId !== user.id && user.role !== 'admin') fail(403, '只能删除自己上传的作品');
+      if (work.ownerId !== user.id && !isSenior(user)) fail(403, '只能删除自己上传的作品');
       const votes = q.votesOfWork.get(taskId, id, id).n;
       if (votes > 0) fail(409, `这件作品已有 ${votes} 票对局记录，删除会破坏历史。请用「标记存疑」让它下线`);
       const now = Date.now();
       transaction(db, () => {
-        q.remove.run(now, now, id);
+        if (work.curated) q.removePack.run(taskId, id, now, user.id, now);
+        else q.remove.run(now, now, id);
         audit(user, 'delete', work, user.id === work.ownerId ? '作者删除' : '管理员删除');
       });
-      rmSync(join(dirs.works, id), { recursive: true, force: true });
-      rmSync(join(dirs.media, id), { recursive: true, force: true });
+      if (!work.curated) {
+        rmSync(join(dirs.works, id), { recursive: true, force: true });
+        rmSync(join(dirs.media, id), { recursive: true, force: true });
+      }
     },
 
     // ---- reactions -------------------------------------------------------------------------
     react(user, taskId, id, emoji) {
-      const work = catalog.work(taskId, id) ?? upload(taskId, id);
+      const work = this.work(taskId, id);
       if (!work) fail(404, '作品不存在');
       if (!isInteractive(work)) fail(409, '存疑作品仅供参考，不能再互动');
       if (!EMOJIS.includes(emoji)) fail(400, '不支持这个表情');

@@ -1,5 +1,5 @@
 // Admin staging inbox: files wait here until an admin previews them and registers
-// them as works. Registration reuses the platform's draft → submit → review pipeline,
+// them as works. Registration reuses the platform's draft → submit pipeline,
 // so every check (entry detection, duplicate digests, unsafe paths) runs unchanged.
 //
 // Entries live on disk under generated ASCII ids (`<id>.bin`, `<id>.d/`, `<id>.json`)
@@ -132,19 +132,9 @@ export function createInbox({ library, config, limits }) {
         library.discardDraft(admin, draft.id);
         throw error;
       }
-      if (body.publish) {
-        work = library.reviewContent(admin, work.taskId, work.id, { status: 'approved', reason: '管理员上传' });
-        work = library.review(admin, work.taskId, work.id, { status: 'verified',
-          ...(body.show_gallery === undefined ? {} : { show_gallery: Boolean(body.show_gallery) }),
-          ...(body.show_arena === undefined ? {} : { show_arena: Boolean(body.show_arena) }) });
-      } else {
-        // Per-face review: registration decides nothing about display. The work waits
-        // with both faces off until each system's review turns its own face on.
-        library.setFaceSettings(admin, work.taskId, work.id, { show_gallery: false, show_arena: false });
-        work = library.work(work.taskId, work.id);
-      }
+      // Staff publication clears content review, but still needs an explicit verification.
       destroy(id);
-      library.audit(admin, 'inbox-register', work, `${meta.name}${body.publish ? ' · 登记并发布' : ' · 登记为待核验'}`);
+      library.audit(admin, 'inbox-register', work, `${meta.name} · 登记为待核验`);
       return work;
     },
 

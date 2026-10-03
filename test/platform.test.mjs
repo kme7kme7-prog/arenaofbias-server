@@ -280,7 +280,7 @@ test('v6 migrates legacy password hashes on first successful login', async () =>
     nickname TEXT NOT NULL DEFAULT '');
     CREATE TABLE sessions (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users (id),
       created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
-    CREATE TABLE works (id TEXT PRIMARY KEY, status TEXT NOT NULL, task_id TEXT NOT NULL, deleted_at INTEGER, reviewed_at INTEGER, updated_at INTEGER);
+    CREATE TABLE works (id TEXT PRIMARY KEY, status TEXT NOT NULL, task_id TEXT NOT NULL, owner_id TEXT, deleted_at INTEGER, reviewed_at INTEGER, updated_at INTEGER);
     CREATE TABLE votes (id TEXT PRIMARY KEY, identity_source TEXT NOT NULL DEFAULT 'legacy');
     CREATE TABLE audit (id INTEGER PRIMARY KEY, at INTEGER, actor_id TEXT, actor_name TEXT, action TEXT, task_id TEXT, work_id TEXT, detail TEXT);
     PRAGMA user_version = 5;`);
@@ -318,7 +318,7 @@ test('malformed legacy hash_params are treated as a wrong password, never a 500'
     nickname TEXT NOT NULL DEFAULT '');
     CREATE TABLE sessions (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users (id),
       created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
-    CREATE TABLE works (id TEXT PRIMARY KEY, status TEXT NOT NULL, task_id TEXT NOT NULL, deleted_at INTEGER, reviewed_at INTEGER, updated_at INTEGER);
+    CREATE TABLE works (id TEXT PRIMARY KEY, status TEXT NOT NULL, task_id TEXT NOT NULL, owner_id TEXT, deleted_at INTEGER, reviewed_at INTEGER, updated_at INTEGER);
     CREATE TABLE votes (id TEXT PRIMARY KEY, identity_source TEXT NOT NULL DEFAULT 'legacy');
     CREATE TABLE audit (id INTEGER PRIMARY KEY, at INTEGER, actor_id TEXT, actor_name TEXT, action TEXT, task_id TEXT, work_id TEXT, detail TEXT);
     PRAGMA user_version = 5;`);
@@ -669,7 +669,7 @@ describe('platform lifecycle', () => {
     assert.doesNotMatch(original.text, /__sp_fold\.js/);
     const boot = await call('bob', 'GET', '/api/bootstrap');
     assert.equal(boot.data.arena.one.works, 2, 'unverified uploads stay out of blind comparisons; curated works are in by default');
-    assert.equal(boot.data.works.length, 0, 'uploads stay off public listings until a human decision');
+    assert.equal(boot.data.works.length, 2, 'package works are public while uploads wait for a human decision');
     assert.equal((await call('alice', 'GET', '/api/me')).data.works[0].id, upload.id);
   });
 
@@ -827,7 +827,7 @@ describe('platform lifecycle', () => {
     assert.equal((await call('bob', 'DELETE', `/api/works/one/${upload.id}`)).status, 403);
     assert.equal((await call('alice', 'DELETE', `/api/works/one/${upload.id}`)).status, 409, 'works with votes keep the match history; question them instead');
     assert.equal((await fetchContent(upload.scene)).status, 200, 'the voted work stays online');
-    assert.equal((await call('root', 'DELETE', '/api/works/one/a1')).status, 409, 'curated works are managed in the repository');
+    assert.equal((await call('root', 'DELETE', '/api/works/one/a1')).status, 409, 'package works with votes preserve match history');
     const staged = await call('alice', 'POST', '/api/drafts?task=one&name=temp.html', '<!doctype html><html><head><title>Temp</title></head><body><p>Temp</p></body></html>', { raw: true });
     const temp = await call('alice', 'POST', '/api/works', { draftId: staged.data.draft.id, confirmed: true, title: 'Temp', modelId: 'm-a', effort: 'Default', providerId: 'official', tool: 'CLI' });
     assert.equal(temp.status, 200);
@@ -852,11 +852,11 @@ describe('platform lifecycle', () => {
     assert.equal(promoted.data.user.role, 'admin');
     assert.equal((await call('alice', 'GET', '/api/admin/users')).status, 200, 'promotion takes effect on the next request');
 
-    const demoted = await call('root', 'POST', `/api/admin/users/${alice.id}/role`, { role: 'member' });
+    const demoted = await call('root', 'POST', `/api/admin/users/${alice.id}/role`, { role: 'user' });
     assert.equal(demoted.status, 200);
     assert.equal((await call('alice', 'GET', '/api/admin/users')).status, 403, 'demotion takes effect on the next request');
 
-    assert.equal((await call('root', 'POST', `/api/admin/users/${root.id}/role`, { role: 'member' })).status, 409, 'an admin cannot demote itself');
+    assert.equal((await call('root', 'POST', `/api/admin/users/${root.id}/role`, { role: 'user' })).status, 409, 'an admin cannot demote itself');
     assert.equal((await call('root', 'POST', `/api/admin/users/${alice.id}/role`, { role: 'boss' })).status, 400, 'unknown roles are refused');
     assert.equal((await call('root', 'POST', '/api/admin/users/nope/role', { role: 'admin' })).status, 404);
 
@@ -886,15 +886,16 @@ describe('platform lifecycle', () => {
     });
     assert.equal(created.status, 200);
     const question = created.data.question;
-    assert.deepEqual(question.tags, ['Three.js', '界面']);
-    assert.equal(question.owner, 'bob');
+    assert.equal(question.author.role, 'user');
+    assert.equal(question.author.name, 'bob');
     assert.equal(question.version, 1);
     const approved = await call('root', 'POST', `/api/questions/${question.id}/moderation`, { status: 'approved' });
     assert.equal(approved.status, 200);
     await call('root', 'POST', `/api/works/${question.id}/${created.data.work.id}/review`, { status: 'verified' });
     const boot = (await call('guest', 'GET', '/api/bootstrap')).data;
     assert.equal(boot.questions.find((q) => q.id === question.id).prompt, question.prompt);
-    assert.equal(boot.arena[question.id].uploads, true);
+    assert.equal(boot.questions.find((q) => q.id === question.id).acceptsUploads, true);
+    assert.equal('uploads' in boot.arena[question.id], false);
     assert.equal((await call('guest', 'GET', `/api/leaderboard?task=${question.id}`)).status, 200);
     const reopened = openDatabase(join(root, 'data', 'platform.db'));
     try { const { moderation, ...publicQuestion } = approved.data.question; assert.deepEqual(createQuestions(reopened).get(question.id), publicQuestion); } finally { reopened.close(); }
@@ -974,10 +975,10 @@ describe('platform lifecycle', () => {
     assert.equal(changed.status, 200);
     assert.equal(changed.data.user.name, 'alice');
     assert.equal(changed.data.user.nickname, '河畔观测员');
-    assert.equal(changed.data.user.role, 'member');
+    assert.equal(changed.data.user.role, 'user');
     const boot = (await call('alice', 'GET', '/api/bootstrap')).data;
     assert.equal(boot.user.nickname, '河畔观测员');
-    assert.ok(boot.questions.some((question) => question.owner === '河畔观测员'));
+    assert.ok(boot.questions.some((question) => question.author.name === '河畔观测员'));
     assert.equal((await call('bob', 'GET', '/api/bootstrap')).data.user.nickname, 'bob');
     const reopened = openDatabase(join(root, 'data', 'platform.db'));
     try { assert.equal(reopened.prepare('SELECT nickname FROM users WHERE name = ?').get('alice').nickname, '河畔观测员'); } finally { reopened.close(); }
@@ -1000,8 +1001,8 @@ describe('platform lifecycle', () => {
     assert.equal(changed.data.user.avatar, picked);
     assert.notEqual(changed.data.user.nickname, '不该保存');
     assert.ok((await call('bob', 'GET', '/api/bootstrap')).data.questions
-      .filter((question) => question.community && question.owner === changed.data.user.nickname)
-      .every((question) => question.ownerAvatar === picked));
+      .filter((question) => question.author.role === 'user' && question.author.name === changed.data.user.nickname)
+      .every((question) => question.author.avatar === picked));
   });
 
   test('personal activity counts participation while received reactions exclude self and deleted works', async () => {

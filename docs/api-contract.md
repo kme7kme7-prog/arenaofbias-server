@@ -12,7 +12,7 @@
 
 ### 1.1 服务定位
 
-本服务是整个体系中**唯一的动态服务与唯一写库者**，负责账号、投票、排行榜、投稿审核与作品沙盒伺服。`ArenaGalleri` 提供静态画廊前端与原作展示，`arenaofbias` 提供主站，`arenaofbias-server` 提供动态 API、数据库、`/admin/` 管理页面和投稿沙盒，`arenaofbias-data` 构建后端读取的馆藏数据包。两个用户前端各自部署并调用本服务；数据库（`DATA_DIR/platform.db`）由本服务独占，前端不直接读写。旧 same-prompt-gallery 已归档。
+本服务是整个体系中**唯一的动态服务与唯一写库者**，负责账号、投票、排行榜、投稿审核与作品沙盒伺服。`ArenaGalleri` 提供静态画廊前端与原作展示，`arenaofbias` 提供主站，`arenaofbias-server` 提供动态 API、数据库、`/admin/` 管理页面和投稿沙盒，`arenaofbias-data` 构建后端读取的数据包数据包。两个用户前端各自部署并调用本服务；数据库（`DATA_DIR/platform.db`）由本服务独占，前端不直接读写。旧 same-prompt-gallery 已归档。
 
 服务同时监听**两个端口**：
 
@@ -29,7 +29,7 @@
 | 2026-09-28 本机联调 | 前端 `http://localhost:4175`；API 与媒体 `http://localhost:5190`；作品内容 `http://{token}.localhost:5191`。后端设 `PORT=5190`、`CONTENT_PORT=5191`、`SITE_ORIGINS=http://localhost:4175`、`DIST_DIR=<已构建数据包目录>`、`DATA_DIR=<隔离运行目录>`、`CAPTURE=0`；前端 API base URL 指向 `http://localhost:5190/` |
 | 生产环境 | 正式 API 为 `https://api.arenaofbias.icu`，由 systemd `arenaofbias-server` 管理，API 监听 `127.0.0.1:5273`、作品监听 `127.0.0.1:5180`；作品源为 `*.w.arenaofbias.icu`。最近已记录发布版本见 [HANDOFF](../HANDOFF.md)，每次部署仍须现场核对。作品迁至独立可注册主域仍是已知运维项。 |
 
-作品内容 URL 不写在各端点文档里逐个列出，而是由响应字段（`bootstrap.site.content`、作品对象的 `scene`、对战对象的 `a`/`b`）以完整 URL 形式下发，前端直接消费，不自行拼接。投稿 `captures` / `cover` 返回相对路径 `media/...`，前端以 API 站点根解析；馆藏 `scene` 路径取自画廊所用数据包。
+作品内容 URL 不写在各端点文档里逐个列出，而是由响应字段（`bootstrap.site.content`、作品对象的 `scene`、对战对象的 `a`/`b`）以完整 URL 形式下发，前端直接消费，不自行拼接。投稿 `captures` / `cover` 返回相对路径 `media/...`，前端以 API 站点根解析；数据包 `scene` 路径取自画廊所用数据包。
 
 ### 1.3 认证方式
 
@@ -40,7 +40,22 @@
 - 前端请求需携带 Cookie（`fetch` 使用 `credentials: 'include'`，XHR 使用 `withCredentials = true`）。`COOKIE_SAME_SITE` 支持 `Lax`（默认）、`Strict`、`None`；跨站 HTTPS 部署设 `None` 并开启 `COOKIE_SECURE=1`，否则服务拒绝启动。第三方 Cookie 仍受浏览器设置限制，建议前端与 API 使用同站域名。
 - 生产会话 Cookie 只属于 `api.arenaofbias.icu`；game 与 Gallery 都必须直接请求 `https://api.arenaofbias.icu` 才能共用登录状态，经前端自身域名反代的 `/api` 会产生独立会话。
 - 登出（`POST /api/auth/logout`）删除服务端会话并下发 `Max-Age=0` 的清空 Cookie。
-- 角色：`member`（默认）与 `admin`。管理员账号只能经 CLI 新建（`npm run admin -- --create <用户名>`，密码从标准输入读取、不回显），或将已有普通账号提权（`npm run admin -- <用户名>` 或管理员角色接口）。公开注册拒绝 `ADMIN_USERNAMES` 中的保留用户名；已有账号登录时仍按该配置同步管理员角色。
+- 角色：`user`（普通用户，默认）、`moderator`（普通管理员）、`admin`（高级管理员）。管理员账号只能经 CLI 新建（`npm run admin -- --create <用户名>`，密码从标准输入读取、不回显），或将已有普通账号提权（`npm run admin -- <用户名>` 或管理员角色接口）。公开注册拒绝 `ADMIN_USERNAMES` 中的保留用户名；已有账号登录时仍按该配置同步管理员角色。
+
+### 1.3.1 三级权限
+
+`isStaff` 包含 admin / moderator，`isSenior` 仅 admin。高级管理员可审核自己的作品与题目；普通管理员不能对自己发布的作品作审核决定，返回 `403` 并提示需要其他管理员处理，编辑自己的作品信息可以。
+
+| 操作 | admin | moderator |
+| --- | --- | --- |
+| 作品内容审核、重新自动审核、人工核验、对应批量接口 | 允许 | 允许，禁止处理自己的作品 |
+| 作品信息编辑、门面开关、校准、收件箱 | 允许 | 允许；自己的作品只可编辑信息 |
+| GET review、GET admin/works、私密预览令牌 | 允许 | 允许 |
+| 题目审核、题目编辑、GET admin/questions | 允许 | 403 |
+| 删除他人的题目或作品 | 允许，无票才可删除 | 403 |
+| 角色管理、流量、主编视角、其他未开放的旧管理员接口 | 允许 | 403 |
+
+作者删除本人题目或作品沿用原作者规则。工作人员发作品跳过 AI 内容审查与人工内容审核，保存 human / approved，仍为 unverified，人工核验通过才公开；工作人员发题目仍进 pending，且不受 3 道待审上限约束。普通用户流程保持原有审核规则。`/admin/` 支持普通管理员登录，隐藏题目、删除他人条目、角色、流量等无权限入口；最终权限以后端 403 为准。
 
 ### 1.4 通用错误格式
 
@@ -93,84 +108,81 @@ API 域静态 `/data.json`（含等价编码路径）仅管理员登录后返回
 
 ## 2. 数据模型
 
-以下字段定义以 `server/db.mjs`（表结构）与 `server/catalog.mjs`（馆藏读取）为准。HTTP 层暴露的是经 `library.toPublic` 整形后的「公开视图」，二者分列。
+以下字段定义以 `server/db.mjs`（表结构）与 `server/catalog.mjs`（数据包读取）为准。HTTP 层暴露的是经 `library.toPublic` 整形后的「公开视图」，二者分列。
 
 ### 2.1 作品（work）
 
-作品文件有两个来源：**数据包作品**（`curated: true`，随数据包 `dist/data.json` 分发，视同已核验的投稿）与**投稿作品**（upload，写入数据库，走审核流）。两者的展示与盲评规则相同：数据包作品没有 override 行时展览馆、竞技场、娱乐三面默认开启，管理员用同一套开关关闭；只有旧 Show1 快照已有作品的轮次（001–008），数据包作品的娱乐面默认关闭，因为同一作品已以旧投稿身份在娱乐名单中。投稿收录进数据包的流程已退役，历史 `curated_as` 列仍让已收录的原投稿不重复出现。
+对外只有一套作品，以 `task/id` 标识；数据包中的作品 ID 可以跨题重复。文件保存在数据包目录或 SQLite 作品对应的上传目录，存储分流仅在后端内部。数据包条目默认已通过核验，数据库新作品默认 `unverified`。两者共用展示开关、盲评资格、文字编辑、核验与删除操作。历史 `curated_as` 非空的数据库作品继续排除，防止同一件作品重复显示。
 
-**投稿作品（数据库行，时间均为毫秒整数）：**
+统一发布者形状：
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | string | `up-` + 8 位小写字母数字（如 `up-3f9k2m1x`） |
-| `taskId` | string | 所属题目 ID |
-| `ownerId` / `ownerName` | string / null | 作者；作者账号删除后为 null |
-| `title` / `summary` / `note` | string | 标题（≤40 字）/ 简介（≤200 字）/ 备注（≤1000 字） |
-| `modelId` / `modelName` / `vendor` | string / null | 模型归属；`modelId` 命中数据包模型表时名称与厂商取自模型表 |
-| `effort` | string | 新投稿必填的强度档位，禁止显式清空；大小写不敏感地归入 `Low / Medium / High / XHigh / Max`；未知值原样保留 |
-| `generationMode` | string | `single-turn`（单轮）、`multi-turn`（多轮）；用户只发一次提示词即为单轮，智能体自主迭代也算单轮；空串为未注明；历史 `agent` 读取为 `single-turn`，新写 `agent` 返回 400 |
-| `humanIntervention` | string | `none`（仅初始提示，未改代码）、`prompt-guided`（额外人工提示指导，未改代码）、`code-edited`（人工改代码）；空串为未注明 |
-| `promptVariant` | string | 生成时使用的题目提示词版本 ID（数据包 `promptVariants[].id`）；单一提示词题目为空串（schema v21） |
-| `tool` | string | 兼容输出，由 Harness 注册表名称或「其他」原文生成，不再独立存储 |
-| `harnessId` / `harnessOther` | string / null、string | Harness 注册表 ID 或自填「其他」，两者互斥；旧作品分别为 null、空串。写入时 ID 传空串与 null 相同，表示未注明 |
-| `providerId` | `official` \| `unofficial` \| null | 官方（模型厂商自己的 API、网页或 App）或非官方（其他一切）；新投稿必填，禁止显式清空；历史 null 表示未注明。内部兼容字段 `providerOther` 恒为空串，不再接受手填 |
-| `status` | `unverified` \| `verified` \| `questioned` | 审核状态，默认 `unverified` |
-| `audience` | `hidden` \| `show1` \| `show2` \| `both` | 兼容输出，由两个展示开关计算；v18 删除数据库列 |
-| `reason` | string | 审核理由；`verified` 时恒为空串 |
-| `reviewerName` / `reviewedAt` | string / null | 审核人从最近一次审核 audit 解析；审核时间保留在作品行 |
-| `contentKey` | string | 作品永久内容令牌（`w` + 32 位十六进制），作品 origin 的子域名 |
-| `checks` / `trial` | object | 上传检查报告 / 试加载探针数据（仅作者与管理员可见） |
-| `arena` | object | 盲评池状态（仅作者与管理员可见；管理员作品视图的投稿与数据包作品都输出）：`{ "state": "in_pool" \| "off" \| "not_qualified" \| "curated" \| "waiting", "reason"?: "多轮生成" \| "有人工介入" \| "生成方式未填写" }`。`off` 为管理员关闭竞技场开关，`not_qualified` 为开关开启但生成方式不符，`waiting` 为尚未核验或内容未放行，`curated` 为已转为馆藏。客户端只显示此结论，不自行推断。 |
-| `trial.calibration` | object / null | Show1 逐作品展示设置，含可选的 `framing`（画布）与 `camera`（3D 视角）；没有时缺省 |
-| `captures` | object | 截图映射 `{条件id: 文件名}`，由自动截图写回 |
-| `cover` | string / null | 封面文件名（`cover.png` / `cover.jpg` / `cover.webp`） |
-| `files` / `bytes` / `digest` | number / number / string | 文件数、解压后字节数、全包 SHA-256 |
-| `createdAt` / `reviewedAt` | number / null | 时间戳（公开视图中转为 ISO 字符串） |
+```json
+{ "author": { "role": "admin", "name": null, "avatar": null }, "mine": false }
+```
 
-**HTTP 公开视图（`toPublic`）：**
+- `author.role` 为创建时角色，持久化于 `author_role`，不随账号后来升降权变化，可取 `admin` / `moderator` / `user`。数据包题目与作品固定为 `admin`。
+- 公开与作者接口（bootstrap、me、作品列表、对局揭晓）中，`admin` / `moderator` 的姓名与头像恒为 null，前端显示站点名；普通用户返回昵称和头像，已注销作者姓名为 null。管理员视图另行返回可追溯的真实账号昵称。
+- `mine` 根据当前会话与作者账号计算。DTO 删除 `owner`、`ownerName`、`ownerAvatar`、`curated`、`community`、`source`、`curatedAs`、`nominatedAt`；内容审核对象内的 `moderation.source` 仍表示审核方式。
 
-投稿作品：
+作品公开视图示例：
 
 ```json
 {
-  "task": "chinese-architecture",
-  "id": "up-3f9k2m1x",
-  "curated": false,
+  "task": "chinese-architecture", "id": "up-3f9k2m1x",
   "title": "体素小城", "summary": "……", "note": "……",
   "model": "grok-4.6", "modelName": "Grok 4.6", "vendor": "xAI",
-  "effort": "High", "tool": "CLI",
-  "harness": "claude-code", "harnessName": "Claude Code",
-  "provider": "official",
+  "effort": "High", "tool": "CLI", "harness": "claude-code", "harnessName": "Claude Code",
+  "provider": "official", "generationMode": "single-turn", "humanIntervention": "none",
   "status": "verified", "reason": "",
-  "owner": "alice", "mine": false,
+  "author": { "role": "user", "name": "alice", "avatar": "avatar-id" }, "mine": false,
   "addedAt": "2026-09-27T08:00:00.000Z", "reviewedAt": null,
   "scene": "http://w<32hex>.localhost:5180/",
-  "captures": { "first": "media/up-3f9k2m1x/first.jpg", "mobile": "media/up-3f9k2m1x/mobile.jpg" },
-  "cover": "media/up-3f9k2m1x/cover.webp",
-  "files": 12, "bytes": 183411
+  "captures": { "first": "media/up-3f9k2m1x/first.jpg" },
+  "cover": "media/up-3f9k2m1x/cover.webp", "files": 12, "bytes": 183411
 }
 ```
 
-- `scene` 为完整 origin URL（末尾带 `/`），iframe 直接加载。
-- `captures` / `cover` 为相对 API 站点的路径（前端拼 base URL）；无封面时 `cover` 为 `null`。
-- **特权字段**（仅作者本人或管理员可见，普通访客与匿名者不返回）：`checks`、`trial`、`sourceName`、`root`、`entry`、`reviewer`。
-- 投稿作品公开视图另有 `calibration`（对象或 `null`），从 `trial.calibration` 提取；`trial` 其余数据仍为特权字段。馆藏作品不使用这套 Show1 校准数据，也不增加该字段；Show2 画廊沿用自己的展示方式。
+| 字段 | 规则 |
+| --- | --- |
+| `title` / `summary` / `note` | 标题 ≤40 字、简介 ≤200 字、补充说明 ≤1000 字 |
+| `model` / `modelName` / `vendor` | 登记模型或自由文本；编辑字段名为 `modelId`，自填模型使用 `modelName` / `vendor` |
+| `effort` | 新作品必填，归一到 Low / Medium / High / XHigh / Max，其他档位保留；编辑不可显式清空 |
+| `harness` / `harnessName` / `tool` | Harness 注册表或自填名称派生；编辑使用 `harnessId` / `harnessOther`，不收集 Harness 版本 |
+| `provider` | official / unofficial / null；新作品及核验通过前须填写；编辑使用 `providerId` |
+| `generationMode` | single-turn / multi-turn / 空串；历史 agent 读取为 single-turn，新写 agent 返回 400 |
+| `humanIntervention` | none / prompt-guided / code-edited / 空串 |
+| `promptVariant` | 数据包提示词版本 ID，非空时输出 |
+| `status` / `reason` | unverified / verified / questioned；存疑须有理由，verified 时理由清空 |
+| `moderation` | 内容审核状态，作者视图裁剪自动拒绝理由，管理员视图保留完整结果 |
+| `arena` | 作者或管理员视图的服务端结论：in_pool / off / not_qualified / waiting；不再返回 curated 状态 |
 
-馆藏作品（公开视图字段更少，注意**没有 `scene`**，见 2.7 待拍板）：
+资源字段 `scene`、`captures`、`cover`、`files`、`bytes`、`checks`、`trial`、`sourceName`、`root`、`entry` 仅出现在后端托管文件的数据库作品上。`scene` 为完整 URL；出现的 `captures` / `cover` 一律按 API 根地址解析。`checks`、`trial`、`sourceName`、`root`、`entry`、`reviewer` 为作者或管理员特权字段。数据库作品的 `calibration` 从 `trial.calibration` 提取。
 
-```json
-{ "task": "…", "id": "grok-4.6", "curated": true, "title": "…", "model": "…",
-  "modelName": "…", "vendor": "…", "effort": "…", "tool": "…", "cover": "…", "status": "verified",
-  "harness": null, "harnessName": null, "provider": null }
-```
+数据包作品省略上述资源字段，前端按 `task/id` 取自己数据包中的资源，并以 bootstrap 列表决定哪些作品可以公开。覆盖后的业务字段、核验 `status` / `reason` 在公开与管理员接口中一致生效。数据包作品的展示模型可编辑，原始数据包模型身份仍保留用于计分；已有投票始终按冻结快照或显式更正计分。
 
 ### 2.2 任务 / 题目（task）
 
-馆藏题目由数据包定义；社区题目经 `POST /api/questions` 写入 SQLite，示例作品选填，人工通过后加入同一个投稿与盲评目录。只有未删除、题目内容状态为 `legacy` 或 `approved` 的社区题目及其关联作品能进入公开列表、上传入口与对战池；作品还须满足自己的内容审核、来源核验与门面开关。字段见第 4 节与 3.14。平台层关心的两个派生属性：
+公开题目 DTO：
 
-- `id` / `title`：标识与标题。
-- `acceptsUploads`：`promptPending` 为真时置假——提示词原文尚未公开的题目**不接受上传**（`POST /api/drafts` 返回 `409`）。
+```json
+{
+  "id": "one", "title": "题目", "summary": "测试简述", "prompt": "完整提示词",
+  "category": "静态网页", "domains": ["产品与品牌"], "templates": ["static", "vite"],
+  "version": 1, "date": "2026-10-03", "createdAt": null,
+  "author": { "role": "admin", "name": null, "avatar": null }, "mine": false,
+  "acceptsUploads": true, "cover": null
+}
+```
+
+数据包题目默认 `approved`，`acceptsUploads` 默认 `!promptPending`；数据库题目默认接受上传。管理员可以编辑投稿开关与指定封面。`cover` 为同题已有作品 ID，未指定为 null；封面选举 `featured` 仍保留。提示词版本、截图条件等资源字段由前端的数据包提供，不加入题目 DTO。数据库题目的既有标签仍保留。
+
+管理员视图另含 `moderation`、`works`（两种存储合计未删除作品数）、`votes`（投票记录数）、`samples`（发起者随题附带的数据库示例；数据包题目为空）。待审、拒绝、撤下题目仅在作者或有权限的管理视图可见；题目撤下或删除后，关联作品不公开，相关票暂停计分，重新通过后恢复。
+
+### 2.2.1 覆盖层与迁移（schema v37）
+
+迁移追加到 MIGRATIONS 末尾并可重复运行。`works` 与 `questions` 新增 `author_role`；回填优先识别管理员创建题目、管理员上传 / 收件箱登记的历史路径，再按作者当前角色回填。旧 member 账号转为公开角色 user，已有 admin 账号保持高级管理员。历史审计、投票 JSON、`curated_as` / `nominated_at` 列与值保留。
+
+`questions` 新增 `accepts_uploads`、`cover_work`。数据包题目编辑、审核、投稿开关、封面与删除存于 `question_overrides`；数据包作品文字、开关、校准、核验决定与删除存于 `work_overrides`。删除数据包条目等于永久隐藏；文件仍由独立数据仓维护，不在服务端移除。数据库条目写本行并软删除。
 
 ### 2.3 模型（model）
 
@@ -178,12 +190,12 @@ API 域静态 `/data.json`（含等价编码路径）仅管理员登录后返回
 
 ### 2.4 用户（user）
 
-数据库字段：`id`（16 位十六进制）、`name`（显示名）、`name_key`（NFKC + trim + 小写的唯一键）、`role`（`member` / `admin`）、`salt` / `hash`（标准 scrypt N=16384, r=8, p=1, keylen=32）、`hash_params`（可空 JSON）、`created_at`。`hash_params=NULL` 表示标准参数；迁入的旧用户可记录 `{ "N": 32768, "r": 8, "p": 1, "keylen": 64 }`。旧用户成功登录后立即换新 salt/hash 并清空 `hash_params`；标准用户无额外哈希或查询。
+数据库字段：`id`（16 位十六进制）、`name`（显示名）、`name_key`（NFKC + trim + 小写的唯一键）、`role`（`admin` / `moderator` / `user`）、`salt` / `hash`（标准 scrypt N=16384, r=8, p=1, keylen=32）、`hash_params`（可空 JSON）、`created_at`。`hash_params=NULL` 表示标准参数；迁入的旧用户可记录 `{ "N": 32768, "r": 8, "p": 1, "keylen": 64 }`。旧用户成功登录后立即换新 salt/hash 并清空 `hash_params`；标准用户无额外哈希或查询。
 
 HTTP 公开视图恒为：
 
 ```json
-{ "id": "…", "name": "…", "nickname": "…", "role": "member" }
+{ "id": "…", "name": "…", "nickname": "…", "role": "user" }
 ```
 
 未登录时用户字段为 `null`。`nickname` 默认返回登录用户名，可经 `PATCH /api/me` 修改；数据库增加 `nickname` 列，`name` 仍为登录用户名。用户名规则：NFKC 规范化后 2–24 位文字（Unicode 字母）、数字、下划线或连字符；密码 8–128 位。
@@ -196,7 +208,7 @@ HTTP 公开视图恒为：
 
 ### 2.6 投票（vote）
 
-数据库字段：`id`、`match_id`（唯一）、`user_id`、`task_id`、`a_work` / `b_work`、`pair_key`（`题目:作品A+作品B`，ID 排序后拼接）、`choice`（`a` / `b` / `tie`，`skip` 不产生投票行）、`created_at`，以及 `a_identity` / `b_identity` JSON 原始快照、`a_correction` / `b_correction` JSON 显式更正和 `source`（`arena` / `show1` / `legacy`，v18 删除冗余的 `identity_source`）。快照含当时模型 ID、名称、厂商、档位、归一化档位、model/config 计分 key、内容摘要 `digest`，以及 `harnessId`、`providerId`。这两项不参与 `configKey` 或 `digest` 计算；旧快照里的 `harnessVersion` 读取输出时忽略，不重写原始快照。馆藏摘要为入口页 SHA-256，投稿为全包 SHA-256。v8 迁移前的 legacy 票在 `a_identity` / `b_identity` 中存的是裸的旧模型 ID，并非 JSON；这类票不参与计分，也不能按推测更正。迁移前没有身份快照的对局不能再投票。新票按持久快照或显式更正计分，原始快照保持不变。约束：`UNIQUE(user_id, pair_key)`——**同一用户对同一作品组合只计一票**。
+数据库字段：`id`、`match_id`（唯一）、`user_id`、`task_id`、`a_work` / `b_work`、`pair_key`（`题目:作品A+作品B`，ID 排序后拼接）、`choice`（`a` / `b` / `tie`，`skip` 不产生投票行）、`created_at`，以及 `a_identity` / `b_identity` JSON 原始快照、`a_correction` / `b_correction` JSON 显式更正和 `source`（`arena` / `show1` / `legacy`，v18 删除冗余的 `identity_source`）。快照含当时模型 ID、名称、厂商、档位、归一化档位、model/config 计分 key、内容摘要 `digest`，以及 `harnessId`、`providerId`。这两项不参与 `configKey` 或 `digest` 计算；旧快照里的 `harnessVersion` 读取输出时忽略，不重写原始快照。数据包摘要为入口页 SHA-256，投稿为全包 SHA-256。v8 迁移前的 legacy 票在 `a_identity` / `b_identity` 中存的是裸的旧模型 ID，并非 JSON；这类票不参与计分，也不能按推测更正。迁移前没有身份快照的对局不能再投票。新票按持久快照或显式更正计分，原始快照保持不变。约束：`UNIQUE(user_id, pair_key)`——**同一用户对同一作品组合只计一票**。
 
 计入排行的投票需同时满足：投票时已登录、双方作品当前均为 `verified` 且存在、非本人作品、未评过该组合。作品被标记存疑或删除后，其相关投票即时退出排行；恢复后重新计入（见 3.9）。审核只影响是否计入，不会改写新票的计分归属。需要改正归属时由管理员明确更正单票，审计记录包含更正前有效值、更正后值、理由和操作者；缺少原始双侧快照的 legacy 票不可按推测更正。
 
@@ -208,14 +220,14 @@ unverified ──审核──▶ verified ──审核──▶ questioned
     └────── 审核退回 ────┴────── 审核退回 ◀───┘
 ```
 
-- `unverified`：初始状态，**不进入**盲投对战池，不进入排行。投稿在人工作出决定（核验 / 存疑，或人工内容审查通过）前不进入公开作品列表，公开作品源返回 410；馆藏不受此限。
-- `verified`：可公开展示；非文字题还须内容放行、`show_arena` 开启、`generationMode=single-turn` 且 `humanIntervention=none` 才进入盲评池与排行。已转为馆藏的原投稿不重复进池。
+- `unverified`：初始状态，**不进入**盲投对战池，不进入排行。普通用户作品沿用内容审核与人工核验流程；工作人员作品虽已内容放行，也必须完成核验才公开。数据包作品默认 verified，核验退回时同样隐藏。
+- `verified`：可公开展示；非文字题还须内容放行、`show_arena` 开启、`generationMode=single-turn` 且 `humanIntervention=none` 才进入盲评池与排行。已转为数据包的原投稿不重复进池。
 - `questioned`：存疑。必须填写理由（作者与访客均可见）；退出对战池与排行，且**不可再互动**（表情返回 `409`）。
-- 删除为软删除（`deleted_at`），馆藏作品不可经 API 删除（`409`，须在数据仓库移除）。
+- 删除为软删除（`deleted_at`），数据包作品同样可经 API 软删除（覆盖层永久隐藏，不移动文件），有票不能删除。
 
 ### 2.8 评论（comment）
 
-v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`、`user_id`（账号删除后可空）、`body`、`created_at`（毫秒）、`deleted_at`（可空）。评论依附于已上架的馆藏作品或 `verified` 投稿；馆藏作品不在 SQLite 的 `works` 表中，因此 `work_id` 不设外键。删除评论只设置 `deleted_at`，公开读取不返回已删除项。
+v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`、`user_id`（账号删除后可空）、`body`、`created_at`（毫秒）、`deleted_at`（可空）。评论依附于已上架的数据包作品或 `verified` 投稿；数据包作品不在 SQLite 的 `works` 表中，因此 `work_id` 不设外键。删除评论只设置 `deleted_at`，公开读取不返回已删除项。
 
 ---
 
@@ -227,16 +239,16 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
 
 **认证**：无（匿名返回阉割版）。**限流**：无。
 
-首屏一次取齐：当前用户、站点配置、全部投稿、表情汇总、各题对战池规模、排行总计、我的计数、管理员待审数。
+首屏一次取齐当前用户、站点配置、全部公开题目与作品、表情汇总、各题对战池规模、排行总计、我的计数和工作人员待审数。apiVersion 为 2，Gallery 须与后端同版本发布；旧版 Gallery 遇到 2 降级为静态存档。Show1 兼容层输出保持原形状。
 
 ```json
 {
   "datapack": "<数据仓库的 40 位 Git commit SHA，或 null>",
   "catalogDigest": "<实际加载 data.json 原始字节的 SHA-256>",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "serverVersion": "<服务端构建版本或 dev>",
   "providers": [{ "id": "official", "name": "官方", "listed": true }, { "id": "unofficial", "name": "非官方", "listed": true }],
-  "user": { "id": "…", "name": "alice", "role": "member", "emailBound": true },
+  "user": { "id": "…", "name": "alice", "role": "user", "emailBound": true },
   "site": {
     "content": "http://{token}.localhost:5180",
     "cdn": ["cdn.jsdelivr.net", "unpkg.com", "cdnjs.cloudflare.com", "esm.sh", "fonts.googleapis.com", "fonts.gstatic.com"],
@@ -247,14 +259,14 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
     "emojis": ["lick", "lol", "press", "luck", "yes", "drool", "knock", "stare", "no"],
     "limits": { "uploadBytes": 31457280, "coverBytes": 3145728, "pendingPerUser": 5, "provisionalGames": 30 }
   },
-  "works": [ /* 全部未删除投稿的公开视图，按创建时间倒序 */ ],
-  "questions": [ /* 未删除且 legacy/approved 的社区题目公开视图，见 3.14 */ ],
+  "works": [ /* 两种存储中 visibleTo(show2) 的作品，已应用覆盖 */ ],
+  "questions": [ /* 两种存储中全部公开题目，已应用覆盖，见 2.2 */ ],
   "domains": [ "数学", "物理", "化学", "生物", "天文", "建筑", "自然景观", "交通与机械", "产品与品牌", "文学艺术", "游戏娱乐" ],
   "reactions": {
     "counts": { "task-id/work-id": { "press": 3 } },
     "mine": { "task-id/work-id": ["press"] }
   },
-  "arena": { "chinese-architecture": { "works": 40, "entries": 33, "uploads": true } },
+  "arena": { "chinese-architecture": { "works": 40, "entries": 33 } },
   "featured": { "chinese-architecture": { "cover": "work-id", "models": { "model-id": "work-id", "x:custom model": "up-work-id" } } },
   "totals": { "votes": 128, "voters": 17, "entries": 33 },
   "me": { "votes": 12, "pending": 1, "pendingLimit": 5, "updates": 0 },
@@ -264,21 +276,21 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
 
 - `site.content` 为作品 origin 模板，`{token}` 占位；前端无需自行替换（`scene` / `preview` 均为替换好的完整 URL），此字段仅供诊断与展示。
 - `datapack` 只在已加载数据包带有有效 GitHub 来源文件时返回真实 SHA；无来源元数据或标为 `local` 的本地包返回 `null`。`catalogDigest` 是实际加载的 `data.json` 原始字节的 SHA-256，本地开发前后端在 `datapack=null` 时可据此比较是否使用同一目录数据版本。`serverVersion` 在进程启动时优先读取 `SERVER_VERSION`，其次读取部署目录 Git HEAD；非 Git 部署读取 `.server-version`，均不可用时为 `dev`。它标识服务代码，不是数据包版本；数据包以 `datapack` 字段判读，部署后分别核对两者。
-- `works` **包含未验证与存疑投稿**（不含馆藏作品，馆藏经数据包分发），访客可见非特权字段。
-- `arena[题目]`：`works` = 对战池作品数（馆藏 + 已验证投稿），`entries` = 不同「模型+档位」配置数，`uploads` = 该题是否接受上传。
-- `featured`：按题目返回已当选的封面 `cover`（作品 ID 或 null）及各模型跨档位的代表作 `models`。只列已有当选记录的题目和模型；空结果为 `{}`，缺少封面时为 null。模型键使用 `catalog.modelKey(work)`：有 `modelId` 时用该 ID，否则用 `x:` 加上模型名的 NFKC、首尾去空白、小写结果。馆藏和投稿均用作品 `id`，无需来源前缀。
+- `works` 为两种存储中当前对 Gallery 公开的作品，统一 author DTO，覆盖字段与状态已生效；不在列表中的数据包作品前端不得公开。
+- `arena[题目]` 只保留 poolStats：`works` 为对战池作品数，`entries` 为模型配置数；删除 uploads，投稿开关读取 questions[].acceptsUploads。
+- `featured`：按题目返回已当选的封面 `cover`（作品 ID 或 null）及各模型跨档位的代表作 `models`。只列已有当选记录的题目和模型；空结果为 `{}`，缺少封面时为 null。模型键使用 `catalog.modelKey(work)`：有 `modelId` 时用该 ID，否则用 `x:` 加上模型名的 NFKC、首尾去空白、小写结果。数据包和投稿均用作品 `id`，无需来源前缀。
 - 代表作与封面只选当前盲评合格且至少 5 场比较的作品，以作品分的 `score - interval` 最大者当选；同模型代表作跨推理档位选择。每日重算时按当前票重新评估候选与旧当选者的保守分，新候选至少高出 40 分才替换。每题按服务器时区自然日最多重算一次，包括没有达标作品的日子；结果与重算日期保存在 SQLite，重启不重排。bootstrap 懒触发后台计算并先返回旧结果；已撤出、存疑、删除或其他不合格的当选作品在读取时立即移除，剩余结果仍等次日重算。文字题跳过，前端自行兜底。
-- 匿名：`user`、`me` 为 `null`，`reactions.mine` 为 `{}`；`review` 仅管理员非 null（`{ "unverified": <所属题目已公开、内容已放行、未存疑且展览馆尚无面决定（reviewed.gallery 为 null）的投稿数，含已在竞技场核验的投稿>, "content": <moderation.status=review 的作品数>, "autoRejected": <moderation.status=rejected 且 source 不为 human 的投稿数>, "injected": <moderation.categories 含 prompt-injection 的投稿数>, "questions": <未删除的 pending 题目数> }`）。两个新计数与 `content` 一样取未删除投稿（也排除所属社区题目已删除的作品，包含已转馆藏的上传记录）；`autoRejected` 包括 automatic、recheck 及缺省 source，`injected` 不限制审核状态或来源，两者可重叠。`unverified` 使用不传 viewer 的 `catalog.task(id)` 判断公开题目，待审题目的示例结果不计入，题目通过后自动计入。`pending` 仍在自动队列、`rejected` 已有决定，均不计入 `content`；原有三个计数字段含义不变。
+- 匿名：`user`、`me` 为 `null`，`reactions.mine` 为 `{}`。工作人员的 `review` 返回 `unverified`、`content`、`autoRejected`、`injected`、`questions`；普通管理员的 questions 固定为 0。`unverified` 与统一核验队列一致：题目已公开、内容已放行、未存疑；数据包作品须 status=unverified，数据库作品须尚无展览馆面决定（reviewed.gallery 为 null，可包含竞技场已核验的作品），历史 curated_as 条目排除。待审题目的示例待题目通过后计入。其余内容计数仍取未删除数据库作品，排除所属题目已删除的作品：content 为 moderation.status=review，autoRejected 为 rejected 且 source 不为 human（包括 automatic、recheck 和缺省 source），injected 为 categories 含 prompt-injection，后两者可重叠。questions 为未删除 pending 题目数。pending 仍在自动队列、rejected 已有决定，均不计入 content。
 - `site.capture` 表示截图当前是否可用；浏览器启动失败后为 false，冷却五分钟后的下一件作品会尝试恢复。`site.contentModeration` 表示内容审核开关；`site.autoModeration` 为 `moderator.enabled && Boolean(apiKey) && capturer.available`，只有开关、密钥与截图能力齐备时为 true，截图恢复后自动变回 true。前端在内容审核开启且 autoModeration=false 时显示「管理员检查内容」；旧后端缺少该字段时按 true 兼容。
 - `user.emailBound` 仅当前会话用户在 bootstrap 中返回，反映是否绑定邮箱；不加入 `auth.public`，评论等公开用户数据不包含该字段。
-- `me.pending` 只统计本人未删除、仍为 `unverified` 的投稿，排除内容已拒绝或所属社区题目已拒绝的作品；内容 `pending` / `review` 与题目待审的示例仍占名额。上传作品和创建题目附示例共用此计数。
-- `me.pendingLimit` 为本人实际等待核验上限；基础上限由 `PENDING_PER_USER` 配置（默认 5），`site.limits.pendingPerUser` 保留此基础值。未删除的 `verified` 作品至少 `TRUSTED_MIN_VERIFIED` 件（默认 3），且近 90 天没有被标为存疑的作品，采用 `TRUSTED_PENDING_PER_USER`（默认 20）。存疑检查包括当前状态与存疑审计记录，删除作品或后来恢复为已验证不会消除该次存疑。管理员不受限制，返回 `null`。
+- `me.pending` 只统计本人未删除、仍为 `unverified` 的投稿，排除内容已拒绝或所属题目已拒绝的作品；内容 `pending` / `review` 与题目待审的示例仍占名额。上传作品和创建题目附示例共用此计数。
+- `me.pendingLimit` 为本人实际等待核验上限；基础上限由 `PENDING_PER_USER` 配置（默认 5），`site.limits.pendingPerUser` 保留此基础值。未删除的 `verified` 作品至少 `TRUSTED_MIN_VERIFIED` 件（默认 3），且近 90 天没有被标为存疑的作品，采用 `TRUSTED_PENDING_PER_USER`（默认 20）。存疑检查包括当前状态与存疑审计记录，删除作品或后来恢复为已验证不会消除该次存疑。高级与普通管理员不受限制，返回 `null`。
 - `me.updates` 为本人未删除投稿中，最近一次核验（`reviewed_at`）或内容审核决定（`moderation.at`）晚于 `users.works_seen_at` 的件数；内容排队 `pending` / `review` 不算决定。尚未标记已读时只统计最近 7 天的变化。调用 `POST /api/me/works/seen` 后已发生的变化归零。
 - `providers` 固定返回上述两项，不依赖数据包中的历史登记表。作品公开、作者与管理员视图的 `provider` 只为 `official`、`unofficial` 或 null，不再返回 `providerName`。
 
 ### 3.1.1 `GET /api/fold.js` —— 作品控件折叠脚本
 
-**认证**：无。响应为 `text/javascript; charset=utf-8`，`Cache-Control: no-cache`；支持 HEAD，沿用受信任前端 CORS 与 API 读取限流。返回服务端 `server/fold.js` 的原始字节，供 Gallery 在同源馆藏 iframe 加载完成后注入，已加载的文档立即扫描。
+**认证**：无。响应为 `text/javascript; charset=utf-8`，`Cache-Control: no-cache`；支持 HEAD，沿用受信任前端 CORS 与 API 读取限流。返回服务端 `server/fold.js` 的原始字节，供 Gallery 在同源数据包 iframe 加载完成后注入，已加载的文档立即扫描。
 
 盲评令牌页面继续默认注入折叠脚本；公开及预览作品的 HTML 仅在 URL 带 `aob=fold` 时额外注入，脚本资源 `/__sp_fold.js` 无需重复携带参数。可同时使用 `aob=bridge&aob=fold`，相机恢复和捕获规则保持。草稿试加载不启用此 opt-in。
 
@@ -293,7 +305,7 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
 成功 `200`（**同时种下会话 Cookie，即注册即登录**）：
 
 ```json
-{ "user": { "id": "…", "name": "alice", "role": "member" } }
+{ "user": { "id": "…", "name": "alice", "role": "user" } }
 ```
 
 Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）。`GET /api/auth/me` 的 `user` 返回 `{ id, username, role, email }`，绑定后为真实归一化邮箱。
@@ -371,7 +383,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 ```
 
 - `preview` 为草稿试加载 origin（`d` 令牌，24 小时后失效），iframe 打开后由内容服务器注入探针脚本 `__sp_probe.js`。
-- `checks[].state` 取值 `ok` / `info` / `warn`；`duplicate` 项在上传内容与馆藏或他人投稿完全相同时为 `warn`。
+- `checks[].state` 取值 `ok` / `info` / `warn`；`duplicate` 项在上传内容与数据包或他人投稿完全相同时为 `warn`。
 - 每位用户最多同时保留 3 份草稿（`draftsPerUser`），超出时最旧的自动废弃。
 
 错误：`401` 未登录；`404 题目不存在`；`409 提示词原文尚未公开，暂不接受上传`；`400` 各类包体 / 内容问题；`413` 超 30 MB；`429`。
@@ -421,7 +433,9 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 成功 `200`：`{ "work": <作品公开视图> }`。作品初始状态 `unverified`，并自动排队无头截图（1440×900 与 390×844 两档，写回 `captures`；截图能力可用性见 `bootstrap.site.capture`）。
 
-启用内容审查时，响应含作者特权字段 `moderation.status: "pending"`，上传请求不等待 Flex。此时 `scene` 是一小时有效的随机 `p<32hex>` 预览源，作品尚不公开；内容状态与 `unverified` 核验状态独立，详见 3.24 节。
+普通用户启用内容审查时，响应含作者特权字段 `moderation.status: "pending"`，上传请求不等待 Flex。此时 `scene` 是一小时有效的随机 `p<32hex>` 预览源，作品尚不公开；内容状态与 `unverified` 核验状态独立，详见 3.24 节。
+
+高级与普通管理员提交（含题目示例、收件箱登记）保存 `moderation={status:"approved",source:"human",reviewer,reason:"管理员发布",at}`，`status="unverified"`，跳过自动审查，直接等人工核验。
 
 截图浏览器只允许当前作品源的文档，以及该源和 HTTPS CDN 白名单内的 GET/HEAD 资源。请求逐跳检查重定向，跨源导航、WebSocket、Service Worker 及未经过路由的浏览器连接被阻断；截图环境须预配置 Playwright ≥ 1.48 和 Chrome。
 
@@ -435,11 +449,11 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 **认证**：登录，且为作者本人或管理员。响应 `{ "ok": true }`。
 
-错误：`401` / `403 只能删除自己上传的作品`；`404 作品不存在`；`409 馆藏作品由仓库收录流程管理`（馆藏作品不可经 API 删除）。
+错误：401 / 403 / 404；有 Gallery 或 Show1 投票的作品返回 409。高级管理员可删除任意无票作品，普通用户与普通管理员仅沿用作者删除本人作品规则；数据包作品写覆盖层 deleted_at。
 
 ### 3.7 审核、互动与账号管理
 
-**`POST /api/works/:task/:id/review`** —— 审核投稿（仅管理员）
+**`POST /api/works/:task/:id/review`** —— 人工核验（高级与普通管理员）
 
 **认证**：管理员。请求体：
 
@@ -466,9 +480,9 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 每件在独立事务内复用 `reviewContent`，写 `content-review` audit；单件失败不影响其它项。成功请求返回 `200`：`{ "results": [...] }`，结果保持请求顺序，每项为 `{ "task": "…", "id": "…", "ok": true, "work": <管理员作品视图> }` 或 `{ "task": "…", "id": "…", "ok": false, "error": { "status": 404, "code": "…", "message": "…" } }`。每批只刷新一次缓存。认证、同源与限流错误为 `401` / `403` / `429`。
 
-**`POST /api/admin/questions`** —— 管理员新建社区题
+**`POST /api/admin/questions`** —— 保留的高级管理员发题入口
 
-认证：管理员；write 限流。请求字段与 `POST /api/questions` 相同（标题、简述、提示词、分类、领域、提交格式），不占每人 3 道待审名额，也不写 `arenaId`。创建时内容决定直接为 `approved` / `human`。成功 `200`：`{ "question": <管理员题目视图> }`。题目随即出现在题目列表和收件箱归属目标里。
+请求字段同 `POST /api/questions`，创建结果同样为 pending，不再直接 approved；不占 3 道待审名额。普通管理员使用 `POST /api/questions` 发题。
 
 **`GET /api/admin/inbox/works`** —— 竞技场收件箱
 
@@ -478,9 +492,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 认证：管理员；write 限流。请求 `{ "works": [{ "task": "…", "id": "…" }], "task": "目标题", "entertainment": false }`，1–200 件，同一事务。`task` 可省略，省略时只记审计、作品留在收件箱。给出 `task` 时复用归属迁移，并把 `entertainment_route` 从 1 改为 2。`entertainment: true` 同时打开 `show_entertainment`。不在收件箱的作品使整批 `404`。成功 `200`：`{ "works": [<管理员作品视图>] }`。
 
-**`POST /api/admin/works/:task/:id/display`** —— 馆藏显示覆写
-
-认证：管理员；write 限流。只接受馆藏作品。请求白名单：`title`、`summary`、`modelName`、`effort`、`harnessId`、`harnessOther`、`providerId`、`generationMode`、`humanIntervention`。写入 `work_overrides.display_json`，`library.work()`、`adminWork()` 和 `toPublic()` 读取时合并。计分仍用数据包里的模型 id，数据包文件不改。成功 `200`：`{ "work": <管理员作品视图> }`。
+作品编辑统一使用 `POST /api/admin/works/:task/:id/meta`（见 3.19）。原 `/display` 路由已删除，请求返回 404。
 
 **`POST /api/admin/works/batch-review`** —— 批量来源核验
 
@@ -498,7 +510,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 { "counts": { "press": 3, "yes": 1 }, "mine": ["press"] }
 ```
 
-错误：`401`；`404 作品不存在`；`409 存疑作品仅供参考，不能再互动`；`400 不支持这个表情`（表情须在 `bootstrap.site.emojis` 白名单内）。馆藏作品同样可互动。
+错误：`401`；`404 作品不存在`；`409 存疑作品仅供参考，不能再互动`；`400 不支持这个表情`（表情须在 `bootstrap.site.emojis` 白名单内）。数据包作品同样可互动。
 
 **`GET /api/me`** —— 本人题目、投稿与参与统计
 
@@ -506,7 +518,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 ```json
 {
-  "questions": [ <本人未删除社区题目视图，含 moderation（pending / approved / rejected / legacy）> ],
+  "questions": [ <本人未删除题目视图，含 moderation（pending / approved / rejected / legacy）> ],
   "works": [ <本人投稿公开视图，含特权字段，符合条件时含 queueAhead / changed> ], "votes": 12,
   "reviewStats": { "medianHours": 18.5 },
   "joinedAt": "…ISO…",
@@ -529,29 +541,29 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 认证：登录；限流：write 桶。请求 `{ "nickname": "河畔观测员" }`，响应 `{ "user": <用户公开视图> }`。昵称经 NFKC 与首尾去空白后为 1–24 字，不能含控制字符；无效返回 `400`。不能更改登录用户名或角色。题目与作品作者公开显示昵称。
 
-**`GET /api/review`** —— 审核台（仅管理员）
+**`GET /api/review`** —— 审核台（高级与普通管理员）
 
 **认证**：管理员。响应：
 
 ```json
 {
-  "works": [ <未删除且未转馆藏的投稿与馆藏作品，管理员视角> ],
+  "works": [ <两种存储的未删除作品，排除历史 curated_as，管理员视角> ],
   "audit": [ { "at": "…ISO…", "actor": "alice", "action": "submit", "task": "…", "work": "up-…", "detail": "…" } ]
 }
 ```
 
-投稿的 `moderation` 原样返回已存完整结果，包括存在的 `status`、`source`（automatic / human / recheck）、`reason`、`categories`、`signals`、`error` 及 usage 等其他字段，不使用作者视图的理由裁剪。字段按实际结果可缺省：legacy 通常只有 status，pending 含 status/revision/at；无错误时不补 error，无信号时不补 signals。馆藏作品没有投稿 moderation。
+投稿的 `moderation` 原样返回已存完整结果，包括存在的 `status`、`source`（automatic / human / recheck）、`reason`、`categories`、`signals`、`error` 及 usage 等其他字段，不使用作者视图的理由裁剪。字段按实际结果可缺省：legacy 通常只有 status，pending 含 status/revision/at；无错误时不补 error，无信号时不补 signals。数据包作品默认内容审核 approved，核验决定读取覆盖层。
 
 `audit` 为审计日志倒序最多 200 条，`action` 取值含 `submit` / `verified` / `questioned` / `unverified` / `delete` / `role`。
 
-**`GET /api/admin/users`** —— 账号列表（仅管理员）
+**`GET /api/admin/users`** —— 账号列表（仅高级管理员）
 
 **认证**：管理员。**限流**：无。
 
 成功 `200`（按注册时间升序）：
 
 ```json
-{ "users": [ { "id": "…", "name": "alice", "role": "member", "createdAt": "2026-09-27T08:00:00.000Z" } ] }
+{ "users": [ { "id": "…", "name": "alice", "role": "user", "createdAt": "2026-09-27T08:00:00.000Z" } ] }
 ```
 
 - 每项仅含 `id` / `name` / `role` / `createdAt`：`name` 为登录用户名（非昵称），`createdAt` 为 ISO 时间；不下发昵称、`name_key` 与凭据（`salt` / `hash`）。
@@ -559,9 +571,9 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 错误：`401`（未登录）/ `403 仅管理员可以操作`。
 
-**`POST /api/admin/users/:id/role`** —— 调整账号角色（仅管理员）
+**`POST /api/admin/users/:id/role`** —— 调整账号角色（仅高级管理员）
 
-**认证**：管理员。**限流**：无。请求体：`{ "role": "admin" }`（取值 `admin` / `member`）。
+**认证**：管理员。**限流**：无。请求体：`{ "role": "admin" }`（取值 `admin` / `moderator` / `user`）。
 
 成功 `200`：`{ "user": { "id": "…", "name": "bob", "role": "admin" } }`，并写审计日志（`action` 为 `role`，`detail` 形如 `bob → 管理员`，无关联题目 / 作品）。
 
@@ -587,8 +599,8 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 - `a` / `b` 为两侧作品的**不透明令牌 origin**（`m` 令牌，对局有效期 3 小时），iframe 直接加载；页面与地址均不泄露作品 / 模型身份。左右顺序随机。
 - `calibration.a` / `calibration.b`：该侧竞技场取景校准（管理员按门面保存的 `framing`），无校准为 `null`；父页面据此裁切 iframe。已保存的 3D 视角（`camera`）不随接口下发，由内容服务器在对局页内嵌恢复（视角桥，见 §5）。
 - `counted`：登录且绑定邮箱时为 `true`，匿名或未绑定邮箱时为 `false`。
-- 对局创建时一次捕获当前馆藏目录和两侧身份。随后切换数据包，旧令牌仍从原目录提供 HTML 与相对资源，旧对局仍可揭晓/投票；部署应保留该目录到相关对局全部过期并经过清理宽限期。
-- 前端在写请求上携带 `X-Datapack-Version: <前端所构建的数据仓库 SHA>`（读请求不带，避免跨源 GET 预检）；创建馆藏对局、馆藏题目草稿及该草稿的正式投稿时，如果该值与服务端当前可信 SHA 不同，请求照常处理，响应头增加 `X-Datapack-Stale: 1`，响应体形状不变。对局仍绑定创建时的服务端快照。社区题目不参与此检查；缺少请求头时不增加提示头。
+- 对局创建时一次捕获当前数据包目录和两侧身份。随后切换数据包，旧令牌仍从原目录提供 HTML 与相对资源，旧对局仍可揭晓/投票；部署应保留该目录到相关对局全部过期并经过清理宽限期。
+- 前端在写请求上携带 `X-Datapack-Version: <前端所构建的数据仓库 SHA>`（读请求不带，避免跨源 GET 预检）；创建数据包对局、数据包题目草稿及该草稿的正式投稿时，如果该值与服务端当前可信 SHA 不同，请求照常处理，响应头增加 `X-Datapack-Stale: 1`，响应体形状不变。对局仍绑定创建时的服务端快照。题目不参与此检查；缺少请求头时不增加提示头。
 - 抽样规则：按 `promptVariant`（缺失为空串）与「模型+档位」分组，只在同一提示词版本的不同配置间抽取，再各均匀抽一件作品；长短版不跨组，配置分仍跨版本合计。偏向对局数少的配置、偏向实力相近者（同档 90% 概率软匹配，分差过大重掷 2 次）；避开上一场两侧作品、本人作品与已评组合。无提示词变体的题目行为不变。
 - `previous` 缺省时，登录用户自动取本人该题最近一场对局作为「上一场」回避。
 
@@ -627,7 +639,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 - `unranked` 与 `works` 计数按作品当前的来源字段筛选。
 - 带筛选时响应多一个 `"filters": { "harness": …, "provider": … }`；不带筛选时响应形状、计票范围与缓存键都与不支持筛选时完全相同。
 
-题型与领域：响应回显 `category`、`domain`（未指定为 `null`）。`totals.votes` / `totals.voters` 只计实际参与拟合的比较：同一计分单位（按配置为同一配置，按模型为同一模型）两件作品之间的票不计入；`totals.tasks` 为这些比较涉及的题目数，前端据此在领域榜少于 2 题或 50 次比较时提示样本不足。既无 `task`、`category` 也无 `domain` 的综合榜多一个 `standings`：`{ [题型]: { [key]: 该题型内名次 } }`，只列已有排名的题型，沿用同一计分单位与来源筛选。已公开的社区题目按 `category` 进入对应题型；迁移后分类仍为空的旧题只计入综合榜。
+题型与领域：响应回显 `category`、`domain`（未指定为 `null`）。`totals.votes` / `totals.voters` 只计实际参与拟合的比较：同一计分单位（按配置为同一配置，按模型为同一模型）两件作品之间的票不计入；`totals.tasks` 为这些比较涉及的题目数，前端据此在领域榜少于 2 题或 50 次比较时提示样本不足。既无 `task`、`category` 也无 `domain` 的综合榜多一个 `standings`：`{ [题型]: { [key]: 该题型内名次 } }`，只列已有排名的题型，沿用同一计分单位与来源筛选。已公开的题目按 `category` 进入对应题型；迁移后分类仍为空的旧题只计入综合榜。
 
 ```json
 {
@@ -684,37 +696,31 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 ### 3.13 站点静态文件
 
-`GET /*`（非 `/api/`、非 `/media/`、非 `/admin/`）分发 `DIST_DIR` 内的数据包资源。HTML/HTM（含目录映射的 `index.html`）及不存在的文件返回纯文本 `404 Not found`；其余响应使用 `Content-Security-Policy: sandbox; default-src 'none'` 与 `Referrer-Policy: no-referrer`，防止 SVG/XML 在 API 同源执行脚本。可信管理端 `/admin/` 保留自身站点 CSP。作品 HTML 从独立内容源打开；独立画廊从自己的静态部署读取馆藏数据与作品目录（见第 4 节）。
+`GET /*`（非 `/api/`、非 `/media/`、非 `/admin/`）分发 `DIST_DIR` 内的数据包资源。HTML/HTM（含目录映射的 `index.html`）及不存在的文件返回纯文本 `404 Not found`；其余响应使用 `Content-Security-Policy: sandbox; default-src 'none'` 与 `Referrer-Policy: no-referrer`，防止 SVG/XML 在 API 同源执行脚本。可信管理端 `/admin/` 保留自身站点 CSP。作品 HTML 从独立内容源打开；独立画廊从自己的静态部署读取数据包数据与作品目录（见第 4 节）。
 
-### 3.14 社区题目与人工审核（schema v23）
+### 3.14 题目与人工审核（schema v37）
 
-附示例作品时，还须满足 3.1 的个人等待核验名额；名额计数、实际信用档上限与满额 429 文案均与 `POST /api/works` 一致（见 3.6）。不附示例的题目不占作品名额。
+**`POST /api/questions`**：登录并绑定邮箱，write 限流，请求体上限 6 MB。`title` / `summary` / `prompt` 必填，长度上限 70 / 400 / 20000 字；提示词仅去首尾空白。`category` 为文学 / 静态网页 / 建模；`domains` 有值时为词表内 1–2 项；`templates` 文学固定 text，其他分类为 static / vite 的非空子集；可选 tags 沿用既有规则。
 
-**`POST /api/questions`**：认证登录；限流 write 桶；请求体上限 6 MB。示例作品选填，无作品请求 `{ "title": "…", "summary": "…", "category": "静态网页", "prompt": "…", "tags": ["UI"], "templates": ["static", "vite"] }`，完全不带 `draftId`、`work`、`confirmed`。附示例时在该请求中加入 `{ "draftId": "…", "confirmed": true, "work": { "title": "示例结果", "modelId": "…", "effort": "High", "harnessId": "…", "trial": { "loaded": true }, "cover": "data:image/png;base64,…" } }`。`draftId` 必须属于本人、未过期且 `task=__new__`；`work` 复用 `POST /api/works` 的作品字段、Harness、封面及生成信息校验，所选提交格式必须允许草稿的实际格式。只要带了 `draftId` 或 `work` 中任一字段，就须同时提供两者并确认试加载，否则返回中文 `400`；仅带 `confirmed` 也返回 `400`。标题、测试简述、完整提示词必填，最多 70 / 400 / 20000 字；提示词除首尾空白外保留原文。`category` 必填，固定为 `文学` / `静态网页` / `建模`，缺少或无效返回 `400 请选择题目分类`。`domains` 选填（新版 Gallery 必传）：带上时须为 1–2 个、在 `bootstrap.domains` 词表内的字符串，重复项合并，`[]` 或非数组返回 `400 请选择所属领域`，超出或不在词表返回 `400`；不带时存为 `[]`，等管理员通过时补充。标签选填、缺省 `[]`，0–6 个，每个 1–24 字，按 NFKC 与大小写归一去重，已有标签沿用其名称；写入时丢弃与分类同名的标签。`templates` 必填：文学固定 `["text"]`，静态网页与建模必须为 `static` / `vite` 的非空子集，不匹配返回 `400 提交格式与题目分类不匹配`。
+不附作品时传题目字段；附示例时另传 `draftId`、`confirmed:true`、`work`（同作品表单字段）。草稿须属于本人、未过期且 task=__new__。题目与示例及审计在同一事务写入，失败保留可重试草稿。响应 `{ "question": <题目作者视图>, "work"?: <作品作者视图> }`，统一 author/mine DTO。
 
-成功 `200`：无作品返回 `{ "question": { "id": "q-<16hex>", "title": "…", "summary": "…", "prompt": "…", "tags": ["UI"], "templates": ["static", "vite"], "owner": "作者昵称", "ownerAvatar": "…", "version": 1, "community": true, "createdAt": "…ISO…", "date": "YYYY-MM-DD", "moderation": { "status": "pending" } } }`，不含 `work` 字段；附示例时返回 `{ "question": <同上题目视图>, "work": <作者示例作品视图> }`。作者从会话读取；题目始终人工审核，不送自动审查，示例作品照常走内容审核并保持 `unverified`。无作品时题目与 `question-create` 审计在同一事务落库；附示例时题目、示例作品和审计同时落库，失败不保留题目或作品，草稿保持可重试。每位作者最多 3 道未删除的 pending 题目（含无作品题目），超限 `429`。其它错误：`401` / `400` / `404`（草稿不属于本人、不存在或过期）/ `429`。人工通过前题目及其作品不进入公开 bootstrap、Show1 列表、排行榜或盲评池；`me.questions` 可读本人全部未删除题目及审核状态。
+所有角色发起的新题目均为 pending，只有高级管理员可人工通过；普通用户至多 3 道未删除 pending 题目，工作人员免限额。附带作品按发布者角色决定内容审查：普通用户照常审查，工作人员 human / approved，但保持 unverified；题目与作品必须各自通过才公开。本人题目在 `GET /api/me` 中可见。保留的 `POST /api/admin/questions` 仅高级管理员可调用，也创建 pending。
 
-**`GET /api/admin/questions`**：仅管理员，返回 `{ "questions": [...] }`，包含全部未删除社区题目。每项为题目 DTO，加 `moderation`、`ownerName`、`works`（未删除关联投稿数量）和 `samples`（作者自己上传的示例作品；无示例时为 `[]`）。每份示例含 `id`、`task`、`title`、`modelName`、`effort`、`status`、`moderation`、`scene`；`scene` 使用有效一小时的私密 `p` 预览令牌，不能作为公开作品地址分发。匿名 `401`，非管理员 `403`。
+**`GET /api/admin/questions`**：仅高级管理员，返回全部未删除题目（数据包及数据库，含 pending / rejected / 已撤下）。统一 DTO 加 moderation、works、votes、samples；有账号的 author.name 为昵称。works 合计两种存储，samples 仅数据库题目发起者附带的示例。示例 scene 使用私密预览令牌。
 
-题目公开视图、`GET /api/me` 的我的题目与 `GET /api/admin/questions` 的每道题均含 `category`（旧题可能为 null）、`domains`（旧题为 `[]`）与 `templates`。
+**`POST /api/questions/:id/moderation`**：仅高级管理员。请求 `status=approved|rejected` 与 reason，拒绝须给非空理由，最多 500 字；通过可调整 category/domains，沿用分类与模板兼容校验。数据包题目的决定写覆盖表。拒绝已公开题目等于撤下，关联作品隐藏且票暂停计分，重新 approved 后恢复。写 question-review 审计并刷新排行缓存。
 
-**`POST /api/questions/:id/moderation`**：仅管理员，write 限流，请求 `{ "status": "approved" | "rejected", "reason": "…", "category": "文学" | "静态网页" | "建模", "domains": ["数学"] }`；通过可省略理由，拒绝必须填非空理由，最多 500 字。通过时 `category` 可选，用来补充或修改分类；现有分类为空且请求未带分类，或请求分类无效，返回 `400 请选择题目分类`。拒绝时忽略 `category`。改分类后原格式不兼容时重置为该分类默认值：文学 `["text"]`，其余 `["static","vite"]`。成功 `{ "question": <含 moderation 的题目视图> }`，人工结果含 `source: "human"`、审核人、时间与理由，写 `question-review` audit；分类、领域与格式改变时 detail 增加对应 `{ from, to }`。通过时 `domains` 可选，带上即按创建时的规则校验并替换；拒绝时忽略。题目通过不改变示例作品自身的审核与核验状态。错误 `400` / `401` / `403` / `404` / `429`。
+**`POST /api/admin/questions/batch-moderation`**：仅高级管理员，1–100 个题目 ID，复用单件规则；每件独立事务，返回逐件 results，失败项含状态码与理由。高级管理员可审核自己的题目。
 
-**`POST /api/admin/questions/batch-moderation`**：仅管理员，每批消耗一次 write 限流。请求 `{ "ids": ["q-…"], "status": "approved" | "rejected", "reason": "…" }`，`ids` 为 1–50 项；理由规则同单件题目审核。列表、状态或拒绝理由无效时整体 `400`，不执行任何项目。此接口不修改分类或领域；通过时分类为空返回单件 `400 请选择题目分类`，领域为 `[]` 返回单件 `400 请选择所属领域`。每题在独立事务中复用 `questions.review` 并写 `question-review` audit，失败不影响其它题。响应 `200`：`{ "results": [...] }`，按请求顺序返回 `{ "id": "q-…", "ok": true, "question": <管理员题目视图> }` 或 `{ "id": "q-…", "ok": false, "error": { "status": 400, "code": "…", "message": "…" } }`。每批只刷新一次缓存。认证、同源与限流错误为 `401` / `403` / `429`。
+**`POST /api/admin/questions/:id/meta`**：仅高级管理员，任何题目可改 title / summary / prompt / category / domains / acceptsUploads / cover。acceptsUploads 须为布尔值，cover 须为同题现有作品 ID，null 清除。公开且有作品的题目不能改提示词；有作品的题目不能改提交格式（作品数合计两种存储）。数据包写 question_overrides，数据库写本行；保持原 moderation，写 question-edit 审计，提示词只记录是否变化与长度。
 
-**`POST /api/admin/questions/:id/meta`**：仅管理员，write 限流，请求可含 `title`、`summary`、`prompt`、`category`、`domains`，至少提供一项；长度、分类与领域规则同创建题目，提示词除首尾空白外保留原文。任何 moderation 状态均可编辑，保持现有 moderation。公开（`approved` / `legacy`）且已有未删除作品的题目，修改提示词返回 `409 已有作品的题目不能修改提示词`。改分类沿用单件审核的模板兼容规则；若须重置 templates 且已有未删除作品，返回 `409`。写 `question-edit` audit，变化字段记 `{ from, to }`，提示词只记录已修改及长度，不记录正文。成功 `200`：`{ "question": <管理员题目视图> }`，刷新缓存。错误 `400` / `401` / `403` / `404` / `409` / `429`。
+**`DELETE /api/questions/:id`**：高级管理员可删除任意无票题目；有 Gallery 或 Show1 投票返回 409。作者删除自己题目沿用原规则：公開题目有其他作者作品或有票不可删。数据包题目覆盖层软删除，题下数据包作品随之隐藏，关联数据库作品同步软删除；文件不动。公开、本人与管理员列表不返回已删除题目，写 question-delete 审计。
 
-**`DELETE /api/questions/:id`**：登录，write 限流，成功 `{ "ok": true }`。作者可删除本人 pending/rejected 题目及本人关联作品；公开 legacy/approved 题目还须没有其他作者的未删除作品、没有 Gallery 或 Show1 投票。管理员可连同全部关联作品软删除题目，但有投票仍返回 `409`。删除设置 `questions.deleted_at` 和关联 `works.deleted_at`，写 `question-delete` audit；公开与本人/管理员题目列表随后不返回该题。错误 `401` / `403`（非本人且非管理员）/ `404` / `409` / `429`。
-
-v22 只在 `questions` 追加 `moderation` JSON 与可空 `deleted_at`。已有题目默认 `{ "status": "legacy" }`，保持公开；新题目为 pending。
-
-v29 追加 `questions.domains TEXT NOT NULL DEFAULT '[]'`，幂等，不回填；数据包题目的 `domains` 由数据仓 `task.json` 提供。
-
-v23 追加可空 `questions.category`，无分类旧题按标签顺序取第一个三项分类名，否则仅有 `text` 格式时回填文学，其余留 null 待管理员补充。迁移幂等，不覆盖已有分类；数据包分类不写入此表，读取时保持原值。
+上述写接口均遵循 Origin 校验、write 限流和通用错误格式。普通管理员对题目管理接口返回 403。历史 v22/v23/v29 字段和原审核记录保留，v37 增加发布者与覆盖层（见 2.2.1）。
 
 ### 3.15 作品评论
 
-评论只属于已上架作品：馆藏作品或状态为 `verified` 的投稿。盲测对局创建响应与未揭晓页面均不带评论；前端应在展示已揭晓作品时单独请求评论。
+评论只属于已核验且至少在一个展示面公开的作品，两种存储使用相同规则；撤下题目的作品不可读写评论。盲测对局创建响应与未揭晓页面均不带评论；前端应在展示已揭晓作品时单独请求评论。
 
 **`GET /api/works/:task/:work/comments`** —— 公开读取最近 100 条未删除评论，按时间倒序。认证、限流均无。成功 `200`：
 
@@ -731,9 +737,9 @@ v23 追加可空 `questions.category`，无分类旧题按标签顺序取第一�
 
 ### 3.16 Show1 投稿作品校准
 
-校准只适用于 SQLite `works` 表中的投稿作品。数据存于 `trial.calibration`，作品原始 HTML 不改写；馆藏作品与 Show2 画廊展示方式不受该字段控制。
+校准只适用于 SQLite `works` 表中的投稿作品。数据存于 `trial.calibration`，作品原始 HTML 不改写；数据包作品与 Show2 画廊展示方式不受该字段控制。
 
-**`GET /api/works/:id/calibration`** —— 已上架投稿公开读取；未上架投稿仅作者或管理员可读。不限流。成功 `200`：`{ "calibration": <对象或 null> }`；不存在、馆藏作品或无权读取未上架投稿时返回 `404`。
+**`GET /api/works/:id/calibration`** —— 已上架投稿公开读取；未上架投稿仅作者或管理员可读。不限流。成功 `200`：`{ "calibration": <对象或 null> }`；不存在、数据包作品或无权读取未上架投稿时返回 `404`。
 
 **`PATCH /api/works/:id/calibration`** —— 投稿作者或管理员写回，使用 `write` 桶。请求 `{ "calibration": { "framing": <对象或 null>, "camera": <对象或 null> } }`；可只提交其中一项，另一项保持原值。`{ "calibration": null }` 清空全部校准。成功 `200`：`{ "calibration": <写入后的对象或 null> }`。错误：`401` / `403` / `404` / `400`（结构或数值无效）/ `429`。
 
@@ -755,25 +761,25 @@ v23 追加可空 `questions.category`，无分类旧题按标签顺序取第一�
 
 ### 3.18 双系统管理端（schema v9）
 
-以下端点均须管理员会话；非管理员返回 `401`（未登录）或 `403`。写请求走同源检查、`write` 限流并记录 audit。错误仍按 1.4 节的 `{ "error": "中文提示", "code": "可选代码" }` 格式返回。
+以下端点均须工作人员会话；权限按 1.3.1 节区分：作品列表、编辑、门面和校准允许普通管理员，题目、主编、流量、角色及其他运营入口仅高级管理员。普通管理员不能对自己的作品作审核、门面或校准决定。无权限返回 `401`（未登录）或 `403`。写请求走同源检查、`write` 限流并记录 audit。错误仍按 1.4 节的 `{ "error": "中文提示", "code": "可选代码" }` 格式返回。
 
-**`GET /api/admin/works`** 合并馆藏精选和 SQLite 投稿。查询参数：`task`（题目 ID）、`status=verified|unverified|questioned`、`source=curated|upload`、`face=gallery|arena` 与 `show=on|off`（两者一起使用）、`harness`（注册表 ID、`other` 表示只填了「其他」、`unset` 表示未注明）、`provider=official|unofficial|unset`（其他值 `400 invalid_query`）、`search`（标题、模型、题目 ID、Harness 与服务商显示名）、`page`（默认 1）、`pageSize`（默认 30，最多 100）。成功形状：
+**`GET /api/admin/works`** 合并两种存储的未删除作品，应用覆盖并排除历史 curated_as。查询参数：`task`（题目 ID）、`status=verified|unverified|questioned`、`author=admin|user`（admin 包含 moderator）、`face=gallery|arena` 与 `show=on|off`（两者一起使用）、`harness`（注册表 ID、`other` 表示只填了「其他」、`unset` 表示未注明）、`provider=official|unofficial|unset`（其他值 `400 invalid_query`）、`search`（标题、模型、题目 ID、Harness 与服务商显示名）、`page`（默认 1）、`pageSize`（默认 30，最多 100）。成功形状：
 
 ```json
-{ "works": [{ "task": "one", "id": "a", "source": "curated", "status": "verified", "show_gallery": true, "show_arena": true, "calibration_gallery": null, "calibration_arena": null, "has_calibration_gallery": false, "has_calibration_arena": false, "arena_eligible": true, "arena_generation_ok": true }], "total": 1, "page": 1, "pageSize": 30 }
+{ "works": [{ "task": "one", "id": "a", "author": { "role": "admin", "name": null, "avatar": null }, "mine": false, "status": "verified", "show_gallery": true, "show_arena": true, "calibration_gallery": null, "calibration_arena": null, "has_calibration_gallery": false, "has_calibration_arena": false, "arena_eligible": true, "arena_generation_ok": true }], "total": 1, "page": 1, "pageSize": 30 }
 ```
 
 管理员作品视图带两个只读字段：`arena_eligible` 即服务端盲评池资格（`library.isEligible`）的判定结果；`arena_generation_ok` 表示生成信息是否合格（文字题恒为 true，其余须单轮且无人工介入）。后台竞技场系统据此显示「在正式盲测池」「不符合盲评条件（多轮 / 人工介入）」或「不在正式盲测池」，不在前端重复判断题型。
 
-作品对象还含原有管理员作品视图字段。精选开关和取景先读 `work_overrides`，缺失时三面默认开启（视同已核验的投稿），旧 Show1 快照轮次的娱乐面默认关闭（见 2.1）。查询错误：`400 invalid_query`、`404 not_found`（题目不存在）。
+作品对象还含原有管理员作品视图字段。数据包作品开关和取景先读 `work_overrides`，缺失时三面默认开启（视同已核验的投稿），旧 Show1 快照轮次的娱乐面默认关闭（见 2.1）。查询错误：`400 invalid_query`、`404 not_found`（题目不存在）。
 
-投稿的管理员作品视图另含 `reviewed: { gallery: <ISO 时间|null>, arena: <ISO 时间|null> }`，表示两面各自最近一次明确决定；馆藏不输出此字段。核验请求显式带布尔 `show_gallery` / `show_arena` 时只更新对应面的时间。v30 为已核验和存疑的旧投稿将两面时间回填为 `COALESCE(reviewed_at, updated_at)`，未核验旧投稿保持 null；娱乐盲测开关不记录面决定。
+投稿的管理员作品视图另含 `reviewed: { gallery: <ISO 时间|null>, arena: <ISO 时间|null> }`，表示两面各自最近一次明确决定；数据包不输出此字段。核验请求显式带布尔 `show_gallery` / `show_arena` 时只更新对应面的时间。v30 为已核验和存疑的旧投稿将两面时间回填为 `COALESCE(reviewed_at, updated_at)`，未核验旧投稿保持 null；娱乐盲测开关不记录面决定。
 
-**`POST /api/admin/works/:task/:id/face-settings`** 请求 `{ "show_gallery": false, "show_arena": true }`，可只给其中一个布尔键。投稿更新 `works` 开关，并记录请求中显式指定面的决定时间，保持核验状态不变；精选 upsert `work_overrides`，不修改数据包。批量开关沿用同样的按面记录规则。响应 `{ "work": <合并管理员作品视图> }`。错误：`400 invalid_face_settings`、`404 not_found`、`429`。
+**`POST /api/admin/works/:task/:id/face-settings`** 请求 `{ "show_gallery": false, "show_arena": true }`，可只给其中一个布尔键。投稿更新 `works` 开关，并记录请求中显式指定面的决定时间，保持核验状态不变；数据包作品 upsert `work_overrides`，不修改数据包。批量开关沿用同样的按面记录规则。响应 `{ "work": <合并管理员作品视图> }`。错误：`400 invalid_face_settings`、`404 not_found`、`429`。
 
 **`POST /api/admin/works/batch-face-settings`** 仅管理员可用，使用 write 限流。请求 `{ "works": [{ "task": "题目 ID", "id": "作品 ID" }], "show_gallery": false, "show_arena": true }`，两个开关至少给一个，且只能为布尔值；一次须选 1–200 件。复用单件开关逻辑，在同一个数据库事务内更新所有作品并为每件写一条 `face-settings` audit；任一作品不存在或参数无效时整批回滚。成功 `200`：`{ "works": [<合并管理员作品视图>, …] }`，顺序与请求一致。错误：`401` / `403`、`400 invalid_work_list|invalid_face_settings`、`404 not_found`、`429`。
 
-**`POST /api/admin/works/:task/:id/calibration`** 请求 `{ "face": "gallery" | "arena", "calibration": { "framing": { "width": 1440, "height": 900, "zoom": 1, "offsetX": 0, "offsetY": 0 }, "camera": { "position": [0,0,5], "target": [0,0,0] } } }`。`calibration` 可为 `null` 清空；对象可只给其中一项，单项为 `null` 则删除该项。投稿画廊取景仍在 `trial.calibration`，竞技场取景在 `works.calibration_arena`；精选取景写覆盖表的两个附加列。响应 `{ "task": "one", "id": "a", "face": "arena", "calibration": <当前对象或 null> }`。错误：`400 invalid_face|invalid_calibration`、`404 not_found`、`429`。校验范围沿用 3.16 节。
+**`POST /api/admin/works/:task/:id/calibration`** 请求 `{ "face": "gallery" | "arena", "calibration": { "framing": { "width": 1440, "height": 900, "zoom": 1, "offsetX": 0, "offsetY": 0 }, "camera": { "position": [0,0,5], "target": [0,0,0] } } }`。`calibration` 可为 `null` 清空；对象可只给其中一项，单项为 `null` 则删除该项。投稿画廊取景仍在 `trial.calibration`，竞技场取景在 `works.calibration_arena`；数据包作品取景写覆盖表的两个附加列。响应 `{ "task": "one", "id": "a", "face": "arena", "calibration": <当前对象或 null> }`。错误：`400 invalid_face|invalid_calibration`、`404 not_found`、`429`。校验范围沿用 3.16 节。
 
 **`GET /api/admin/tasks/:id/editorial?face=gallery|arena`** 响应 `{ "task": "one", "face": "arena", "commentary": "…", "weights": [0.2,0.2,0.2,0.2,0.1,0.1] | null, "updatedAt": "…" | null }`。**`POST /api/admin/tasks/:id/editorial`** 请求 `{ "face": "arena", "commentary": "点评", "weights": [0.2,0.2,0.2,0.2,0.1,0.1] }`；`gallery` 只接受 `commentary`，不得传 `weights`。竞技场权重须 6 个 0–1 数，总和在 `1 ± 0.001`。成功返回同 GET。错误：`400 invalid_face|invalid_editorial|invalid_weights`、`404 not_found`、`429`。
 
@@ -781,21 +787,22 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 
 **`GET /api/admin/traffic?days=N`** `N` 默认 30，范围 1–90。响应 `{ "days": 30, "daily": [{ "day": "2026-09-28", "pv": 12, "uniqueIps": 8 }], "paths": [{ "path": "/", "pv": 9 }], "users": { "total": 24, "new": 2 } }`。`daily` 按 UTC 日补齐零值；`paths` 最多 20 条；错误 `400 invalid_query`。
 
-**`POST /api/admin/works/upload`** 原始 HTML 或 ZIP 请求体，查询参数 `task`、`name`（含扩展名）、`title`、`modelId` 或 `modelName`、`summary`、`tool`、`harnessId`、`harnessOther`、必填 `effort`、`providerId`、`template`、`show_gallery=0|1`、`show_arena=0|1`。来源字段遵循 3.6 节规则，旧 `harnessVersion` 忽略；管理员可不填 Harness，`tool` 不再自动设为录入渠道。管理员上传即人工内容审核：登记时保存 `moderation: { status: "approved", source: "human", reviewer: <管理员名>, reason: "管理员上传", at: <毫秒时间> }`，写 `content-review` 审计，再核验为 `verified`；不送 Luna，仍可排队生成截图。开关缺省时按首次核验规则两面都开启。响应 `{ "work": <合并管理员作品视图> }`。错误沿用 `/api/drafts` 和 `/api/works`，另有 `400 invalid_face_settings`、`413`、`429`。该流程在 audit 中留下 `submit`、`content-review`、`verified` 三条记录；普通核验接口的内容未放行 409 不影响此路径。
+**`POST /api/admin/works/upload`** 仍仅高级管理员可用，原始 HTML / ZIP 参数与校验沿用原入口。创建时按工作人员发布规则保存 human / approved，理由「管理员发布」，核验状态 unverified，进入人工核验队列；不再自动 verified。可排队生成截图，响应 `{ "work": <管理员作品视图> }`。普通管理员可使用正常投稿或收件箱登记入口。
 
 竞技场配对和 Bradley–Terry 计分都只纳入当前 `show_arena=1` 的已验证作品；数据包作品没有覆盖记录时竞技场开关默认开启，管理员关闭后按覆盖记录保持。`votes.source='arena'` 的限制不变。Show1 娱乐榜仍从全量历史票回放。
 
 ### 3.19 管理员收件箱与作品编辑
 
-以下 API 均须管理员会话；写请求遵循同源检查和 write 限流。收件箱位于 `DATA_DIR/inbox`，只保存待登记的 HTML/ZIP，不会因上传本身发布作品。
+以下 API 开放给高级与普通管理员。写请求遵循 Origin 校验和 write 限流。收件箱位于 DATA_DIR/inbox，仅暂存待登记 HTML/ZIP，上传本身不公开作品。
 
-- **`GET /api/admin/inbox`** 返回 `{ "entries": [...] }`，按加入时间升序。每项含 `id`、原文件名 `name`、`kind`（HTML/ZIP）、字节数 `size`、毫秒时间戳 `addedAt`、从文件名推断的 `suggest: { title, model }` 和预览路径 `preview`。
-- **`POST /api/admin/inbox?name=<文件名>[&overwrite=1]`** 请求体为原始 HTML 或 ZIP，最多 30 MB；文件名只接受 `.html`、`.htm`、`.zip`（含「标题，模型.html」格式）。上传前执行包检查；同名文件默认返回 `409 inbox_conflict`，`overwrite=1` 覆盖。成功 `200`：`{ "ok": true, "name": "…" }`，写 `inbox-upload` audit。
-- **`GET /admin/inbox/:id/...`** 是预览文件路径，不是 API；仅管理员可读取，其他用户或文件不存在时返回纯文本 `404`。`/file` 返回原始文件；ZIP 的预览路径由列表给出，响应使用 `no-store`。
-- **`POST /api/admin/inbox/register`** JSON 请求含 `id`、`task`、必填 `effort`、`providerId`，可选的 `title`、`summary`、`modelId` 或 `modelName`、`tool`、`harnessId`、`harnessOther`；标题和模型名可从文件名建议值补齐。来源字段遵循 3.6 节规则，旧 `harnessVersion` 忽略；不填时 `tool` 为空，不写录入渠道。缺省登记为 `unverified` 且两个门面均关闭，照常走内容审核；`publish: true` 时按管理员上传即人工内容审核，保存 `approved` / `human`、管理员名、理由「管理员上传」与时间并写 `content-review` 审计，然后直接核验为 `verified`，不送 Luna。缺省按首次核验规则两面都开启，可用 `show_gallery` / `show_arena` 指定。成功 `200`：`{ "work": <管理员作品视图> }`，移除收件箱文件并写 `inbox-register` audit；无效或已移除的 `id` 返回 `404`。
-- **`DELETE /api/admin/inbox?id=<收件箱 ID>`** 移除暂存文件，成功 `200`：`{ "ok": true }`，写 `inbox-remove` audit；文件不存在返回 `404`。
-- **`POST /api/admin/works/:task/:id/meta`** 仅编辑 SQLite 投稿，不编辑馆藏。JSON 请求可含 `title`、`summary`、`modelName`、`modelId`、`effort`、`harnessId`、`harnessOther`、`providerId`；至少提供一个允许字段（只有旧 `harnessVersion` 时成功返回原视图，不写 audit 或重新审核）。标题不能为空，`modelId` 须存在于目录。来源字段按 3.6 节校验；设置 Harness ID 会清空「其他」，反之亦然。管理员编辑送审声明保持现有 `moderation`，不重新置为 `pending` 或排队。成功 `200`：`{ "work": <管理员作品视图> }`，写 `meta` audit；无效字段或内容返回 `400`，投稿不存在或目标为馆藏返回 `404 not_found`。
+- `GET /api/admin/inbox`：按加入时间返回 entries，含 id/name/kind/size/addedAt/suggest/preview。
+- `POST /api/admin/inbox?name=<文件名>[&overwrite=1]`：原始 HTML/ZIP，最多 30 MB，先检查包。已存在同名文件且不覆盖返回 409 inbox_conflict；成功写 inbox-upload 审计。
+- `GET /admin/inbox/:id/...`：暂存文件预览，仅工作人员可读，其他请求返回 404，响应 no-store。
+- `POST /api/admin/inbox/register`：传 id/task/effort/providerId 及可选作品信息。保存 human / approved、unverified，仍须别次人工核验；旧 publish 参数不再直接公开。登记成功移除暂存文件并写 inbox-register 审计，返回管理员作品 DTO。
+- `DELETE /api/admin/inbox?id=<ID>`：移除暂存文件并写 inbox-remove 审计，不等于删除已发布作品。
+- `POST /api/admin/works/:task/:id/meta`：两种存储统一编辑 title/summary/note、promptVariant、modelId/modelName/vendor、effort、harnessId/harnessOther、providerId、generationMode/humanIntervention。未提供字段保持原值，校验与作品表单一致，旧停用字段沿用忽略规则。数据包写 work_overrides.display_json，数据库写本行；不触发重新内容审核，写 meta 审计。普通管理员可编辑自己作品的信息。响应 `{ "work": <管理员作品视图> }`。
 
+原 `POST /api/admin/works/:task/:id/display` 路由已删除，后台所有编辑统一调用 meta。核验、内容决定、开关、校准、收件箱归属及相应批量接口拒绝普通管理员处理自己的作品，403 提示需由其他管理员处理；高级管理员可以处理自己作品。
 
 ### 3.20 Show1 猜模型接口
 
@@ -826,7 +833,7 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 | `POST /api/reactions` | 登录且绑定邮箱；请求 `id`、`promptId`、`mid`、`kind`，成功 `201 { counts, mine }`；`kind:null` 撤销。未绑定返回 `403 email_required`。 |
 | `POST /api/track` | 最佳努力记录 `path` 浏览量，成功 `204`。 |
 
-正式题目在数据仓库登记 `arenaId`（稳定三位编号）、`kind`（`text` / `web`）和 `category`。共享后端将同一个 task ID 映射到 Show1 编号，新增题目及其已验证、开启竞技场展示的投稿可以进入娱乐玩法；长短提示词使用同一个 task ID 与编号，以 `promptVariants: [{id, label, prompt}]` 返回两份原文，由前端按钮切换；作品可通过 `promptVariant` 标明使用的版本，同一模型的两版展示在一起。既有快照题目保留编号、名称及权重，正式提示词由数据包提供；未进入数据包的历史题目仍保留。此登记不写入社区 `questions` 表，也不改变作品审核和展示开关。
+正式题目在数据仓库登记 `arenaId`（稳定三位编号）、`kind`（`text` / `web`）和 `category`。共享后端将同一个 task ID 映射到 Show1 编号，新增题目及其已验证、开启竞技场展示的投稿可以进入娱乐玩法；长短提示词使用同一个 task ID 与编号，以 `promptVariants: [{id, label, prompt}]` 返回两份原文，由前端按钮切换；作品可通过 `promptVariant` 标明使用的版本，同一模型的两版展示在一起。既有快照题目保留编号、名称及权重，正式提示词由数据包提供；未进入数据包的历史题目仍保留。此登记不写入 SQLite 的 `questions` 表，也不改变作品审核和展示开关。
 
 旧分享卡端点已移除，访问返回 `404`。兼容层的详细字段可参考 `test/fixtures/show1-golden/` 中的固定响应。
 
@@ -860,7 +867,7 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 
 ### 3.24 自动内容审查（schema v19）
 
-追加幂等迁移，仅新增 `works.moderation` JSON 列；默认 `{ "status": "legacy" }`，既有作品保持原行为。`CONTENT_MODERATION=1` 时普通新投稿与未发布的收件箱登记先设 `pending`；管理员直接上传或以 `publish: true` 登记按 3.18 / 3.19 人工通过。作者修改送审声明后重新设 `pending`，管理员 meta 与 review 修改保持现有 `moderation`，随机 revision 防止旧调用结果覆盖新版声明；人工决定也不会被较早的自动结果覆盖。启动恢复持久化的 pending 队列。内容状态与来源核验 `status` 独立。
+追加幂等迁移，仅新增 `works.moderation` JSON 列；默认 `{ "status": "legacy" }`，既有作品保持原行为。`CONTENT_MODERATION=1` 时普通用户新作品先设 pending；高级与普通管理员新作品直接 human / approved、unverified，所有入口仍须人工核验（见 3.18 / 3.19）。作者修改送审声明后重新设 `pending`，管理员 meta 与 review 修改保持现有 `moderation`，随机 revision 防止旧调用结果覆盖新版声明；人工决定也不会被较早的自动结果覆盖。启动恢复持久化的 pending 队列。内容状态与来源核验 `status` 独立。
 
 | `moderation.status` | 含义 | 可公开 |
 | --- | --- | --- |
@@ -872,7 +879,7 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 
 `moderation` 仅返回作者/管理员。普通作者只收到 `{ status, at }`，且仅在 `rejected` 时附 `reason`：人工拒绝为人工理由，自动拒绝（含复查）统一为固定文案「自动内容审查未通过，请联系管理员」，模型文字不返回作者；管理员保留完整结果，可含 `source: automatic|human|recheck`、中文 `reason`、风险 `categories`、`signals`、`error` 代码、`model`、`serviceTier`、`responseId`、`usage`、`coverage` 或人工 `reviewer`。`at` 为毫秒时间，旧 legacy 记录可缺省。不含 API 密钥或服务商原始错误响应。题目作者视图采用相同裁剪规则；管理员题目视图保留完整结果。`bootstrap.site.autoModeration` 与管理员审核计数见 3.1。
 
-内容尚未通过时，公开 bootstrap、Show1 动态作品、盲评、评论/表情均不可使用该作品。自动通过（以及关闭审查时的 `legacy`）本身也不公开投稿：公开列表、评论/表情、公开 `w<32hex>` 源与媒体还要求人工已作决定，即 `status` 不为 `unverified`，或 `moderation.source` 为 `human`；在此之前作者/管理员继续使用下述预览源。公开 `w<32hex>` 源返回 410，媒体请求仅允许作者/管理员，否则 404。作者/管理员作品 DTO 的 `scene` 是随机 `p<32hex>` 源，有效一小时、进程重启失效，返回 `Cache-Control: no-store`。该地址本身具有预览能力，不应公开转发。自动截图也使用此源。参与审查的已公开作品源与媒体使用 `no-store`，防止新审核状态被已有缓存跳过。
+内容尚未通过时，公开 bootstrap、Show1 动态作品、盲评、评论/表情均不可使用该作品。普通用户作品沿用人工已作决定的公开规则：`status` 不为 `unverified`，或 `moderation.source` 为 `human`；自动通过（以及关闭审查时的 `legacy`）本身不公开。工作人员发布及数据包作品还要求 `status` 不为 `unverified`，创建时 human / approved 不能替代最后的人工核验。评论和表情继续要求 verified。在此之前作者/管理员使用预览源。公开 `w<32hex>` 源返回 410，媒体请求仅允许作者/管理员，否则 404。作者/管理员作品 DTO 的 `scene` 是随机 `p<32hex>` 源，有效一小时、进程重启失效，返回 `Cache-Control: no-store`。该地址本身具有预览能力，不应公开转发。自动截图也使用此源。参与审查的已公开作品源与媒体使用 `no-store`，防止新审核状态被已有缓存跳过。
 
 - **`POST /api/works/:task/:id/moderation`**：仅管理员；JSON `{ "status": "approved" | "rejected", "reason": "人工理由" }`。通过理由选填，省略或空白时保存「人工复核通过」；拒绝理由必填，理由保存最多 500 字；无效决定或拒绝缺理由 400，无权限 403，作品不存在 404。成功 200 `{ "work": <管理员作品视图> }`，写 `content-review` audit 并刷新竞技场缓存。内容通过不改变来源核验或门面开关；示例作品需题目也人工通过、进入 catalog 后才公开，无需再次操作作品。
 - **`POST /api/works/:task/:id/moderation/retry`**：仅管理员，无需请求体；仅开启自动审查时可用，否则 409。成功 200 `{ "work": <pending 作品视图> }`，写 `content-retry` audit 并刷新竞技场缓存，重新进入队列并暂不公开。
@@ -881,7 +888,7 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 
 静态信号：结果返回后扫描作品内全部 `.html/.htm/.js/.mjs/.cjs/.svg`（合计上限 64MB，超出记为「部分脚本过大未扫描」）。命中密码输入框、`navigator.webdriver` / `HeadlessChrome`、以字面外部地址赋值 `location` / `location.assign|replace` / `window.open`、meta refresh，或可在审查后更换内容的 CDN 地址（jsdelivr / esm.sh 的 `gh/` 路径，jsdelivr `npm/`、unpkg、esm.sh 上不带精确 `x.y.z` 版本的包）时，approved 改为 review，`reason` 追加命中项，`categories` 追加 `signal:<id>`，管理员结果另含 `signals`。混淆代码可以绕过这些规则，它们只保证明显信号由人工确认。作品 CSP 的 jsdelivr 来源收紧为 `https://cdn.jsdelivr.net/npm/`，`gh/` 等其他路径一律不加载；上传检查把 `cdn.jsdelivr.net/gh` 列为会被拦截的外部资源。
 
-定期复查：`CONTENT_RECHECK_HOURS`（默认 24，0 关闭）在开启审查时生效，进程启动一小时后每小时检查一次到期作品。范围为已公开（见上）且未转馆藏的投稿，在待审队列空闲时逐件重新截图（`recheck-*.jpg`，不更新 captures）。基线存于 `.data/media/<id>/baseline.json`：数字归一后的首屏文字摘要、全部 CDN 响应体的 SHA-256 及检查时间；自动审查截图完整时写入，没有基线的作品在首次复查时补建。截图不完整则跳过，下一轮重试。文字和 CDN 都未变时只更新检查时间。有变化时重新送审：通过则写 `content-recheck` audit 并保持公开；否则（含调用失败）以 `source: "recheck"`、理由前缀「定期复查发现内容变化：…」写入结果，作品立即撤下等待人工。缺密钥、截图不完整、超出材料限额、请求超过 15 分钟、429/其他错误、未完成/拒答/无效结构或未确认 Flex 均转 review，不自动重试或切换标准档。`CAPTURE=0` 无法完成自动审查。关闭开关不放行已有待审或被拒作品。
+定期复查：`CONTENT_RECHECK_HOURS`（默认 24，0 关闭）在开启审查时生效，进程启动一小时后每小时检查一次到期作品。范围为已公开（见上）且未转数据包的投稿，在待审队列空闲时逐件重新截图（`recheck-*.jpg`，不更新 captures）。基线存于 `.data/media/<id>/baseline.json`：数字归一后的首屏文字摘要、全部 CDN 响应体的 SHA-256 及检查时间；自动审查截图完整时写入，没有基线的作品在首次复查时补建。截图不完整则跳过，下一轮重试。文字和 CDN 都未变时只更新检查时间。有变化时重新送审：通过则写 `content-recheck` audit 并保持公开；否则（含调用失败）以 `source: "recheck"`、理由前缀「定期复查发现内容变化：…」写入结果，作品立即撤下等待人工。缺密钥、截图不完整、超出材料限额、请求超过 15 分钟、429/其他错误、未完成/拒答/无效结构或未确认 Flex 均转 review，不自动重试或切换标准档。`CAPTURE=0` 无法完成自动审查。关闭开关不放行已有待审或被拒作品。
 
 ### 3.25 盲评资格维护与代表作持久化（schema v26）
 
@@ -889,7 +896,7 @@ v26 仅追加幂等建表 `featured_picks(task_id, scope, model_key, work_id, co
 
 ## 4. 数据包契约（`dist/data.json`）
 
-数据包由数据仓库（arenaofbias-data）构建产出；部署到 `DIST_DIR` 的副本是服务端馆藏目录输入。画廊前端从自己的静态部署消费对应数据与馆藏资源；若前后端各持有副本，应同步版本。其结构属契约的一部分。后端仓库当前无默认 `dist/`，运行前必须提供数据包。
+数据包由数据仓库（arenaofbias-data）构建产出；部署到 `DIST_DIR` 的副本是服务端数据包目录输入。画廊前端从自己的静态部署消费对应数据与数据包资源；若前后端各持有副本，应同步版本。其结构属契约的一部分。后端仓库当前无默认 `dist/`，运行前必须提供数据包。
 
 ### 4.1 顶层结构
 
@@ -918,10 +925,10 @@ v26 仅追加幂等建表 `featured_picks(task_id, scope, model_key, work_id, co
 | `prompt` / `promptUrl` | string | 提示词原文与出处链接 |
 | `promptPending` | boolean（可缺省） | 为真时该题**不接受上传**（服务端据此置 `acceptsUploads=false`） |
 | `sandtable` / `sceneProfile` | 可缺省 | 沙盘 / 场景档案标记 |
-| `conditions` | array | 截图条件 `[{ "id", "label", "note", "mobile" }]`，`id` 与馆藏作品的 `captures` 键对应 |
-| `results` | array | 馆藏作品列表 |
+| `conditions` | array | 截图条件 `[{ "id", "label", "note", "mobile" }]`，`id` 与数据包作品的 `captures` 键对应 |
+| `results` | array | 数据包作品列表 |
 
-**馆藏作品（result）**：
+**数据包作品（result）**：
 
 | 字段 | 说明 |
 | --- | --- |
@@ -941,14 +948,14 @@ v26 仅追加幂等建表 `featured_picks(task_id, scope, model_key, work_id, co
 - 已发布数据包目录包含 `.datapack-source.json`，形如 `{ "source": "github", "repo": "owner/arenaofbias-data", "commit": "<40 位数据包 SHA>" }`。`data.json.sourceCommit` 是打包前的源码 SHA，与数据包 SHA 分别校验格式，不要求相等；缺少来源文件或来源标为 `local` 时视为 `unversioned/dev`，即使 `data.json` 自称某 SHA 也不作为可信 pin。旧数据包缺少 `schemaVersion` 按版本 1 读取；不支持其它 schemaVersion。
 - `DIST_DIR` 可直接指向不可变版本目录，或为指向它的 symlink/junction。切换指针到另一版本目录后，服务无需重启；缓存以真实目录和来源 SHA 为版本标识，不依赖 mtime。无来源文件的开发目录按 `data.json` 内容摘要检测变化。
 - 对局保存其原版本真实目录，作品页面及资源在切换或重启后仍从该目录读取；历史票的计分身份自足于数据库，不要求永久保留旧包。清理旧目录时应保留当前目录，以及 `matches.expires_at` 尚未超过宽限期所引用的 `matches.datapack_root`。目录已被清理的对局，令牌不再提供内容，投票返回 `410`；服务也会释放该目录的内存快照。
-- 后端站点端口可从 `DIST_DIR` 分发 JSON、图片等资源，但不提供作品 HTML；馆藏盲评使用内容端口的独立令牌源，独立画廊则从自身静态部署加载馆藏资源与页面。
+- 后端站点端口可从 `DIST_DIR` 分发 JSON、图片等资源，但不提供作品 HTML；数据包盲评使用内容端口的独立令牌源，独立画廊则从自身静态部署加载数据包资源与页面。
 - 版本目录一经发布必须保持内容不可变；直接覆盖仍被旧对局引用的同一目录不能保证旧资源可用。
 
 ### 4.3 消费方注意点
 
 - 服务端使用 `id`、`title`、`promptPending`、`results[].id/model/effort/title/summary/sourceLabel/harness/provider/scene/captures/gallery`，以及顶层 `models`、`harnesses`、`providers`；其余字段由画廊前端自行解释。
-- 馆藏作品在平台 API（`bootstrap.works`、对战揭晓等）中**不携带 `scene` 字段**；需要播放馆藏场景的前端应以数据包 `scene` 路径为准。**待拍板**：娱乐面若也要经平台统一播放馆藏作品，是扩展 `toPublic` 下发 `scene`，还是娱乐面同样消费数据包，需双方确认。
-- 服务端重复检测会读取馆藏作品 `scene/index.html` 的 SHA-256，数据包内该文件缺失时该作品不参与重复比对（不报错）。
+- 数据包作品在平台 API 中省略所有资源字段（见 2.1），前端以本地同版本数据包提供资源，以 bootstrap DTO 判断可公开条目并合并当前业务字段。
+- 服务端重复检测会读取数据包作品 `scene/index.html` 的 SHA-256，数据包内该文件缺失时该作品不参与重复比对（不报错）。
 
 ---
 

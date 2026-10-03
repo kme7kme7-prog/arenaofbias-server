@@ -20,6 +20,12 @@
   root.append(sceneStyle);
   function isolateScene() {
     if (!sceneOnly || !document.body) return;
+    // Entry / credential forms must remain usable before the scene starts.
+    if ([...document.querySelectorAll('form,input[type="email"],input[type="password"],textarea,' + controls)].some(node =>
+      node.getClientRects().length && (node.matches('input[type="email"],input[type="password"],textarea') ||
+        (node.matches('form') && (!node.querySelector('input[type="radio"],input[type="range"],select') ||
+          node.querySelector('input[type="email"],input[type="password"],textarea'))) ||
+        /开始体验|进入体验|点击开始|start experience|enter experience/i.test(node.textContent)))) return;
     if (!isolatedCanvas?.isConnected) {
       root.removeAttribute('data-aob-scene');
       for (const node of document.querySelectorAll('[data-aob-scene-path],[data-aob-scene-hidden]')) {
@@ -83,6 +89,21 @@
       annotations.add(layer);
     }
   }
+  function scanHud(scenes) {
+    // Scene metadata, single toggles and instruction chips are also overlays.
+    // Only small positioned DOM containers over a substantial canvas qualify.
+    for (const node of [...document.querySelectorAll('div,aside,nav,header,footer,section,span,button')].slice(0, 2000)) {
+      if (marked.has(node) || annotations.has(node) || node.closest('[data-aob-scene-hidden]') || !node.getClientRects().length) continue;
+      const css = getComputedStyle(node), r = rect(node);
+      if (!/^(fixed|absolute)$/.test(css.position) || area(r) < 100 || area(r) > innerWidth * innerHeight * .6 ||
+          !scenes.some(scene => overlaps(rect(scene), r)) || !node.textContent.trim() || node.textContent.length > 1200) continue;
+      if (node.matches('form,article,[aria-live],[role="alert"],[role="alertdialog"],#err,#error') || node.querySelector('canvas,video,iframe,form,article,input[type="password"],input[type="email"],textarea') ||
+          [...node.querySelectorAll('p')].some(p => p.textContent.length > 280) ||
+          /开始体验|进入体验|点击开始|start experience|enter experience/i.test(node.textContent)) continue;
+      if ([...node.querySelectorAll('svg,img')].some(media => area(rect(media)) > 10000)) continue;
+      node.setAttribute('data-aob-fold-panel', ''); marked.add(node);
+    }
+  }
   function scan() {
     if (!document.body) return;
     isolateScene();
@@ -92,6 +113,7 @@
     const scenes = [...document.querySelectorAll('canvas')].filter(el => area(rect(el)) > viewport * .4);
     if (!scenes.length) { report(); return; }
     scanAnnotations(scenes);
+    scanHud(scenes);
     const found = new Set();
     for (const control of [...document.querySelectorAll(controls)].slice(0, 500)) {
       if (!control.getClientRects().length || [...marked].some(box => box.contains(control))) continue;

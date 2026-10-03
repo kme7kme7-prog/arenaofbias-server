@@ -115,10 +115,11 @@ export function createContentHandler({ config, library, arena, siteOrigins, read
       // Match sides get the fold plus the ready probe (the arena transition gate listens
       // for aob:work-ready); the camera bridge restores or captures per bridgePlan.
       const head = [];
+      // Start the readiness clock before any parser-blocking injected script.
+      if (key[0] === 'm' || key[0] === 'c' || url.searchParams.getAll('aob').includes('prev')) head.push(probeTag());
       if (target.draft) head.push(scriptTag(SCRIPTS.draft.path));
       if (arenaFold) head.push(scriptTag(SCRIPTS.arena.path));
       else if (fold) head.push(scriptTag(SCRIPTS.match.path));
-      if (key[0] === 'm' || key[0] === 'c' || url.searchParams.getAll('aob').includes('prev')) head.push(probeTag());
       const bridge = bridgePlan(key, work, url);
       let body = readFileSync(found.file);
       if (bridge) {

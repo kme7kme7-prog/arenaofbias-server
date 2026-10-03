@@ -5,7 +5,7 @@
 - Show1 `GET /api/works` 的公开 datapack 作品使用 `c<32hex>` 内容 origin；地址为持久化随机索引，按 task/id 联合识别，SQLite v37 追加 `curated_content_keys` 表。正常重启、再次拉清单不换键，不需要签名 secret。投稿 `w` 地址不变。
 - 仅当前数据包中的公开、开启娱乐池且有内容目录的作品可取得 `c` 键。每次 GET/HEAD（含子资源）重新从当前目录读取作品并检查 `publicContent` 和娱乐开关；移出目录或关闭娱乐池后旧地址返回 410。返回 `Cache-Control: no-store`；键本身不授予权限。
 - `p` 仍是作者/管理员私看与截图机的 bearer 预览源：一小时有效、重启失效。已有有效 `p` 无需迁移，新索引不延长或改变它的权限。
-- `c` HTML 注入 `aob:work-ready` 探针；竞技场请求其他已有作品源时用 `aob=prev` 请求同一探针，普通 `w` 地址未带此参数时保持原样。错误页不发送就绪消息。CSP 和部署配置不变。
+- `c` HTML 注入就绪探针：在其他阻塞脚本前首先发送 `aob:work-loading`，随后按原时序发送 `aob:work-ready`；竞技场请求其他已有作品源时用 `aob=prev` 请求同一探针，普通 `w` 地址未带此参数时保持原样。错误页不发送上述消息。父页等待文档到达最多二十秒；当前作品窗口首次 loading 或 iframe 文档 load 后，给该文档十秒就绪等待，重复信号不续期。初始 about:blank 不算文档到达，自动恢复仍仅一次。CSP 和部署配置不变。
 
 > 本文档是「娱乐面 React 站」与「专业面静态画廊」两个前端对接本后端的**唯一硬接口文档**。
 > 文中全部端点、字段、状态码与限制均以 `server/` 目录当前代码为准逐条核实；
@@ -309,7 +309,7 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
 
 Show1 娱乐盲测小窗可单独 opt-in `aob=arena-fold`，注入 `/__aob_fold.js`（`server/arena-fold.js`），不限题目类别；放大及正式模式不附加此参数。它与原折叠脚本互斥，不改变 `aob=fold` / Gallery 语义；草稿不启用。策略要求大幅 Canvas，识别覆盖其上的 fixed/absolute 控制容器，以及由多个短文本绝对定位节点构成的非交互标注层，保护入口、表单、带语义标记的介绍内容；未识别时保持原貌。沿用上述父子消息协议，默认收起，可恢复原 DOM/输入状态，并检测迟加载容器；count 仍仅报告控制面板数量。脚本资源同样先经过作品访问门禁，不扩大公开范围。Canvas 内文字和布局内 UI 不保证可自动识别。
 
-键盘娱乐小窗在上述参数之外附加 `aob=arena-scene`，仅在存在唯一可识别大 Canvas 时将其原容器链铺满，收起链外产品页内容并触发原作品 resize；不移动/重建 Canvas 或修改相机。没有 Canvas 或多个候选时不选择。场景布局不受 `sp-arena` 面板开关控制；放大/正式使用不含两项 Arena 参数的原地址恢复完整页面。源文件及访问权限不变。
+娱乐建模/3D 场景/物理模拟/体素世界小窗在上述参数之外附加 `aob=arena-scene`，仅在存在唯一可识别大 Canvas 时将其原容器链铺满，收起链外产品页内容并触发原作品 resize；不移动/重建 Canvas 或修改相机。没有 Canvas 或多个候选时不选择。含 radio/range/select 且不含邮箱、密码或 textarea 的产品配置表单可随场景隔离隐藏；普通表单、凭据输入与开始体验入口仍保留。场景布局不受 `sp-arena` 面板开关控制；放大/正式使用不含两项 Arena 参数的原地址恢复完整页面。后台竞技场取景沿用同一类别与 opt-in 参数，并保留 bridge 相机通信；展览馆取景不附加 Arena 参数。源文件及访问权限不变。
 
 ### 3.2 `POST /api/auth/register` —— 注册
 
@@ -850,7 +850,7 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 | 方法与路径 | 请求与响应 |
 | --- | --- |
 | `GET /api/prompts` | `{ prompts: [...] }`；合并历史快照与数据包正式题目，竞技场 editorial 覆盖对应题目的 `commentary`、`weights`。 |
-| `GET /api/works` | `{ works: [...] }`；快照作品加符合条件的 live 投稿。 |
+| `GET /api/works` | `{ works: [...] }`；快照作品加符合条件的 live 投稿与公开收录。快照 HTML 和 live 投稿还须通过内容源当前的 `publicContent` 门禁；任务缺失、撤下或不可公开的源不进入清单，快照非 HTML 内容保留。历史身份映射、票与题目定义不删除。 |
 | `GET /api/votes?scope=entertainment\|formal` | `{ votes: [...] }`；只读库内 `source=show1` 的票，按时间和 ID 排序，不合入旧快照。scope 必填，非法或缺失为 400。 |
 | `POST /api/votes` | 登录必需；提交 `id`、`promptId`、`winnerRid/Mid`、`loserRid/Mid`、`mode`、`outcome`。未绑定邮箱时有效请求返回 `200 { counted: false, reason: 'unbound' }`，不写入对局或票；已绑定时成功 `201 { vote }`，同 ID 同票幂等重放，已投同一对返回 `409 pair`；`formal` 仅管理员。新 `blind` / `party` 票要求该题当前公开娱乐作品至少 10 件（非演示、按 id 去重），不足返回 `409 { code: "pool", error: "作品收集中（数量/10），暂未开放娱乐盲测" }`；已存票幂等重放及历史榜单保留，正式范围不套此门槛。 |
 | `GET /api/ratings?scope=entertainment\|formal` | `{ ratings: { [modelId]: number }, games: { [modelId]: number } }`；按库内票回放未取整 Elo，供配对，复用聚合缓存。scope 必填。 |

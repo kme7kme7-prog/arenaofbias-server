@@ -5,7 +5,22 @@
 - 用户本轮授权全部已有修改提交、必要分支合并、推送及联调发布。后端隔离合并 origin/main 3ef8ec7（父代理核实已在线）与本地版本标记文档、投稿预览、成员默认8；既有题目参考图v39/契约/测试和历史发布补记一起整理，其他支线无独有功能。
 - 隔离源码 check95/0、完整 test283/283。生产快照副本试迁移v38→v39，20张旧表原列/旧行SHA逐表保持，外键0、integrity ok、二次打开幂等，源快照SHA保持。参考图存references，补齐每日备份与部署步骤，Bash语法与diff检查通过。
 - 11组模型媒体用生产库副本及原HTML演练全量核验和安装通过；运行源摘要或任一媒体摘要不符必须停止。生成物独立安装、不覆盖原作、不复制extract，运行媒体需父代理统一上线。
-- 本仓无build/intake脚本；前端/跨端与生产切换由各代理和父代理执行。正式pin更新为数据仓CI成功发布的不可变包，不把隔离测试称为全部交互通过。证据在忽略目录output/coordinated-release-20261004；[本轮归档](docs/archive/2026-10-04-coordinated-backend-release-wsnxxxs.md)。
+- 本仓无build/intake脚本；前端/跨端与生产切换由各代理和父代理执行。正式pin更新、正规安装并激活数据仓CI发布不可变包，真实catalog20题/176件/digest一致；最终主线check95/0、test283/283。本轮功能提交f1292cc后合并远端主线，不把隔离测试称为全部交互通过。证据在忽略目录output/coordinated-release-20261004；[本轮归档](docs/archive/2026-10-04-coordinated-backend-release-wsnxxxs.md)。
+
+## 配置表单与竞技场取景预览（2026-10-04，本地）
+
+- arena-fold.js 收窄场景隔离的表单保护，配置 radio/range/select 且无凭据/textarea 可隐藏；登录/普通表单和开始体验入口保持。admin/admin.js 竞技场取景接入 arena-fold 及对应类别 arena-scene，bridge/face 保留，展览馆不变。API 契约更新，不修改源作品或数据库。
+- check 87/0、test 263/263；Show1 typecheck/lint、键盘回归及真实 FORM 68 复验通过，截图已查看。未实点管理员保存、未提交/推送/部署；本地下载副本内容服务已重启。其他遗留不动。
+
+
+## 娱乐评测巡检问题修复（2026-10-04，本地未提交/部署）
+
+- 用户授权修复 Show1 娱乐巡检缺陷。`show1compat.mjs` 将 snapshot HTML 和 live 投稿的清单资格与 library 当前 publicContent 门禁对齐，保留内联作品及历史身份/投票映射。本地生产副本清单 527 -> 445（HTML 464 -> 382），001/006 退出可配对池，002 留一件内联；011=22、022=4。没有补 show1-001/002/006 定义、改数据库/键语义或放宽内容访问。
+- `arena-fold.js` 扩充小 HUD/单按钮识别及 scene 隔离入口/表单保护；Show1 将既有唯一 Canvas 场景隔离用于娱乐建模/3D/物理/体素类别。仅 aob=arena-fold/arena-scene opt-in，普通/放大/正式预览保持原展示，源文件、图库 fold.js 和相机未改。真实飞机/键盘、营地及正式/放大保留控件回归通过，不保证 Canvas 内 UI 或复杂多画布全部覆盖。
+- `bridge.mjs` 探针新增一次 `aob:work-loading`，`content.mjs` 在其他阻塞注入脚本前安排探针，原 ready 时序保留。解决本地真实 011/010 文档慢到达造成首组误超时；Show1 文档到达上限二十秒、到达后就绪十秒，重复信号不续期，一次自动刷新后仍失败进入手动空态。契约已更新。
+- 验证：npm run check 87 文件/0 错，npm test 260/260；新增门禁清单动态撤下/恢复及内联保留测试，HTTP 断言探针先于阻塞适配脚本。Show1 类型/lint/构建、work-ready 14/14、work-retry 13/13、真实 work-controls 和 keyboard-preview 通过，详情在 Show1 docs/qa/2026-10-03-entertainment-tabbit.md。两仓 diff --check 通过。
+- 仅本地下载副本 API 5190/内容 5191 与 Show1 5441，未触及生产、未 commit/push/deploy，无迁移/依赖/CSP/nginx/部署配置变更。不是整批入口重新 HTTP 验收：中途 bulk HEAD 命中 60/min 限流，未放宽限流，也未据此报告剩余入口逐件全绿。
+
 
 ## 上传待核验额度（2026-10-04，已本地提交，未推送、未部署）
 

@@ -111,6 +111,7 @@ function foldElement(tag, { position = 'static', width = 100, height = 30, text 
     },
     appendChild(child) { this.children.push(child); child.parentElement = this; return child; },
     append(child) { return this.appendChild(child); },
+    closest(selector) { let node = this; while (node) { if (node.matches(selector)) return node; node = node.parentElement; } return null; },
     contains(other) { return this === other || this.children.some(child => child.contains(other)); },
     querySelectorAll(selector) { return this.children.flatMap(child => [...(child.matches(selector) ? [child] : []), ...child.querySelectorAll(selector)]); },
     querySelector(selector) { return this.querySelectorAll(selector)[0] ?? null; },
@@ -722,6 +723,7 @@ describe('platform lifecycle', () => {
     assert.equal((await fetchContent(new URL('/__sp_fold.js', match.data.a).href)).status, 200);
     const arenaFrame = await fetchContent(`${match.data.a}?aob=arena-fold`);
     assert.match(arenaFrame.text, /<script src="\/__aob_fold\.js"><\/script>/);
+    assert.ok(arenaFrame.text.indexOf('data-aob-probe') < arenaFrame.text.indexOf('/__aob_fold.js'), 'readiness starts before the blocking fold script');
     assert.doesNotMatch(arenaFrame.text, /__sp_fold\.js/);
     const arenaScript = await fetchContent(new URL('/__aob_fold.js', match.data.a).href);
     assert.equal(arenaScript.status, 200);

@@ -63,6 +63,7 @@ test('bridgeTags order the saved camera and capture flag before the runtime', ()
   const plain = bridgeTags(null, false);
   assert.ok(!plain.includes('window.__AOB_SAVED__=') && !plain.includes('__AOB_CAPTURE__=true'));
   assert.ok(probeTag().includes("parent.postMessage('aob:work-ready','*')"));
+  assert.ok(probeTag().includes("parent.postMessage('aob:work-loading','*')"));
 });
 
 test('validCamera accepts only position/target of three finite numbers', () => {

@@ -120,7 +120,8 @@ export function registerShow1Compat(router, deps) {
     // Work gates stay in the SQL. This only admits a community question beside an arena id,
     // and keeps an unassigned inbox item out even if its switch was turned on.
     const uploads = q.liveWorks.all().filter((row) => row.entertainment_route !== 1 && !snapshot.upToRid[row.id]
-      && (roundByTask[row.task_id] || community.has(row.task_id)))
+      && (roundByTask[row.task_id] || community.has(row.task_id))
+      && (!library || library.publicContent(library.byContentKey(row.content_key))))
       .map((row) => ({ ...row, round: roundByTask[row.task_id] ?? row.task_id,
         modelName: row.model_id ? (deps.catalog.model(row.model_id)?.name ?? row.model_id) : row.model_other,
         vendor: row.model_id ? (deps.catalog.model(row.model_id)?.vendor ?? '') : row.model_vendor }));
@@ -201,7 +202,14 @@ export function registerShow1Compat(router, deps) {
     const row = q.arenaEditorial.get(taskOfRound(prompt.id) ?? '');
     return row ? { ...prompt, commentary: row.commentary, ...(row.weights_json ? { weights: JSON.parse(row.weights_json) } : {}) } : prompt;
   });
-  const worksOf = () => [...snapshot.works, ...liveWorks().map((row) => ({
+  // Historical HTML rows are indexes, not publication authority. Match the w-host
+  // gate at read time so removed tasks / held works cannot enter the random pool.
+  const snapshotWorks = () => snapshot.works.filter((row) => {
+    if (!library || JSON.parse(row.content).kind !== 'html') return true;
+    const key = snapshot.workMap[row.id]?.key;
+    return !!key && library.publicContent(library.byContentKey(key));
+  });
+  const worksOf = () => [...snapshotWorks(), ...liveWorks().map((row) => ({
     id: row.rid ?? row.id, promptId: row.round, modelId: row.model_id,
     modelName: row.modelName, vendor: row.vendor, title: row.title, isDemo: 0,
     content: JSON.stringify({ kind: 'html', src: `${deps.config.contentTemplate.replace('{token}', row.content_key)}/` }),

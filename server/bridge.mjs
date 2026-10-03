@@ -21,6 +21,7 @@ const VIRTUAL = '/__aob__';
 // the arena transition. The arena frontend still listens for this exact message.
 const PROBE_JS = `(function(){
 var posted=false;
+try{parent.postMessage('aob:work-loading','*');}catch(e){}
 function post(){if(posted)return;posted=true;try{parent.postMessage('aob:work-ready','*');}catch(e){}}
 function arm(){
   var frames=0;

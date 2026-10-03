@@ -367,6 +367,14 @@ describe('upload inspection', () => {
     assert.equal(result.kind, 'html');
   });
 
+  test('a missing script warns in a single HTML file but rejects a ZIP', () => {
+    const page = '<html><body><script src="engine.js"></script><script>window.ok = 1</script></body></html>';
+    const local = inspect(Buffer.from(page), 'page.html').checks.find((check) => check.id === 'local');
+    assert.equal(local.state, 'warn');
+    assert.match(local.detail, /engine\.js/);
+    assert.throws(() => inspect(zip([{ name: 'index.html', data: page }])), /脚本或样式不存在：engine\.js/);
+  });
+
   test('a wrapping folder is stripped and dist/ becomes the served root', () => {
     const result = inspect(zip([
       { name: 'project/package.json', data: '{}' },

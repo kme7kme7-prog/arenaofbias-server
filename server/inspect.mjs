@@ -210,7 +210,9 @@ export function inspectUpload(buffer, filename, { limits, cdn, template }) {
     if (!clean) continue;
     const target = posix.normalize(clean.startsWith('/') ? clean.slice(1) : posix.join(posix.dirname(entry), clean));
     local++;
-    if (!served.has(target) && !served.has(posix.join(target, 'index.html'))) (critical ? missingCritical : missingOther).push(clean);
+    // A single HTML file carries nothing else, so a missing reference there is usually a stray
+    // tag beside inlined code; the trial load shows whether the page still works.
+    if (!served.has(target) && !served.has(posix.join(target, 'index.html'))) (critical && isZip ? missingCritical : missingOther).push(clean);
   }
   if (missingCritical.length) fail(400, `入口页面引用的脚本或样式不存在：${missingCritical.slice(0, 4).join('、')}`);
   checks.push(missingOther.length

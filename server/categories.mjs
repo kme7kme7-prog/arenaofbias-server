@@ -3,7 +3,13 @@ import { fail } from './http.mjs';
 
 export const CATEGORIES = ['文学', '静态网页', '建模'];
 // Domains say what a question is about. They scope browsing and the leaderboard, never formats.
-export const DOMAINS = ['数学', '物理', '化学', '生物', '天文', '建筑', '自然景观', '交通与机械', '产品与品牌', '文学艺术', '游戏娱乐'];
+export const DOMAIN_GROUPS = [
+  { title: '理工与健康', domains: ['数学', '物理', '化学', '生物', '天文', '计算机技术', '工程技术', '医学健康', '地理环境'] },
+  { title: '人文与社会', domains: ['文学艺术', '历史文化', '教育学习', '经济金融', '商业管理', '法律政务', '社会生活'] },
+  { title: '空间与产品', domains: ['建筑', '自然景观', '交通与机械', '产品与品牌'] },
+  { title: '生活与娱乐', domains: ['游戏娱乐', '生活服务', '餐饮美食', '旅游出行', '运动体育'] },
+];
+export const DOMAINS = DOMAIN_GROUPS.flatMap((group) => group.domains);
 export const MAX_DOMAINS = 2;
 export const defaultTemplates = (category) => category === '文学' ? ['text'] : ['static', 'vite'];
 export const templatesOf = (task) => task.templates?.length ? task.templates : defaultTemplates(task.category);

@@ -190,6 +190,24 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; letter-spacing: -0.01em; line-heig
 textarea.input { resize: vertical; min-height: 64px; }
 select.input { appearance: none; padding-right: 32px; background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(-45deg, transparent 50%, currentColor 50%); background-position: right 17px center, right 13px center; background-size: 4px 4px; background-repeat: no-repeat; }
 .field-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; }
+fieldset.domain-field { padding: 0; border: 0; }
+dialog.sheet:has(.domain-field) { width: min(720px, calc(100% - 32px)); }
+.domain-field > legend { padding: 0; margin-bottom: 6px; }
+.domain-groups { display: grid; gap: 14px; margin-top: 6px; }
+.domain-group { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 10px; align-items: start; }
+.domain-group-title { padding-top: 8px; color: var(--muted); font-size: 11.5px; line-height: 1.5; }
+.domain-options { display: flex; flex-wrap: wrap; gap: 7px; }
+.domain-option { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 6px 9px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: var(--ink-2); font-size: 12px; line-height: 1.5; cursor: pointer; }
+.domain-option input { width: 13px; height: 13px; margin: 0; accent-color: var(--ink); }
+.domain-option:hover { border-color: var(--ink-2); color: var(--ink); }
+.domain-option:has(input:checked) { border-color: var(--ink-2); background: var(--surface-2); color: var(--ink); }
+.domain-option:has(input:focus-visible) { outline: 2px solid var(--ink); outline-offset: 2px; }
+.domain-option:has(input:disabled) { opacity: .6; cursor: default; border-color: var(--line); }
+.domain-hint { margin: 8px 0 0; font-size: 12px; line-height: 1.7; }
+@media (max-width: 460px) {
+  .domain-group { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .domain-group-title { padding-top: 0; }
+}
 .form-error { margin: 0 0 12px; color: var(--danger); font-size: 13px; }
 .form-error:empty { display: none; }
 .page-error { width: min(100%, var(--wrap)); margin: 16px auto 0; padding-inline: 24px; }

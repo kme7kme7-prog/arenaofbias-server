@@ -186,7 +186,7 @@ const state = { user: undefined, data: null, works: null, audit: [], users: null
   sidebarCollapsed: store.get('admin-sidebar-collapsed') === '1',
   workPage: 1, workTask: '', workStatus: '', workShow: '', workHarness: '', workProvider: '', workSearch: '', traffic: null,
   workModel: '', workEffort: '', workAuthor: '', workGenerationMode: '', workHumanIntervention: '', workEfforts: [],
-  inbox: null, inboxForms: {}, intake: null, adminQuestions: null, reviewCounts: null };
+  inbox: null, inboxForms: {}, intake: null, adminQuestions: null, reviewCounts: null, domainGroups: [] };
 const taskTitle = (id) => [...(state.adminQuestions ?? []), ...(state.questions ?? [])].find((t) => t.id === id)?.title ?? id;
 
 async function loadCatalog() {
@@ -452,7 +452,21 @@ function systemWorksView() {
     </section>`;
 }
 
-const QUESTION_DOMAINS = ['数学', '物理', '化学', '生物', '天文', '建筑', '自然景观', '交通与机械', '产品与品牌', '文学艺术', '游戏娱乐'];
+const QUESTION_TYPES = { 文学: '文本', 静态网页: '设计', 建模: '三维' };
+const MAX_DOMAINS = 2;
+function questionTypeField(category = '静态网页') {
+  return `<label class="field"><span class="field-label">题目类型</span><select class="input" name="category" required>${Object.entries(QUESTION_TYPES).map(([value, label]) => `<option value="${value}"${value === category ? ' selected' : ''}>${label}</option>`).join('')}</select></label>`;
+}
+function questionDomainField(selected = []) {
+  return `<fieldset class="field domain-field"><legend class="field-label">所属领域<small data-domain-count aria-live="polite">已选 ${selected.length} / ${MAX_DOMAINS}</small></legend>
+    <div class="domain-groups">${state.domainGroups.map((group) => `<div class="domain-group" role="group" aria-label="${esc(group.title)}"><span class="domain-group-title">${esc(group.title)}</span><div class="domain-options">${group.domains.map((domain) => `<label class="domain-option"><input type="checkbox" name="domains" value="${esc(domain)}"${selected.includes(domain) ? ' checked' : ''}><span>${esc(domain)}</span></label>`).join('')}</div></div>`).join('')}</div>
+    <p class="muted domain-hint">选 1–${MAX_DOMAINS} 个，方便按领域查找题目；选满后取消一项即可更换。</p></fieldset>`;
+}
+function syncQuestionDomains(form) {
+  const count = $$('[name="domains"]:checked', form).length;
+  $$('[name="domains"]', form).forEach((input) => { input.disabled = count >= MAX_DOMAINS && !input.checked; });
+  $('[data-domain-count]', form).textContent = `已选 ${count} / ${MAX_DOMAINS}`;
+}
 function tasksView() {
   const tasks = state.adminQuestions ?? [];
   return `${pageHero('题目管理', `${faceLabel()}题目`, '统一管理题目信息、投稿开关和审核状态。新题目须经人工审核。', [['题目', tasks.length]])}
@@ -463,13 +477,15 @@ function questionDialog(question) {
     <label class="field"><span class="field-label">标题</span><input class="input" name="title" maxlength="70" value="${esc(question.title)}" required></label>
     <label class="field"><span class="field-label">简述</span><textarea class="input" name="summary" maxlength="400">${esc(question.summary)}</textarea></label>
     <label class="field"><span class="field-label">提示词</span><textarea class="input" name="prompt"${question.works && question.moderation?.status === 'approved' ? ' disabled' : ''}>${esc(question.prompt)}</textarea></label>
-    <label class="field"><span class="field-label">题型</span><select class="input" name="category">${['文学', '静态网页', '建模'].map((value) => `<option${value === question.category ? ' selected' : ''}>${value}</option>`).join('')}</select></label>
-    <div class="field"><span class="field-label">领域</span><div class="face-checks">${QUESTION_DOMAINS.map((domain) => `<label><input type="checkbox" name="domains" value="${esc(domain)}"${question.domains?.includes(domain) ? ' checked' : ''}>${esc(domain)}</label>`).join('')}</div></div>
+    ${questionTypeField(question.category)}
+    ${questionDomainField(question.domains)}
     <label class="face-checks"><input type="checkbox" name="acceptsUploads"${question.acceptsUploads ? ' checked' : ''}>接受投稿</label>
     <label class="field"><span class="field-label">封面作品 id<small>留空使用默认封面</small></span><input class="input" name="cover" value="${esc(question.cover)}"></label>
     <p class="form-error" role="alert"></p><button class="btn primary" type="submit">保存信息</button></form>
     <div class="actions"><button class="btn primary" data-question-decision="approved">通过 / 恢复</button><button class="btn danger" data-question-decision="rejected">拒绝 / 撤下</button></div>` });
   const form = $('form', sheet.el);
+  syncQuestionDomains(form);
+  form.addEventListener('change', () => syncQuestionDomains(form));
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     const done = busy($('button[type="submit"]', form));
@@ -534,10 +550,12 @@ function newQuestionDialog() {
     <label class="field"><span class="field-label">标题</span><input class="input" name="title" maxlength="70" required></label>
     <label class="field"><span class="field-label">简述</span><textarea class="input" name="summary" maxlength="400" rows="2" required></textarea></label>
     <label class="field"><span class="field-label">提示词</span><textarea class="input" name="prompt" maxlength="20000" rows="6" required></textarea></label>
-    <label class="field"><span class="field-label">形式</span><select class="input" name="category" required><option value="静态网页">网页</option><option value="建模">三维</option><option value="文学">文本</option></select></label>
-    <label class="field"><span class="field-label">领域</span><select class="input" name="domain" required>${QUESTION_DOMAINS.map((domain) => `<option value="${domain}">${domain}</option>`).join('')}</select></label>
+    ${questionTypeField()}
+    ${questionDomainField()}
     <p class="form-error" role="alert"></p><button class="btn primary" type="submit">创建</button></form>` });
   const form = $('form', sheet.el);
+  syncQuestionDomains(form);
+  form.addEventListener('change', () => syncQuestionDomains(form));
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const category = form.category.value;
@@ -545,7 +563,7 @@ function newQuestionDialog() {
     try {
       await api('admin/questions', { method: 'POST', body: {
         title: form.title.value, summary: form.summary.value, prompt: form.prompt.value, category,
-        domains: [form.domain.value], templates: category === '文学' ? ['text'] : ['static'],
+        domains: $$('[name="domains"]:checked', form).map((input) => input.value), templates: category === '文学' ? ['text'] : ['static'],
       } });
       sheet.close();
       toast('题目已创建，等待审核');
@@ -1191,6 +1209,7 @@ async function boot() {
     state.questions = data.questions;
     state.reviewCounts = data.review;
     state.site = data.site;
+    state.domainGroups = data.domainGroups;
     state.adminQuestions = null;
   } catch {
     state.user = null;

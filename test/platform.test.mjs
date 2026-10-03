@@ -111,6 +111,7 @@ function foldElement(tag, { position = 'static', width = 100, height = 30, text 
     },
     appendChild(child) { this.children.push(child); child.parentElement = this; return child; },
     append(child) { return this.appendChild(child); },
+    closest(selector) { let node = this; while (node) { if (node.matches(selector)) return node; node = node.parentElement; } return null; },
     contains(other) { return this === other || this.children.some(child => child.contains(other)); },
     querySelectorAll(selector) { return this.children.flatMap(child => [...(child.matches(selector) ? [child] : []), ...child.querySelectorAll(selector)]); },
     querySelector(selector) { return this.querySelectorAll(selector)[0] ?? null; },

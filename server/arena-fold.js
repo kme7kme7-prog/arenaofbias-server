@@ -95,7 +95,7 @@
       const css = getComputedStyle(node), r = rect(node);
       if (!/^(fixed|absolute)$/.test(css.position) || area(r) < 100 || area(r) > innerWidth * innerHeight * .6 ||
           !scenes.some(scene => overlaps(rect(scene), r)) || !node.textContent.trim() || node.textContent.length > 1200) continue;
-      if (node.matches('form,article,[aria-live]') || node.querySelector('canvas,video,iframe,form,article,input[type="password"],input[type="email"],textarea') ||
+      if (node.matches('form,article,[aria-live],[role="alert"],[role="alertdialog"],#err,#error') || node.querySelector('canvas,video,iframe,form,article,input[type="password"],input[type="email"],textarea') ||
           [...node.querySelectorAll('p')].some(p => p.textContent.length > 280) ||
           /开始体验|进入体验|点击开始|start experience|enter experience/i.test(node.textContent)) continue;
       if ([...node.querySelectorAll('svg,img')].some(media => area(rect(media)) > 10000)) continue;

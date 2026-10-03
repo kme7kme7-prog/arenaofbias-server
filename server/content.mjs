@@ -61,7 +61,7 @@ export function createContentHandler({ config, library, arena, siteOrigins, read
     }
     readGuard.file(req);
     const key = String(req.headers.host ?? '').split('.')[0].toLowerCase();
-    if (!/^[wmdp][0-9a-f]{32}$/.test(key)) return errorPage(res, 404, '作品地址无效', '请从展厅重新打开作品。');
+    if (!/^[wmdpc][0-9a-f]{32}$/.test(key)) return errorPage(res, 404, '作品地址无效', '请从展厅重新打开作品。');
 
     let target = null;
     let work = null;
@@ -71,6 +71,9 @@ export function createContentHandler({ config, library, arena, siteOrigins, read
     } else if (key[0] === 'm') {
       work = arena.workForToken(key);
       if (library.isEligible(work)) target = { dir: work.dir, entry: work.entry ?? 'index.html' };
+    } else if (key[0] === 'c') {
+      work = library.curatedByKey(key);
+      if (library.publicCuratedContent(work)) target = { dir: work.dir, entry: work.entry ?? 'index.html', private: true };
     } else if (key[0] === 'p') {
       work = library.previewByKey(key);
       if (work) target = { dir: work.dir, entry: work.entry ?? 'index.html', private: true };
@@ -110,7 +113,7 @@ export function createContentHandler({ config, library, arena, siteOrigins, read
       const head = [];
       if (target.draft) head.push(scriptTag(SCRIPTS.draft.path));
       if (fold) head.push(scriptTag(SCRIPTS.match.path));
-      if (key[0] === 'm') head.push(probeTag());
+      if (key[0] === 'm' || key[0] === 'c' || url.searchParams.getAll('aob').includes('prev')) head.push(probeTag());
       const bridge = bridgePlan(key, work, url);
       let body = readFileSync(found.file);
       if (bridge) {

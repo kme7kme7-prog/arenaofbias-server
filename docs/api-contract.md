@@ -1,5 +1,12 @@
 # API 契约 · arenaofbias-server
 
+## 竞技场收录作品的稳定内容地址（2026-10-03）
+
+- Show1 `GET /api/works` 的公开 datapack 作品使用 `c<32hex>` 内容 origin；地址为持久化随机索引，按 task/id 联合识别，SQLite v37 追加 `curated_content_keys` 表。正常重启、再次拉清单不换键，不需要签名 secret。投稿 `w` 地址不变。
+- 仅当前数据包中的公开、开启娱乐池且有内容目录的作品可取得 `c` 键。每次 GET/HEAD（含子资源）重新从当前目录读取作品并检查 `publicContent` 和娱乐开关；移出目录或关闭娱乐池后旧地址返回 410。返回 `Cache-Control: no-store`；键本身不授予权限。
+- `p` 仍是作者/管理员私看与截图机的 bearer 预览源：一小时有效、重启失效。已有有效 `p` 无需迁移，新索引不延长或改变它的权限。
+- `c` HTML 注入 `aob:work-ready` 探针；竞技场请求其他已有作品源时用 `aob=prev` 请求同一探针，普通 `w` 地址未带此参数时保持原样。错误页不发送就绪消息。CSP 和部署配置不变。
+
 > 本文档是「娱乐面 React 站」与「专业面静态画廊」两个前端对接本后端的**唯一硬接口文档**。
 > 文中全部端点、字段、状态码与限制均以 `server/` 目录当前代码为准逐条核实；
 > 与代码现状存在出入、或尚待双方确认之处，均以「**待拍板**」标出。
@@ -178,7 +185,7 @@ API 域静态 `/data.json`（含等价编码路径）仅管理员登录后返回
 
 管理员视图另含 `moderation`、`works`（两种存储合计未删除作品数）、`votes`（投票记录数）、`samples`（发起者随题附带的数据库示例；数据包题目为空）。待审、拒绝、撤下题目仅在作者或有权限的管理视图可见；题目撤下或删除后，关联作品不公开，相关票暂停计分，重新通过后恢复。
 
-### 2.2.1 覆盖层与迁移（schema v37）
+### 2.2.1 覆盖层与迁移（schema v38）
 
 迁移追加到 MIGRATIONS 末尾并可重复运行。`works` 与 `questions` 新增 `author_role`；回填优先识别管理员创建题目、管理员上传 / 收件箱登记的历史路径，再按作者当前角色回填。旧 member 账号转为公开角色 user，已有 admin 账号保持高级管理员。历史审计、投票 JSON、`curated_as` / `nominated_at` 列与值保留。
 
@@ -698,7 +705,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 `GET /*`（非 `/api/`、非 `/media/`、非 `/admin/`）分发 `DIST_DIR` 内的数据包资源。HTML/HTM（含目录映射的 `index.html`）及不存在的文件返回纯文本 `404 Not found`；其余响应使用 `Content-Security-Policy: sandbox; default-src 'none'` 与 `Referrer-Policy: no-referrer`，防止 SVG/XML 在 API 同源执行脚本。可信管理端 `/admin/` 保留自身站点 CSP。作品 HTML 从独立内容源打开；独立画廊从自己的静态部署读取数据包数据与作品目录（见第 4 节）。
 
-### 3.14 题目与人工审核（schema v37）
+### 3.14 题目与人工审核（schema v38）
 
 **`POST /api/questions`**：登录并绑定邮箱，write 限流，请求体上限 6 MB。`title` / `summary` / `prompt` 必填，长度上限 70 / 400 / 20000 字；提示词仅去首尾空白。`category` 为文学 / 静态网页 / 建模；`domains` 有值时为词表内 1–2 项；`templates` 文学固定 text，其他分类为 static / vite 的非空子集；可选 tags 沿用既有规则。
 
@@ -716,7 +723,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 **`DELETE /api/questions/:id`**：高级管理员可删除任意无票题目；有 Gallery 或 Show1 投票返回 409。作者删除自己题目沿用原规则：公開题目有其他作者作品或有票不可删。数据包题目覆盖层软删除，题下数据包作品随之隐藏，关联数据库作品同步软删除；文件不动。公开、本人与管理员列表不返回已删除题目，写 question-delete 审计。
 
-上述写接口均遵循 Origin 校验、write 限流和通用错误格式。普通管理员对题目管理接口返回 403。历史 v22/v23/v29 字段和原审核记录保留，v37 增加发布者与覆盖层（见 2.2.1）。
+上述写接口均遵循 Origin 校验、write 限流和通用错误格式。普通管理员对题目管理接口返回 403。历史 v22/v23/v29 字段和原审核记录保留，v38 增加发布者与覆盖层（见 2.2.1）。
 
 ### 3.15 作品评论
 
@@ -824,7 +831,7 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 | `GET /api/prompts` | `{ prompts: [...] }`；合并历史快照与数据包正式题目，竞技场 editorial 覆盖对应题目的 `commentary`、`weights`。 |
 | `GET /api/works` | `{ works: [...] }`；快照作品加符合条件的 live 投稿。 |
 | `GET /api/votes?scope=entertainment\|formal` | `{ votes: [...] }`；只读库内 `source=show1` 的票，按时间和 ID 排序，不合入旧快照。scope 必填，非法或缺失为 400。 |
-| `POST /api/votes` | 登录必需；提交 `id`、`promptId`、`winnerRid/Mid`、`loserRid/Mid`、`mode`、`outcome`。未绑定邮箱时有效请求返回 `200 { counted: false, reason: 'unbound' }`，不写入对局或票；已绑定时成功 `201 { vote }`，同 ID 同票幂等重放，已投同一对返回 `409 pair`；`formal` 仅管理员。 |
+| `POST /api/votes` | 登录必需；提交 `id`、`promptId`、`winnerRid/Mid`、`loserRid/Mid`、`mode`、`outcome`。未绑定邮箱时有效请求返回 `200 { counted: false, reason: 'unbound' }`，不写入对局或票；已绑定时成功 `201 { vote }`，同 ID 同票幂等重放，已投同一对返回 `409 pair`；`formal` 仅管理员。新 `blind` / `party` 票要求该题当前公开娱乐作品至少 10 件（非演示、按 id 去重），不足返回 `409 { code: "pool", error: "作品收集中（数量/10），暂未开放娱乐盲测" }`；已存票幂等重放及历史榜单保留，正式范围不套此门槛。 |
 | `GET /api/ratings?scope=entertainment\|formal` | `{ ratings: { [modelId]: number }, games: { [modelId]: number } }`；按库内票回放未取整 Elo，供配对，复用聚合缓存。scope 必填。 |
 | `GET /api/show1/leaderboard?scope=entertainment\|formal&category=all\|text\|web` | 主站聚合榜单，scope 必填，category 缺省 all；非法参数 400。见下方。 |
 | `GET /api/comments?round=<题目编号>` | `{ comments: [...] }`；无效题目 `400`。 |
@@ -833,7 +840,7 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 | `POST /api/reactions` | 登录且绑定邮箱；请求 `id`、`promptId`、`mid`、`kind`，成功 `201 { counts, mine }`；`kind:null` 撤销。未绑定返回 `403 email_required`。 |
 | `POST /api/track` | 最佳努力记录 `path` 浏览量，成功 `204`。 |
 
-正式题目在数据仓库登记 `arenaId`（稳定三位编号）、`kind`（`text` / `web`）和 `category`。共享后端将同一个 task ID 映射到 Show1 编号，新增题目及其已验证、开启竞技场展示的投稿可以进入娱乐玩法；长短提示词使用同一个 task ID 与编号，以 `promptVariants: [{id, label, prompt}]` 返回两份原文，由前端按钮切换；作品可通过 `promptVariant` 标明使用的版本，同一模型的两版展示在一起。既有快照题目保留编号、名称及权重，正式提示词由数据包提供；未进入数据包的历史题目仍保留。此登记不写入 SQLite 的 `questions` 表，也不改变作品审核和展示开关。
+正式题目在数据仓库登记 `arenaId`（稳定三位编号）、`kind`（`text` / `web`）和 `category`。共享后端将同一个 task ID 映射到 Show1 编号，新增题目及其已验证、开启竞技场展示的投稿会保留在公开清单中；娱乐盲测须至少有 10 件不同 id 的非演示公开娱乐作品且有跨模型组合，未达门槛仍可浏览；长短提示词使用同一个 task ID 与编号，以 `promptVariants: [{id, label, prompt}]` 返回两份原文，由前端按钮切换；作品可通过 `promptVariant` 标明使用的版本，同一模型的两版展示在一起。既有快照题目保留编号、名称及权重，正式提示词由数据包提供；未进入数据包的历史题目仍保留。此登记不写入SQLite 的 `questions` 表，也不改变作品审核和展示开关。
 
 旧分享卡端点已移除，访问返回 `404`。兼容层的详细字段可参考 `test/fixtures/show1-golden/` 中的固定响应。
 

@@ -312,6 +312,17 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     return { show_gallery: work.showGallery, show_arena: work.showArena, show_entertainment: Boolean(work.showEntertainment) };
   };
   const inInbox = (work) => Boolean(work && !work.curated && work.entertainmentRoute === 1);
+  const publicCuratedContent = (work) => {
+    const current = withDisplay(work);
+    return Boolean(work?.curated && work.status === 'verified' && current?.status === 'verified' && current.dir &&
+      (!work.moderation || ['legacy', 'approved'].includes(work.moderation.status)) &&
+      publicContentEffective(current) && !inInbox(current) && current.showEntertainment);
+  };
+  const curatedKeys = {
+    byWork: db.prepare('SELECT content_key FROM curated_content_keys WHERE task_id = ? AND work_id = ?'),
+    byKey: db.prepare('SELECT task_id, work_id FROM curated_content_keys WHERE content_key = ?'),
+    add: db.prepare('INSERT OR IGNORE INTO curated_content_keys (task_id, work_id, content_key) VALUES (?, ?, ?)'),
+  };
   const visibleEffective = (work, site) => Boolean(work && !inInbox(work) && publicContentEffective(work) &&
     (site === 'show1' ? work.showArena : work.showGallery));
   const visibleTo = (work, site = 'show2') => visibleEffective(withDisplay(work), site);
@@ -489,6 +500,21 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     mediaDir: dirs.media,
     contentAllowed,
     publicContent,
+    publicCuratedContent,
+    curatedContentKey(work) {
+      // Re-read the work: a stale object must not issue a public address after removal.
+      const current = work && this.work(work.taskId, work.id);
+      if (!publicCuratedContent(current)) return null;
+      const existing = curatedKeys.byWork.get(current.taskId, current.id);
+      if (existing) return existing.content_key;
+      curatedKeys.add.run(current.taskId, current.id, token('c'));
+      return curatedKeys.byWork.get(current.taskId, current.id)?.content_key ?? null;
+    },
+    curatedByKey(key) {
+      const row = curatedKeys.byKey.get(key);
+      const work = row && this.work(row.task_id, row.work_id);
+      return publicCuratedContent(work) ? work : null;
+    },
     canRead(work, viewer) {
       work = withDisplay(work);
       return Boolean(work && (publicContentEffective(work) || viewer && (viewer.id === work.ownerId || isStaff(viewer))));

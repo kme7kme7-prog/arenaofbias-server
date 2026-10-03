@@ -1,5 +1,15 @@
 # HANDOFF.md · 当前状态
 
+## 四仓联调后端合并（2026-10-03，待统一发布）
+
+- 用户授权四仓联调、合并已完成分支、提交、推送和部署。后端把本地 c4585a8 的发布者角色 / API v2 与远端 bdb55e9 汇合；远端 873b5c8 的长期 c 内容地址和 bdb55e9 的娱乐池十件门槛均保留。其他本地分支均已在主线祖先中，无独有功能需要再次合并。
+- 发布顺序保留后端先于游戏；Gallery 与后端须同步 API v2。已发布 v1–v37 迁移逻辑未改写，内容地址索引保持 v37，发布者角色与覆盖层追加为 v38。新回归分别验证 v36 / v37 -> v38，保留票、审计、外键、长期 c 索引及创建角色。
+- 合并修复：长期 c 地址门禁使用当前作品覆盖层，撤下为 unverified / questioned 或软删除后返回 410、清单停止提供，恢复后长期键保留。内容探针、娱乐门槛与正式投票豁免均保留。
+- 验证：npm run check 86 文件 / 0 错；最终 npm test 258 / 258，通过且无失败、取消或跳过；针对性内容 / 迁移 / Show1 测试通过；迁移 v1–v37 与远端逐项比对一致（只规范换行）；git diff --check 通过。
+- 生产只读预部署副本（由父代理提供）复制后试迁移 v37 -> v38 通过；原副本未写入。19 张既有表按原列核对 SHA256 均保持，仅 users 的 member 按授权迁移为 user；votes=444、users=31，外键与完整性检查通过。回填 questions admin=7/user=7，works admin=16/user=344。父代理逐文件核对线上 68 个 runtime 文件等于 bdb55e9，旧 marker 5527c5e 失准；发布真实代码基线采用 bdb55e9，保留已上线内容键与门槛。
+- 本轮开始已有脏 HANDOFF、两条旧归档和两条未跟踪归档保留；证据位于忽略目录 output/server-integration-20261003。没有操作生产库、切换线上包、部署或验收线上交互；发布由父代理完成，数据 pin 由父代理统一安装。
+- [本轮归档](docs/archive/2026-10-03-coordinated-backend-integration-wsnxxxs.md)。
+
 ## 发布者角色统一与 API v2（2026-10-03，本地验证完成）
 
 - 三名 GPT-6.1 Sol / high 子代理分别完成数据库与题目、作品流程、API 与 `/admin/`；父代理完成联调、文档、交接与单条本地提交。依据用户本轮开头“完成后请 commit”的授权，只纳入本轮文件及本节交接；不推送、不部署。
@@ -12,6 +22,25 @@
 - **本地包联调**：只读当前本地包 20 题 / 182 件作品，临时库新建公开题 1 道与已核验作品 3 件；bootstrap=21 题 / 185 件，与同一包按旧前端“包作品 + 公开数据库作品”的合并口径一致。临时库新作品 author_role 各 admin / moderator / user=1，题目 admin=1、moderator=1（后者 pending）、user=0。浏览器确认高级管理题目覆盖保存、三级角色选项、普通管理员入口隐藏 / 本人开关禁用、空路由加载及 185 件列表；未捕获 console error / warn。服务已关闭，新工作区临时库已清除。
 - **范围与未做**：排名实现、回放脚本、Show1 兼容层源码和他轮归档原样保留；仅新身份快照省略 curated，旧票读取 / 排行规则保持。未修改 Gallery、另一前端、数据包源码或 pin，未验收双前端同步发布、生产迁移 / SMTP / CAPTCHA / 外部审查、全部作品交互、移动端或多浏览器；本仓没有 build / check:intake 脚本。Gallery 与后端须同时发布 v2。
 - [本轮归档](docs/archive/2026-10-03-unified-authorship-api-v2-wsnxxxs.md)。本地证据在忽略目录 output/unify-authorship-20261003-parent；旧外部临时目录的清理被自动审批拒绝（见归档），未无差别清理。
+
+## 娱乐盲测十件作品门槛（2026-10-03，本地完成，未提交、推送、部署）
+
+- 用户确认实施报告后授权：Show1 公开娱乐题目须当前至少 10 件不同 id 的非演示公开娱乐作品；前端同时保留跨模型要求。不隐藏题库清单、不删除历史票/榜单、不影响 Gallery 正式盲测。
+- 动工复核本地已在 873b5c8（上一轮长期 c 门牌由外部提交），工作区干净。本轮仅修改 server/show1compat.mjs、test/show1compat.test.mjs、docs/api-contract.md 和本节；不改迁移、审核、数据包、内容门禁、CSP、nginx 或部署配置。
+- 新 blind/party 票按当前 worksOf 清单按 id 去重，demo 不计数；不足十件返回 409 pool 与中文收集进度。已存同 id 同票幂等重放先处理，formal 保留管理员门禁、免娱乐门槛。公开作品清单仍全量供浏览。live 投稿和 datapack 件继续由现有公开/娱乐开关过滤。
+- 测试 fixture 每题扩至十件不同作品（可共享模型），新增 9/10、重复/demo不计数、unverified/questioned不计数、第十件实时加入/撤出、formal免门槛、历史票/重放保留。check 84/0、npm test 249/249、diff --check 通过。早期测试把 held 当作品核验 status 导致约束错误，已按真实 questioned 状态修正并全量重跑。
+- Show1 配套公共随机/直接/分享/继续/失败恢复门槛及收集进度；typecheck/lint/check build/production build 通过，public pool 5、arena 13、placeholder 10、formal 6、work retry 8、work ready 14 全通过。仅隔离浏览器/临时库验证，无生产写入；未部署/未线上验收。本轮不 commit/push/deploy，未来提交英文简单句并禁止任何联合署名。
+
+
+## 竞技场公开收录内容长期索引（2026-10-03，本地完成，未提交、推送、部署）
+
+- 用户确认实施报告后授权拉取准备实施；pull --ff-only 2915a49→5527c5e，原工作区干净。只改 server/db.mjs、library.mjs、show1compat.mjs、content.mjs、新增 test/curated-content.test.mjs、API 契约及本节。不改投稿地址/门禁、Gallery、nginx、CSP、部署配置、老题定义或历史桥接。
+- 方案 B：v36 后追加幂等 v37，curated_content_keys 按 task_id/work_id 联合唯一、content_key 唯一。首次公开清单访问为在娱乐池的 datapack 件生成 c<32hex> 持久化随机索引，不依赖 secret，不回填 works、不改发布开关。投稿 w 分支原样，p 的一小时/重启失效语义原样，有效旧 p 不迁移。
+- c 每次内容/子资源请求重读当前 catalog、verified/内容状态和娱乐开关，private/held 不发键；关闭娱乐池或移出数据包后旧 c 410，no-store 防浏览器缓存绕过门禁。不套正式 isEligible，避免误加生成资格条件，同名 id 跨题隔离。
+- 实查只有 m HTML 注入就绪探针，与任务书假设不同。c 默认注入；其他已有地址仅在 aob=prev 时 opt-in，普通 w、作者/管理员预览和截图默认行为不动。错误页不发探针、安全头不变。Show1 配套识别平台 URL 和一次性恢复；后端需先于前端发布。
+- 最终 check 84 个文件/0 错；npm test 248/248，原未过审作者私看/公开不可见测试无回退。新增真实 HTTP 测试涵盖 c 200/探针/no-store、重建平台/重复开库后原键有效、跨题同名不同键、unverified/held 禁发及 410、关娱乐/移出目录后 410、p 过期/重启失效、p opt-in 探针、清单不泄露测试 secret。diff --check 通过，仅 CRLF 提示。
+- 动工前公网只读 curl --ssl-no-revoke：464 HTML，177 p / 287 w，刚取 p 样本 200；没有声称历史失效地址已恢复。未部署、未写生产库、未验收公网新 c 200，发布需先备份生产 SQLite 并验收 v37；生产版本须现场核对。
+- 后续提交禁止 Co-authored-by / Generated with 等联合署名，英文简单句。本轮不 commit/push/deploy，不新增归档或决策日志。
 
 ## 共池分支发布（2026-10-03，发布准备完成）
 

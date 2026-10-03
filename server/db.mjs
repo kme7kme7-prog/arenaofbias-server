@@ -471,18 +471,27 @@ const MIGRATIONS = [
     const columns = new Set(db.prepare('PRAGMA table_info(works)').all().map((column) => column.name));
     if (!columns.has('model_vendor')) db.exec("ALTER TABLE works ADD COLUMN model_vendor TEXT NOT NULL DEFAULT ''");
   },
+  // Stable public datapack addresses are indexes, never preview capabilities.
+  (db) => {
+    db.exec(`CREATE TABLE IF NOT EXISTS curated_content_keys (
+      task_id TEXT NOT NULL,
+      work_id TEXT NOT NULL,
+      content_key TEXT NOT NULL UNIQUE CHECK (length(content_key) = 33 AND substr(content_key, 1, 1) = 'c'),
+      PRIMARY KEY (task_id, work_id)
+    );`);
+  },
   // Creation-time authorship and persistent decisions over immutable package entries.
   Object.assign((db) => {
     // Foreign keys are disabled around this migration's transaction by openDatabase
     // so rebuilding users preserves dependent rows. member stays readable for legacy imports.
     const schema = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'").get().sql;
     if (!schema.includes("'moderator'")) {
-      const next = schema.replace(/^CREATE TABLE ["`\[]?users["`\]]?/i, 'CREATE TABLE users_v37').replace("DEFAULT 'member'", "DEFAULT 'user'")
+      const next = schema.replace(/^CREATE TABLE ["`\[]?users["`\]]?/i, 'CREATE TABLE users_v38').replace("DEFAULT 'member'", "DEFAULT 'user'")
         .replace("role IN ('member', 'admin')", "role IN ('member', 'admin', 'moderator', 'user')");
       const indexes = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'users' AND sql IS NOT NULL").all();
       const columns = db.prepare('PRAGMA table_info(users)').all().map((column) => `"${column.name}"`).join(', ');
       db.exec(next);
-      db.exec(`INSERT INTO users_v37 (${columns}) SELECT ${columns} FROM users; DROP TABLE users; ALTER TABLE users_v37 RENAME TO users;`);
+      db.exec(`INSERT INTO users_v38 (${columns}) SELECT ${columns} FROM users; DROP TABLE users; ALTER TABLE users_v38 RENAME TO users;`);
       for (const { sql } of indexes) db.exec(sql);
     }
     db.exec("UPDATE users SET role = 'user' WHERE role = 'member'");

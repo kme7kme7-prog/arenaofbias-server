@@ -1,5 +1,6 @@
 # HANDOFF.md · 当前状态
 
+
 ## 娱乐评测巡检问题修复（2026-10-04，本地未提交/部署）
 
 - 用户授权修复 Show1 娱乐巡检缺陷。`show1compat.mjs` 将 snapshot HTML 和 live 投稿的清单资格与 library 当前 publicContent 门禁对齐，保留内联作品及历史身份/投票映射。本地生产副本清单 527 -> 445（HTML 464 -> 382），001/006 退出可配对池，002 留一件内联；011=22、022=4。没有补 show1-001/002/006 定义、改数据库/键语义或放宽内容访问。
@@ -7,6 +8,14 @@
 - `bridge.mjs` 探针新增一次 `aob:work-loading`，`content.mjs` 在其他阻塞注入脚本前安排探针，原 ready 时序保留。解决本地真实 011/010 文档慢到达造成首组误超时；Show1 文档到达上限二十秒、到达后就绪十秒，重复信号不续期，一次自动刷新后仍失败进入手动空态。契约已更新。
 - 验证：npm run check 87 文件/0 错，npm test 260/260；新增门禁清单动态撤下/恢复及内联保留测试，HTTP 断言探针先于阻塞适配脚本。Show1 类型/lint/构建、work-ready 14/14、work-retry 13/13、真实 work-controls 和 keyboard-preview 通过，详情在 Show1 docs/qa/2026-10-03-entertainment-tabbit.md。两仓 diff --check 通过。
 - 仅本地下载副本 API 5190/内容 5191 与 Show1 5441，未触及生产、未 commit/push/deploy，无迁移/依赖/CSP/nginx/部署配置变更。不是整批入口重新 HTTP 验收：中途 bulk HEAD 命中 60/min 限流，未放宽限流，也未据此报告剩余入口逐件全绿。
+
+
+## 四仓最新功能合并（2026-10-03，待统一发布）
+
+- 用户授权四仓联调、合并、提交、推送和部署；本仓在隔离 worktree 将本地 `216879e`（分类扩充与 CDN / 重试修复）与远端 `ca3e2ca`（娱乐小窗 `arena-fold` / 键盘 `arena-scene`）合并。其他本地功能分支均为主线祖先，无独有提交需再次合并。
+- 保留 Gallery 原折叠及娱乐独立 opt-in，修正文档冲突，并给娱乐脚本补齐 `#err` / `#error` / alert 错误恢复控件保护，避免再次隐藏换源按钮；普通控制面板仍折叠。远端运维脚本保留，本轮不运行清理、不安装 cron。
+- Windows Node 24.16.0：check 87 / 0、test 262 / 262，无失败、取消或跳过；迁移仍 v38，`server/db.mjs` 与远端及合并前相同。邮箱验证注册、三级权限、统一作品管理、领域扩充、内容门禁及娱乐阈值回归通过。
+- 原工作区未提交 HANDOFF / datapack / 旧归档与未跟踪归档原样保留；本轮不改消费 pin、不写生产库、不推送或部署。父代理从合并后的完整 SHA 统一发布，后端先于游戏；生产现场、显式 CDN 白名单、SMTP / Turnstile 和浏览器验收由父代理核对。[本轮归档](docs/archive/2026-10-03-latest-backend-integration-wsnxxxs.md)。
 
 ## 四仓联调后端合并（2026-10-03，待统一发布）
 

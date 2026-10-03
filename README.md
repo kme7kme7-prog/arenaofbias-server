@@ -63,7 +63,7 @@ npm start
 | `CONTENT_ORIGIN_TEMPLATE` | `http://{token}.localhost:<CONTENT_PORT>` | 作品 origin 模板，默认端口 5180；`{token}` 必须占满一个 host label，生产需独立泛域名 |
 | `SITE_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | 可信前端 origin（逗号分隔，含协议与端口），同时允许凭据 CORS、API 写操作和 iframe 嵌入作品 |
 | `ADMIN_USERNAMES` | 空 | 始终持有管理员角色的用户名（逗号分隔） |
-| `CONTENT_CDN_ALLOWLIST` | `cdn.jsdelivr.net,unpkg.com,cdnjs.cloudflare.com,esm.sh,fonts.googleapis.com,fonts.gstatic.com` | 作品允许加载脚本/样式/字体/数据的公共 CDN 白名单 |
+| `CONTENT_CDN_ALLOWLIST` | `cdn.jsdelivr.net,unpkg.com,cdnjs.cloudflare.com,esm.sh,fonts.googleapis.com,fonts.gstatic.com,registry.npmmirror.com` | 作品允许加载脚本/样式/字体/数据的公共 CDN 白名单；npmmirror 仅允许 `/three/0.170.0/files/` |
 | `CAPTURE` | 开（`0` 关闭） | 投稿作品的无头截图（预配置 Playwright ≥ 1.48 + 本地 Chrome）；文档只访问当前作品源，资源只访问作品源和 HTTPS CDN 白名单，逐跳检查重定向，禁用 Service Worker / WebSocket |
 | `CAPTURE_BROWSER` | `chrome` | 截图所用浏览器通道 |
 | `CONTENT_MODERATION` | 关（`1` 开启） | 新投稿先保持私密，异步审查文字、封面及桌面/手机首屏；异常转人工 |
@@ -87,6 +87,8 @@ npm start
 | `TURNSTILE_VERIFY_URL` | Cloudflare siteverify | 校验地址，本地测试可指向桩服务 |
 
 数据包作品与上传作品共用展示和盲评开关，管理员在 Gallery 审核页管理。作品文件仍分别由数据仓库和平台数据库维护；上传作品不再提名导出到数据仓库，已有 `curated_as` 记录继续用于隐藏历史重复项。
+
+`registry.npmmirror.com` 的限制由作品 CSP、上传检查和截图网络守卫共同执行，不允许其他包或版本。若部署显式设置了 `CONTENT_CDN_ALLOWLIST`，需在该配置中加入此域名才能启用；显式名单仍覆盖默认值。错误提示区域（`#err`、`#error`、`role=alert|alertdialog`）保留换源和重试按钮，盲评折叠只处理作品控制面板。
 
 公开浏览保留，超出读取额度返回 `429` 和 `Retry-After`；登录、换 Cookie、换参数或作品域名不会重置 IP 额度。API 域的完整 `/data.json` 仅供已登录管理员使用，包来源文件不公开。两个前端的 Nginx 静态资源需另按 [部署说明](docs/deploy.md#公开读取与反爬配置)启用 `deploy/nginx/` 配置；仅升级后端不会保护前端静态站。公开展示内容仍可被低频读取，公开源码仓库也不受这些限流保护。
 

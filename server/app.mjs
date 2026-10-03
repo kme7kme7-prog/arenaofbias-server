@@ -21,7 +21,7 @@ import { createLibrary } from './library.mjs';
 import { createAdmin } from './admin.mjs';
 import { createInbox } from './inbox.mjs';
 import { createQuestions } from './questions.mjs';
-import { DOMAINS, requireCategory, requireDomains } from './categories.mjs';
+import { DOMAIN_GROUPS, DOMAINS, requireCategory, requireDomains } from './categories.mjs';
 import { createProfile } from './profile.mjs';
 import { registerShow1Compat } from './show1compat.mjs';
 import { registerShow1Guess } from './show1/guess.mjs';
@@ -139,6 +139,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       serverVersion,
       providers: snapshot.providers(),
       domains: DOMAINS,
+      domainGroups: DOMAIN_GROUPS,
       user: user ? { ...auth.public(user), emailBound: Boolean(user.email) } : null,
       site: {
         content: config.contentTemplate,

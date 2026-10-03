@@ -98,8 +98,10 @@ function foldElement(tag, { position = 'static', width = 100, height = 30, text 
     setAttribute(name, value) { attributes.set(name, value); },
     getAttribute(name) { return attributes.get(name) ?? null; },
     hasAttribute(name) { return attributes.has(name); },
+    removeAttribute(name) { attributes.delete(name); },
     toggleAttribute(name, force) { if (force) attributes.set(name, ''); else attributes.delete(name); },
-    getBoundingClientRect() { return { width, height }; },
+    getBoundingClientRect() { return { width, height, left: 0, top: 0, right: width, bottom: height }; },
+    isConnected: true,
     getClientRects() { return [{}]; },
     matches(selector) {
       return selector.split(',').some(part => {
@@ -108,6 +110,7 @@ function foldElement(tag, { position = 'static', width = 100, height = 30, text 
       });
     },
     appendChild(child) { this.children.push(child); child.parentElement = this; return child; },
+    append(child) { return this.appendChild(child); },
     contains(other) { return this === other || this.children.some(child => child.contains(other)); },
     querySelectorAll(selector) { return this.children.flatMap(child => [...(child.matches(selector) ? [child] : []), ...child.querySelectorAll(selector)]); },
     querySelector(selector) { return this.querySelectorAll(selector)[0] ?? null; },
@@ -116,15 +119,17 @@ function foldElement(tag, { position = 'static', width = 100, height = 30, text 
   return el;
 }
 
-function foldFrame(children, readyState = 'loading') {
+function foldFrame(children, readyState = 'loading', script = 'fold.js') {
   const body = foldElement('body', {}, children);
   const root = foldElement('html', {}, [body]);
   const events = new Map(), timers = [], reports = [];
   const parent = { postMessage(data) { reports.push({ ...data }); } };
   const document = { body, readyState, documentElement: root, createElement: tag => foldElement(tag), querySelectorAll: selector => root.querySelectorAll(selector) };
-  runInNewContext(readFileSync(new URL('../server/fold.js', import.meta.url), 'utf8'), {
+  runInNewContext(readFileSync(new URL(`../server/${script}`, import.meta.url), 'utf8'), {
     document, parent, innerWidth: 1280, innerHeight: 660,
-    getComputedStyle: el => ({ position: el.position }),
+    getComputedStyle: el => ({ position: el.position, pointerEvents: 'auto' }),
+    URL, location: { href: 'https://work.example/?aob=arena-fold' },
+    MutationObserver: class { observe() {} },
     addEventListener: (type, callback) => events.set(type, callback),
     setTimeout: callback => timers.push(callback),
   });
@@ -176,6 +181,31 @@ test('fold finds static tuning cards inside a full-page positioned overlay', () 
   assert.equal(overlay.hasAttribute('data-sp-fold-ui'), false);
   assert.equal(scene.hasAttribute('data-sp-fold-ui'), false);
   assert.deepEqual(frame.reports.map(report => report.count), [0, 2]);
+});
+
+test('fold keeps retry buttons inside a full-page error overlay', () => {
+  const retries = foldElement('div', {}, [foldElement('button', { text: 'unpkg' }), foldElement('button', { text: 'jsdelivr' })]);
+  const error = foldElement('div', { position: 'fixed', width: 1280, height: 660, selectors: ['#err'] }, [
+    foldElement('h3', { text: 'Three.js 加载失败' }), foldElement('p', { text: '请选择镜像后重试' }), retries,
+  ]);
+  const tuning = foldElement('div', { position: 'fixed' }, [foldElement('input')]);
+  const frame = foldFrame([error, tuning]);
+  frame.load(); frame.scan();
+  assert.equal(error.hasAttribute('data-sp-fold-ui'), false);
+  assert.equal(retries.hasAttribute('data-sp-fold-ui'), false);
+  assert.equal(tuning.hasAttribute('data-sp-fold-ui'), true);
+  assert.deepEqual(frame.reports.map(report => report.count), [0, 1]);
+});
+
+test('arena fold keeps error recovery controls while hiding tuning panels', () => {
+  const buttons = () => [foldElement('button', { text: 'unpkg' }), foldElement('button', { text: 'jsdelivr' })];
+  const errors = ['#err', '#error', '[role="alert"]', '[role="alertdialog"]'].map(selector =>
+    foldElement('div', { position: 'fixed', width: 300, height: 120, selectors: [selector] }, buttons()));
+  const tuning = foldElement('div', { position: 'fixed', width: 300, height: 120 }, buttons());
+  const canvas = foldElement('canvas', { width: 1280, height: 660 });
+  foldFrame([canvas, ...errors, tuning], 'complete', 'arena-fold.js');
+  for (const error of errors) assert.equal(error.hasAttribute('data-aob-fold-panel'), false);
+  assert.equal(tuning.hasAttribute('data-aob-fold-panel'), true);
 });
 
 test('fold reports cumulative batches and only accepts its parent toolbar messages', () => {
@@ -440,6 +470,14 @@ describe('upload inspection', () => {
     assert.equal(blocked.checks.find((check) => check.id === 'external').state, 'warn');
     const cdn = inspect(zip([{ name: 'index.html', data: '<html><script type="importmap">{"imports":{"three":"https://unpkg.com/three"}}</script></html>' }]));
     assert.equal(cdn.checks.find((check) => check.id === 'external').state, 'info');
+  });
+
+  test('npmmirror only allows the verified Three.js release', () => {
+    for (const [path, state] of [['three/0.170.0/files/build/three.module.js', 'info'], ['three/0.171.0/files/build/three.module.js', 'warn'], ['other/1.0.0/files/index.js', 'warn']]) {
+      const result = inspectUpload(Buffer.from(`<html><script src="https://registry.npmmirror.com/${path}"></script></html>`), 'index.html',
+        { limits: defaultLimits, cdn: ['registry.npmmirror.com'] });
+      assert.equal(result.checks.find((check) => check.id === 'external').state, state, path);
+    }
   });
 });
 

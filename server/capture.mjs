@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
+import { THREE_MIRROR_PATH } from './config.mjs';
 
 const SHOTS = [
   { id: 'first', viewport: { width: 1440, height: 900 }, mobile: false },
@@ -38,7 +39,8 @@ export async function guardCaptureContext(context, { origin, cdn, resources = nu
   const workOrigin = new URL(origin).origin;
   const cdnOrigins = new Set(cdn.map((host) => new URL(`https://${host}`).origin));
   const allowed = (url, document) => !url.username && !url.password &&
-    (url.origin === workOrigin || (!document && url.protocol === 'https:' && cdnOrigins.has(url.origin)));
+    (url.origin === workOrigin || (!document && url.protocol === 'https:' && cdnOrigins.has(url.origin)
+      && (url.hostname !== 'registry.npmmirror.com' || url.pathname.startsWith(THREE_MIRROR_PATH))));
   await context.routeWebSocket('**/*', (socket) => socket.close());
   await context.route('**/*', async (route) => {
     const request = route.request();

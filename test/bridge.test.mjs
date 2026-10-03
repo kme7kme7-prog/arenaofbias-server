@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { bridgeTags, probeTag, rewriteImportmap, serveBridgeVirtual, validCamera } from '../server/bridge.mjs';
 import { createContentHandler } from '../server/content.mjs';
+import { config as defaultConfig } from '../server/config.mjs';
 import { drainServers } from '../server/shutdown.mjs';
 
 const CAMERA = { position: [1, 2, 3], target: [0, 0, 0] };
@@ -82,7 +83,7 @@ function request(base, host, path = '/') {
     httpGet(new URL(path, base), { headers: { host } }, (res) => {
       const chunks = [];
       res.on('data', (chunk) => chunks.push(chunk));
-      res.on('end', () => resolve({ status: res.statusCode, type: res.headers['content-type'], body: Buffer.concat(chunks).toString('latin1') }));
+      res.on('end', () => resolve({ status: res.statusCode, type: res.headers['content-type'], csp: res.headers['content-security-policy'], body: Buffer.concat(chunks).toString('latin1') }));
     }).on('error', reject);
   });
 }
@@ -91,7 +92,7 @@ test('content server injects per key type', async () => {
   const root = mkdtempSync(join(tmpdir(), 'bridge-works-'));
   let workFor = () => null;
   const server = createServer(createContentHandler({
-    config: { cdn: ['cdn.example.com'], siteOrigins: ['https://game.example'] },
+    config: { cdn: ['cdn.example.com', ...defaultConfig.cdn], siteOrigins: ['https://game.example'] },
     siteOrigins: ['https://game.example'],
     library: {
       draftByToken: () => null,
@@ -126,6 +127,9 @@ test('content server injects per key type', async () => {
     const match = await request(base, `${key('m', 9)}.w.example`);
     assert.equal(match.status, 200);
     assert.match(match.type, /^text\/html/);
+    const scriptSources = match.csp.split(';').find(directive => directive.trim().startsWith('script-src ')).trim().split(/\s+/);
+    assert.ok(scriptSources.includes('https://registry.npmmirror.com/three/0.170.0/files/'));
+    assert.ok(!scriptSources.includes('https://registry.npmmirror.com'), 'the whole mirror remains blocked');
     assert.ok(match.body.includes('/__sp_fold.js'), 'match sides keep the fold');
     assert.ok(match.body.includes('data-aob-probe'), 'match sides get the ready probe');
     assert.ok(match.body.includes(`window.__AOB_SAVED__=${JSON.stringify(CAMERA)}`), 'arena camera is restored');

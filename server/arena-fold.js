@@ -119,7 +119,7 @@
       for (let el = control; el && el !== document.body && el !== root; el = el.parentElement) {
         if (el.querySelector('canvas,video,iframe')) break;
         // Entry screens, prose and data-entry forms are part of the work, not tuning UI.
-        if (el.matches('header,form,article') || (el.matches('[aria-live],[aria-labelledby]') && el.querySelector('p')) || el.querySelector('input[type="password"],input[type="email"],textarea') ||
+        if (el.matches('header,form,article,[role="alert"],[role="alertdialog"],#err,#error') || (el.matches('[aria-live],[aria-labelledby]') && el.querySelector('p')) || el.querySelector('input[type="password"],input[type="email"],textarea') ||
             /开始体验|进入体验|点击开始|start experience|enter experience/i.test(el.textContent)) { candidate = null; break; }
         const r = rect(el);
         if (area(r) > viewport * .6) break;

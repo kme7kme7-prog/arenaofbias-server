@@ -627,3 +627,10 @@
 - 父代理在实际差异包部署中确认 cpSync(oldRoot) 会保留 .datapack/current 根符号链接，后续删除和更新写穿旧版本。仅修改 scripts/datapack-delta.mjs 与既有 delta 测试：先 realpathSync 解析旧根，基线核验和复制均使用实体目录，资源内部链接继续由 inventory 拒绝。
 - 新 root-link 回归使用 Windows junction / Linux directory symlink，确认旧版本树 SHA256 不变、current 保持链接、目标是实体目录并通过目标校验。修复前 Windows cp 报 EPERM，修复后 2 / 2 专项通过；npm run check 86 / 0、完整 npm test 259 / 259、diff --check 通过。
 - 本轮不操作生产，不重跑数据库迁移；线上受影响文件恢复与旧版本完整校验由父代理负责。保留父代理已更新但未提交的 datapack.json 与原脏文档。本补充与脚本 / 测试作为必要修复独立提交，父代理重新固定后端来源后发布。
+
+
+## 游戏内置作品同源嵌入修复（2026-10-03，待现场验收）
+
+- 公网联调发现 game 题库封面 /art/pelican-cover.html 和历史 /works/ 预览被站点默认 frame-ancestors none 拦截。仅在现有 host / normalized URI map 中对该封面精确路径与 game /works/ 目录返回 frame-ancestors 'self'，允许游戏自己的 iframe；query 不参与 $uri。Gallery 原例外、game 顶层 none、API / 上传作品策略和 iframe sandbox 保留。
+- 修改 deploy/nginx/read-zones.conf、docs/deploy.md；npm run check 86 / 0、完整 npm test 259 / 259、diff --check 通过。未改 JS，也未新增重复实现测试。
+- 现场 Nginx -t / reload、游戏顶层 none / 两类预览 self 响应头及实际 iframe 渲染由父代理执行，当前没有宣称部署验收完成。本轮新归档见 docs/archive/2026-10-03-game-bundled-csp-wsnxxxs.md；只提交本节及本轮文件，既有脏交接 / 归档 / pin 保留。

@@ -629,7 +629,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
 
   function serveSite(req, res, pathname) {
     readGuard.file(req);
-    const media = /^\/media\/(up-[a-z0-9]{8})\/(cover\.(?:png|jpg|webp)|first\.jpg|mobile\.jpg)$/.exec(pathname);
+    const media = /^\/media\/(up-[a-z0-9]{8})\/(cover\.(?:png|jpg|webp)|first\.jpg|mobile\.jpg|preview\.(?:sbox|webp|jpg))$/.exec(pathname);
     if (pathname.startsWith('/media/')) {
       const work = media && library.uploadById(media[1]);
       if (!library.canRead(work, auth.userFrom(req))) return sendJson(res, 404, { error: '文件不存在' });

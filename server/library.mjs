@@ -13,6 +13,7 @@ import { fail } from './http.mjs';
 import { inspectUpload } from './inspect.mjs';
 import { isTextTask, templatesOf } from './categories.mjs';
 import { GENERATION_FIELDS, IGNORED_GENERATION_FIELDS, generationFrom, generationOf, generationAudit, generationAuditView } from './generation.mjs';
+import { readWorkPreview } from './work-previews.mjs';
 
 const token = (prefix) => `${prefix}${randomBytes(16).toString('hex')}`;
 const workId = () => `up-${[...randomBytes(8)].map((byte) => (byte % 36).toString(36)).join('')}`;
@@ -618,6 +619,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
         files: work.files,
         bytes: work.bytes,
         calibration: work.trial.calibration ?? null,
+        ...(!work.curated && this.canRead(work, viewer) ? readWorkPreview(dirs.media, work) : null),
         ...(privileged ? { checks: work.checks, trial: work.trial, sourceName: work.sourceName, root: work.root, entry: work.entry, reviewer: work.reviewerName } : {}),
       };
     },

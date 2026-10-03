@@ -11,7 +11,6 @@
     "admin": "node server/cli.mjs",
     "correct:vote": "node scripts/correct-vote.mjs",
     "reset:votes": "node scripts/reset-votes.mjs",
-    "arena-backfill": "node scripts/arena-backfill.mjs",
     "test": "node --test test/*.test.mjs"
   },
   "engines": {

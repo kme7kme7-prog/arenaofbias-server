@@ -46,7 +46,6 @@ export const config = {
     // Hours between rechecks of public uploads for changed text or CDN content; 0 turns them off.
     recheckHours: int(env.CONTENT_RECHECK_HOURS, 24),
   },
-  // 「收录为馆藏」用的 arenaofbias-data 本地克隆（main 分支，部署钥写权限）。
   secureCookies: env.COOKIE_SECURE === '1',
   cookieSameSite: env.COOKIE_SAME_SITE || 'Lax',
   trustProxy: env.TRUST_PROXY === '1',

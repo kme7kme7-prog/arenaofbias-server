@@ -407,17 +407,14 @@ function updateBulkSelection() {
 }
 function adminWorkRow(w, face = state.system) {
   const label = face === 'gallery' ? '展览馆' : '竞技场';
-  const datapackTasks = new Set((state.data?.tasks ?? []).map((t) => t.id));
-  const curable = w.source === 'upload' && w.status === 'verified' && !w.curatedAs && datapackTasks.has(w.task);
-  const promoted = Boolean(w.curatedAs);
-  const formal = w.entertainment_route === 1 ? '在收件箱' : promoted ? '已收录' : w.arena_eligible ? '在正式盲测池' : w.show_arena && !w.arena_generation_ok ? '不符合盲评条件（多轮 / 人工介入）' : '不在正式盲测池';
+  const formal = w.entertainment_route === 1 ? '在收件箱' : w.arena_eligible ? '在正式盲测池' : w.show_arena && !w.arena_generation_ok ? '不符合盲评条件（多轮 / 人工介入）' : '不在正式盲测池';
   const entertainment = w.entertainment_route === 1 ? '在收件箱' : w.show_entertainment ? '在娱乐池' : '不在娱乐池';
   return `<tr data-work-key="${esc(`${w.task}/${w.id}`)}">
     <td><div class="admin-work-title">${thumb(w)}<div><b>${esc(w.title)}</b><small>${esc(taskTitle(w.task))} · ${w.votes ?? 0} 票</small>${w.entertainment_route === 1 ? '<span class="badge">在收件箱</span>' : ''}</div></div></td>
     <td>${esc(w.modelName)}${provenanceText(w) ? `<small class="work-provenance">${esc(provenanceText(w))}</small>` : ''}</td><td>${statusBadge(w.status)}</td>
     <td>${w.show_gallery ? '进入展览馆' : '未进展览馆'}</td>
     ${face === 'arena' ? `<td>${formal}</td><td>${entertainment}</td>` : '<td>—</td>'}
-    <td><div class="actions">${promoted ? '<span class="badge">已收录</span>' : w.nominatedAt ? '<span class="badge">已提名</span>' : ''}<button class="btn sm" data-calibrate="${esc(w.id)}">${label}取景</button><button class="btn sm" data-task-note="${esc(w.task)}">${face === 'gallery' ? '策展笔记' : '题目点评'}</button>${w.source === 'upload' ? `${curable ? `<button class="btn sm primary" data-nominate="${esc(w.id)}">${w.nominatedAt ? '换发命令' : '提名收录'}</button>` : ''}${w.nominatedAt && !promoted ? `<button class="btn sm" data-withdraw="${esc(w.id)}">撤回提名</button>` : ''}` : ''}${promoted ? '' : `<button class="btn sm" data-edit="${esc(w.id)}">编辑</button><a class="btn sm" href="${REVIEW_URL}" target="_blank" rel="noopener">审核</a>`}</div></td>
+    <td><div class="actions"><button class="btn sm" data-calibrate="${esc(w.id)}">${label}取景</button><button class="btn sm" data-task-note="${esc(w.task)}">${face === 'gallery' ? '策展笔记' : '题目点评'}</button><button class="btn sm" data-edit="${esc(w.id)}">编辑</button><a class="btn sm" href="${REVIEW_URL}" target="_blank" rel="noopener">审核</a></div></td>
   </tr>`;
 }
 function systemWorksView() {
@@ -1248,27 +1245,6 @@ document.addEventListener('click', async (e) => {
     return;
   }
   if (e.target.closest('[data-new-question]')) { newQuestionDialog(); return; }
-  const nominateBtn = e.target.closest('[data-nominate]');
-  if (nominateBtn) {
-    const w = state.adminWorks.find((item) => item.id === nominateBtn.dataset.nominate);
-    if (!w) return;
-    const doneBusy = busy(nominateBtn, '正在提名…');
-    try {
-      const data = await api(`admin/works/${workKey(w)}/nominate`, { method: 'POST' });
-      const sheet = openDialog({ title: '复制收录命令', body: `<p class="sheet-text">在 arenaofbias-data 仓库执行。命令中的导出令牌 14 天有效，请妥善保管。</p><textarea readonly rows="4" style="width:100%">${esc(data.command)}</textarea><div class="sheet-actions"><button class="btn primary" data-copy-command>复制命令</button></div>` });
-      $('[data-copy-command]', sheet.el).addEventListener('click', async () => { await navigator.clipboard.writeText(data.command); toast('命令已复制'); });
-      await reload();
-    } catch (error) { toast(error.message); doneBusy(); }
-    return;
-  }
-  const withdrawBtn = e.target.closest('[data-withdraw]');
-  if (withdrawBtn) {
-    const w = state.adminWorks.find((item) => item.id === withdrawBtn.dataset.withdraw);
-    if (!w || !await confirmDialog({ title: '撤回提名？', message: '现有导出命令会立即失效。', confirm: '撤回提名' })) return;
-    try { await api(`admin/works/${workKey(w)}/nominate`, { method: 'DELETE' }); toast('提名已撤回'); await reload(); }
-    catch (error) { toast(error.message); }
-    return;
-  }
   const note = e.target.closest('[data-task-note]');
   if (note) { await editorialDialog(note.dataset.taskNote); return; }
   if (e.target.closest('[data-logout]')) {

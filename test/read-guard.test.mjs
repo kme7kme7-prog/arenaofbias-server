@@ -81,8 +81,6 @@ test('the general read budget counts unknown API paths and keeps writes availabl
     assert.equal((await request('/api/auth/me', { method: 'HEAD' })).status, 200);
     assert.equal((await request('/api/prompts')).status, 429);
     assert.equal((await request('/api/auth/logout', { method: 'POST' })).status, 200);
-    assert.equal((await request('/api/curate/export/invalid-token/file?path=index.html')).status, 404,
-      'intake exports retain their dedicated token limit and still validate the token');
   });
 });
 

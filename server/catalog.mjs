@@ -42,8 +42,7 @@ function readSnapshot(root) {
     works: new Map(task.results.map((result) => {
       const model = models.get(result.model);
       return [result.id, {
-        taskId: task.id, id: result.id, curated: true, status: 'verified', sourceUpload: result.sourceUpload ?? null,
-        sourceDigest: result.sourceDigest ?? null,
+        taskId: task.id, id: result.id, curated: true, status: 'verified', addedAt: result.addedAt ?? null,
         title: result.title, summary: result.summary ?? '', modelId: result.model,
         modelName: model?.name ?? result.model, vendor: model?.vendor ?? '',
         effort: result.effort ?? '', tool: result.sourceLabel ?? '', ownerId: null,

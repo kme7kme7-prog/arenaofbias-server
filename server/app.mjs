@@ -20,7 +20,6 @@ import {
 import { createLibrary } from './library.mjs';
 import { createAdmin } from './admin.mjs';
 import { createInbox } from './inbox.mjs';
-import { createCurator } from './curate.mjs';
 import { createQuestions } from './questions.mjs';
 import { DOMAINS, requireCategory, requireDomains } from './categories.mjs';
 import { createProfile } from './profile.mjs';
@@ -46,15 +45,15 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const auth = createAuth(db, { admins: config.admins, secureCookies: config.secureCookies, cookieSameSite: config.cookieSameSite, sessionTtl: limits.sessionTtl });
   const loginSecurity = createLoginSecurity(db, { isAdminName: auth.isAdminName });
   const emailAuth = createEmailAuth(db, auth, { mailer });
-  const library = createLibrary({ db, catalog, config, limits });
+  // Show1 娱乐面兼容层（fusion/show1-adapter/DESIGN.md）：快照 + live 合并的同形状端点。
+  const show1Snapshot = JSON.parse(readFileSync(new URL('./show1/compat-data.json', import.meta.url), 'utf8'));
+  const library = createLibrary({ db, catalog, config, limits, legacyRounds: new Set(show1Snapshot.works.map((work) => work.promptId)) });
   const adminService = createAdmin({ db, catalog, library });
   const inbox = createInbox({ library, config, limits });
   const arena = createArena({ db, catalog, library, limits });
   const matchCleanup = setInterval(() => arena.cleanupExpiredMatches(), 60e3);
   matchCleanup.unref();
   const featured = createFeatured({ db, catalog, library, arena });
-  const curator = createCurator({ db, catalog, library, onTakeover: () => arena.invalidate() });
-  catalog.onChange(curator.takeover);
   const comments = createComments(db, library);
   const capturer = captureFactory({ config, library });
   const moderator = createModerator({ config, library, capturer, onChange: () => arena.invalidate() });
@@ -68,8 +67,6 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     write: rateLimit(60e3, 120),
     drafts: rateLimit(10 * 60e3, 12, '上传太频繁，请稍后再试'),
     matches: rateLimit(60e3, 60),
-    exportToken: rateLimit(60e3, 2000),
-    exportIp: rateLimit(60e3, 10000),
   };
   const siteCsp = [
     "default-src 'self'",
@@ -600,29 +597,6 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     limit.write(admin.id);
     return inbox.remove(admin, ctx.url.searchParams.get('id') ?? '');
   });
-  router.on('POST', '/api/admin/works/:task/:id/nominate', (ctx) => {
-    const admin = adminOnly(ctx);
-    limit.write(admin.id);
-    const protocol = config.trustProxy ? String(ctx.req.headers['x-forwarded-proto'] ?? 'http').split(',')[0] : ctx.req.socket.encrypted ? 'https' : 'http';
-    const origin = ctx.req.headers.origin ?? `${protocol}://${ctx.req.headers.host}`;
-    return curator.nominate(admin, ctx.params.task, ctx.params.id, origin);
-  });
-  router.on('DELETE', '/api/admin/works/:task/:id/nominate', (ctx) => {
-    const admin = adminOnly(ctx);
-    limit.write(admin.id);
-    return curator.withdraw(admin, ctx.params.task, ctx.params.id);
-  });
-  router.on('GET', '/api/curate/export/:token', (ctx) => {
-    limit.exportIp(ctx.ip);
-    limit.exportToken(ctx.params.token);
-    return curator.metadata(ctx.params.token);
-  });
-  router.on('GET', '/api/curate/export/:token/file', (ctx) => {
-    limit.exportIp(ctx.ip);
-    limit.exportToken(ctx.params.token);
-    return streamFile(ctx.req, ctx.res, curator.file(ctx.params.token, ctx.url.searchParams.get('path')),
-      { 'Cache-Control': 'no-store', 'Content-Disposition': 'attachment', 'Content-Security-Policy': 'sandbox' });
-  });
   // Inline edits (title/summary/model) from the works table; curated works stay repo-managed.
   router.on('POST', '/api/admin/works/:task/:id/meta', async (ctx) => {
     const admin = adminOnly(ctx);
@@ -659,8 +633,6 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     return arena.leaderboard({ task, category, domain, by: ctx.url.searchParams.get('by') === 'model' ? 'model' : 'config', ...filters });
   });
 
-  // Show1 娱乐面兼容层（fusion/show1-adapter/DESIGN.md）：快照 + live 合并的同形状端点。
-  const show1Snapshot = JSON.parse(readFileSync(new URL('./show1/compat-data.json', import.meta.url), 'utf8'));
   registerShow1Compat(router, { db, catalog, library, snapshot: show1Snapshot, config, limit });
   registerShow1Guess(router, { db, limit });
 

@@ -336,7 +336,7 @@ test('admin API merges curated and upload works, applies face settings, calibrat
   assert.equal(curatedSettings.status, 200);
   assert.deepEqual({ ...platform.db.prepare('SELECT show_gallery, show_arena FROM work_overrides WHERE work_id = ?').get('a') }, { show_gallery: 0, show_arena: 0 });
   list = await call('root', 'GET', '/api/admin/works?face=arena&show=off');
-  assert.equal(list.data.total, 3, 'curated works default to arena-off until approved');
+  assert.equal(list.data.total, 2, 'curated works default to arena-on unless switched off');
   const framing = { width: 1440, height: 900, zoom: 1.2, offsetX: 0.1, offsetY: -0.2 };
   const camera = { position: [1, 2, 3], target: [0, 0, 0] };
   assert.equal((await call('root', 'POST', `/api/admin/works/one/${id}/calibration`, { face: 'gallery', calibration: { framing } })).status, 200);
@@ -415,7 +415,7 @@ test('calibrating a curated work preserves its arena approval and invalidates th
   const framing = { width: 1440, height: 900, zoom: 1, offsetX: 0, offsetY: 0 };
   assert.equal((await call('root', 'POST', '/api/admin/works/one/a/calibration', { face: 'gallery', calibration: { framing } })).status, 200);
   assert.deepEqual({ ...platform.db.prepare('SELECT show_gallery, show_arena FROM work_overrides WHERE work_id = ?').get('a') },
-    { show_gallery: 1, show_arena: 0 });
+    { show_gallery: 1, show_arena: 1 });
   assert.equal(invalidations, 1);
 }));
 
@@ -471,9 +471,6 @@ test('editorial validates weights, traffic aggregates, and arena switches remove
   assert.equal(traffic.users.total, 2);
   assert.equal(traffic.users.new, 2);
   assert.equal((await call('root', 'GET', '/api/admin/traffic?days=91')).status, 400);
-  // 精选馆藏默认不进正式盲测池：先逐件审批 a/b。
-  await call('root', 'POST', '/api/admin/works/one/a/face-settings', { show_arena: true });
-  await call('root', 'POST', '/api/admin/works/one/b/face-settings', { show_arena: true });
   const match = await call('voter', 'POST', '/api/arena/matches', { task: 'one' });
   assert.equal(match.status, 200);
   assert.ok(!JSON.stringify(match.data).includes('模型甲'));
@@ -500,14 +497,18 @@ test('the entertainment switch opts uploads and curated works into the Show1 poo
   assert.equal(platform.db.prepare('SELECT show_entertainment AS s FROM works WHERE id = ?').get(id).s, 1);
   const compatWorks = (await call('root', 'GET', '/api/works')).data.works;
   assert.ok(compatWorks.some((work) => work.id === id), 'the opted-in upload joins the Show1 roster');
-  // Curated works store the switch in their override row, keeping formal faces untouched.
-  const curated = await call('root', 'POST', '/api/admin/works/one/a/face-settings', { show_entertainment: true });
-  assert.equal(curated.status, 200, 'curated works can join the entertainment face');
-  assert.equal(curated.data.work.show_entertainment, true);
+  // Datapack works are in by default under a round-qualified game id; the switch lives in
+  // their override row and leaves the formal faces untouched.
+  const datapack = (works, id) => works.some((work) => work.id.startsWith('dp-') && work.id.endsWith(`-${id}`));
+  assert.ok(datapack(compatWorks, 'a'), 'datapack works join the Show1 roster by default');
+  const curated = await call('root', 'POST', '/api/admin/works/one/a/face-settings', { show_entertainment: false });
+  assert.equal(curated.status, 200, 'datapack works can leave the entertainment face');
+  assert.equal(curated.data.work.show_entertainment, false);
   assert.deepEqual({ ...platform.db.prepare('SELECT show_gallery, show_arena, show_entertainment FROM work_overrides WHERE work_id = ?').get('a') },
-    { show_gallery: 1, show_arena: 0, show_entertainment: 1 });
-  const withCurated = (await call('root', 'GET', '/api/works')).data.works;
-  assert.ok(withCurated.some((work) => work.id === 'a'), 'the curated work joins the Show1 roster');
+    { show_gallery: 1, show_arena: 1, show_entertainment: 0 });
+  const withoutCurated = (await call('root', 'GET', '/api/works')).data.works;
+  assert.equal(datapack(withoutCurated, 'a'), false, 'the switched-off datapack work leaves the Show1 roster');
+  assert.ok(datapack(withoutCurated, 'b'));
   const off = await call('root', 'POST', `/api/admin/works/one/${id}/face-settings`, { show_entertainment: false });
   assert.equal(off.data.work.show_entertainment, false);
   assert.equal((await call('root', 'GET', '/api/works')).data.works.some((work) => work.id === id), false, 'opting out removes it again');

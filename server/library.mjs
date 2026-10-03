@@ -54,7 +54,7 @@ function writeTree(target, files) {
   }
 }
 
-export function createLibrary({ db, catalog, config, limits }) {
+export function createLibrary({ db, catalog, config, limits, legacyRounds = new Set() }) {
   const contentAllowed = (work) => Boolean(work && (work.curated ||
     (catalog.task(work.taskId) && ['legacy', 'approved'].includes(work.moderation?.status))));
   // Public surfaces additionally wait for a human decision on uploads (a review status or a
@@ -66,13 +66,16 @@ export function createLibrary({ db, catalog, config, limits }) {
   const originOf = (key) => config.contentTemplate.replace('{token}', key);
   // Short-lived bearer previews are only issued in owner/admin responses. Public
   // work hosts never serve a held upload, even when its old URL is known.
-  const previews = new Map();
+  // Datapack ids repeat across tasks, so a key belongs to one task/id pair.
+  const previews = new Map(), previewOf = new Map();
   function previewKey(work) {
-    const now = Date.now();
-    for (const [key, value] of previews) if (value.expiresAt <= now) previews.delete(key);
-    for (const [key, value] of previews) if (value.id === work.id) return key;
+    const now = Date.now(), id = `${work.taskId}/${work.id}`;
+    const current = previewOf.get(id);
+    if (current && previews.get(current)?.expiresAt > now) return current;
+    for (const [key, value] of previews) if (value.expiresAt <= now) { previews.delete(key); previewOf.delete(`${value.task}/${value.id}`); }
     const key = token('p');
     previews.set(key, { id: work.id, task: work.taskId, expiresAt: now + 3600e3 });
+    previewOf.set(id, key);
     return key;
   }
 
@@ -148,7 +151,6 @@ export function createLibrary({ db, catalog, config, limits }) {
       harness_id = ?, harness_other = ?, provider_id = ?, provider_other = ?,
       generation_mode = ?, human_intervention = ?,
       prompt_variant = ?, note = ?, updated_at = ? WHERE id = ?`),
-    curatedAs: db.prepare('UPDATE works SET curated_as = ?, updated_at = ? WHERE id = ?'),
     votesOfWork: db.prepare('SELECT COUNT(*) AS n FROM votes WHERE task_id = ? AND (a_work = ? OR b_work = ?)'),
     override: db.prepare('SELECT * FROM work_overrides WHERE task_id = ? AND work_id = ?'),
     setOverride: db.prepare(`INSERT INTO work_overrides (task_id, work_id, show_gallery, show_arena, show_entertainment, updated_by, updated_at)
@@ -286,9 +288,10 @@ export function createLibrary({ db, catalog, config, limits }) {
     if (!work) return { show_gallery: false, show_arena: false, show_entertainment: false };
     if (work.curated) {
       const row = q.override.get(work.taskId, work.id);
-      // 精选馆藏默认只在展览馆展示；进正式盲测池须在竞技场系统逐件审核通过。
-      // 娱乐面走同一张 override 表，与正式开关互不影响。
-      return { show_gallery: Boolean(row?.show_gallery ?? 1), show_arena: Boolean(row?.show_arena ?? 0), show_entertainment: Boolean(row?.show_entertainment ?? 0) };
+      // 数据包作品视同已核验的投稿：默认三面都开，管理员可逐件关闭。旧 Show1 快照
+      // 已有的轮次里同一作品早以投稿身份在娱乐名单中，这些题的娱乐面默认关闭。
+      const entertainment = !legacyRounds.has(catalog.task(work.taskId)?.arenaId);
+      return { show_gallery: Boolean(row?.show_gallery ?? 1), show_arena: Boolean(row?.show_arena ?? 1), show_entertainment: Boolean(row?.show_entertainment ?? entertainment) };
     }
     return { show_gallery: work.showGallery, show_arena: work.showArena, show_entertainment: Boolean(work.showEntertainment) };
   };
@@ -510,7 +513,7 @@ export function createLibrary({ db, catalog, config, limits }) {
     toPublic(work, viewer) {
       if (work.curated) {
         work = withDisplay(work);
-        return { task: work.taskId, id: work.id, curated: true, title: work.title, model: work.modelId, modelName: work.modelName, vendor: work.vendor, effort: work.effort, tool: work.tool, ...publicProvenance(work), cover: work.cover, status: 'verified' };
+        return { task: work.taskId, id: work.id, curated: true, title: work.title, model: work.modelId, modelName: work.modelName, vendor: work.vendor, effort: work.effort, tool: work.tool, ...publicProvenance(work), cover: work.cover, status: 'verified', addedAt: work.addedAt };
       }
       const privileged = viewer && (viewer.id === work.ownerId || viewer.role === 'admin');
       return {
@@ -573,7 +576,7 @@ export function createLibrary({ db, catalog, config, limits }) {
         arena_eligible: isEligible(work),
         arena_generation_ok: generationQualified(work),
         entertainment_route: work.entertainmentRoute ?? 0,
-        ...(work.curated ? {} : { arena: arenaState(work) }),
+        arena: arenaState(work),
       };
     },
 
@@ -785,11 +788,6 @@ export function createLibrary({ db, catalog, config, limits }) {
         throw error;
       }
       return upload(taskId, id);
-    },
-
-    markCurated(admin, work, curatedId) {
-      q.curatedAs.run(curatedId, Date.now(), work.id);
-      audit(admin, 'curate', work, `收录为馆藏 ${curatedId}`);
     },
 
     // Admins edit any upload; authors edit their own until it has been reviewed.

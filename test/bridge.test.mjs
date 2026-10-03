@@ -3,7 +3,7 @@
 // node:http because undici's fetch ignores custom Host headers, and the content server
 // routes by work host name.
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, get as httpGet } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -134,12 +134,22 @@ test('content server injects per key type', async () => {
     const plainPublic = await request(base, `${key('w', 1)}.w.example`);
     assert.equal(plainPublic.body, plainDoc, 'uncalibrated public work stays byte-identical');
 
+    const folded = await request(base, `${key('w', 1)}.w.example`, '/?aob=fold&face=gallery&custom=keep');
+    assert.ok(folded.body.includes('<script src="/__sp_fold.js"></script>'), 'public viewers can opt into the fold');
+    assert.ok(!folded.body.includes('data-aob-probe'), 'public fold does not add the match ready probe');
+    const foldAsset = await request(base, `${key('w', 1)}.w.example`, '/__sp_fold.js');
+    assert.equal(foldAsset.status, 200, 'injected script loads without carrying the document query');
+    assert.equal(foldAsset.body, readFileSync(new URL('../server/fold.js', import.meta.url), 'latin1'));
+
     const galleryCalibrated = await request(base, `${key('w', 2)}.w.example`);
     assert.ok(galleryCalibrated.body.includes(`window.__AOB_SAVED__=${JSON.stringify(CAMERA)}`), 'gallery camera falls back in for public pages');
 
     const capture = await request(base, `${key('w', 1)}.w.example`, '/?aob=bridge');
     assert.ok(capture.body.includes('__AOB_CAPTURE__=true'));
     assert.ok(!capture.body.includes('window.__AOB_SAVED__='), 'no camera to start from');
+    const combined = await request(base, `${key('w', 1)}.w.example`, '/?aob=bridge&aob=fold&face=gallery');
+    assert.ok(combined.body.includes('__AOB_CAPTURE__=true'));
+    assert.ok(combined.body.includes('/__sp_fold.js'), 'adding fold preserves an existing bridge query');
 
     const preview = await request(base, `${key('p', 3)}.w.example`, '/?aob=bridge&face=gallery');
     assert.ok(preview.body.includes('__AOB_CAPTURE__=true'));

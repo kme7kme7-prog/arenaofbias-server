@@ -29,6 +29,8 @@ import { registerShow1Guess } from './show1/guess.mjs';
 import { turnstileEnabled, turnstileSiteKey, verifyTurnstile } from './turnstile.mjs';
 import { createReadGuard } from './read-guard.mjs';
 
+const foldScript = readFileSync(new URL('./fold.js', import.meta.url));
+
 export function createPlatform({ config, limits, captureFactory = createCapturer, mailer }) {
   const serverVersion = process.env.SERVER_VERSION || (() => {
     try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: new URL('..', import.meta.url), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); }
@@ -173,6 +175,11 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   }
 
   const router = createRouter();
+  router.on('GET', '/api/fold.js', ({ req, res }) => {
+    res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Content-Length': foldScript.length,
+      'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' });
+    res.end(req.method === 'HEAD' ? undefined : foldScript);
+  });
   router.on('GET', '/api/bootstrap', (ctx) => bootstrap(ctx.user));
   router.on('GET', '/api/show1/works', (ctx) => ({
     works: publicList(library.published('show1'), ctx.user),

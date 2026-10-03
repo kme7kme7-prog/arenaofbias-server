@@ -277,6 +277,14 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
 - `me.updates` 为本人未删除投稿中，最近一次核验（`reviewed_at`）或内容审核决定（`moderation.at`）晚于 `users.works_seen_at` 的件数；内容排队 `pending` / `review` 不算决定。尚未标记已读时只统计最近 7 天的变化。调用 `POST /api/me/works/seen` 后已发生的变化归零。
 - `providers` 固定返回上述两项，不依赖数据包中的历史登记表。作品公开、作者与管理员视图的 `provider` 只为 `official`、`unofficial` 或 null，不再返回 `providerName`。
 
+### 3.1.1 `GET /api/fold.js` —— 作品控件折叠脚本
+
+**认证**：无。响应为 `text/javascript; charset=utf-8`，`Cache-Control: no-cache`；支持 HEAD，沿用受信任前端 CORS 与 API 读取限流。返回服务端 `server/fold.js` 的原始字节，供 Gallery 在同源馆藏 iframe 加载完成后注入，已加载的文档立即扫描。
+
+盲评令牌页面继续默认注入折叠脚本；公开及预览作品的 HTML 仅在 URL 带 `aob=fold` 时额外注入，脚本资源 `/__sp_fold.js` 无需重复携带参数。可同时使用 `aob=bridge&aob=fold`，相机恢复和捕获规则保持。草稿试加载不启用此 opt-in。
+
+子页面报告 `{source:'sp-fold', count}`，父页面通过 `{source:'sp-arena', fold:boolean}` 切换；`false` 显示控件，`true` 隐藏控件。控件 DOM 与状态保留，接受消息时只认当前父窗口。检测启发式与超过 6 个块 / 本次覆盖 40% 的保护规则沿用现有脚本。
+
 ### 3.2 `POST /api/auth/register` —— 注册
 
 **认证**：无。**限流**：auth 桶（10 次/分钟/IP）。

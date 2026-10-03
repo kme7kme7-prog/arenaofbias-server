@@ -1,5 +1,14 @@
 # HANDOFF.md · 当前状态
 
+## 作品控件折叠协议接入（2026-10-03，本地验证完成）
+
+- 用户要求 Gallery 盲评 / 并排显示控件开关，并让投稿公开地址按参数注入 fold.js；3 个 GPT-6.1 Sol / high 子代理并行完成两处 Gallery 与本仓服务端。父代理汇总验证、文档和提交，身份 wsnxxxs；本轮每仓一条英文提交，未推送、未部署。
+- server/content.mjs：公开 / 预览 HTML 带 aob=fold 时注入，aob=bridge&aob=fold 可并用；/__sp_fold.js 资源不依赖页面参数。盲评默认注入、草稿试加载和普通作品地址保持原行为。
+- server/app.mjs：GET/HEAD /api/fold.js 返回同一份 server/fold.js 原始字节，沿用 API 读取限流、trusted frontend CORS；Gallery CSP 允许 API 域名，无需放宽 Nginx 策略。fold.js 对已经加载的文档立即扫描并保留 600/1800/4000ms 后续扫描；检测启发式与保护阈值沿用现有脚本。
+- 验证：check 88/0、test 254/254，覆盖 opt-in、无参数脚本资源、bridge/fold 并用、canonical asset/CORS/HEAD、后加载即时扫描。Gallery check 51/0、test 19/19、build 181 件 / 61 文件、CI intake 0 错 / 10 既有提示；Browser 用真实内容 handler 验证合成投稿 / 盲评显隐与状态保留，馆藏实际台灯亮度 / 色温、787 风扇、390px 工具栏通过，无 console error。
+- 未改另一前端、作品 / 数据包、数据库 / 部署配置或生产；未验收真实生产上传 / 登录 / 投票、全部作品、多浏览器或真机。生成浏览器证据在相邻 Gallery 忽略目录 output/fold-controls-20261003；保留他轮未提交记录。[归档](docs/archive/2026-10-03-work-controls-wsnxxxs.md)。
+
+
 ## 四仓协调发布（2026-10-03，联调部署进行中）
 
 - 用户授权联调部署四仓现有改动。保留线上 v33/v34，贴纸与厂商为 v35/v36；新包固定 389199bd。check 88/0、test 251/251；生产库副本迁移和身份更正幂等验证通过，原始票面保留。实际发布结果随后追加到 docs/archive/2026-10-03-coordinated-release-wsnxxxs.md。

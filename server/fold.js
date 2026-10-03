@@ -1,10 +1,10 @@
-// Arena fold. The content server injects this script only into blind-comparison frames;
-// stored works are served exactly as uploaded everywhere else. It hides a work's own
-// floating control panels (small fixed / absolute boxes holding buttons or inputs, plus the
+// Arena fold. Blind-comparison frames and public viewers can opt into this script.
+// It hides a work's own floating control panels (small fixed / absolute boxes holding
+// buttons or inputs, plus the
 // common GUI libraries) so both sides are compared on the work itself. The arena toolbar
 // shows them again; hidden panels keep their DOM and state.
 // Protocol for the parent arena toolbar (default: hidden):
-// Child -> parent: {source:'sp-fold', count} once on window load (possibly 0), then
+// Child -> parent: {source:'sp-fold', count} once at startup (possibly 0), then
 // once per newly hidden batch. count is cumulative and never decreases.
 // Parent -> child: {source:'sp-arena', fold:boolean}; true hides, false shows.
 // Only messages whose source is this window's parent are accepted.
@@ -82,8 +82,11 @@
     root.toggleAttribute('data-sp-fold', Boolean(event.data.fold));
   });
   // Panels built by module scripts or after assets arrive show up late.
-  addEventListener('load', () => {
+  function start() {
     report();
-    for (const wait of [0, 600, 1800, 4000]) setTimeout(scan, wait);
-  });
+    scan();
+    for (const wait of [600, 1800, 4000]) setTimeout(scan, wait);
+  }
+  if (document.readyState === 'complete') start();
+  else addEventListener('load', start, { once: true });
 })();

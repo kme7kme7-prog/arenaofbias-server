@@ -7,7 +7,7 @@ import { createReadGuard } from './read-guard.mjs';
 import { bridgeTags, probeTag, rewriteImportmap, serveBridgeVirtual, validCamera } from './bridge.mjs';
 
 // Scripts the content server adds to a page: the trial-load probe for drafts, the panel
-// fold for blind-comparison frames. Stored works are otherwise served as uploaded.
+// fold for blind-comparison frames and public pages that opt in with ?aob=fold.
 const SCRIPTS = {
   draft: { path: '/__sp_probe.js', body: readFileSync(new URL('./probe.js', import.meta.url)) },
   match: { path: '/__sp_fold.js', body: readFileSync(new URL('./fold.js', import.meta.url)) },
@@ -88,7 +88,8 @@ export function createContentHandler({ config, library, arena, siteOrigins, read
       'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=()',
       'Cache-Control': target.draft || target.private || key[0] === 'm' ? 'no-store' : 'private, max-age=600',
     };
-    const inject = target.draft ? SCRIPTS.draft : key[0] === 'm' ? SCRIPTS.match : null;
+    const fold = key[0] === 'm' || (!target.draft && url.searchParams.getAll('aob').includes('fold'));
+    const inject = pathname === SCRIPTS.match.path ? SCRIPTS.match : target.draft ? SCRIPTS.draft : null;
     if (inject && pathname === inject.path) {
       res.writeHead(200, { ...headers, 'Content-Type': 'text/javascript; charset=utf-8', 'Content-Length': inject.body.length });
       return res.end(req.method === 'HEAD' ? undefined : inject.body);
@@ -108,7 +109,8 @@ export function createContentHandler({ config, library, arena, siteOrigins, read
       // for aob:work-ready); the camera bridge restores or captures per bridgePlan.
       const head = [];
       if (target.draft) head.push(scriptTag(SCRIPTS.draft.path));
-      if (key[0] === 'm') head.push(scriptTag(SCRIPTS.match.path), probeTag());
+      if (fold) head.push(scriptTag(SCRIPTS.match.path));
+      if (key[0] === 'm') head.push(probeTag());
       const bridge = bridgePlan(key, work, url);
       let body = readFileSync(found.file);
       if (bridge) {
@@ -136,7 +138,7 @@ export function createContentHandler({ config, library, arena, siteOrigins, read
       const camera = cameraOf('arena');
       return camera ? [bridgeTags(camera, false)] : null;
     }
-    const capture = url.searchParams.get('aob') === 'bridge';
+    const capture = url.searchParams.getAll('aob').includes('bridge');
     const faceParam = url.searchParams.get('face');
     const face = faceParam === 'arena' || faceParam === 'gallery' ? faceParam : null;
     const camera = face

@@ -116,12 +116,12 @@ function foldElement(tag, { position = 'static', width = 100, height = 30, text 
   return el;
 }
 
-function foldFrame(children) {
+function foldFrame(children, readyState = 'loading') {
   const body = foldElement('body', {}, children);
   const root = foldElement('html', {}, [body]);
   const events = new Map(), timers = [], reports = [];
   const parent = { postMessage(data) { reports.push({ ...data }); } };
-  const document = { body, documentElement: root, createElement: tag => foldElement(tag), querySelectorAll: selector => root.querySelectorAll(selector) };
+  const document = { body, readyState, documentElement: root, createElement: tag => foldElement(tag), querySelectorAll: selector => root.querySelectorAll(selector) };
   runInNewContext(readFileSync(new URL('../server/fold.js', import.meta.url), 'utf8'), {
     document, parent, innerWidth: 1280, innerHeight: 660,
     getComputedStyle: el => ({ position: el.position }),
@@ -130,6 +130,15 @@ function foldFrame(children) {
   });
   return { body, root, parent, reports, load: () => events.get('load')(), scan: () => timers.shift()(), message: event => events.get('message')(event) };
 }
+
+test('fold scans immediately when injected after the document has loaded', () => {
+  const panel = foldElement('div', { position: 'fixed' }, [foldElement('input')]);
+  const frame = foldFrame([panel], 'complete');
+  assert.equal(panel.hasAttribute('data-sp-fold-ui'), true);
+  assert.deepEqual(frame.reports, [{ source: 'sp-fold', count: 0 }, { source: 'sp-fold', count: 1 }]);
+  frame.message({ source: frame.parent, data: { source: 'sp-arena', fold: false } });
+  assert.equal(frame.root.hasAttribute('data-sp-fold'), false);
+});
 
 test('fold keeps activation buttons, native form inputs and work content', () => {
   const button = text => foldElement('button', { text });
@@ -505,6 +514,18 @@ describe('platform lifecycle', () => {
     content.close();
     await platform.close();
     rmSync(root, { recursive: true, force: true });
+  });
+
+  test('public fold asset serves the canonical script with trusted frontend CORS', async () => {
+    const origin = 'http://127.0.0.1';
+    const response = await fetch(`${base}/api/fold.js`, { headers: { origin } });
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type'), /^text\/javascript/);
+    assert.equal(response.headers.get('access-control-allow-origin'), origin);
+    assert.equal(await response.text(), readFileSync(new URL('../server/fold.js', import.meta.url), 'utf8'));
+    const head = await fetch(`${base}/api/fold.js`, { method: 'HEAD' });
+    assert.equal(head.status, 200);
+    assert.equal(await head.text(), '');
   });
 
   test('trusted frontends can preflight, sign in and read sessions while foreign writes are refused', async () => {

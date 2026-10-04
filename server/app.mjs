@@ -324,6 +324,13 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     arena.invalidate();
     return { question };
   });
+  router.on('POST', '/api/questions/:id/resubmit', async (ctx) => {
+    const user = emailBound(ctx);
+    limit.write(user.id);
+    const question = questions.resubmit(user, ctx.params.id, await readJson(ctx.req, 6 * 1024 * 1024));
+    arena.invalidate();
+    return { question };
+  });
   router.on('DELETE', '/api/questions/:id', (ctx) => {
     const user = signedIn(ctx);
     limit.write(user.id);

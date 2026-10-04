@@ -2,10 +2,14 @@
 // draft is reached through its own host name ({token}.<content domain>), so every page gets
 // a separate origin and can reach neither the site's session nor another work.
 import { readFileSync } from 'node:fs';
+import { entertainmentProbeTag } from './work-ready.mjs';
 import { THREE_MIRROR_PATH } from './config.mjs';
 import { HttpError, resolveInside, streamFile } from './http.mjs';
 import { createReadGuard } from './read-guard.mjs';
 import { bridgeTags, probeTag, rewriteImportmap, serveBridgeVirtual, validCamera } from './bridge.mjs';
+import { APEX_ASSET, APEX_CAMERA_PATH, adaptApexCamera, apexDocument, adaptApexDocument } from './apex-camera.mjs';
+import { TESSERA_ASSET, TESSERA_CAMERA_PATH, adaptTesseraCamera, tesseraDocument, adaptTesseraDocument } from './tessera-camera.mjs';
+import { entertainmentMatches, entertainmentOptions, entertainmentCamera, entertainmentDocument, entertainmentModule } from './entertainment-calibration.mjs';
 
 // Scripts the content server adds to a page: the trial-load probe for drafts, the panel
 // fold for blind-comparison frames and public pages that opt in with ?aob=fold.
@@ -104,7 +108,22 @@ export function createContentHandler({ config, library, arena, siteOrigins, read
       res.writeHead(200, { ...headers, 'Content-Type': 'text/javascript; charset=utf-8', 'Content-Length': inject.body.length });
       return res.end(req.method === 'HEAD' ? undefined : inject.body);
     }
+    // A pinned bundled work adapter is served dynamically; stored assets stay intact.
+    if (!target.draft && pathname === APEX_CAMERA_PATH) {
+      const asset = resolveInside(target.dir, APEX_ASSET);
+      const body = asset && adaptApexCamera(readFileSync(asset.file));
+      if (!body) return errorPage(res, 404, '取景适配不可用', '作品版本已变化，请使用原作预览。');
+      res.writeHead(200, { ...headers, 'Cache-Control': 'no-store', 'Content-Type': 'text/javascript; charset=utf-8', 'Content-Length': body.length });
+      return res.end(req.method === 'HEAD' ? undefined : body);
+    }
     // Bridge forwarding modules for rewritten importmaps, ahead of any real file lookup.
+    if (!target.draft && pathname === TESSERA_CAMERA_PATH) {
+      const asset = resolveInside(target.dir, TESSERA_ASSET);
+      const body = asset && adaptTesseraCamera(readFileSync(asset.file));
+      if (!body) return errorPage(res, 404, '取景适配不可用', '作品版本已变化，请使用原作预览。');
+      res.writeHead(200, { ...headers, 'Cache-Control': 'no-store', 'Content-Type': 'text/javascript; charset=utf-8', 'Content-Length': body.length });
+      return res.end(req.method === 'HEAD' ? undefined : body);
+    }
     const virtual = serveBridgeVirtual(pathname, url.searchParams);
     if (virtual) {
       if (virtual.error) return errorPage(res, virtual.error, '作品地址无效', '转发目标无法解析。');
@@ -113,18 +132,52 @@ export function createContentHandler({ config, library, arena, siteOrigins, read
     }
     const found = resolveInside(target.dir, pathname === '/' ? `/${target.entry}` : pathname);
     if (!found) return errorPage(res, 404, '找不到文件', pathname.slice(0, 120));
+    if (!target.draft && key[0] !== 'm' && url.searchParams.getAll('aob').includes('entertainment-camera') && /\.m?js$/i.test(found.file)) {
+      const body = entertainmentModule(readFileSync(found.file), work, pathname);
+      if (body) {
+        res.writeHead(200, { ...headers, 'Cache-Control': 'no-store', 'Content-Type': 'text/javascript; charset=utf-8', 'Content-Length': body.length });
+        return res.end(req.method === 'HEAD' ? undefined : body);
+      }
+    }
     if (/\.html?$/i.test(found.file)) {
       readGuard.page(req);
       // Match sides get the fold plus the ready probe (the arena transition gate listens
       // for aob:work-ready); the camera bridge restores or captures per bridgePlan.
       const head = [];
       // Start the readiness clock before any parser-blocking injected script.
-      if (key[0] === 'm' || key[0] === 'c' || url.searchParams.getAll('aob').includes('prev')) head.push(probeTag());
+      if (key[0] === 'm' || key[0] === 'c' || url.searchParams.getAll('aob').includes('prev')) {
+        head.push(arenaFold && key[0] !== 'm'
+          ? entertainmentProbeTag(url.searchParams.getAll('aob').includes('arena-scene')) : probeTag());
+      }
       if (target.draft) head.push(scriptTag(SCRIPTS.draft.path));
       if (arenaFold) head.push(scriptTag(SCRIPTS.arena.path));
       else if (fold) head.push(scriptTag(SCRIPTS.match.path));
-      const bridge = bridgePlan(key, work, url);
       let body = readFileSync(found.file);
+      let bridge = bridgePlan(key, work, url, body);
+      const entertainmentCurrent = entertainmentMatches(body, work);
+      const entertainmentSettings = entertainmentOptions(work, body);
+      const arenaCamera = !target.draft && key[0] !== 'm' &&
+        (url.searchParams.getAll('aob').includes('arena-scene') ||
+          (url.searchParams.get('face') === 'arena' && url.searchParams.getAll('aob').includes('bridge')));
+      if (arenaCamera && apexDocument(body)) {
+        const asset = resolveInside(target.dir, APEX_ASSET);
+        if (asset && adaptApexCamera(readFileSync(asset.file))) {
+          body = adaptApexDocument(body);
+          bridge ??= [bridgeTags(null, false)];
+        }
+      }
+      if (arenaCamera && tesseraDocument(body)) {
+        const asset = resolveInside(target.dir, TESSERA_ASSET);
+        if (asset && adaptTesseraCamera(readFileSync(asset.file))) {
+          body = adaptTesseraDocument(body);
+          bridge ??= [bridgeTags(null, false)];
+        }
+      }
+      if (arenaCamera && entertainmentCurrent) {
+        body = entertainmentDocument(body, work, pathname);
+        bridge ??= [bridgeTags(null, false)];
+        head.push('<script>window.__AOB_ENTERTAINMENT__=' + JSON.stringify(entertainmentSettings) + '</script>');
+      }
       if (bridge) {
         body = rewriteImportmap(body, pathname);
         head.push(...bridge);
@@ -140,7 +193,7 @@ export function createContentHandler({ config, library, arena, siteOrigins, read
   // never capture (blind comparison stays pure). Public and preview documents restore a
   // saved camera when one exists; ?aob=bridge additionally enables capture for the admin
   // calibration panel, with ?face= picking which side's camera to start from.
-  function bridgePlan(key, work, url) {
+  function bridgePlan(key, work, url, source) {
     if (!work || key[0] === 'd') return null;
     const cameraOf = (face) => {
       const camera = library.calibrationOf?.(work, face)?.camera ?? null;
@@ -153,9 +206,10 @@ export function createContentHandler({ config, library, arena, siteOrigins, read
     const capture = url.searchParams.getAll('aob').includes('bridge');
     const faceParam = url.searchParams.get('face');
     const face = faceParam === 'arena' || faceParam === 'gallery' ? faceParam : null;
-    const camera = face
+    const entertainment = key[0] !== 'm' && (url.searchParams.getAll('aob').includes('arena-scene') || (capture && face === 'arena'));
+    const camera = (entertainment ? entertainmentCamera(work, source) : null) ?? (face
       ? (cameraOf(face) ?? cameraOf(face === 'arena' ? 'gallery' : 'arena'))
-      : (cameraOf('arena') ?? cameraOf('gallery'));
+      : (cameraOf('arena') ?? cameraOf('gallery')));
     return capture || camera ? [bridgeTags(camera, capture)] : null;
   }
 

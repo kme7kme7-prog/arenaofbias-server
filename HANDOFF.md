@@ -1,5 +1,15 @@
 # HANDOFF.md · 当前状态
 
+## 后端统一联调整合（2026-10-05，验证通过，准备推送，生产由父代理统一发布）
+
+- 用户授权适用分支整合、提交、推送和部署；本仓合入 origin/main a64797de 的社区题/娱乐就绪/相机适配与 question-resubmit 90179b7，保留main今天验证码、资格、安全、成员统计，其他支线无独有功能。仅HANDOFF冲突，保留两侧有效记录并清除远端遗留冲突标记；旧worktree遗留不动。
+- Node24.16.0，最终check106/0、test316/316、diff检查通过；合入重提前首轮314/315为既有随机bad port，重跑315/315。正式config.dist只读20题/176件、digest b9a2a5d29c8705089d4cf9b16752bee2cf589c2393f7816734c28da677621cab。今天新增迁移v40 last_seen_at，既有列/行发布核对由父代理执行。
+- 本代理未SSH、部署、生产写入、离线删除Show1占位题或浏览器验收，无build/intake脚本。上线必须同步前端重提/资格/成员界面及游戏新题号/就绪策略；占位题清库须单独dry-run/备份/授权，不能启动时自动清理。[归档](docs/archive/2026-10-05-coordinated-backend-integration-wsnxxxs.md)。
+## 被拒题目修改后重新提交（2026-10-05，已本地提交，未推送、未部署）
+
+- 新增 `POST /api/questions/:id/resubmit`：作者本人、rejected 且从未 approved 的数据库题目可改字段后回到 pending；不查发起资格，计入 3 道待审限额，无改动 400，可选 removeSamples。moderation 记 round 与上次理由、审核人和内容；新决定保留 round。`GET /api/me` 的 rejected 题目带 resubmittable。无迁移。
+- check95/0、test299/299（新增作者重提单元回归）。配套 Gallery 本地真实后端浏览器联调通过。[交付记录](docs/archive/2026-10-05-question-resubmit-wsnxxxs.md)。
+
 ## 成员列表统计与最近活跃（2026-10-05，已提交，未推送、未部署）
 
 - 配合 Gallery「全部成员」：`GET /api/admin/users` 每项增加 `nickname`、`avatar`、`fixed`（ADMIN_USERNAMES）、打码 `email` 与 `emailVerified`、`lastSeenAt`、`works`（已核验 / 存疑 / 待审 / 内容拒绝，未删除且题目未删除）、`questions`、`votes`、`trusted`、`pendingLimit`。`auth.list()` 出账号字段，`admin.mjs` 新增 `members()` 三条分组统计，`library` 拆出 `trusted()` 供 `pendingLimit` 复用；权限、角色接口与审计不变，无依赖变化。
@@ -16,6 +26,43 @@
 
 - 默认 IP 额度改为 30 次 / 15 分钟，仍统计失败请求；邮箱额度 3 封 / 15 分钟在发送时占位、失败退回，失败人机验证和短冷却不占邮箱额度。注册/绑定的 IP、邮箱和短冷却分别返回 code 与 retryAfter，HTTP 同时保留 Retry-After；找回密码的邮箱级拒绝仍返回统一响应。
 - 配套 Gallery 显示真实等待时间并禁用重发。check95/0、test296/296（新增3项邮箱回归），无迁移或依赖变化，无生产发信、推送或部署。[交付记录](docs/archive/2026-10-05-email-rate-limit-patch-wsnxxxs.md)。
+
+## 删除旧Show1占位题（2026-10-04，本地完成）
+
+- 用户确认删除show1-002/003/006及对应测试记录。它们不在当前共享questions/数据包和线上Gallery公开目录。compat-data.json移除三题、43作品及映射、62快照票、1回填评论；不移除其他题，也不改作品源文件内容。
+- 新scripts/remove-show1-placeholders.mjs仅清理这三个固定task，默认dry-run；apply要求显式db/新backup/actor，VACUUM INTO后事务清理目标业务记录，外键检查与聚合审计；若出现共享questions记录拒绝删除。必须停服务执行并重启。无迁移或部署配置改动。
+- 本地下载测试库已备份并清理44作品、1票、1对局、1评论；非目标记录逐行相同。遗留文件在本地orphans，Windows原生移动解决Node rename EPERM。Show1 API返回26题/442作品且目标均0。check96/0、test275/275（真实快照不变量更新为5种子题/219作品，其他兼容测试保留）；前端检查通过及四张封面接入。
+- 未执行生产清理、提交或部署。发布配套更新前端种子和封面、兼容快照；生产先dry-run确认实际数量、停服务备份apply重启。未动相机/社区题/加载策略等同期改动。
+
+## 娱乐作品加载探针（2026-10-04，本地完成）
+
+- 新 server/work-ready.mjs 仅替换非正式娱乐 arena-fold 文档探针：静态 DOM 可用，场景实际 Canvas 绘制且已识别的大加载浮层消失才发 ready；定时轮询避免透明 iframe 帧回调节流，没有原 8 秒强制成功。正式 m 与普通/Gallery 原探针不改；无作品源、数据库、CSP 或部署配置修改。
+- check 95 文件/0 错误、npm test 275/275；新增静态 DOM、场景绘制/加载浮层、正式旧策略隔离三项测试。Show1 16 项就绪恢复回归通过；真实慢飞机两侧绘制后入场、无已识别加载浮层。原作品内部初始化与外部依赖性能仍独立存在。
+- 本地后端已重启；未提交/推送/部署。保留同期兼容层社区题和相机校准改动。发布须配套 Show1 的旧窗口信号隔离和场景等待预算。
+
+## 展览馆新题自动同步娱乐题库（2026-10-04，本地完成）
+
+- 用户授权调查后修复：show1compat promptCatalog 统一接入已审核公开 questions 与无 arenaId 数据包题，旧编号保持，其他题沿用 task ID。liveWorks 不再单独放行所有未删除 questions，而须位于同一公开目录；投票、评论、反应沿用统一映射。kind 缺失由类别/templates 判定。既有 publicContent、审核、娱乐开关、十件及跨模型门槛不改，无迁移、源文件或 Gallery API 改动。
+- check93/0、test272/272，兼容层27/27：pending不可见、公开九件可浏览/不可投，第十件可投/评论/反应，降九件关闭新票但历史重放保留，编辑同步、拒绝/删除退出目录、文字kind派生、未编号数据包题。Show1 前端 typecheck/lint/build及19项浏览器入口回归通过；详细报告在 Show1 docs/qa/2026-10-04-community-prompts.md。
+- 未提交/推送/部署或写生产数据；必须协调部署 Show1 前端（支持canonical ID）和本后端，无手工补编号/迁移步骤。既有相机适配、参数与其他 dirty 文件保留，本轮只改 show1compat/test 与相关契约/交接记录。
+
+## 独立娱乐批量相机（2026-10-04，本地）
+
+- 三个GPT-6 Luna代理审阅当前445件公开作品；77件专用镜头保存在server/entertainment-calibration.json，task/id索引与入口/模块SHA256匹配。content.mjs仅娱乐arena-scene/竞技场取景读取，正式m、gallery、普通路径不读取本批配置；不写共享calibration_arena、作品源或数据库。
+- entertainment-calibration.mjs接入打包OrbitControls与四种自定义相机；bridge绘制前防作者相机复位，直接canvas操作释放保持，resize保留当前视角。007Grok娱乐FOV65单独保存，gallery原48；未知版本不转换。上线需这些代码、参数与既有APEX/Tessera适配模块共同部署并重启，无迁移。
+- check93/0、test270/270；473模块/374内联脚本语法通过；77镜头隔离检查通过。真实浏览器冷启动/静置/resize、canvas手动释放、FOV隔离通过。修复render转换截断$变量的运行时黑屏，新增回归用例；Grok/Minimax/Dots/Muse复查200、0pageerror、画面可见。详见Show1 docs/qa/2026-10-04-entertainment-calibration.md及.local证据。
+- 005GPT4o云遮挡/005Dots场景限制保留，011Astra同步构建场景慢。未commit/push/deploy或写生产数据；本轮未动同期出现的show1compat社区提示词改动。
+
+## Tessera 65 缩放与偏移（2026-10-04，本地）
+
+- 新tessera-camera.mjs按bundle SHA256适配竞技场取景/娱乐场景：隐藏UI后的相机insets归零、距离0.08–10倍baseRadius、跳过预览相机入场补间、注册既有桥接。content.mjs保持访问门禁和其他展示路径；存储作品/数据库不改，未知版本不适配。
+- check91/0、test266/266；真实Tessera与APEX浏览器回归通过，取景滚轮双向、抓取/保存值模拟恢复、其他路径不转发，截图已查看。未实点后台保存、未提交/推送/部署；本地副本服务已重启。
+
+## APEX-65 竞技场取景距离（2026-10-04，本地）
+
+- 用户授权。新增 apex-camera.mjs 精确匹配 bundle SHA256，仅竞技场取景/娱乐场景参数的 HTML 使用动态模块，距离上限220扩大到2200并注册已有桥接；content.mjs 仍先检查作品访问门禁。版本变化不自动套用。普通/展览馆/正式m保留原bundle，不改作品、数据库、相机协议或部署配置。
+- check 89/0、test 265/265；Show1真实APEX浏览器回归：滚轮拉远、抓取、保存值模拟恢复、其他显示路径不转发。未实点后台保存；无 commit/push/deploy。本地副本服务已重启，保留其他遗留。
+
 
 ## 后端发布前核对（2026-10-04，已验证，待统一推送部署）
 
@@ -839,3 +886,9 @@
 - 验证码验证/绑定/重置增加独立每IP30次/分钟额度；登录挑战通过后占密码计算名额；TRUST_PROXY兼容loopback/1、拒绝其他非关闭值；Turnstile半配置失败关闭。后台相机校验当前iframe窗口/源及有限三元向量，主题启动外置、脚本CSP收紧；内容服务统一HSTS与错误页转义；统计限制合法路径，完整目录明确拒绝分页参数。
 - 不改竞猜、多贴纸主键、注销用户历史票或数据库迁移。新增SSH密钥认证模板但未安装；无运维凭据，生产代理配置、系统包和DNS尚待确认/处理。
 - check96/0、test302/302、diff检查通过。真实本地3D后台取景与消息来源校验通过，未保存业务参数；无生产发信、投票、并发攻击、推送或部署。日志在忽略output，临时库由Gallery harness管理。[本轮归档](docs/archive/2026-10-05-security-review-wsnxxxs.md)。
+
+## 展览馆新题到Show1目录漏同步（2026-10-04，仅调查）
+
+- 只读线上bootstrap/prompts/works及game发布JS。二十四节气q-48c3b43eeb284f6d最新21件非演示、19模型（调查期间由18增长）；公开Gallery与Show1 works均有该题作品，但Show1 prompts25道均为旧编号，无此题。橘子题q-5ebd7c84dff7cd8f也有36件、26模型而无题目目录。
+- show1compat.promptCatalog无arenaId即continue；liveWorks允许数据库questions题并以q-*为round，导致目录/作品不一致。published依赖目录，不能只在前端造入口。线上题目解析器和本地Show1 lib/prompts.ts仅接受三位数字；随机池从目录选题，故十件门槛不是本次阻断原因。
+- 未修业务代码、写DB、修改源作品、提交/推送/部署；建议后续统一新题ID及目录、作品、投票契约，保留旧编号与十件跨模型门槛。之前未完成的娱乐视角校准验证保持待续。

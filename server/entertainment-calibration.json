@@ -1,0 +1,4590 @@
+{
+  "version": 1,
+  "works": {
+    "chinese-architecture/up-08ipiv5r": {
+      "entrySha256": "876afd6aac161d68dc4374e437a24f337ff970e58f5a1f7a20e85630e217cbff",
+      "modules": [
+        {
+          "path": "/assets/index-CnSAKEm3.js",
+          "sha256": "e21a4ec551c47db317a4372f24a65a31358f804f0e1fb2a19df78f1c74108317"
+        }
+      ]
+    },
+    "chinese-architecture/up-ih15pwqt": {
+      "entrySha256": "de40aad63e628d4f4ee4aef77dd6903946ce96dd2fbc0693cc6cd1fb0595e342",
+      "modules": [
+        {
+          "path": "/assets/index-KYk926aL.js",
+          "sha256": "da608b00ebdd63b7b9d5edac9000f834dc164a872e848957524ec342acd560a5"
+        }
+      ]
+    },
+    "chinese-architecture/up-bvk561al": {
+      "entrySha256": "4874e1da1cb637bce6501b0999919f9b48974fe434c7f2319151b834bf577eea",
+      "modules": [
+        {
+          "path": "/assets/index-Bz_1qQdF.js",
+          "sha256": "4b19cc387383059d65902f4c55b162ffb0199b504cc9ae9bd711a9a9e8c11bb5"
+        }
+      ],
+      "camera": {
+        "position": [
+          -73.77113195960804,
+          44.69200000000002,
+          40.92567364991788
+        ],
+        "target": [
+          0,
+          4.6,
+          -9
+        ]
+      }
+    },
+    "chinese-architecture/up-gzzyrzks": {
+      "entrySha256": "c8b6257019b0f1db02e023e143832278625683a47080c330f71fced095eb3441",
+      "modules": [
+        {
+          "path": "/assets/index-ClZWHkLn.js",
+          "sha256": "eb4306d599b39b7dffe398565e4e09cb3fa7455b0046633f1386c93967aca752"
+        }
+      ]
+    },
+    "chinese-architecture/up-wuwu17ff": {
+      "entrySha256": "f468ceed885acf17895ca902bedfb218d428d0d3372b4763d30d48becd903c89",
+      "modules": [
+        {
+          "path": "/assets/index-ZboMZ97W.js",
+          "sha256": "fd64019f308a5f5173cb200f4de911f0dfb40165bcf433779c7b56188723cb46"
+        }
+      ]
+    },
+    "chinese-architecture/up-oz3y4w9t": {
+      "entrySha256": "dbda57097e42d7f071a4c2e97a964e3f575d0e0ecb84cdbb9a8175938c739db5",
+      "modules": [
+        {
+          "path": "/assets/index-BKnIZqtq.js",
+          "sha256": "17c93bc1ad74b6fac2dd5b85cce1743f805fa6e4abd803b1128b2d7222c19223"
+        }
+      ],
+      "camera": {
+        "position": [
+          -100.39242751193805,
+          134.94658868385773,
+          -217.0961965414194
+        ],
+        "target": [
+          0,
+          14.000000000000002,
+          -2
+        ]
+      }
+    },
+    "show1-005/up-bln2uuob": {
+      "entrySha256": "cb363d47a561ecef9e214efe15f478fdbc600d7ee095fffed346071b861c9895",
+      "modules": []
+    },
+    "show1-005/up-mlmwq050": {
+      "entrySha256": "1845c73fc0946637abb5a2ec206dcc523ffdbfa77fe7ed9c9a1c1ebfc6ee9f03",
+      "modules": [
+        {
+          "path": "/assets/index-B54Sj5at.js",
+          "sha256": "006b5ef4b09ee3340566e6cfe7baa5ef9f539adf9eaff9f0a88c45be4354c677"
+        }
+      ]
+    },
+    "show1-005/up-abil6pc9": {
+      "entrySha256": "102e8faa935b1c12ded92813be35f30f62e7925b77b7150d2cc901192c460a57",
+      "modules": [
+        {
+          "path": "/assets/index-DKYxRY3G.js",
+          "sha256": "16f73183a6d277e9db5446e7287fe8c1766a1e2540d667125875d6d43044418a"
+        }
+      ]
+    },
+    "show1-005/up-ot82m8n3": {
+      "entrySha256": "f824906ab3a22e84996b2a93727987b311b57369894e5973974f761a654ada57",
+      "modules": [
+        {
+          "path": "/assets/index-Czziq_h-.js",
+          "sha256": "5e3328331b7ac5512fdc94fa493c49596298ac1cc82f512242f49107661ce889"
+        }
+      ]
+    },
+    "show1-005/up-lx32wpop": {
+      "entrySha256": "047d0e8045afda0a7c479ff19c66daa2c32fa12cfc5ff642112a00e03f899152",
+      "modules": [
+        {
+          "path": "/assets/index-CzdOSULz.js",
+          "sha256": "21cf8ee2579ba5b1b9ad14da59d6ca4d9d020205e3b9f64e8e4fd26a29b21d7d"
+        }
+      ]
+    },
+    "show1-005/up-z32dodxu": {
+      "entrySha256": "3a76b5557514ea416a259cd69382e7f630b6d401a303f343b3d5f18500c8da73",
+      "modules": [
+        {
+          "path": "/assets/index-C4HHTt5Q.js",
+          "sha256": "0891cbc4eca7b06dddac59eb38e8a382b2eca22ada0af52203633b7277fa67af"
+        }
+      ]
+    },
+    "show1-007/up-3wo81ls6": {
+      "entrySha256": "d739458c6ee2bb9ec213e2d270917b387b3dfdd04b13af066a0360704b1b57e8",
+      "modules": []
+    },
+    "show1-007/up-msu1odl1": {
+      "entrySha256": "c1319f0d896365fa351085f533ff4dbddf80f63101501fdf34dfbca05d11d18b",
+      "modules": [
+        {
+          "path": "/js/blackhole.js",
+          "sha256": "2bebf57b929c450040d42212a5e8d0c714b27fed4a9264d85a6f353258bd1f14"
+        },
+        {
+          "path": "/js/shaders.js",
+          "sha256": "8dedd93c9a9bbc760444ad27a95aac9951bc8ec245f1924621f0c9a3f8876ae6"
+        },
+        {
+          "path": "/libs/lil-gui.umd.min.js",
+          "sha256": "06a22dc0f48ff21a2e675289d66f922e1b66220bef36a5d74b5795cd465e9b25"
+        },
+        {
+          "path": "/libs/OrbitControls.js",
+          "sha256": "02bb4ade710f3e607329e37a21f098bc3ac70eb6e33daf8a65e79f4db785e7b2"
+        },
+        {
+          "path": "/libs/postprocessing/CopyShader.js",
+          "sha256": "6b5da4fe3b410286974590885f82fe4a446f25c728f7d6c888e2a2a331333949"
+        },
+        {
+          "path": "/libs/postprocessing/EffectComposer.js",
+          "sha256": "4fc320fa3185847797332bc2b0125b1a39b9cf5fc4170a2f180cfa54fb057a2b"
+        },
+        {
+          "path": "/libs/postprocessing/LuminosityHighPassShader.js",
+          "sha256": "00ed0682e61ca207d9c62298269472d6d4eedd9d33528400e7cbc633da8544da"
+        },
+        {
+          "path": "/libs/postprocessing/Pass.js",
+          "sha256": "1b6d53b6dc4eafd45a2b9e21d68a4e3dea33c7de92c408d36993282ee0514cfa"
+        },
+        {
+          "path": "/libs/postprocessing/RenderPass.js",
+          "sha256": "57a549b2d6a947cddf0385a804dc70c3b2d155663d908e99e35d42274b3878be"
+        },
+        {
+          "path": "/libs/postprocessing/ShaderPass.js",
+          "sha256": "2e64890b8e4c4dafcfd796d5c84877f2ad36a101c83263211c500ec40eaf1240"
+        },
+        {
+          "path": "/libs/postprocessing/UnrealBloomPass.js",
+          "sha256": "1ed342b273e9b077a3e92e5caeecd45043f03071306c696564d5b53f0562dced"
+        },
+        {
+          "path": "/libs/three.min.js",
+          "sha256": "9274bbcec8d96168626c732b5d31c775aa8cfb7eaa0599bec0c175908a2c1ce2"
+        }
+      ]
+    },
+    "show1-007/up-lc0vny76": {
+      "entrySha256": "603f11dc790acc017a48ca9457ee30ef79a9185569b377dfbf15042576fdc7a6",
+      "modules": [
+        {
+          "path": "/assets/index-BV3B2Z3D.js",
+          "sha256": "a04fe787dc5b68de479237d39b79cdb6ae75672f45aa1e0718a8c3c29f61752c"
+        }
+      ]
+    },
+    "show1-007/up-mg44poo8": {
+      "entrySha256": "2b4f0df1ea8fad97946aa8be8aa69c5399b07ceeb9fe16b8f5dfcf32520a65cc",
+      "modules": []
+    },
+    "show1-007/up-futzcbzr": {
+      "entrySha256": "7ae46fa420e258e0d4b9232d7a71664e0dff9967806f3ff36ca00d703265d7b2",
+      "modules": []
+    },
+    "show1-007/up-2tysjofi": {
+      "entrySha256": "184d333020a6dda4a3977f382b164f162c3e5274184323fe901d8776fe4fff24",
+      "modules": [
+        {
+          "path": "/src/main.js",
+          "sha256": "68fedebac6a588dc11a3433add5a3f881b5d7f08166dbe9e5321010602dd637b"
+        },
+        {
+          "path": "/src/shaders.js",
+          "sha256": "810aafe7e50e01d0e00c6d48a7b35e49477045b36520eec4be356c3f078ef29c"
+        },
+        {
+          "path": "/src/ui.js",
+          "sha256": "8c7cb7413ebcf3a4e6731f77ecbafa7d7f5e3017101f7e27d1899e37de973d57"
+        },
+        {
+          "path": "/vendor/jsm/controls/OrbitControls.js",
+          "sha256": "80efaadea4f8a636a65fb0bd08bfef62f3d93a0bb94e2e7500f23176c5c07f4e"
+        },
+        {
+          "path": "/vendor/three.module.min.js",
+          "sha256": "08fd7545d13d2c7fb65ab691530a802dafefd638596501854f267d0fb13c39e7"
+        }
+      ]
+    },
+    "chinese-architecture/up-hwu0dsm4": {
+      "entrySha256": "a479102bda02230490f8f4cc7382fd7e8b96752ac451de0072565c01e2718487",
+      "modules": [
+        {
+          "path": "/assets/index-CnSAKEm3.js",
+          "sha256": "e21a4ec551c47db317a4372f24a65a31358f804f0e1fb2a19df78f1c74108317"
+        }
+      ]
+    },
+    "show1-005/up-fls4wyes": {
+      "entrySha256": "1e60351e57c1031b2292b458fd29b2fc8bb4a7c6e12c2bb2a692082a2276b0df",
+      "modules": []
+    },
+    "show1-007/up-rufofsmz": {
+      "entrySha256": "bd09b22904b25c0bbd7e518e915d53ea786b4267fcfb5a8e270c5292469298ea",
+      "modules": []
+    },
+    "chinese-architecture/up-g5ro3vgz": {
+      "entrySha256": "67313e21709e47d5bcc4db888ef1434e52a9d9aaad668ccec2ae52ba4a2850dd",
+      "modules": [
+        {
+          "path": "/assets/index-BtnuYYKi.js",
+          "sha256": "2fd31749c6a5a801283c9ef3d7a6cf1cbad51a4199b77d96520a77d3456aa6d4"
+        }
+      ]
+    },
+    "show1-005/up-qvw3gfax": {
+      "entrySha256": "a6aadb792001fa02d26dcfd63a92e5dd6407c08135596d424b915e3cfdc27302",
+      "modules": [
+        {
+          "path": "/assets/index-Gpw6x4hn.js",
+          "sha256": "54bb80df16fab2486b5f9efbd6e020c3be4148181e5f507eae084e5325bf3def"
+        }
+      ]
+    },
+    "show1-007/up-zb43y8k6": {
+      "entrySha256": "1a6dc13c648a2b045f82514406807a3d427fe21841c3a6870078fe6753952f72",
+      "modules": [
+        {
+          "path": "/js/app.js",
+          "sha256": "d315dc8fb4b68b9fccb03157bf4e59466019b129b3a3794dcfdcb8d8001c68c4"
+        },
+        {
+          "path": "/js/shaders.js",
+          "sha256": "1d9325527688599363934071f02522e4a5e52189944714d28f1d3ff6d347506f"
+        },
+        {
+          "path": "/vendor/OrbitControls.js",
+          "sha256": "b4c6e53f98538535b11fd6655627d47fb5877b3ad972568bff0a7026c4b6d5c4"
+        },
+        {
+          "path": "/vendor/three.min.js",
+          "sha256": "f34446bf875b5fb0dcd93819ffe1d9e182d46634ee855f5d904c6c4ac7cdbc95"
+        }
+      ]
+    },
+    "chinese-architecture/up-ebkpmu6r": {
+      "entrySha256": "b29d04595053c3dad1799fe90207ca9e4dcb91df058fb31f8e4073f8187b4db9",
+      "modules": [
+        {
+          "path": "/src/buildings.js",
+          "sha256": "efade3345d18066fc76d4a0bb8eb04d77aad44f715ff7a4ede12379e96ce7efe"
+        },
+        {
+          "path": "/src/camera-fit.js",
+          "sha256": "e24a8bb3086bb9403806c4287af6e1164563faabaeb4f6b49efb05a4b0d61d5c"
+        },
+        {
+          "path": "/src/layout.js",
+          "sha256": "5bf7c980f1ead7f0e68cc376c86f17ce815ce68da98f07fead4940fb74d8f59c"
+        },
+        {
+          "path": "/src/main.js",
+          "sha256": "285ffdf0dce6fdde1eab582ffe8556d25bbacb6047cd287a8a6383d23cb5ea6a"
+        },
+        {
+          "path": "/src/palette.js",
+          "sha256": "19e23338940734f70ba17ef13c3630fa09cbfc8e33f21ad0f3b3cf5889e87df7"
+        },
+        {
+          "path": "/src/parts.js",
+          "sha256": "fb15349cb2840031db9d80e73544e12a3513d0e3fefb0f5aa85e6ee2f48c5010"
+        },
+        {
+          "path": "/src/renderer.js",
+          "sha256": "31b02885aa22e7fa00f32510eb09ad658de8dbb19496a59736519ad92b3ef405"
+        },
+        {
+          "path": "/src/rng.js",
+          "sha256": "c1c1896a000505bec3d0529e6732046605f8d8f31f61c72d5c6701dbbf52fd9e"
+        },
+        {
+          "path": "/src/roofs.js",
+          "sha256": "41ae076915e17daf43ec56b0bd42c50ce0f85629922fed24a1acf986e1334958"
+        },
+        {
+          "path": "/src/scene-data.js",
+          "sha256": "aeb2d24ec685d710afdc43211b2d163b649641a53b9d1898174d72e555b5f563"
+        },
+        {
+          "path": "/src/time-of-day.js",
+          "sha256": "7f8f110e92e1ac49298cc97bd869e4e1fa20fa0c987452ca82c6237a17267bd5"
+        },
+        {
+          "path": "/src/voxel.js",
+          "sha256": "cc4a3532059a58ac6543470d895681dc330b03ecbc259724ded476f0a47e390c"
+        },
+        {
+          "path": "/test/verify.mjs",
+          "sha256": "37aad033799364d537176bea1ec23a0f6d70c76ac74530177683ac85c8237971"
+        },
+        {
+          "path": "/vendor/OrbitControls.js",
+          "sha256": "faabb4e8dfd9235ee4a9fd7c9a3d75f90f1689dbd4944bd6fd32117dacec5f93"
+        },
+        {
+          "path": "/vendor/three.core.js",
+          "sha256": "3718df126d69c125362a03340913204470d8c50238605150e57f808840fb7759"
+        },
+        {
+          "path": "/vendor/three.module.js",
+          "sha256": "bbf5ed13fe4373f5bd38b14ea8e62e9f157327da5638edc6d3863e08b167c9c7"
+        }
+      ]
+    },
+    "show1-005/up-es79784b": {
+      "entrySha256": "a689a08b37c688cec04467e7c5b5536cb43f5f6fea089991515fa9ac2d9e3dad",
+      "modules": [
+        {
+          "path": "/assets/index-DIXhJ_8C.js",
+          "sha256": "04f4b40b9e3e24e8d02600bd1b74dde06c87bc68ce2397325ec0b1a0bfe1b783"
+        }
+      ]
+    },
+    "show1-007/up-tg33z18r": {
+      "entrySha256": "3d956357b60b4e64cd09575e25b8d10d3f6c3d77e0698b00403d2668f3ba087a",
+      "modules": [
+        {
+          "path": "/src/camera/controls.js",
+          "sha256": "8e8650dd63af14c37e20caa763c3a785bf0225ff0ad37aba7c4037a97e96b934"
+        },
+        {
+          "path": "/src/main.js",
+          "sha256": "5fd059c63ff7eb0e6a975db94b497327b0d1bf4e0334c533fbb293b0249b3178"
+        },
+        {
+          "path": "/src/physics/blackbody.js",
+          "sha256": "00bb3dd8a2972ca82d7100c55f98bbefc31981fea8a5ef03d2ee0465ab24db4b"
+        },
+        {
+          "path": "/src/physics/constants.js",
+          "sha256": "384d09261c63122d59f71e524909054e9424e5e74564e2d4799501142fa57bea"
+        },
+        {
+          "path": "/src/physics/disk.js",
+          "sha256": "59e160f2d31ef938db3aa8640a3567fe435fa48ebd33c9dbc976e79fdb344f3d"
+        },
+        {
+          "path": "/src/physics/kernel-source.js",
+          "sha256": "399140d0ed66388a5c20997cccc7e05834ac3834e88a3df24c160e12433b19df"
+        },
+        {
+          "path": "/src/physics/kernel-transpile.js",
+          "sha256": "7ca31a2ae05b859a54fb4054983238136e5c6e246d4272d33b9843648c0e39d3"
+        },
+        {
+          "path": "/src/physics/kernel.js",
+          "sha256": "aefeb576829fc06d09113db53cc10b921bee8c7616a802319cea0bd9c5a1961b"
+        },
+        {
+          "path": "/src/physics/observables.js",
+          "sha256": "520b7e311d6af107b9d03ff68193d4862fc3f539764a3aa9aa045c4d611709cb"
+        },
+        {
+          "path": "/src/physics/raytrace.js",
+          "sha256": "67e025d55fea8b91de26832fabe514ad651e60c160131e553c9e4384e08d4be9"
+        },
+        {
+          "path": "/src/physics/selftest.js",
+          "sha256": "d07953b9aab35fed195d931f4869404f46ec1c57eeb28a76cfd325191c99752a"
+        },
+        {
+          "path": "/src/render/renderer.js",
+          "sha256": "79b7361544a3bcf8422e7bdf56485c1b36ff666b9e18b247eec5007c5ef067c1"
+        },
+        {
+          "path": "/src/render/shaders.js",
+          "sha256": "9d02ec2a0a5f0653a12ffe338b7a0864cce239fe145418de8473657ed072a0f3"
+        },
+        {
+          "path": "/src/ui/panel.js",
+          "sha256": "a2d12b2892370e67d2829ada04f648d775888dcf0cf5eea5eed935646ca30440"
+        },
+        {
+          "path": "/vendor/OrbitControls.js",
+          "sha256": "faabb4e8dfd9235ee4a9fd7c9a3d75f90f1689dbd4944bd6fd32117dacec5f93"
+        },
+        {
+          "path": "/vendor/three.core.js",
+          "sha256": "3718df126d69c125362a03340913204470d8c50238605150e57f808840fb7759"
+        },
+        {
+          "path": "/vendor/three.module.js",
+          "sha256": "bbf5ed13fe4373f5bd38b14ea8e62e9f157327da5638edc6d3863e08b167c9c7"
+        }
+      ]
+    },
+    "chinese-architecture/up-68pmuwx7": {
+      "entrySha256": "cb2f95843caf35d85f8eb4a40a3ecc89280fd96b214aa48f9475f9687d52fafe",
+      "modules": [
+        {
+          "path": "/assets/index-KYk926aL.js",
+          "sha256": "da608b00ebdd63b7b9d5edac9000f834dc164a872e848957524ec342acd560a5"
+        }
+      ]
+    },
+    "show1-005/up-pe0kdwjo": {
+      "entrySha256": "1c859c7cf0d60aa1ea1861b4f3947eebaf9798a05a17faa35c18381722b92877",
+      "modules": [
+        {
+          "path": "/assets/index-B54Sj5at.js",
+          "sha256": "006b5ef4b09ee3340566e6cfe7baa5ef9f539adf9eaff9f0a88c45be4354c677"
+        }
+      ]
+    },
+    "show1-007/up-oegzwus9": {
+      "entrySha256": "d2688904d105eabc160d31ccd36bd427eba19c060f4f165f9e486ac570bc7fb5",
+      "modules": [
+        {
+          "path": "/js/blackhole.js",
+          "sha256": "2bebf57b929c450040d42212a5e8d0c714b27fed4a9264d85a6f353258bd1f14"
+        },
+        {
+          "path": "/js/shaders.js",
+          "sha256": "8dedd93c9a9bbc760444ad27a95aac9951bc8ec245f1924621f0c9a3f8876ae6"
+        },
+        {
+          "path": "/libs/lil-gui.umd.min.js",
+          "sha256": "06a22dc0f48ff21a2e675289d66f922e1b66220bef36a5d74b5795cd465e9b25"
+        },
+        {
+          "path": "/libs/OrbitControls.js",
+          "sha256": "02bb4ade710f3e607329e37a21f098bc3ac70eb6e33daf8a65e79f4db785e7b2"
+        },
+        {
+          "path": "/libs/postprocessing/CopyShader.js",
+          "sha256": "6b5da4fe3b410286974590885f82fe4a446f25c728f7d6c888e2a2a331333949"
+        },
+        {
+          "path": "/libs/postprocessing/EffectComposer.js",
+          "sha256": "4fc320fa3185847797332bc2b0125b1a39b9cf5fc4170a2f180cfa54fb057a2b"
+        },
+        {
+          "path": "/libs/postprocessing/LuminosityHighPassShader.js",
+          "sha256": "00ed0682e61ca207d9c62298269472d6d4eedd9d33528400e7cbc633da8544da"
+        },
+        {
+          "path": "/libs/postprocessing/Pass.js",
+          "sha256": "1b6d53b6dc4eafd45a2b9e21d68a4e3dea33c7de92c408d36993282ee0514cfa"
+        },
+        {
+          "path": "/libs/postprocessing/RenderPass.js",
+          "sha256": "57a549b2d6a947cddf0385a804dc70c3b2d155663d908e99e35d42274b3878be"
+        },
+        {
+          "path": "/libs/postprocessing/ShaderPass.js",
+          "sha256": "2e64890b8e4c4dafcfd796d5c84877f2ad36a101c83263211c500ec40eaf1240"
+        },
+        {
+          "path": "/libs/postprocessing/UnrealBloomPass.js",
+          "sha256": "1ed342b273e9b077a3e92e5caeecd45043f03071306c696564d5b53f0562dced"
+        },
+        {
+          "path": "/libs/three.min.js",
+          "sha256": "9274bbcec8d96168626c732b5d31c775aa8cfb7eaa0599bec0c175908a2c1ce2"
+        }
+      ]
+    },
+    "chinese-architecture/up-oeym1xzo": {
+      "entrySha256": "cb2de0af81b7a7a7059f62f158868add18038637549674592722585a3b035eef",
+      "modules": [
+        {
+          "path": "/assets/index-BbcqlRYM.js",
+          "sha256": "0d9bb3d82e3af8e14c9457e21607b5de7a2e9b9a923d83f2b3f98dcf6a38f580"
+        }
+      ],
+      "camera": {
+        "position": [
+          66.50992696099213,
+          72.25000000000007,
+          -192.1008501233412
+        ],
+        "target": [
+          0,
+          7.000000000000001,
+          -10
+        ]
+      }
+    },
+    "show1-005/up-1n0epegg": {
+      "entrySha256": "e52f89f1f51052152cc0a7b8a7895b7a67eedb7fc426d177b6c7f0b83c72c337",
+      "modules": [
+        {
+          "path": "/assets/index-CJCJoBdg.js",
+          "sha256": "815f6ec367671f31f632149f20896674fbf4133926a85a6a7e1e90f9286b6a5f"
+        }
+      ]
+    },
+    "show1-007/up-aeq32fj8": {
+      "entrySha256": "aad533edfda4cd31ae49a0f1b62906562a484ca81d32155a54e31968b5d454c1",
+      "modules": [
+        {
+          "path": "/js/main.js",
+          "sha256": "972d4db78656b001399cb535d95dea83ac2ad5f12ed96e298ac0e5f325388caa"
+        },
+        {
+          "path": "/js/shaders.js",
+          "sha256": "631fe701ebc3990dfa6d00ef34d80bc8eff1dffcf7035b0516055469676004e8"
+        },
+        {
+          "path": "/libs/OrbitControls.js",
+          "sha256": "02bb4ade710f3e607329e37a21f098bc3ac70eb6e33daf8a65e79f4db785e7b2"
+        },
+        {
+          "path": "/libs/three.min.js",
+          "sha256": "9274bbcec8d96168626c732b5d31c775aa8cfb7eaa0599bec0c175908a2c1ce2"
+        },
+        {
+          "path": "/tools/verify_geodesic.js",
+          "sha256": "d9f9c8881c431ef1803f71065955e2c9efdec0f2208e97d3eccba81533c67ec1"
+        }
+      ]
+    },
+    "chinese-architecture/up-wgd85cs2": {
+      "entrySha256": "c36d683dc93621c69beeacf6c42d10a0f1aa4b1a3c9cbd2b6c9a5b2b92cec582",
+      "modules": [
+        {
+          "path": "/assets/index-671df8c7.js",
+          "sha256": "40c490102a2f5482209905d0dee323555e180510e961795efcf4dfceaa96d75c"
+        }
+      ]
+    },
+    "show1-005/up-b3qtl25m": {
+      "entrySha256": "162cd2edfb7a238061255cd6f19a070099ac68d9ab9b30fee8148447d2652f20",
+      "modules": [
+        {
+          "path": "/assets/index-CNcQfsIu.js",
+          "sha256": "8e10b7dc1e0e882d71b6b646abc662173832ed73ed82ce31bc609adb6f605ab0"
+        }
+      ]
+    },
+    "show1-007/up-ex8ay984": {
+      "entrySha256": "29e5398a6d50809ad925fc3bbfffa7a47a7f42af3f2d929afa7d3d0253e019c3",
+      "modules": [
+        {
+          "path": "/assets/index-BEgZo9Vl.js",
+          "sha256": "389c1b62173c005c6afd5c039e95937a5f4165e7048bbf32a9e4ab1913e25f66"
+        }
+      ],
+      "camera": {
+        "position": [
+          0,
+          1.5920408388915593e-16,
+          2.6
+        ],
+        "target": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    "chinese-architecture/up-v2xyp7rh": {
+      "entrySha256": "45bba4e81bcf8026117dca9ddef495729d589cfe04a658870a06f210e2abac8c",
+      "modules": [
+        {
+          "path": "/assets/index-Bz_1qQdF.js",
+          "sha256": "4b19cc387383059d65902f4c55b162ffb0199b504cc9ae9bd711a9a9e8c11bb5"
+        }
+      ]
+    },
+    "show1-005/up-vb8abmpi": {
+      "entrySha256": "102e8faa935b1c12ded92813be35f30f62e7925b77b7150d2cc901192c460a57",
+      "modules": [
+        {
+          "path": "/assets/index-DKYxRY3G.js",
+          "sha256": "16f73183a6d277e9db5446e7287fe8c1766a1e2540d667125875d6d43044418a"
+        }
+      ]
+    },
+    "show1-007/up-c4tq09eb": {
+      "entrySha256": "603f11dc790acc017a48ca9457ee30ef79a9185569b377dfbf15042576fdc7a6",
+      "modules": [
+        {
+          "path": "/assets/index-BV3B2Z3D.js",
+          "sha256": "a04fe787dc5b68de479237d39b79cdb6ae75672f45aa1e0718a8c3c29f61752c"
+        }
+      ]
+    },
+    "chinese-architecture/up-euhv8i35": {
+      "entrySha256": "9cfeba247688ca8df4b53a5df61930fb396bd0fd7f7aca7720ddc11c776f231d",
+      "modules": [
+        {
+          "path": "/assets/index-CtkN2JYm.js",
+          "sha256": "904995ead4acd29e38a9c9d20a1a1073c8cf0e1a4cface1c104a91804cfcfa77"
+        }
+      ]
+    },
+    "show1-005/up-e076l0oj": {
+      "entrySha256": "63ed42e996b6a07814cba6b551d3ebd9e1eceb48a2b3e92b7e3f8d2380d6c305",
+      "modules": [
+        {
+          "path": "/assets/index-Bl2FEYYW.js",
+          "sha256": "7214d7cf82d9072aaa5577d11533852dbd60163d21692cca3a6e7bb71dc61f2c"
+        }
+      ]
+    },
+    "show1-007/up-lvy4vak7": {
+      "entrySha256": "b906527eeb430bdbc0e0c001ac1032ca1f182c35bf145ab5ca390241ae5eb0f0",
+      "modules": [
+        {
+          "path": "/assets/index-C0ScTAZ9.js",
+          "sha256": "a80067a6ca101cd772559d12d6ff2fbec888a4ba8ff51c3179b271f4648b2e21"
+        }
+      ]
+    },
+    "chinese-architecture/up-9ltchsdb": {
+      "entrySha256": "c8b6257019b0f1db02e023e143832278625683a47080c330f71fced095eb3441",
+      "modules": [
+        {
+          "path": "/assets/index-ClZWHkLn.js",
+          "sha256": "eb4306d599b39b7dffe398565e4e09cb3fa7455b0046633f1386c93967aca752"
+        }
+      ]
+    },
+    "show1-005/up-smxdw997": {
+      "entrySha256": "4753ba8c8711cf91005bcfd1e30c5ebadac5b12f0105402209e012d71f8633bf",
+      "modules": [
+        {
+          "path": "/assets/index-Czziq_h-.js",
+          "sha256": "5e3328331b7ac5512fdc94fa493c49596298ac1cc82f512242f49107661ce889"
+        }
+      ]
+    },
+    "show1-007/up-sywx5mse": {
+      "entrySha256": "0888373871ae6ee1c2427a4911f3bbdfe6a7465d4bfecc7aa1493705af021163",
+      "modules": [
+        {
+          "path": "/scripts/build.mjs",
+          "sha256": "b347337c308ad73c13491e1dcb81c22fd63d45b17c4f50690d63daa040515681"
+        },
+        {
+          "path": "/scripts/server.mjs",
+          "sha256": "0421d5a6052e2c3dbef9d140dc16c1846397bc7ef68d0a10ddf0a18609240160"
+        },
+        {
+          "path": "/src/main.js",
+          "sha256": "bb4c50205f94ad9e82abef3f74fc39ac72daadff23711b7d16152cb2a82ecc7d"
+        },
+        {
+          "path": "/src/physics.js",
+          "sha256": "54d2c7d06c6a19f9c926fb4f4ccc9d3515b95fd3934d760370ce932f1897f235"
+        },
+        {
+          "path": "/src/renderer.js",
+          "sha256": "0f70c7878af09f501572c73658edf27591ad7b5c4b20a3dbd593b1a0d1d078ac"
+        },
+        {
+          "path": "/src/textures.js",
+          "sha256": "76f79776e443b09ec147890c6890d345a8d7ebfc993139119646ae9d499edf44"
+        },
+        {
+          "path": "/src/ui.js",
+          "sha256": "2012d4296ed3ecda54a8889d0203bd056007a5aeb0b29a71661f16a8bf78a52f"
+        },
+        {
+          "path": "/tests/physics.test.mjs",
+          "sha256": "f7b63fe919ba1fa0135f21ea1d0924f6c4c6b0c9dc705581286c78646966b80a"
+        }
+      ]
+    },
+    "chinese-architecture/up-ffzburo7": {
+      "entrySha256": "dc61ac705b50b2bf3af1d7d74baff8b9cb6640ae174a83cb07ad93b2ce17194c",
+      "modules": [
+        {
+          "path": "/assets/index-CDAFxrp7.js",
+          "sha256": "6e4e058b8a41740ef9aab8b39a5d12ec4a0b145da7ee6c5d1cf57de397d20b45"
+        }
+      ]
+    },
+    "show1-005/up-50epztzg": {
+      "entrySha256": "2dbff23c169f291827d4f8abe9f0c6da90260a809e85217448e92cdde2e66990",
+      "modules": [
+        {
+          "path": "/assets/index-D6a665Y_.js",
+          "sha256": "512c0f22089410b70cb304c929ef2f7425fd894174d6e3d130ac7cee3985abf6"
+        }
+      ]
+    },
+    "show1-007/up-vyan7ew0": {
+      "entrySha256": "cc26bec5f91a4641326b657e5b288d05a90b8cecf5496b48df3c54b3b1389b9c",
+      "modules": [
+        {
+          "path": "/src/main.js",
+          "sha256": "7aa7bd410ff20067ba116e346ea042e5298b097b846d8275e21088cd000480a4"
+        },
+        {
+          "path": "/src/physics/blackbody.js",
+          "sha256": "5304644137afff63e87e229c15188c3835901b5b9e14851bfca894c853da38ad"
+        },
+        {
+          "path": "/src/physics/kerr.js",
+          "sha256": "96fcac6b36178d88ca9d07bec4fd59192e2f6582712f53ae780ef1d65bae8f0d"
+        },
+        {
+          "path": "/src/render/pipeline.js",
+          "sha256": "b1f0d1c9d50d1ff9812f90f99f530b37487184431f85e6cf905664575549afdd"
+        },
+        {
+          "path": "/src/render/shaders/blackhole.glsl.js",
+          "sha256": "3eba9d553fd55c9b1a76c444456311268eb3a579ff5d2cdb1822da2126f6e4e8"
+        },
+        {
+          "path": "/src/render/shaders/post.glsl.js",
+          "sha256": "ec12e7383a01b6c9aab3c75dbb6ea3d644803279c044037b7e4a07e4fd1fdf42"
+        },
+        {
+          "path": "/tools/tune-step.mjs",
+          "sha256": "63912b353e4b290c22cde8cff1beb2ceab4a0ae11c69611088906aca3defa6ab"
+        },
+        {
+          "path": "/tools/verify-geodesics.mjs",
+          "sha256": "86b4a2d642c76715f49cafdea6eae7b299736d5f4df13b02129a70944fe37d55"
+        },
+        {
+          "path": "/tools/_render-presets.mjs",
+          "sha256": "56c2d7b53c9a3be7475a868b32c35652b1b52ae06fd27dcd0225cf31002bd9ae"
+        },
+        {
+          "path": "/tools/_render-preview.mjs",
+          "sha256": "73556197181afc7447cf339e1c9d78d208540314709bab50efee01b7330c4ae6"
+        },
+        {
+          "path": "/vendor/OrbitControls.js",
+          "sha256": "7aa4372a5ec60b49988edde81014c7361740a57962d032003ca33301c1f4edd5"
+        },
+        {
+          "path": "/vendor/three.module.js",
+          "sha256": "76dea8151bc9352aef3528b4262e249b2604f62543828328db978d060d61a495"
+        }
+      ]
+    },
+    "chinese-architecture/up-qf6vso2v": {
+      "entrySha256": "dbfabca5949ef90287f91b129d6e08769f48ed7a35c8c3d5b075a530f67fbf53",
+      "modules": [
+        {
+          "path": "/assets/index-BgqR8NFy.js",
+          "sha256": "e4ecf46cbaa8269a97dd35df403f0482e0648f6e449744c7a0f86bfcc1743111"
+        }
+      ],
+      "camera": {
+        "position": [
+          33.6,
+          29.2,
+          48.2
+        ],
+        "target": [
+          0,
+          10,
+          5
+        ]
+      }
+    },
+    "show1-005/up-24a8jlrl": {
+      "entrySha256": "8ff2eb7e76fd69c745875af38c6bae0af7a9f0d576a50abd92bfdc99c9d0a745",
+      "modules": [],
+      "camera": {
+        "position": [
+          20.807442603534945,
+          22.500000000000007,
+          45.347660714755726
+        ],
+        "target": [
+          0,
+          8,
+          0
+        ]
+      }
+    },
+    "chinese-architecture/up-y6kx9hyz": {
+      "entrySha256": "e76ce19327805b5dba6df8bbf74ec4ebdc8a40212e7387cef50570ce8a6ac537",
+      "modules": [
+        {
+          "path": "/assets/index-BE79mCaN.js",
+          "sha256": "9b0387ef6f267a7f1608621d9b89e4af37a33a94827a83387f81b1a614b931c8"
+        }
+      ]
+    },
+    "show1-005/up-db0pz79t": {
+      "entrySha256": "5240b30017d9187dc1fc0ed8e3b62b17d214296708bc72a1c593ea43c817cd51",
+      "modules": [
+        {
+          "path": "/assets/index-Ae5kMBxB.js",
+          "sha256": "a223fabbe9abe64d68b9c726cac6c6af98922c1a85d9799882b9fd7b98570332"
+        }
+      ],
+      "camera": {
+        "position": [
+          -46.89144879364457,
+          19.57999999999996,
+          -21.302958246050906
+        ],
+        "target": [
+          0,
+          11,
+          0
+        ]
+      }
+    },
+    "show1-007/up-ut7glnqx": {
+      "entrySha256": "76ccdf0fbd168a4fc84325db56b9b9a68a27958d8ec598e0e7636c8092462d8e",
+      "modules": [
+        {
+          "path": "/js/main.js",
+          "sha256": "c52ace083cc6b9b4c6efd287de43a685c4621e3d0a85e82401acc8d011522b1b"
+        },
+        {
+          "path": "/vendor/OrbitControls.js",
+          "sha256": "b4c6e53f98538535b11fd6655627d47fb5877b3ad972568bff0a7026c4b6d5c4"
+        },
+        {
+          "path": "/vendor/three.min.js",
+          "sha256": "f34446bf875b5fb0dcd93819ffe1d9e182d46634ee855f5d904c6c4ac7cdbc95"
+        }
+      ]
+    },
+    "chinese-architecture/up-veil7qzf": {
+      "entrySha256": "266ea9f3452f81757a09341acb5aae7fbbf3733de6a126560e0a631329e60504",
+      "modules": [
+        {
+          "path": "/assets/index-ZboMZ97W.js",
+          "sha256": "fd64019f308a5f5173cb200f4de911f0dfb40165bcf433779c7b56188723cb46"
+        }
+      ]
+    },
+    "show1-005/up-s5q9n1dn": {
+      "entrySha256": "2034c092dc717255344a3e9914b9ad87c0e803a7c71b50ee13e21132eb61a34b",
+      "modules": [
+        {
+          "path": "/assets/index-CzdOSULz.js",
+          "sha256": "21cf8ee2579ba5b1b9ad14da59d6ca4d9d020205e3b9f64e8e4fd26a29b21d7d"
+        }
+      ]
+    },
+    "show1-007/up-xtp72lew": {
+      "entrySha256": "15d91d7ff7522af9964aebeb3df7c971b59474ecf2ce0d977a61bcf8dd581f0d",
+      "modules": []
+    },
+    "chinese-architecture/up-r0jnasy7": {
+      "entrySha256": "bfdb98f6a415cd601531f26d1b50f2502b7a684ea0409e1b798f0f2e1d09bfc7",
+      "modules": [
+        {
+          "path": "/assets/index-CkcQdXfD.js",
+          "sha256": "3cbd65c78c3bd68652f740421dab4c829b3eaaa58e2c7e5ef65dc634957e3276"
+        }
+      ]
+    },
+    "show1-005/up-dcvhj68c": {
+      "entrySha256": "59b1b8145ca4b47929a6daffc39a0d535ec853c26d0165fc31ccbf1f98c394bd",
+      "modules": [
+        {
+          "path": "/main.js",
+          "sha256": "bd841ecd4ec59bbb5680988e974010ccb01233ef449767e5a06bff16ea4c26da"
+        }
+      ],
+      "camera": {
+        "position": [
+          -87.36469390239147,
+          39.44999999999996,
+          -57.814014385280316
+        ],
+        "target": [
+          0,
+          9,
+          0
+        ]
+      }
+    },
+    "show1-007/up-tw4ycgz7": {
+      "entrySha256": "82f77de75d726152661f57488978c542b29e4b83b5416a2ec989a263bdf81f10",
+      "modules": []
+    },
+    "chinese-architecture/up-xpzho2cf": {
+      "entrySha256": "befb6be5c4ee0d0df1e27abc07f8e733d55dc1c3d74a41512888f27053ff0006",
+      "modules": [
+        {
+          "path": "/assets/index-BMp3D5pn.js",
+          "sha256": "802ecdf457bdbebb523a2c4709596b24fdc1bf9327e82c713fe6ffcc543bf5c0"
+        }
+      ]
+    },
+    "show1-005/up-3dtu3y1t": {
+      "entrySha256": "7494f048338aea5a5f1dd77f140fa5cfa14ac12b89a53c08020f8076dd6a9bfe",
+      "modules": [
+        {
+          "path": "/assets/index-AyuwYnFb.js",
+          "sha256": "386ccdfc357309f7ef67205c4052c1a717fce3f2cd4168c5593737c5ff2d838e"
+        }
+      ]
+    },
+    "show1-007/up-x5briea2": {
+      "entrySha256": "291eadd9caaaf5d4f5a229e2ae1d31b768382845535e059cac135927c5e9a2af",
+      "modules": [
+        {
+          "path": "/src/main.js",
+          "sha256": "db7645f4d26488cff591fd33f71c87ac772b7516e82cab114855ae0cc0ea315e"
+        },
+        {
+          "path": "/src/physics.js",
+          "sha256": "93be89cf9abe8f309e35e1c12f3c677b6074ca7d5fdae9e440a75c0981e09fd1"
+        },
+        {
+          "path": "/src/shaders.js",
+          "sha256": "ccb8c1bef37f951066b955abaab292661e6402d783f2b5b1ed088db7c6e30fb4"
+        },
+        {
+          "path": "/tools/serve.mjs",
+          "sha256": "bc31d45b2fd259f44bce18482d0339ead1aff50504e193afbfa46dc06df092f8"
+        },
+        {
+          "path": "/tools/verify.mjs",
+          "sha256": "9164513edb1cfaab2c22ed1d7a218f1a7f6ec52c6eb69e5e109d7e5a6a8fb6ec"
+        },
+        {
+          "path": "/vendor/OrbitControls.js",
+          "sha256": "b4c6e53f98538535b11fd6655627d47fb5877b3ad972568bff0a7026c4b6d5c4"
+        },
+        {
+          "path": "/vendor/three.min.js",
+          "sha256": "f34446bf875b5fb0dcd93819ffe1d9e182d46634ee855f5d904c6c4ac7cdbc95"
+        }
+      ]
+    },
+    "chinese-architecture/up-vnl3g1xk": {
+      "entrySha256": "dbab901384f0fc8db87576d63c0ca43ad18572646db9f5ea802f0d8de4bdfa4c",
+      "modules": [
+        {
+          "path": "/assets/index-BKnIZqtq.js",
+          "sha256": "17c93bc1ad74b6fac2dd5b85cce1743f805fa6e4abd803b1128b2d7222c19223"
+        }
+      ]
+    },
+    "show1-005/up-u97slx40": {
+      "entrySha256": "12b8147fd872a136d68b2d126703ec2721f56e6cf150e2bc069d241459784828",
+      "modules": [
+        {
+          "path": "/assets/index-C4HHTt5Q.js",
+          "sha256": "0891cbc4eca7b06dddac59eb38e8a382b2eca22ada0af52203633b7277fa67af"
+        }
+      ]
+    },
+    "show1-007/up-cnznh4ui": {
+      "entrySha256": "5fd14561615a8781bba3f7b684e531279acd17dd30d5f3e817b39b078d30c5c9",
+      "modules": [
+        {
+          "path": "/server.mjs",
+          "sha256": "89b5f97c2a9abbc925ff73e22d996fddc2f0f510927ce0281d25fc8af9ce4472"
+        },
+        {
+          "path": "/src/main.js",
+          "sha256": "68fedebac6a588dc11a3433add5a3f881b5d7f08166dbe9e5321010602dd637b"
+        },
+        {
+          "path": "/src/shaders.js",
+          "sha256": "810aafe7e50e01d0e00c6d48a7b35e49477045b36520eec4be356c3f078ef29c"
+        },
+        {
+          "path": "/src/ui.js",
+          "sha256": "8c7cb7413ebcf3a4e6731f77ecbafa7d7f5e3017101f7e27d1899e37de973d57"
+        },
+        {
+          "path": "/vendor/jsm/controls/OrbitControls.js",
+          "sha256": "80efaadea4f8a636a65fb0bd08bfef62f3d93a0bb94e2e7500f23176c5c07f4e"
+        },
+        {
+          "path": "/vendor/three.module.min.js",
+          "sha256": "08fd7545d13d2c7fb65ab691530a802dafefd638596501854f267d0fb13c39e7"
+        }
+      ]
+    },
+    "chinese-architecture/up-fgvnsvnw": {
+      "entrySha256": "9a88bdeb6aff9d5a91b2492d51ff0f93581f77c8ded476a38268a80297bb07ee",
+      "modules": [
+        {
+          "path": "/assets/index-B4c-QZQb.js",
+          "sha256": "0a11e97c085c0760af79f07d41855f0f7795bab63ceb02abc597c2b6cd879974"
+        }
+      ]
+    },
+    "show1-005/up-xk2qn4n3": {
+      "entrySha256": "5520464c30cb36715e5df42f60de640b6b553319ae8ab2c0f02d3b723adca997",
+      "modules": [
+        {
+          "path": "/assets/index-DdsrIWYY.js",
+          "sha256": "817f973bdf0bd37fd9db4219e150161cec321b3760915f76c81e5c9d1199320e"
+        }
+      ]
+    },
+    "chinese-architecture/up-e0gqd585": {
+      "entrySha256": "3cba42515aefdb84808000ccf7067bf8ec5ea3a0d9e286335d1db1a9e21f25d4",
+      "modules": []
+    },
+    "show1-005/up-7h0i7hd9": {
+      "entrySha256": "3bcf823dad220f71a0c9a5b5eadb67b5ef5325c1d080fad36423fdbf6cb3de39",
+      "modules": []
+    },
+    "show1-007/up-n7mm6sn9": {
+      "entrySha256": "6accc5844e53f6bc036c95a66468f07f00e04fba19b34249f5a70132f164709c",
+      "modules": []
+    },
+    "chinese-architecture/up-2xasl39b": {
+      "entrySha256": "01296eb9e2b1231351cf98301a6a98f01d871d565eb8949b2ff3b4eb1073938c",
+      "modules": [
+        {
+          "path": "/assets/index-DaVviXRq.js",
+          "sha256": "018a32dc29b3fb5ae830b5891529f3480bb90f93178dc730f850ae4c0aaebb6e"
+        }
+      ]
+    },
+    "show1-005/up-4zk75i2q": {
+      "entrySha256": "d70ee1120c522bdc3e5ca378739b9db5be165a1e55299bfb1db92359cac4e031",
+      "modules": [
+        {
+          "path": "/assets/index-D0aKki4y.js",
+          "sha256": "6df6a962ee3b4a6d0ec599c5b9a3399b1d9d967a7179fafee4accd8375b59152"
+        }
+      ]
+    },
+    "show1-007/up-viebbvae": {
+      "entrySha256": "dc1d810000562e1eb075026d8bc678b3eb3c47416b4519b78b7191f15cb12244",
+      "modules": [
+        {
+          "path": "/js/main.js",
+          "sha256": "397d5fa4ad957dbd7685e0d8b26ba350671eca1788436644dde74569ff7c7bac"
+        },
+        {
+          "path": "/js/OrbitControls.js",
+          "sha256": "02bb4ade710f3e607329e37a21f098bc3ac70eb6e33daf8a65e79f4db785e7b2"
+        },
+        {
+          "path": "/js/shaders.js",
+          "sha256": "32c4f0e717b842b58cd337c0039b0275dacbbf1e06a86ad03cf6553576a8abcc"
+        },
+        {
+          "path": "/js/stars.js",
+          "sha256": "390258179cafbf37df695e4271c97ef162b435803036274775df3dd7fd067faf"
+        },
+        {
+          "path": "/js/three.min.js",
+          "sha256": "9274bbcec8d96168626c732b5d31c775aa8cfb7eaa0599bec0c175908a2c1ce2"
+        },
+        {
+          "path": "/tools/raytest.js",
+          "sha256": "48a862dae9256d03a437d7e956ce015a9e7034341ac64afa37a66277106a8a62"
+        }
+      ]
+    },
+    "chinese-architecture/up-n7l0c9n1": {
+      "entrySha256": "32dc92ab3a45c97a1eca8a3d7703bc4e6c0da6375cfb38e238b6b31cc93640a1",
+      "modules": [
+        {
+          "path": "/assets/index-CCTpPqTc.js",
+          "sha256": "767c84ed8defa3d975f13dca0c16d49b70cbbed6aa540bbccee2bedd5fdb5811"
+        }
+      ],
+      "camera": {
+        "target": [
+          0,
+          7,
+          0
+        ],
+        "position": [
+          18.8624526259921,
+          27.550000000000015,
+          40.755617783714285
+        ]
+      }
+    },
+    "show1-005/up-2uptbw3c": {
+      "entrySha256": "d3f3a8ac1c25d8b58c7360f193870f94be3dae008131a295f2a71fa0e068a91b",
+      "modules": [
+        {
+          "path": "/assets/index-CVq8i4J5.js",
+          "sha256": "41c1eab7aaefa73f00915665a8da2f76776a90c92db5fab5489e4f67c0671426"
+        }
+      ]
+    },
+    "show1-007/up-h3lplud7": {
+      "entrySha256": "9f3e64ae6877c73e6591d89a50528dda54ebf8076435a47653e27f8126802e7e",
+      "modules": [
+        {
+          "path": "/libs/OrbitControls.js",
+          "sha256": "02bb4ade710f3e607329e37a21f098bc3ac70eb6e33daf8a65e79f4db785e7b2"
+        },
+        {
+          "path": "/libs/three.min.js",
+          "sha256": "9274bbcec8d96168626c732b5d31c775aa8cfb7eaa0599bec0c175908a2c1ce2"
+        }
+      ]
+    },
+    "chinese-architecture/up-7aymcr8c": {
+      "entrySha256": "f0a93d543564c5621eb26bccd8ea9bd88c451b3ca7f7e431e8aff60eb17f9440",
+      "modules": [
+        {
+          "path": "/src/buildings.js",
+          "sha256": "2d2f4c4ce57b7b7715703017de9ddfe75a4cf34023511fea8393cf845fd1dda9"
+        },
+        {
+          "path": "/src/main.js",
+          "sha256": "3c3591cbd8676415b8c092b5387098511d3f1ea21a824f7652ac3ca7c536f06f"
+        },
+        {
+          "path": "/src/palette.js",
+          "sha256": "1787a268eac8a911601bd5d523e32e29962fb4e6226a8e059815d529626642bb"
+        },
+        {
+          "path": "/src/parts.js",
+          "sha256": "8bfe20f31fddeea2b00c97a5b04dd8eafeda4235ae841865c4872600938db2a5"
+        },
+        {
+          "path": "/src/roofs.js",
+          "sha256": "6d916a5c430a8e8371f999494a3b22d8cf1fd0bf1f3def521f76acc0caf3b3e5"
+        },
+        {
+          "path": "/src/scene.js",
+          "sha256": "9f024d451da7656c6ecc629f6e7382379010799ba8be98b2f93c11a50e180c40"
+        },
+        {
+          "path": "/src/site.js",
+          "sha256": "24604026748e7785f09eba1d3c9588bf4f907157c628371e942870b3c4ce05ee"
+        },
+        {
+          "path": "/src/sky.js",
+          "sha256": "4c1128ca05df5acfe3e245fe2c524886ffb05c39d9aedcd2b75eb48d2152f727"
+        },
+        {
+          "path": "/src/voxel.js",
+          "sha256": "6e1ea7161abd62cc85b7821e8abb17b66c2fd4e2af02dc3e1445c4911c04d3b8"
+        },
+        {
+          "path": "/tools/serve.mjs",
+          "sha256": "3fcaf74353d2427c613b1b3e6505b9edfbf8eaffe1064cdde61a7cbc23673c81"
+        },
+        {
+          "path": "/tools/shoot.mjs",
+          "sha256": "fdcc2f57551aed22a03d8d53922f1662343a82bac53183821f105d1f47eb3591"
+        },
+        {
+          "path": "/tools/validate.mjs",
+          "sha256": "c5a047a2c5d60423ddb6fee6ae858125f0cfb7a9133261bf96f96b729db92380"
+        },
+        {
+          "path": "/vendor/addons/controls/OrbitControls.js",
+          "sha256": "faabb4e8dfd9235ee4a9fd7c9a3d75f90f1689dbd4944bd6fd32117dacec5f93"
+        },
+        {
+          "path": "/vendor/three.core.js",
+          "sha256": "3718df126d69c125362a03340913204470d8c50238605150e57f808840fb7759"
+        },
+        {
+          "path": "/vendor/three.module.js",
+          "sha256": "bbf5ed13fe4373f5bd38b14ea8e62e9f157327da5638edc6d3863e08b167c9c7"
+        }
+      ],
+      "camera": {
+        "position": [
+          -79.05772972609117,
+          188.04,
+          229.3040125478757
+        ],
+        "target": [
+          0,
+          18,
+          0
+        ]
+      }
+    },
+    "show1-005/up-5x9i9m67": {
+      "entrySha256": "0d386946b9764d65290edd00524514064a0274c755280c9108640e27d5c56c9c",
+      "modules": [
+        {
+          "path": "/src/clouds.js",
+          "sha256": "b37a19642ac710daf6fbd91a464fa60fdafcad2819d2a5a74c5ee87ba67078d3"
+        },
+        {
+          "path": "/src/main.js",
+          "sha256": "ee04cac99912d2465bf73fb8a9e7f31f60ab5730e2148e619a8fd025417ac5cd"
+        },
+        {
+          "path": "/src/noise.js",
+          "sha256": "2b6e24a84f152567859046900053ad7515d7759403ee250e4c3432aa5f140613"
+        },
+        {
+          "path": "/src/palette.js",
+          "sha256": "2bf322ee9be0ea7645321ce01a606f077ccce8e15755ff74f3084f49c1cc3c04"
+        },
+        {
+          "path": "/src/scene.js",
+          "sha256": "d6645ba1eec1f3d21d4af48e2fecb7d426633eb740ddd4d3bc34f1e2b8fde787"
+        },
+        {
+          "path": "/src/sky.js",
+          "sha256": "d998664cd116ff1256d686c812e0f2315c21de1b3d14be8bfb57d710df91e511"
+        },
+        {
+          "path": "/src/terrain.js",
+          "sha256": "cf1eff0e9f4ab37094cfd38a7d1a8b54d3c6e47429eb0907129b22c93b7c7e02"
+        },
+        {
+          "path": "/src/vegetation.js",
+          "sha256": "cbc068da995db8346027af10aa5e2dc12a77eb83811b31917db2ae7de1535ef8"
+        },
+        {
+          "path": "/src/voxel.js",
+          "sha256": "98a9c9361f15510e70d5d111b9e7db73e61e609f016911cbce4a96419a4b0630"
+        },
+        {
+          "path": "/src/water.js",
+          "sha256": "79fb26fd45f69663a76f51b026e470b3ca8e84edb3def34784651dd667c2fd82"
+        },
+        {
+          "path": "/tools/serve.mjs",
+          "sha256": "7c4e90eac4f56e4bdab7d937a87e3f387bf5d251170ad6cf881fc1f015dfc1af"
+        },
+        {
+          "path": "/tools/shoot.mjs",
+          "sha256": "6b1fe236a97c66ea334fe48e873e9cc3e45ff7c64d5a2333959df2f1eac13031"
+        },
+        {
+          "path": "/tools/validate.mjs",
+          "sha256": "b8b3f8f320097b2d49fbdd3a33e040ad9b278ac31f038bd7e9e4791f9ef2dbf1"
+        },
+        {
+          "path": "/vendor/addons/controls/OrbitControls.js",
+          "sha256": "faabb4e8dfd9235ee4a9fd7c9a3d75f90f1689dbd4944bd6fd32117dacec5f93"
+        },
+        {
+          "path": "/vendor/three.core.js",
+          "sha256": "3718df126d69c125362a03340913204470d8c50238605150e57f808840fb7759"
+        },
+        {
+          "path": "/vendor/three.module.js",
+          "sha256": "bbf5ed13fe4373f5bd38b14ea8e62e9f157327da5638edc6d3863e08b167c9c7"
+        }
+      ]
+    },
+    "show1-007/up-90xho9lm": {
+      "entrySha256": "0c84b6fe237184e2191e5033e4fa7c6ccfa5b3dc74f914194179a8ec2b8fc69b",
+      "modules": [
+        {
+          "path": "/src/blackbody.js",
+          "sha256": "07f88f98474921891cca539bae3d28158b63ba87fb635b8d986429a6b4ec81e7"
+        },
+        {
+          "path": "/src/main.js",
+          "sha256": "e2f40ce5fbc2975509675071281a3f3fa9e72ef87ca69aafd3f26377501c98ac"
+        },
+        {
+          "path": "/src/physics.js",
+          "sha256": "7e432c24e48e762e0674df7c6893e02dbe6792daee9033769341b95831c399ac"
+        },
+        {
+          "path": "/src/shaders.js",
+          "sha256": "208f0e95454d6bc0d4897f13db1df522ab99e39bdd563070bb059b62d45f7a5d"
+        },
+        {
+          "path": "/src/starfield.js",
+          "sha256": "7d8ba3e0d3c1da10a0f6489ad27fa8f18ea08e3f034a452ae6357f2140472dcf"
+        },
+        {
+          "path": "/src/ui.js",
+          "sha256": "50646f11e7f344cd4975fd1dfe6ef7cdfa5cab0646239ab0571e5bc222e38fc0"
+        },
+        {
+          "path": "/tools/serve.mjs",
+          "sha256": "70e06f1f495dd04be8b4c41ea036d4541342a7b80e936ad768480694ca52abfb"
+        },
+        {
+          "path": "/tools/shoot.mjs",
+          "sha256": "79545863a94d66949ea23c3fc588f94a6120a0f20411d8dc5bbe8c139031bf03"
+        },
+        {
+          "path": "/tools/validate.mjs",
+          "sha256": "5ac95a7b1c5be377aa135bf728904251166a9ae381518cd9931f889243d715cd"
+        },
+        {
+          "path": "/vendor/addons/controls/OrbitControls.js",
+          "sha256": "faabb4e8dfd9235ee4a9fd7c9a3d75f90f1689dbd4944bd6fd32117dacec5f93"
+        },
+        {
+          "path": "/vendor/three.core.js",
+          "sha256": "3718df126d69c125362a03340913204470d8c50238605150e57f808840fb7759"
+        },
+        {
+          "path": "/vendor/three.module.js",
+          "sha256": "bbf5ed13fe4373f5bd38b14ea8e62e9f157327da5638edc6d3863e08b167c9c7"
+        }
+      ]
+    },
+    "chinese-architecture/up-wyzkltl8": {
+      "entrySha256": "1b451355050af690482c9b7c8e6ae0dfbefbccf59778e0a2b78f6282007dc177",
+      "modules": [
+        {
+          "path": "/assets/index-BKhMqvXS.js",
+          "sha256": "f652a68918d0b78abcf1ea23d5b425a6953a59e432df7b097ba6fdc65ed2cab1"
+        }
+      ],
+      "adapter": "dots-orbit",
+      "camera": {
+        "position": [
+          56.520987,
+          44.66,
+          -65.2
+        ],
+        "target": [
+          0,
+          8,
+          5
+        ]
+      }
+    },
+    "show1-005/up-sksfw7b4": {
+      "entrySha256": "83c87563e0bb91817a06ec5769a803d32d0047b74102ac668469a513f758f913",
+      "modules": [
+        {
+          "path": "/js/app.js",
+          "sha256": "ebded8c5a8093b903325d98398019777733ca4583ea0601f967d2c1d2821c324"
+        }
+      ]
+    },
+    "chinese-architecture/up-fh8255op": {
+      "entrySha256": "a806f42f28ca95d9562397a6ec960ba7ebf4483d1387624ee7f4dccafd087711",
+      "modules": [
+        {
+          "path": "/assets/index-C51B1iuN.js",
+          "sha256": "3ff806ef25e77643713216a7a80571f416f499130df866748614b5eb0e6e5ee5"
+        }
+      ]
+    },
+    "show1-005/up-lw5yn65u": {
+      "entrySha256": "ea919bd3f63fa2cd392649d31a4167b82abe43e0d3142d209e8ca1703ef8d0cf",
+      "modules": [
+        {
+          "path": "/assets/index-CWLr72ve.js",
+          "sha256": "72b155b688cc4725ceae0e151f579d849007d3304faf43335898ee608a9fd642"
+        }
+      ]
+    },
+    "show1-007/up-6dv2pkmq": {
+      "entrySha256": "8386dfd7e135ecae676f52d93c685fe4f3ac9a6354267ec73aa24e515d3def10",
+      "modules": [
+        {
+          "path": "/js/app.standalone.js",
+          "sha256": "e1aa383bb5b4cbf52e35db227a02de7575085764192c0e58e7c30eb7ce87b3fe"
+        },
+        {
+          "path": "/js/controls/cameraControls.js",
+          "sha256": "2156bedc20d9229ecff51db0a80306583403e3b0e162b7f112b979cc51008f4e"
+        },
+        {
+          "path": "/js/main.js",
+          "sha256": "c267acbf1f6bf85bb97f58ae505ee6214a887642e826ea86c3c3a0e3dc043e7b"
+        },
+        {
+          "path": "/js/physics/blackholeShader.js",
+          "sha256": "1684f93a74d64cc87eaae708cde520cf8fa0f5dfe2d4e35607ba3e8ff95ddc26"
+        },
+        {
+          "path": "/js/ui/guiOverlay.js",
+          "sha256": "1794989fe7ed20e2f7aa04dd77c549799c934b82f432853a6dec44e39285acf6"
+        }
+      ]
+    },
+    "chinese-architecture/up-vb8f3053": {
+      "entrySha256": "53f2678c44510a3e06f01ee8ba5c7ae8cc9862e227c49aa11422b6a9d205f1c5",
+      "modules": [],
+      "camera": {
+        "target": [
+          0,
+          6.000000000000001,
+          -12.000000000000002
+        ],
+        "position": [
+          -111.02301715857348,
+          41.19999999999995,
+          61.97769434773595
+        ]
+      }
+    },
+    "show1-005/up-mmpgbpox": {
+      "entrySha256": "646dcdad8dd0190183fb96555100930161632974f8c037ff6526d717782e46da",
+      "modules": [
+        {
+          "path": "/assets/index-Dgq0Q6jj.js",
+          "sha256": "6248d0af65fcf3d79e61331ef5c77d3f9df31e71c00c133c87e70d16f39854b9"
+        }
+      ]
+    },
+    "show1-007/up-y97fdxnt": {
+      "entrySha256": "6d1419e23cfbc52ccede21f585d1f0468c668a87d17aacd1d7d6f78c94483e3a",
+      "modules": [
+        {
+          "path": "/js/main.js",
+          "sha256": "729066df3fe4cff00ef62b5855ee1aaaad8d660d8941eaab26a65669e8f91537"
+        },
+        {
+          "path": "/js/shaders.js",
+          "sha256": "099d1356ac6fb5e3c4c655e6826ff0a9e55a3026a4f8caf6ae38f5a49a2a9d06"
+        },
+        {
+          "path": "/libs/OrbitControls.js",
+          "sha256": "02bb4ade710f3e607329e37a21f098bc3ac70eb6e33daf8a65e79f4db785e7b2"
+        },
+        {
+          "path": "/libs/three.min.js",
+          "sha256": "9274bbcec8d96168626c732b5d31c775aa8cfb7eaa0599bec0c175908a2c1ce2"
+        },
+        {
+          "path": "/tools/verify_physics.js",
+          "sha256": "6e3af37063d8d876c31277a115791630815967b010d56a611485ff42f2ab641d"
+        }
+      ]
+    },
+    "chinese-architecture/up-czyeuas5": {
+      "entrySha256": "145d6be6f0968ba6309810d5b345474cf8fff4a10b4ca567393cea4341d7059a",
+      "modules": [
+        {
+          "path": "/assets/index-CB2XSF4B.js",
+          "sha256": "2cea6e3ceacf54f47e4cef11523e561df7b05b314dc3b196e2dfe1f87d6003bf"
+        }
+      ],
+      "camera": {
+        "target": [
+          8,
+          14,
+          48
+        ],
+        "position": [
+          60.69328492742743,
+          55.99999999999972,
+          123.52097538801256
+        ]
+      }
+    },
+    "show1-005/up-pf044g3m": {
+      "entrySha256": "1fc3643ae0fefeb23f181cda67320d267120b6012a7af7ee36632b85187a6017",
+      "modules": [
+        {
+          "path": "/assets/index-mUIa7xNY.js",
+          "sha256": "2e727b8d425f731baa0cae32d3b7d10013e9168a5aa3b7a8228299a754978dfd"
+        }
+      ]
+    },
+    "show1-007/up-1y0owpp6": {
+      "entrySha256": "bd6effb767d0145266915d86daa3813c899b6b06d5c7b4f350bca2050d57638f",
+      "modules": [
+        {
+          "path": "/js/main.js",
+          "sha256": "897414f3735135ff75eabef9598f6d6c06fb8f94f57ee178bb66796aeb715de4"
+        },
+        {
+          "path": "/js/OrbitControls.js",
+          "sha256": "b9f508c1f0d19a7d1d9591aaeb90887f46f9083ccceccde370d7861cfe593f28"
+        },
+        {
+          "path": "/js/shaders.js",
+          "sha256": "f34c1375833389c0f5572045ebc14f2fbaf621d78784d38e2376afa019c48503"
+        },
+        {
+          "path": "/vendor/three.min.js",
+          "sha256": "170c6789f43217c96b3170f4b42fafe135de7f7cd48497a4218f9757ee1d49fa"
+        }
+      ],
+      "camera": {
+        "position": [
+          0,
+          10.900138878645807,
+          49.22643364549722
+        ],
+        "target": [
+          0,
+          0,
+          0
+        ]
+      },
+      "fov": 65
+    },
+    "chinese-architecture/up-4nb4ovov": {
+      "entrySha256": "87528274b393c601ef7172c66d96f2eaadcd721a9a3ebcf6f23146e2338f486e",
+      "modules": [
+        {
+          "path": "/assets/index-DUZihkyi.js",
+          "sha256": "fd2a0c7ce3ccef1233efbd66bb973be613a2e295a90febb69ace0118666832c0"
+        }
+      ]
+    },
+    "show1-005/up-y1f0sp0n": {
+      "entrySha256": "345861edad2b0b755905c660ecd701d374d0a993baeb6a4573f208e94b1f9a33",
+      "modules": [
+        {
+          "path": "/src/main.js",
+          "sha256": "3f1081ee1868f4381ff238511ba5a4e62be1740ea0752ccbf4e4c6978ecbbb10"
+        }
+      ]
+    },
+    "show1-007/up-dtd2ltjr": {
+      "entrySha256": "fc7b86803742c98e8f01c0a0d057feaab6f5ccf58c70505d47bdd47518633bbf",
+      "modules": [
+        {
+          "path": "/_check.mjs",
+          "sha256": "9c960f6ca410313af3288448aa678589cfe3ade9d4b682319e7333e089bb71ae"
+        }
+      ]
+    },
+    "chinese-architecture/up-lbjay21d": {
+      "entrySha256": "87bc7f5cb208948eb63eab5c1f512b2c79e5bb23dcec0537f23dcb6add79d0f4",
+      "modules": [
+        {
+          "path": "/assets/index-D2QsWkNQ.js",
+          "sha256": "70939701a02a20237d58fbe08f62b03eac79f5e0daee1a32492da38cce052228"
+        }
+      ]
+    },
+    "show1-005/up-jv3gjdhg": {
+      "entrySha256": "d5b62ac5f083b3aa2ddf6efc8dc9fce1e0c9d4576c6337ea07d9b741c5b85476",
+      "modules": [
+        {
+          "path": "/assets/index-DqnG5xZ_.js",
+          "sha256": "7fe3ee31ac423b1dfe0fda58d731eea36b6f469f6a2fcd94e757190231702a10"
+        }
+      ],
+      "camera": {
+        "position": [
+          -126.04077993652533,
+          51.73860000000014,
+          -73.95754349430857
+        ],
+        "target": [
+          0,
+          19.08,
+          0
+        ]
+      }
+    },
+    "show1-007/up-udh489vn": {
+      "entrySha256": "99032ed3ababf5a6eb462f5d169f8c05209c82a3209501ca8615316ddca6ff5d",
+      "modules": [
+        {
+          "path": "/lib/OrbitControls.js",
+          "sha256": "b4c6e53f98538535b11fd6655627d47fb5877b3ad972568bff0a7026c4b6d5c4"
+        },
+        {
+          "path": "/lib/three.min.js",
+          "sha256": "f34446bf875b5fb0dcd93819ffe1d9e182d46634ee855f5d904c6c4ac7cdbc95"
+        }
+      ]
+    },
+    "chinese-architecture/up-jj3xuy3h": {
+      "entrySha256": "dc151b1a599819feaf094b92257f889a0e78fb21f09757bec5ff2af4c4427d51",
+      "modules": [
+        {
+          "path": "/assets/index-B-TFd9AB.js",
+          "sha256": "79fe5a09c84e7009af24971b04a59e45ee286b4d96fbf60a5103c7d092236143"
+        },
+        {
+          "path": "/assets/index-BjqqqCkP.js",
+          "sha256": "cb5f34b20eefc2dcde838650b67686e4384f474c374d84e5146a1b6b28642363"
+        }
+      ],
+      "camera": {
+        "position": [
+          -39.608902680583,
+          21.399999999999977,
+          28.33296087492057
+        ],
+        "target": [
+          0,
+          4,
+          2
+        ]
+      }
+    },
+    "show1-005/up-3lxep963": {
+      "entrySha256": "9c90039fc7ad501de07d877480241760a695825122171d7f7aeb1092d0bbde78",
+      "modules": [
+        {
+          "path": "/assets/index-DkfR9A9N.js",
+          "sha256": "83fad65ce7179052671a0d47faae7b856ced0f50ba8f2787a77ca3d0fe3fcd68"
+        }
+      ],
+      "camera": {
+        "position": [
+          -20,
+          48,
+          95
+        ],
+        "target": [
+          28,
+          16,
+          28
+        ]
+      }
+    },
+    "show1-007/up-st4vn91c": {
+      "entrySha256": "60f058c5738e7532522d53f1e59b9f4f65f9e03218119c49ef4d311fd99c198d",
+      "modules": [
+        {
+          "path": "/vendor/three/addons/controls/OrbitControls.js",
+          "sha256": "5a44a9e86a2a0fb11933eed69bc2cd33c76a496854c1aed6ed776efa87d7b064"
+        },
+        {
+          "path": "/vendor/three/three.module.js",
+          "sha256": "76dea8151bc9352aef3528b4262e249b2604f62543828328db978d060d61a495"
+        }
+      ]
+    },
+    "chinese-architecture/up-m0w64dcz": {
+      "entrySha256": "cfa5701beb635404b3e76e155dbe9c093d3fcd983c8a0e09523883e6ef43e6df",
+      "modules": [
+        {
+          "path": "/assets/index-DtF2UCI9.js",
+          "sha256": "0c753f52e252013b6095d09909650e2cdb0480be9d7d65dd1a1ab39188795183"
+        }
+      ],
+      "adapter": "muse-spherical",
+      "camera": {
+        "target": [
+          0,
+          8,
+          4
+        ],
+        "position": [
+          -23.672264325439365,
+          75.31709375999505,
+          -64.04229772365902
+        ]
+      }
+    },
+    "show1-005/up-lyynfkze": {
+      "entrySha256": "5d3d964638a6e1b4dfa8e75f43aa779db605aba3eaa68d54fcbbcbebffaf6b4b",
+      "modules": [
+        {
+          "path": "/assets/index-DqadXS9m.js",
+          "sha256": "8e8ebb428beb3d3878f2084fa9d962317aaa78f677deadbffb0bf0cfdd3faf5f"
+        }
+      ]
+    },
+    "show1-007/up-gbx3ws0s": {
+      "entrySha256": "aa70d539dfe985e278e82a87ed4ba54c696041d9ed5dbba66dfb01a6832ac2a7",
+      "modules": [
+        {
+          "path": "/assets/index-Mpa6RC5G.js",
+          "sha256": "a797d23c4de28c839163b306d54dca22d64c173ef2ed2761a05bc8ddacb59ec5"
+        }
+      ]
+    },
+    "chinese-architecture/up-2sf6dugg": {
+      "entrySha256": "19e093aa34465b85a8ccf133e1a6087b8c570ce8f47d33e1648e6fd61491d7a9",
+      "modules": [
+        {
+          "path": "/assets/index-C5zKqE2w.js",
+          "sha256": "d5b2d6d99908404b2417d3c943fbe652107f302c11947a8e0631af9fc39c19ec"
+        }
+      ]
+    },
+    "show1-005/up-xhwn3lr0": {
+      "entrySha256": "19a074f5f7674efe027efb72149a52e7501977e1bdeb78e0d432dc8d5845ef0d",
+      "modules": [
+        {
+          "path": "/assets/index-CEJFonZJ.js",
+          "sha256": "795a4ed2ebea62cbeb0a16fe7019320ba8707c74d23ccd974febaf394451b816"
+        }
+      ]
+    },
+    "show1-007/up-qqoblbu1": {
+      "entrySha256": "a4c932be1a90fecf00af3491171518c1c176a844ebc7055548b28efbeee3ddef",
+      "modules": [
+        {
+          "path": "/libs/addons/controls/OrbitControls.js",
+          "sha256": "5a44a9e86a2a0fb11933eed69bc2cd33c76a496854c1aed6ed776efa87d7b064"
+        },
+        {
+          "path": "/libs/addons/postprocessing/EffectComposer.js",
+          "sha256": "d234e578618fa816955ebdc059c049c577e203e650e33cf22bde3f232c29e669"
+        },
+        {
+          "path": "/libs/addons/postprocessing/MaskPass.js",
+          "sha256": "328cf7db0da5d9be83ffe39d54b01d5ac1fddf108cc98182ddbb056f5c8b537f"
+        },
+        {
+          "path": "/libs/addons/postprocessing/OutputPass.js",
+          "sha256": "13817fc7a87f662d29d2c5e00f44d3a4588c9afac4a372de0cacb0e44e368ffd"
+        },
+        {
+          "path": "/libs/addons/postprocessing/Pass.js",
+          "sha256": "b3c6128340eaa37e40a6a2f1b738e894c855239417d50959759b34a2b5e89f92"
+        },
+        {
+          "path": "/libs/addons/postprocessing/RenderPass.js",
+          "sha256": "1c90c085312871c4bcdccfcf519499c6276dd503363fcf7cb7f703add45cf4a2"
+        },
+        {
+          "path": "/libs/addons/postprocessing/ShaderPass.js",
+          "sha256": "3b28a1ee27e0eb96c0eab137a1f442ccf127a926904eced2d51e125ec44af781"
+        },
+        {
+          "path": "/libs/addons/postprocessing/UnrealBloomPass.js",
+          "sha256": "8f09315c0cec117a0ca2494d3e3586035b3c4323d6dcb037537cc51b04c3cdba"
+        },
+        {
+          "path": "/libs/addons/shaders/CopyShader.js",
+          "sha256": "4e3346db194db56a596cd074e9bdb39fb5eb52040c333e0d29dc4eb1324d3b1d"
+        },
+        {
+          "path": "/libs/addons/shaders/LuminosityHighPassShader.js",
+          "sha256": "3d841cc594a0c1767d1b0185720b32761a0133c5f1b70b56658e28f2fb9b7900"
+        },
+        {
+          "path": "/libs/addons/shaders/OutputShader.js",
+          "sha256": "53a52e430c27bc36ceaab8ae90a2b4af7b02672d7ee4b29d6ba3c28e09c92c2a"
+        },
+        {
+          "path": "/libs/three.module.js",
+          "sha256": "76dea8151bc9352aef3528b4262e249b2604f62543828328db978d060d61a495"
+        },
+        {
+          "path": "/main.js",
+          "sha256": "30ed92c15e706c2e6b90920c5e189cf33af4638ab5d9bdbc55168929a2e8be78"
+        }
+      ]
+    },
+    "chinese-architecture/up-szg9wpy3": {
+      "entrySha256": "3de2cb51b9c71c884dbed3e0a80c01fc0f105abd7b597b5830a3199fa70dd253",
+      "modules": [
+        {
+          "path": "/assets/index-DtEFt1bH.js",
+          "sha256": "5cf7243a97a438291281781a0763f8a93b99f6fe03abdcc129cad6f6917603b2"
+        }
+      ]
+    },
+    "show1-005/up-g6cb80ra": {
+      "entrySha256": "d7c641907b931c6a4f50f84db75c86824fe9c9dd0049097f13042769bd3784cd",
+      "modules": [
+        {
+          "path": "/assets/index-Mtexqtrq.js",
+          "sha256": "25c0bf51ded644300e75cff65168d4d848c97d4bc82c3b75cdaa57147c2dcd0c"
+        }
+      ]
+    },
+    "show1-007/up-kx88owl2": {
+      "entrySha256": "950f01d52fd0dd60d2dee70a492dee9f0523fa71cf552cab365e29a5a134bed7",
+      "modules": []
+    },
+    "chinese-architecture/up-osafjik6": {
+      "entrySha256": "1a04b708764168a829d3acf9e137191ab21fc90d1832d744c8947ea411ad1d26",
+      "modules": [
+        {
+          "path": "/assets/index-BZFAqd6m.js",
+          "sha256": "4ae69559904be7a93d30f5d32ef6fa08264f95fb136a47a2a855238ff9e5527b"
+        }
+      ],
+      "adapter": "seed-orbit",
+      "camera": {
+        "target": [
+          0,
+          12,
+          0
+        ],
+        "position": [
+          39.78598403536183,
+          60,
+          -49.169482144292836
+        ]
+      }
+    },
+    "show1-005/up-14ghxyzk": {
+      "entrySha256": "e316098ebdb304f3f06232a6094dd487585037dcf6d936aa9d2a70d6ac28d303",
+      "modules": [
+        {
+          "path": "/assets/index-BTmqHJjP.js",
+          "sha256": "cae94fdffd403ea81f89c055a1028704408ff965bd904a03caa58e9a546de9c6"
+        }
+      ]
+    },
+    "show1-005/up-nu5qxcfl": {
+      "entrySha256": "2e5e25f93199d9b3cfc55b03a7298113fe8f0130cb72a80aad8788e1e8ea0711",
+      "modules": [
+        {
+          "path": "/assets/index-DjSKAXEZ.js",
+          "sha256": "e4f7992a6a12f3bcdf98e9df6e3dba74c3f577f37a29a2d7680568639626b5b5"
+        }
+      ]
+    },
+    "show1-005/up-axiev9bi": {
+      "entrySha256": "6be0dab213d0c9a8c1b2c215fd7be08dbd63fb4958940a4e107b6edf696494eb",
+      "modules": [
+        {
+          "path": "/assets/index-Cb0f1PoD.js",
+          "sha256": "bf836b49ace46140fefa8d2a5934896c60ac6b196e2946bdf0b00eb4c0b2c992"
+        }
+      ]
+    },
+    "show1-007/up-pmzo9tv4": {
+      "entrySha256": "6edebae3e707f60fc633e5c1863caa8302baf4ba10a1521ad6b90c506325f314",
+      "modules": []
+    },
+    "show1-005/up-oulbewdo": {
+      "entrySha256": "d92ac5bd86dabd73930e6ffcb6fdddbae3d6f9b6f53986061dd0a506a7f7b59f",
+      "modules": [
+        {
+          "path": "/assets/index-Cjkr0Qfj.js",
+          "sha256": "c1a2772ebde2b50994d640e4fa576d664ef22239ada32980dd424abee5bc1ee0"
+        }
+      ],
+      "adapter": "luna-spherical",
+      "camera": {
+        "position": [
+          26.327195839268324,
+          51.65940675768563,
+          97.55555483763362
+        ],
+        "target": [
+          0,
+          12.5,
+          6
+        ]
+      }
+    },
+    "chinese-architecture/up-jr8uqdrc": {
+      "entrySha256": "0360b66d96b7b2a405bd5cf8b6909aabae900c4a95b49d2a3454d6a740a94f11",
+      "modules": [
+        {
+          "path": "/assets/index-5KUpjXnC.js",
+          "sha256": "6c622706428103eae421942f0e271430d794b930fbbc1784dc4978e7b889f618"
+        }
+      ],
+      "camera": {
+        "position": [
+          12.937784162259048,
+          17.48999999999996,
+          57.80147737064758
+        ],
+        "target": [
+          0,
+          2.2,
+          -1
+        ]
+      }
+    },
+    "show1-007/up-vfk9eh8j": {
+      "entrySha256": "413f96a8011d0377fa841d291d2b3a5f9790c7cd9ad858a6237e3fd9bed39509",
+      "modules": [
+        {
+          "path": "/assets/index-CAPCwPcw.js",
+          "sha256": "ccb84e1e4c7682e54c99e2f3514741192dba3ad34e099d6fbf3c1d5a321425d0"
+        }
+      ]
+    },
+    "show1-005/up-3u9liyf9": {
+      "entrySha256": "30f114cf1d7d9e187356579e1a6dcf567c3533a0b6efac877c835c7b146d84ab",
+      "modules": [
+        {
+          "path": "/assets/index-DL9qC8L_.js",
+          "sha256": "f8ed18c080bd7c19a41025c44a587ef692f46584027606ff3c93392a2a50df43"
+        }
+      ]
+    },
+    "chinese-architecture/up-wb4new4y": {
+      "entrySha256": "8470a397bfcc671b3489a7fc8ec1bfe9db70fe00af85210cf706ad382f4fd087",
+      "modules": [
+        {
+          "path": "/assets/index-DWtJ6FV4.js",
+          "sha256": "1c3d5317e0ab39268bfe1e74cab2e9bc320eccf0099f4c0d506edac808a9b1fd"
+        }
+      ],
+      "camera": {
+        "position": [
+          46.748000000000005,
+          68.254,
+          106.39200000000001
+        ],
+        "target": [
+          0,
+          2.5,
+          0
+        ]
+      }
+    },
+    "show1-007/up-e9ajz1l3": {
+      "entrySha256": "a74625bbc6d8f3722ecfa115884af594c69d01f4c2c3ad98001caf95fbe21a68",
+      "modules": [
+        {
+          "path": "/assets/index-D79vxrUn.js",
+          "sha256": "b0e9935b27073cf28ce6c01a2dc00a060cd3dbd2582192dfaec95abd8c52be75"
+        }
+      ]
+    },
+    "q-7520307699d6010e/up-96xjexcb": {
+      "entrySha256": "240c75c3824411cdddba6efda9e479937635388be76b43ecef50a99ab3efae48",
+      "modules": []
+    },
+    "chinese-architecture/up-9q1k7yoc": {
+      "entrySha256": "4767253aceef355b972ad5913623e71afcef238fbad0fc82f417e970a10446c5",
+      "modules": [
+        {
+          "path": "/assets/index-B0iHtzI2.js",
+          "sha256": "0d35c22501f3398cfc1952397c035421b91dd70df800b4ff9702ece690ee50a8"
+        }
+      ]
+    },
+    "mechanical-keyboard/up-tfi8ez5m": {
+      "entrySha256": "43d059cc2fe4970aaed271d493053e3e1f77bf3a8bf4bca4d2e2a55f3f1275fd",
+      "modules": [],
+      "camera": {
+        "position": [
+          6.3988526762,
+          4.5074658156,
+          6.3244474125
+        ],
+        "target": [
+          0,
+          0.75,
+          0
+        ]
+      }
+    },
+    "supernovai/up-irtggfq5": {
+      "entrySha256": "68fda778d030f683f057595d3f60c746e8d3011eb4ab74e59dad475e7da91c55",
+      "modules": []
+    },
+    "little-red-riding-hood/up-x91pmv9e": {
+      "entrySha256": "6d4e621c6b4727050206894d0a0553a1055e49a1d2fa00369afb74e92a818492",
+      "modules": []
+    },
+    "little-red-riding-hood/up-r70803y0": {
+      "entrySha256": "db9472db77dd46a757933f92934692ccc3d51f7ca133881b728b902477abc804",
+      "modules": []
+    },
+    "little-red-riding-hood/up-cv385r7w": {
+      "entrySha256": "4bbad4a317a8d41ef2ade307d99437c941cb329a01d88d644fd4596d43f23bd1",
+      "modules": []
+    },
+    "little-red-riding-hood/up-3e5was2s": {
+      "entrySha256": "4e2e4277254e391504d281cacb095a8720792cf8ba5e5c0b5a1c445d042ff660",
+      "modules": []
+    },
+    "miniature-railway-town/up-7pcx710r": {
+      "entrySha256": "1e0dd645abc634d4177c65cb57ac1880df8669c557c97ffd962d1b06cafacb77",
+      "modules": []
+    },
+    "desk-lamp/up-eiamho44": {
+      "entrySha256": "42e752997920bde2548dc69bd1fe70f9116481680e42aa5c033ec305f1c540cc",
+      "modules": []
+    },
+    "campfire-campsite/up-vmx79e74": {
+      "entrySha256": "532d4c839e31eb55a67535e20fb6a42c9f707cce185f840cfd9ada7a699d8050",
+      "modules": []
+    },
+    "tengwang-pavilion/up-328yey91": {
+      "entrySha256": "3ab56a18be895d906037678d8a302b5c4284baefe87640794b2659e54466de5a",
+      "modules": []
+    },
+    "show1-007/up-cfp77scv": {
+      "entrySha256": "7782f837da96b5fc9d342ab759aff350d6a37a77cfd1d284b13058e61f78165c",
+      "modules": [],
+      "camera": {
+        "position": [
+          0,
+          12,
+          33
+        ],
+        "target": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    "classical-fountain/up-ccnksbcp": {
+      "entrySha256": "83dc19d5667369026535f51a0996c5ad6a3c0e4cbe6a77bd003006b5898b0936",
+      "modules": []
+    },
+    "little-red-riding-hood/up-25za98l7": {
+      "entrySha256": "28f13ded1dcb82d5508f788d47d1c20a71bdd36f12b1ec8ad27d28019b58a842",
+      "modules": []
+    },
+    "hukou-waterfall/up-mpf4hwy6": {
+      "entrySha256": "84b9d49fadf6a90b5f16690ca1f932fd90bae47542051dfc1894e82cea79d289",
+      "modules": []
+    },
+    "voxel-construction-site/up-pwaartvt": {
+      "entrySha256": "09790f414d57d199fae8decd7b137cf4f904239055097fb675863945817a5232",
+      "modules": []
+    },
+    "little-red-riding-hood/up-u9836f18": {
+      "entrySha256": "8dfaf0d42b22097b915d96c5ce385d14b8bd1d46709c00605827651f57a44401",
+      "modules": []
+    },
+    "q-c7e65f283bc453a5/up-0aav567i": {
+      "entrySha256": "e470b8d6a5f0f82bbba0cdc562ded36cfa212472d04e3a7cbf75ccc2ca7734ab",
+      "modules": []
+    },
+    "hukou-waterfall/up-ns9oiwlp": {
+      "entrySha256": "10b643463e2e7a9a957f392b01bf8db3301ec63dc56024dc3772fe86c17aec55",
+      "modules": []
+    },
+    "sailboat/up-vii3k07u": {
+      "entrySha256": "751fe26a1c63d75a06e59dc3f50f8c15516e30dc1b4ebbad128567ff1373a68b",
+      "modules": []
+    },
+    "campfire-campsite/up-jalxwef7": {
+      "entrySha256": "0a149c5ef94bf1e2710e92f3ad373654f54a50a34334620f2a35b90229606804",
+      "modules": []
+    },
+    "classical-fountain/up-6fvkznn8": {
+      "entrySha256": "cd235c05cb75f82c63e63db391177a8e11d2ff0a012f908056ba238a9d788387",
+      "modules": []
+    },
+    "rainy-lotus-pond/up-uk2blchv": {
+      "entrySha256": "a384b5b059ae00bd6b191fe070f9d782cb96a50e270cd16363b91a6ed12f5834",
+      "modules": []
+    },
+    "q-d9886c5bbd71a318/up-d5mig7uc": {
+      "entrySha256": "5f42f5a4bc126690e2b39a5c89352d4c5772216824092801cf93c5d8aa190366",
+      "modules": []
+    },
+    "little-red-riding-hood/up-bsl4rmly": {
+      "entrySha256": "ba3266477a8d658ec3e4fc921197d63899740645fabe1961c58120c9a20ff565",
+      "modules": []
+    },
+    "little-red-riding-hood/up-oerzlyfj": {
+      "entrySha256": "44af8a71af902a2e70dbbb823ee234ac49aefcc794f7aec8be545e60930055bf",
+      "modules": []
+    },
+    "little-red-riding-hood/up-ypf5gyi3": {
+      "entrySha256": "0eda4e6a922c98495e575c99217f39e70623777f6b9b9187194d56a2e1a30505",
+      "modules": []
+    },
+    "little-red-riding-hood/up-jh77qwb1": {
+      "entrySha256": "c10c984dc81c357e98957033df5b02309bf92a009f7e1687157212ced6db4c7f",
+      "modules": []
+    },
+    "little-red-riding-hood/up-p9nq8m82": {
+      "entrySha256": "66ff64d29369489734fb6c7de62407271b0d4c4d8443504734a404ea6936e0d2",
+      "modules": []
+    },
+    "little-red-riding-hood/up-eokz3u27": {
+      "entrySha256": "f4576e7d7e32f85a64ddd9781106539949d23ad6760af913a2ef7ebc9e7dd924",
+      "modules": []
+    },
+    "little-red-riding-hood/up-sagxejui": {
+      "entrySha256": "589984cd4052f7b9beac23e789b1ad656c72c333c678e943e50ac711529dc342",
+      "modules": []
+    },
+    "little-red-riding-hood/up-zf03utba": {
+      "entrySha256": "9e2501b95a3f403aec366725bcc3289ff9a2fd195a93b1f4f748afc2533dd8f1",
+      "modules": []
+    },
+    "little-red-riding-hood/up-7luhmht9": {
+      "entrySha256": "a475465fd9bfc21568d0c05ace39e88fed7b9646ddd767db5e720e0b7af32bfb",
+      "modules": []
+    },
+    "tengwang-pavilion/up-ouif3zg3": {
+      "entrySha256": "76009b82bae331ecc0bc4d97786fa3ee16e41e49979cd6a0a4c1608b52e2a0d2",
+      "modules": []
+    },
+    "show1-005/up-abgsk59g": {
+      "entrySha256": "19376598e454fd6cd1fab9bf2e78a010b24bedaec3e5a491eb95ebc97e6ebc0a",
+      "modules": []
+    },
+    "campfire-campsite/up-amwgzyv4": {
+      "entrySha256": "b6c0f8894f285caa418387f5dd0e759f4375d50d16b43c70c40bb7fc1d9c44a3",
+      "modules": []
+    },
+    "little-red-riding-hood/up-w91cjnzl": {
+      "entrySha256": "af1b2a0b0ece8df15103185fd4466dc983ffeea8b0eb2f0863248f1245f6d280",
+      "modules": []
+    },
+    "voxel-construction-site/up-kbv5jbsr": {
+      "entrySha256": "883d6cdce76ad2a3b5fa763b16a41821f0fbbae6f89b64d5aec05c8826d26197",
+      "modules": []
+    },
+    "little-red-riding-hood/up-ria9u2el": {
+      "entrySha256": "35980dc13b4447061434f7cb9823cd3b58dd23df27f013accd1c649837e088c2",
+      "modules": []
+    },
+    "little-red-riding-hood/up-2ccr3dz3": {
+      "entrySha256": "119fc3bde5866f73dc342afcb8b607bbeaeac4a2fc24ea0538ff3a521c85eabb",
+      "modules": []
+    },
+    "little-red-riding-hood/up-fyu9bawj": {
+      "entrySha256": "1a743e9c73aa121275e32b6fe29b92b16197fbc6a1e19354f9fa8bc13e10080a",
+      "modules": []
+    },
+    "little-red-riding-hood/up-7ajs0cbu": {
+      "entrySha256": "0db0e80cc1b9c264c8eb35143863e282ec8003c4b147a0e6eb051c29ffb71d6b",
+      "modules": []
+    },
+    "show1-007/up-k92y6xzy": {
+      "entrySha256": "db8bcd3e654a4df9e397f1e4608f72e4c17a668faee7442035e46059b7e35c67",
+      "modules": []
+    },
+    "chinese-architecture/up-jq5lkm1c": {
+      "entrySha256": "82f5a1af17bbe70ac06bae3a3e058b869962f9bfa42542a84cf69e3cef280e59",
+      "modules": []
+    },
+    "show1-007/up-f2scqcvb": {
+      "entrySha256": "151b7719d26d1e8fd2996f4f677471eb62a3095789f83a28ae719958585add89",
+      "modules": []
+    },
+    "little-red-riding-hood/up-j42t6byq": {
+      "entrySha256": "73703476c7d0c722cee22bd7c1a9b72b1b341ed2017dcfa65bc4f614d05c8ee8",
+      "modules": []
+    },
+    "little-red-riding-hood/up-ykn2bpdw": {
+      "entrySha256": "73f3d7a87b54d3f2d8301ef0b97ca49523486cfacb1c7ac942026d6492e6da38",
+      "modules": []
+    },
+    "denza-z/up-j3912pm9": {
+      "entrySha256": "86cdc361daaef4b4e53d33b7a07a100b7c703197e63d1f6c4b6163d6759fffa4",
+      "modules": []
+    },
+    "little-red-riding-hood/up-t67j1yfn": {
+      "entrySha256": "a01dc16dd90ff35c2c09158368b4d1c782acaf553dd115f7f9fc535bacbc94bc",
+      "modules": []
+    },
+    "sydney-opera-house/up-lx7w6b6j": {
+      "entrySha256": "ae37772b3bacba0925d300de10a346ef4f4e19b8b4556b0f209d6844bd5deb55",
+      "modules": []
+    },
+    "sailboat/up-ypex9jxq": {
+      "entrySha256": "a969da8323b54d1036d0ed67fc67777430542529f22c41a7d384fe7d41acfc69",
+      "modules": []
+    },
+    "rocket-simulation/up-sdlt653i": {
+      "entrySha256": "2e3fba966916fbd21dffe6ed44f3c76144755dd8cb9baeed7bd210addb0324b7",
+      "modules": []
+    },
+    "mechanical-keyboard/up-9n0hg4f7": {
+      "entrySha256": "7f298e21c569621d1854ae1ac99d7ad10312cfc4c7b57e3aba4040f5bd0e4c14",
+      "modules": [],
+      "camera": {
+        "position": [
+          4.233600000000001,
+          15.9936,
+          16.699199999999998
+        ],
+        "target": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    "mechanical-keyboard/up-dy0eeqq9": {
+      "entrySha256": "b7795263a04ff2f79154881e9f28946f1b747e3a1b19bdfac2f9709348d9822e",
+      "modules": [],
+      "camera": {
+        "position": [
+          4.592000000000002,
+          3.258000000000001,
+          5.264000000000003
+        ],
+        "target": [
+          0,
+          0.15,
+          0
+        ]
+      }
+    },
+    "denza-z/up-6pbnnzl6": {
+      "entrySha256": "a89c4204fbf69bd2446e6d93ec84e8f218487abf4b195264d4440b79506d0d5c",
+      "modules": []
+    },
+    "boeing-787/up-q65i8oqo": {
+      "entrySha256": "9de70798071fe8c8bc96cebe6606628a51741aff38c4c60814caa26b3ad8ca21",
+      "modules": [],
+      "camera": {
+        "position": [
+          -56.15999999999999,
+          34.86,
+          61.61999999999999
+        ],
+        "target": [
+          0,
+          6,
+          0
+        ]
+      }
+    },
+    "rainy-lotus-pond/up-6oakcrkc": {
+      "entrySha256": "1134779433b15eb82208a12f7eb5659138402a6e307b84e71dd79094406e7629",
+      "modules": []
+    },
+    "little-red-riding-hood/up-73svktfe": {
+      "entrySha256": "57f739b8cce564bd6df45acf05965c14472d1207130c8dddab0f98bbeeec37ce",
+      "modules": []
+    },
+    "hukou-waterfall/up-dwtwvo06": {
+      "entrySha256": "8a54cc89ea2471d51cbc766dd9629d31cbd0f31fb031a1eeb431ece679fcb933",
+      "modules": []
+    },
+    "little-red-riding-hood/up-p6iuj69f": {
+      "entrySha256": "2b3962ea75c55035e8c7cfdd36b37f573818d082105714abdb655b1be50a1e4f",
+      "modules": []
+    },
+    "little-red-riding-hood/up-04vsf03k": {
+      "entrySha256": "d210a5c35074c5b9bbd5f864276b44f4033778734be27a7b84a12fee59c7d9f2",
+      "modules": []
+    },
+    "little-red-riding-hood/up-7ag6hf2j": {
+      "entrySha256": "f0196a816262c320ac3e255d0bdbee7ae00b64726cc1273217cbbf644ebb66c7",
+      "modules": []
+    },
+    "little-red-riding-hood/up-wz12qhti": {
+      "entrySha256": "dc03e4ca7d6d4fbf7504301cf46d959a4f2147584eb0efa19d9e8478307eed37",
+      "modules": []
+    },
+    "little-red-riding-hood/up-qe1b7q5l": {
+      "entrySha256": "1fbfe9f0efaf4688c75e5110ab2d8d9e80e5586f5f17d66c5152f2226bd481bc",
+      "modules": []
+    },
+    "little-red-riding-hood/up-kvinvbg1": {
+      "entrySha256": "0b22882f9e40fde4d279457709d755a27904df16a08fc98b935b913e4b40bc0a",
+      "modules": []
+    },
+    "little-red-riding-hood/up-4sch3fl7": {
+      "entrySha256": "569a53d27aa2969e4282de84ce89c3ae0aa4f69b06c1e859159fc1e2207cfac8",
+      "modules": []
+    },
+    "little-red-riding-hood/up-8obvwf5q": {
+      "entrySha256": "41c0e424bc7f29c8f700756af5d807ad13afa9eaf2d8323f402c733819f78c42",
+      "modules": []
+    },
+    "voxel-mountain-city/up-a80181ln": {
+      "entrySha256": "e40dfb38e00e4bd7b823338b8752241a10f5b992dab053c965783a6fd1409cff",
+      "modules": []
+    },
+    "desk-lamp/up-orkebuoq": {
+      "entrySha256": "6430aa4fe0d35860b97486f511217b892a6cda3312752636b457b815685356af",
+      "modules": []
+    },
+    "campfire-campsite/up-1qpf2uec": {
+      "entrySha256": "e3f599584c542260a5a3b984ff8b2c2582458534da6af2b6c548968439f7589c",
+      "modules": []
+    },
+    "miniature-railway-town/up-wju4bqyj": {
+      "entrySha256": "9469e2602d63e551ba294187bfa01b147661f94019615bc1863a2fe6d02c494a",
+      "modules": []
+    },
+    "q-5ebd7c84dff7cd8f/up-btjczrzv": {
+      "entrySha256": "bf01ad8af5f5ba03e4f97297437eac088a761e9ccb84340e55eec80abee23474",
+      "modules": []
+    },
+    "q-5ebd7c84dff7cd8f/up-v25nen9f": {
+      "entrySha256": "33da5d0fda5c3375e97291ac3ebdf8e7b039a868138d0b12256cc471baa2788b",
+      "modules": []
+    },
+    "q-5ebd7c84dff7cd8f/up-zjd3z94i": {
+      "entrySha256": "80ea07311337ef1d7301286ef03135abb43dfed670196343eedb4b8db48461c4",
+      "modules": []
+    },
+    "q-5ebd7c84dff7cd8f/up-z0mxosia": {
+      "entrySha256": "054413c3d46f6c4d992a7c302559939ccb1f1ef500e4a6f15edb55497e68a631",
+      "modules": []
+    },
+    "q-5ebd7c84dff7cd8f/up-j1yjmror": {
+      "entrySha256": "09be94b9f91e78ffd22489e4cea98016b124d5c67e6e7493b3ae8d1f01a7f1f5",
+      "modules": []
+    },
+    "q-5ebd7c84dff7cd8f/up-fucx3690": {
+      "entrySha256": "3af72c782fad3131da82ca3c792b15b15769321676ddcf0e5e2a994e55d41d0a",
+      "modules": []
+    },
+    "boeing-787/up-up4mczqm": {
+      "entrySha256": "ec94a8c60b981443633fecbe15e2bbd53d52646c9c5efe4115c31418158b6cd2",
+      "modules": [],
+      "camera": {
+        "position": [
+          33.12000000000001,
+          17.015999999999995,
+          -46.08
+        ],
+        "target": [
+          0,
+          4.2,
+          0
+        ]
+      }
+    },
+    "supernovai/up-69hy7vxp": {
+      "entrySha256": "d838df22cdb83c52b2cf85084a61d2959e63d25a8cca27816a02a60facd09543",
+      "modules": []
+    },
+    "supernovai/up-lv3nw80z": {
+      "entrySha256": "f18c64b9fbfbb18d877409731981367a29e7e6f2542868af02e1b92bf0038e11",
+      "modules": []
+    },
+    "supernovai/up-ukziwh9p": {
+      "entrySha256": "4fa742df843fd33335a2d8c016856980ba6dd68e25fe09a2b50a36eae78ff480",
+      "modules": []
+    },
+    "supernovai/up-atz5x6u4": {
+      "entrySha256": "fa8a13c7ff02042e62ca0f34c3cbdf4ac6138e603127a1b9b0e9fb18a222efd1",
+      "modules": []
+    },
+    "supernovai/up-ciooz3x1": {
+      "entrySha256": "3fdf1066700d67e47de9642d05d9d2c50aa9e6f3525abc4a7ae6916f65d6cf8d",
+      "modules": []
+    },
+    "supernovai/up-53i2sitw": {
+      "entrySha256": "43c7ff6b1dbd38b1979f13827ad278c7c78e4731348cadfb87258f2cb47dff8d",
+      "modules": []
+    },
+    "supernovai/up-7okhvd7e": {
+      "entrySha256": "71a894266866595852fb91abea9ded2e4ab263fd05defc6da4788b7bf7f0b9e6",
+      "modules": []
+    },
+    "chinese-architecture/grok-4.6": {
+      "entrySha256": "145d6be6f0968ba6309810d5b345474cf8fff4a10b4ca567393cea4341d7059a",
+      "modules": [
+        {
+          "path": "/assets/index-CB2XSF4B.js",
+          "sha256": "2cea6e3ceacf54f47e4cef11523e561df7b05b314dc3b196e2dfe1f87d6003bf"
+        }
+      ]
+    },
+    "chinese-architecture/qwen3.8-max-0902": {
+      "entrySha256": "dbab901384f0fc8db87576d63c0ca43ad18572646db9f5ea802f0d8de4bdfa4c",
+      "modules": [
+        {
+          "path": "/assets/index-BKnIZqtq.js",
+          "sha256": "17c93bc1ad74b6fac2dd5b85cce1743f805fa6e4abd803b1128b2d7222c19223"
+        }
+      ]
+    },
+    "chinese-architecture/qwen3.8-flash-next": {
+      "entrySha256": "5fb3df1a8119097b2f363db9d5691ccfb8589f9d8363a6fb923a057a4b8146b3",
+      "modules": [
+        {
+          "path": "/assets/composition-Dv0YeqT2.js",
+          "sha256": "6eff5f56026139987cba391651565eab9bc52b8e9b5ef3bb2688c2ad012d8e7d"
+        },
+        {
+          "path": "/assets/index-CkarH2Qt.js",
+          "sha256": "6bb32b45351a7437356cc3ac84d5a3cfdbb743694e1e716bd2090bc38b3696b8"
+        }
+      ]
+    },
+    "chinese-architecture/seed-2.1-pro": {
+      "entrySha256": "1a04b708764168a829d3acf9e137191ab21fc90d1832d744c8947ea411ad1d26",
+      "modules": [
+        {
+          "path": "/assets/index-BZFAqd6m.js",
+          "sha256": "4ae69559904be7a93d30f5d32ef6fa08264f95fb136a47a2a855238ff9e5527b"
+        }
+      ]
+    },
+    "chinese-architecture/step-5-preview": {
+      "entrySha256": "b2c02a5aa1b8545ff52250fc17cfa77753653c22d4ac0e493916d91ede0fdf9c",
+      "modules": [
+        {
+          "path": "/assets/index-BtO0yNYS.js",
+          "sha256": "7ef5a142088d662e9874621fb9b22944ce842ab5100b780301a9ceff8fb621cc"
+        }
+      ]
+    },
+    "chinese-architecture/opus-5.5-high": {
+      "entrySha256": "725556a607f4b7eaa215028f805d17598b1d83476dabf0d3e3dcd6f64795aa84",
+      "modules": [
+        {
+          "path": "/assets/index-BxbsE9Oo.js",
+          "sha256": "fcfc84bdac1f898f5f7a5221d68907218437e16a57f9c934f39d7906a9e1533d"
+        },
+        {
+          "path": "/assets/three-ByP8DQ2T.js",
+          "sha256": "42e5295daaa7b82681813bf739e6fb492e0bd372ab025217d71d1435c4a55a24"
+        }
+      ]
+    },
+    "chinese-architecture/sonnet-5.5-max": {
+      "entrySha256": "4d3a7c6e79203998a34eda7044fae0f30b94bf7e8551682e7a1b4d223d22c113",
+      "modules": [
+        {
+          "path": "/assets/index-DBcmgs64.js",
+          "sha256": "8fcf2df83299f1808e5f12f00ae78bb97b898c1a3981a9cbd364b9270666c7be"
+        }
+      ]
+    },
+    "chinese-architecture/sonnet-5.5-high": {
+      "entrySha256": "8d2fc8fce42d580fc8622e8e223d5d359aceeaab75e63e7fe7cb16096809c342",
+      "modules": [
+        {
+          "path": "/assets/index-CsU6IlEG.js",
+          "sha256": "c416d0f4a9d4add976877d9d3c327629c920a558da6600ef349dd710e68f8aae"
+        }
+      ]
+    },
+    "chinese-architecture/mimo-v2.6-pro": {
+      "entrySha256": "a21f29f4b06be1f7859cb5a2de5a039c8174f19d45dfb1973f51be83eada6ba7",
+      "modules": [
+        {
+          "path": "/assets/index-D2iUyfqW.js",
+          "sha256": "5fa03013c9602f1c15bcaf5dec8dbc46d57072762c1933370262559462c60269"
+        }
+      ]
+    },
+    "chinese-architecture/mimo-v2.6-flash": {
+      "entrySha256": "94353d32d71c83794b8acd7bf61fe39e2fadb9e44e2ae686107320dc5ee9ee9c",
+      "modules": []
+    },
+    "chinese-architecture/deepseek-v4.1-flash": {
+      "entrySha256": "32e12c0c27196eefbb6256c0306ac34ce2ef830f49407306c8b1309b435f4987",
+      "modules": [
+        {
+          "path": "/assets/index-Da0JYET7.js",
+          "sha256": "8a6b6c47f3f9e98c502df20a935daa0d0225d4ffa01a13e565817afbe7c85c89"
+        }
+      ]
+    },
+    "chinese-architecture/glm-5.3-flash": {
+      "entrySha256": "a005b6078974732b812b21d7bcf16f1562ee9ba98b5d16bbc43d2def8887331c",
+      "modules": [
+        {
+          "path": "/assets/index-IIb4E5Hh.js",
+          "sha256": "0595d19ad5733000a085d80ffbf0f4dcc1845450f1d3b08340c0354655c5c0d6"
+        }
+      ]
+    },
+    "chinese-architecture/glm-5.3": {
+      "entrySha256": "09f64b47b5950d2bb8b44dd938120bc5fd06338878149c3946e24242f0944929",
+      "modules": [
+        {
+          "path": "/assets/index-7GDz9poo.js",
+          "sha256": "0368449e5ebb64ebe139e3e85563f85d8e1b498f4cd8778f95a2ca5fa6f69782"
+        }
+      ]
+    },
+    "chinese-architecture/hy3": {
+      "entrySha256": "396f2643fb29764c99edb8071af21419a581c028c05505c00325c96f5cce2199",
+      "modules": [
+        {
+          "path": "/assets/index-BnPQMIJj.js",
+          "sha256": "74f9f43fed616c0a3dacd4102fe3bd81a1b94b1f1909f934e652213b1cd77007"
+        }
+      ]
+    },
+    "chinese-architecture/kimi-k3": {
+      "entrySha256": "87bc7f5cb208948eb63eab5c1f512b2c79e5bb23dcec0537f23dcb6add79d0f4",
+      "modules": [
+        {
+          "path": "/assets/index-D2QsWkNQ.js",
+          "sha256": "70939701a02a20237d58fbe08f62b03eac79f5e0daee1a32492da38cce052228"
+        }
+      ]
+    },
+    "chinese-architecture/kimi-k2.8-preview": {
+      "entrySha256": "e76ce19327805b5dba6df8bbf74ec4ebdc8a40212e7387cef50570ce8a6ac537",
+      "modules": [
+        {
+          "path": "/assets/index-BE79mCaN.js",
+          "sha256": "9b0387ef6f267a7f1608621d9b89e4af37a33a94827a83387f81b1a614b931c8"
+        }
+      ]
+    },
+    "chinese-architecture/deepseek-v4-pro": {
+      "entrySha256": "0a2b37dc0ec2476a6dd14d4724235ebb88a79b0d5a3cb138af5cd13107adb474",
+      "modules": [
+        {
+          "path": "/assets/index-CorMr7H5.js",
+          "sha256": "15b3f7995cc2263c316e10de0dda6c9b90ba7c11a5e1e1c26e17945432de1f6f"
+        }
+      ]
+    },
+    "chinese-architecture/minimax-m3": {
+      "entrySha256": "22b2d85a42298e50680e83ff14899a71428ea3dc53675a349fde42dc4c2e645d",
+      "modules": [
+        {
+          "path": "/assets/index-HDmydl2N.js",
+          "sha256": "a68db6916044fd1f6b06ed92773b00c93725d93ad9a7688680e2dec9aa4af363"
+        }
+      ]
+    },
+    "chinese-architecture/space-bunny": {
+      "entrySha256": "f3ba35d9d0705a37ec507e747fd6ff5d1e3a4f5b7128e4df758faf1fd3cc1076",
+      "modules": [
+        {
+          "path": "/assets/index-BeiCkDA4.js",
+          "sha256": "84ca12bace901ea5912a5d86ed586f918f2c99ccb76dd7324fa936d4d87971cb"
+        }
+      ]
+    },
+    "chinese-architecture/gpt-6-sol-max": {
+      "entrySha256": "f855e58e7e3c3106c9e26c828d5f471477af45f76c686ec1fd224e89518e7bc0",
+      "modules": [
+        {
+          "path": "/assets/index-XBzKbozC.js",
+          "sha256": "a7b45cbd409d9bdbfbf2609a5f81bb0a707d3fd03b0dfb5a8f359360838f48ff"
+        }
+      ]
+    },
+    "chinese-architecture/gpt-6-sol-high": {
+      "entrySha256": "2f396637e0b44ad3636041d4225b3a6e09e05855fecab6410ae82d4ba2e4e0cc",
+      "modules": [
+        {
+          "path": "/assets/index-COgkeGy-.js",
+          "sha256": "8dafc5738a4c7144203b4616765ba6ae376550387038c9b43ea6e0c6bfe2f3ff"
+        }
+      ]
+    },
+    "chinese-architecture/gpt-6-luna-max": {
+      "entrySha256": "a9c817fde820d394915f2f3d5cc9f54c7b967cf355da478e388eaffd6dd65dc1",
+      "modules": [
+        {
+          "path": "/assets/index-m_s-wHFM.js",
+          "sha256": "eea422a3216cba68b04eeb39d68e9f7b55f0db5aa93f58589821910965d457a0"
+        }
+      ]
+    },
+    "chinese-architecture/gpt-5.6-sol-max": {
+      "entrySha256": "fc57b9e7c4a0332d4f9dc4e53b1949ef3e56cf3d8fcb43f171782438364214f5",
+      "modules": [
+        {
+          "path": "/assets/index-D4hv57xA.js",
+          "sha256": "fe7c12029cdfea69347556207d6f7e40dd73c97466d887163e35ae8c88a0633d"
+        }
+      ]
+    },
+    "chinese-architecture/gpt-5.6-luna-max": {
+      "entrySha256": "cab1b488e6efff794cd8256b128bfc04fa424e3db8a3a38bee565410d9966e3c",
+      "modules": [
+        {
+          "path": "/assets/index-CUiWPC7e.js",
+          "sha256": "f9e30967c8ecdff46ebf12464d4d230f014145bdac108d2748a62462396e21c7"
+        }
+      ]
+    },
+    "chinese-architecture/gpt-5.6-terra-max": {
+      "entrySha256": "31ead3a2e71c86e958923b54a3e55c6438fa7460da708b9819489b77e33a1ec8",
+      "modules": [
+        {
+          "path": "/assets/index-BTN40fp4.js",
+          "sha256": "3a91d72b312ee2836fc0f5c08b599f717a44726eaae3f1b851c37c61a2bafcb5"
+        }
+      ]
+    },
+    "chinese-architecture/gpt-6-astra-high": {
+      "entrySha256": "6623ee71e147461064b6fa381b0a4f53d4afa6733aa9f42a291c60e09a0c9ef2",
+      "modules": [
+        {
+          "path": "/assets/index-Bw4Jdp0P.js",
+          "sha256": "731372cc20e722be5449b53c8fd06ebc2a151eafe834e850a24ca4b181161950"
+        },
+        {
+          "path": "/assets/three-BnGkkVgF.js",
+          "sha256": "d15e9bcc8cfc1ff0b064eccaa6353121a5865c74a4c30f94528c61f7d99266f3"
+        }
+      ]
+    },
+    "chinese-architecture/astra-pro": {
+      "entrySha256": "5c7c0169da7001dce5f8d29d32d58e918d8ca30ff561fa5134db75d38f412314",
+      "modules": [
+        {
+          "path": "/src/boot.js",
+          "sha256": "cbe9f6ab592bd6babe62064d86bec6575b1e8f1eec9b6858601f60af7fe24882"
+        },
+        {
+          "path": "/src/layout.js",
+          "sha256": "9c2975bed4dbd74569bf2955161cadcccfb554376bb80c14fffc30b9c9b28199"
+        },
+        {
+          "path": "/src/main.js",
+          "sha256": "10cf56c678fc768ab9ebc89863808550b728fed1e01425491819c5ca8435eb49"
+        },
+        {
+          "path": "/src/palette.js",
+          "sha256": "b935153ffbbdb7db4a56785d8a5d6e55b3cd7bb38c1b8c75f0fcf9673f57ecb4"
+        },
+        {
+          "path": "/src/scene-data.js",
+          "sha256": "2dfacf933a1f8c514e951a3c0cbf2e86a2131a1f302b25c84c8ded88c8f0adc7"
+        },
+        {
+          "path": "/vendor/OrbitControls.js",
+          "sha256": "b97879c748170baadeb3fb84cea1ffdf4674e283dc06042f34e2acb95a76042c"
+        },
+        {
+          "path": "/vendor/three.core.min.js",
+          "sha256": "61ba0df005b05991361d040d8ff670e1aadfd0ce7aeebd1fdb0725957a8957de"
+        },
+        {
+          "path": "/vendor/three.module.min.js",
+          "sha256": "e2b5ee6bccd38fd6d8a2428546b83c5f2426d84b152ef82be8055556e3b40eb6"
+        }
+      ]
+    },
+    "chinese-architecture/gemini-3.1-pro": {
+      "entrySha256": "f2f4a50a247c8d5f592c4f9ad5b6ea75c13b060845b4fdc6449dee78e4290163",
+      "modules": [
+        {
+          "path": "/assets/index-BzjCchdf.js",
+          "sha256": "dee8ab86efda47d05f167a23913fac16d579b65a00930296de99db849f989f7a"
+        }
+      ]
+    },
+    "chinese-architecture/gemini-3.8-flash": {
+      "entrySha256": "de40aad63e628d4f4ee4aef77dd6903946ce96dd2fbc0693cc6cd1fb0595e342",
+      "modules": [
+        {
+          "path": "/assets/index-KYk926aL.js",
+          "sha256": "da608b00ebdd63b7b9d5edac9000f834dc164a872e848957524ec342acd560a5"
+        }
+      ]
+    },
+    "chinese-architecture/gemini-3.7-flash": {
+      "entrySha256": "a806f42f28ca95d9562397a6ec960ba7ebf4483d1387624ee7f4dccafd087711",
+      "modules": [
+        {
+          "path": "/assets/index-C51B1iuN.js",
+          "sha256": "3ff806ef25e77643713216a7a80571f416f499130df866748614b5eb0e6e5ee5"
+        }
+      ]
+    },
+    "chinese-architecture/longcat-2.5": {
+      "entrySha256": "6adde217a03187b0f6cf433ad5ea7512bb8888139115909cd00c1f4983498d8c",
+      "modules": [
+        {
+          "path": "/assets/index-DzCq77JO.js",
+          "sha256": "cbbfe1048103351d7e52615face681c63e5aaa8dffe3e77bb2123ea040b8d09a"
+        }
+      ]
+    },
+    "chinese-architecture/gpt-6-astra-max": {
+      "entrySha256": "984ba0ebb456f06ec8def140fbc548b114d36a30c5a5ca6b29476612c188c195",
+      "modules": [
+        {
+          "path": "/assets/index-ClZWHkLn.js",
+          "sha256": "eb4306d599b39b7dffe398565e4e09cb3fa7455b0046633f1386c93967aca752"
+        }
+      ]
+    },
+    "chinese-architecture/claude-fable-5.1-max": {
+      "entrySha256": "2dc03fb686e968f773dbe9e4b3b31edbfae547b575a5a95bb2cb39d022d7ca87",
+      "modules": [
+        {
+          "path": "/assets/index-CnSAKEm3.js",
+          "sha256": "e21a4ec551c47db317a4372f24a65a31358f804f0e1fb2a19df78f1c74108317"
+        }
+      ]
+    },
+    "chinese-architecture/deepseek-v4.1-flash-e0910": {
+      "entrySha256": "a7c6e8a56495927606900e2f079ca780d2754b31735bd625eef415d6fce344a0",
+      "modules": [
+        {
+          "path": "/assets/index-DWETX8v5.js",
+          "sha256": "406dc91e11166e5b781df5945421d8e1c73ef0f2cbf6113224437ffe1ebbc959"
+        },
+        {
+          "path": "/assets/main-BfILvUko.js",
+          "sha256": "99095a982e6756de30b308a2a17f29a3286f9a7fd4b45f1f5c7afe04384a9060"
+        }
+      ]
+    },
+    "chinese-architecture/glm-5.3-flash-max": {
+      "entrySha256": "67e57e09f27378f84544a72ec4d39b4babd838daf1e64688260039310dc1622c",
+      "modules": [
+        {
+          "path": "/assets/index-BbcqlRYM.js",
+          "sha256": "0d9bb3d82e3af8e14c9457e21607b5de7a2e9b9a923d83f2b3f98dcf6a38f580"
+        }
+      ]
+    },
+    "chinese-architecture/minimax-m3-20260926": {
+      "entrySha256": "715fff7e214f72847b63d3124bb30ba54fdac51d121d0d4f2ceabad09e7e4991",
+      "modules": [
+        {
+          "path": "/assets/index-B-TFd9AB.js",
+          "sha256": "79fe5a09c84e7009af24971b04a59e45ee286b4d96fbf60a5103c7d092236143"
+        },
+        {
+          "path": "/assets/index-BjqqqCkP.js",
+          "sha256": "cb5f34b20eefc2dcde838650b67686e4384f474c374d84e5146a1b6b28642363"
+        }
+      ]
+    },
+    "chinese-architecture/qwen-latest-series-invite-2609-max": {
+      "entrySha256": "10c63f5d550b06b4f7368b4ac4683121d8bf8b6ef43743db792b078931122d5b",
+      "modules": [
+        {
+          "path": "/assets/index-DjA2tdSv.js",
+          "sha256": "57e64a04d58b2ed160fe11923b2ba887a7432fcdb17362c47e67eda5f24c6a95"
+        }
+      ]
+    },
+    "chinese-architecture/gpt-6-sol-max-yunque-courtyard": {
+      "entrySha256": "c9c624b0fd8aac41df7e68141154963a1531eec5063b9b678039ac0607c3063a",
+      "modules": [
+        {
+          "path": "/assets/index-CbZHgxpX.js",
+          "sha256": "51b21bf60e2e4a4038ee4577f2f72d70ebbdb88f2fda02144a329a2c3c34149d"
+        },
+        {
+          "path": "/assets/three-Brv1qJK-.js",
+          "sha256": "e7560d6e38390b0cef82feac91e039bfab84cfa22e89a6dcb65d83e93c593008"
+        }
+      ]
+    },
+    "chinese-architecture/gemini-4.x-high": {
+      "entrySha256": "6b47be8ca67e8f0898988396e2c01079d16676e7d2aedf76083608b1dc51f34d",
+      "modules": [
+        {
+          "path": "/assets/index-DXzWRAoC.js",
+          "sha256": "9b52734b236de5a54375ed61170522b3ed5a4d35e435b41b5f2efc974f08b61c"
+        }
+      ]
+    },
+    "chinese-architecture/claude-opus-5.5-max-fanjing": {
+      "entrySha256": "b2eac85910531db5dc4b4392db7f5494032db40e4b4487045a76dd638414bf70",
+      "modules": [
+        {
+          "path": "/assets/gen.worker-Czmd5ZQE.js",
+          "sha256": "f6972a95ca3a79254a60954f2987ba925cb5253953ac7d564c1d0e3799003399"
+        },
+        {
+          "path": "/assets/index-DJw4jelG.js",
+          "sha256": "fa0ccba810223ec0a5745d7603a11782fb7e0a000769768ce35e2a0c7471e858"
+        },
+        {
+          "path": "/assets/mesh.worker-Cz1MtY5s.js",
+          "sha256": "5772bb4a042e9c6b728628590a590cc5c110fd11e60c22d5f0417629486ecbf7"
+        }
+      ]
+    },
+    "chinese-architecture/gpt-6.1-sol-max": {
+      "entrySha256": "9713df67d32e4b23c60c16fc60c39e86b0378a4787478a523b7fe27c5192d6ae",
+      "modules": []
+    },
+    "miniature-railway-town/astra-pro": {
+      "entrySha256": "ec36930e4165fa56c039bee9ca5d615c484c583937e75fe5aa6141d4ed97e9c9",
+      "modules": [
+        {
+          "path": "/assets/index-BNmx45oR.js",
+          "sha256": "0503d035ad9a08f6b6a8359cd4360ee350dcb7076ec4b9763afb6492792732eb"
+        },
+        {
+          "path": "/assets/three-auxMYzZM.js",
+          "sha256": "e8543f85dd25a46de8a58cd4122fea0029c05a193c4335f49ad596f9e052c43d"
+        },
+        {
+          "path": "/assets/world-0tKtAQgG.js",
+          "sha256": "a3c631fcec3c0c153eee217966a789fe17c56eeec5c38d26162076ed8ce78897"
+        }
+      ],
+      "camera": {
+        "position": [
+          24.029999999999994,
+          24.980499999999996,
+          30.26
+        ],
+        "target": [
+          0,
+          0.55,
+          0
+        ]
+      }
+    },
+    "miniature-railway-town/deepseek-v4.1-flash": {
+      "entrySha256": "3101d1920bcc887b8aa7ee3b54efbf2041177d5bedb4e67266cdb5ae14b788f1",
+      "modules": [
+        {
+          "path": "/assets/index-ORCIiqw3.js",
+          "sha256": "f30c4953bd6ddaf2619cd201e565d4f7cec7af11ab98e59531bc398df4855c25"
+        }
+      ],
+      "camera": {
+        "position": [
+          79.74241971179082,
+          84.47762607536256,
+          95.03331517368206
+        ],
+        "target": [
+          0,
+          0.8,
+          0
+        ]
+      }
+    },
+    "miniature-railway-town/gemini-3.8-flash": {
+      "entrySha256": "6fff6215833a33dbd651a98f84a1e2be4276e6415476db2477b54a728056a94f",
+      "modules": [
+        {
+          "path": "/assets/index-Cbr_l0Zx.js",
+          "sha256": "3e2c0e8b1886dfe0b982f6a962b26bb9fb8e02a88226bb205d614982e2389127"
+        }
+      ],
+      "camera": {
+        "position": [
+          68.39999999999999,
+          55.099999999999994,
+          72.2
+        ],
+        "target": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    "miniature-railway-town/gpt-5.6-luna-max": {
+      "entrySha256": "512097e0f35b545af7a8aa85e6318455db9d88f1223d8e66caa673d1feacec31",
+      "modules": [
+        {
+          "path": "/assets/index-D01PI2JO.js",
+          "sha256": "07431d77c286e473bb773d178ae9e0ca31803d8650b5339ee1cd75fdff31fcaa"
+        }
+      ],
+      "camera": {
+        "position": [
+          14.404999999999996,
+          15.537000000000006,
+          17.285999999999998
+        ],
+        "target": [
+          0,
+          1.4,
+          0
+        ]
+      }
+    },
+    "miniature-railway-town/gpt-5.6-sol-max": {
+      "entrySha256": "3701c87adf66af68e220263e58737d75a9b75b2792d7df74fd95dfcce2f4d82e",
+      "modules": [
+        {
+          "path": "/assets/index-DzYuiUF_.js",
+          "sha256": "0c93747f5076881234aa64ce5da653858efe28d9c3ce46c9f093f4fd2266510e"
+        }
+      ],
+      "camera": {
+        "position": [
+          22.184999999999995,
+          20.893000000000008,
+          25.619499999999995
+        ],
+        "target": [
+          0,
+          0.10000000000000003,
+          -0.35
+        ]
+      }
+    },
+    "miniature-railway-town/gpt-5.6-terra-max": {
+      "entrySha256": "484052f59aa0adf2da3a2c2f62aed7c087972b2117b72c3aa0b76b82e7488960",
+      "modules": [
+        {
+          "path": "/assets/index-DJSjx0c8.js",
+          "sha256": "f41304ebec14c951e50755e22478fb5fc010077f93fdf4770886f5f8e7fa6e53"
+        }
+      ],
+      "camera": {
+        "position": [
+          21.452,
+          20.133999999999993,
+          24.14999999999999
+        ],
+        "target": [
+          0.19999999999999998,
+          0.39999999999999997,
+          0
+        ]
+      }
+    },
+    "miniature-railway-town/gpt-6-astra-high": {
+      "entrySha256": "8f5e55d3671a75ef6ea82da68b12cc24d8623cd10a0cd598e4c210ee72bd8955",
+      "modules": [
+        {
+          "path": "/assets/index-C9KFRa5V.js",
+          "sha256": "26d4c5d04cf6b4effc9e32ee03d4d58ee655e0c14c85e6257b36f633c2b44aa4"
+        }
+      ],
+      "camera": {
+        "position": [
+          21.75,
+          20.769499999999997,
+          26.97
+        ],
+        "target": [
+          0,
+          -0.85,
+          0
+        ]
+      }
+    },
+    "miniature-railway-town/gpt-6-luna-max": {
+      "entrySha256": "21b740b81d48a4e532f76c98e10de0691d325a2436678851e692e4ed639bb2a3",
+      "modules": [
+        {
+          "path": "/assets/index-Cx2LxhM8.js",
+          "sha256": "43b6c3259a1de7c703c77cab10ba5fcbcb5962a3f580fdd77be0eb01ceee9c5d"
+        }
+      ],
+      "camera": {
+        "position": [
+          14.852000000000004,
+          15.614200000000004,
+          17.696
+        ],
+        "target": [
+          0,
+          0.62,
+          0
+        ]
+      }
+    },
+    "miniature-railway-town/gpt-6-sol-high": {
+      "entrySha256": "6437445d719817206e5e338ec2ba08b5e1150c00181a8a1c30038a16ee4eb8ed",
+      "modules": [
+        {
+          "path": "/assets/index-M1Fma4Uk.js",
+          "sha256": "6044ddc7f8f9119f6cf1ffd52f317af6327ae0ab20ee6c7a7489ebb2bc554806"
+        }
+      ],
+      "camera": {
+        "position": [
+          21.000000000000004,
+          19.950000000000003,
+          25.200000000000003
+        ],
+        "target": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    "miniature-railway-town/gpt-6-sol-max": {
+      "entrySha256": "a39518dfb83bfe2945afa01959f13634cf292ce319ffea62bc8efb022914e57d",
+      "modules": [
+        {
+          "path": "/assets/index-D0EKeSUL.js",
+          "sha256": "2c8adc138b437e6d4704d259587ebfd37f0e49356fa5739d72e55520233d45bc"
+        }
+      ],
+      "camera": {
+        "position": [
+          26.599999999999998,
+          28.507499999999997,
+          37.05
+        ],
+        "target": [
+          0,
+          0.15,
+          0
+        ]
+      }
+    },
+    "miniature-railway-town/hy3": {
+      "entrySha256": "636f7dc66a92571b7a761bc304f4cff03527ef3fb8fea305f8c7faa0dbff7275",
+      "modules": [
+        {
+          "path": "/assets/index-IvizJIcH.js",
+          "sha256": "4d56f91bda6918305ebce5b1713b3eafa26abad3016a6f585f9cd4c9da2e922e"
+        }
+      ],
+      "camera": {
+        "position": [
+          15.200000000000003,
+          14.299999999999992,
+          15.200000000000006
+        ],
+        "target": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    "miniature-railway-town/longcat-2.5": {
+      "entrySha256": "e94aa9399ba2b6ad1f6c94f207168c17a1b712a33cafcfd451c2478ea1444c44",
+      "modules": [
+        {
+          "path": "/assets/index-BQCDPltj.js",
+          "sha256": "8a76f298b2ce20429213c7742ed42717ca254722933cff2ce1c1a79b4db29309"
+        }
+      ],
+      "camera": {
+        "position": [
+          42.11999999999999,
+          44.391999999999996,
+          42.12
+        ],
+        "target": [
+          0,
+          0.4,
+          0
+        ]
+      }
+    },
+    "miniature-railway-town/qwen3.8-flash-next": {
+      "entrySha256": "077cffbb53504ae9cc25bf6d99660480fc42a5e1352f528bf7fee09916c00ce4",
+      "modules": [
+        {
+          "path": "/assets/index-Cnjwek07.js",
+          "sha256": "a249bbee11a835592b0d1b3a42837f97a4873c5243bc21fee546deedfc025943"
+        },
+        {
+          "path": "/assets/main-KiWyQ3yV.js",
+          "sha256": "d9d3fc8b170e37aacda5415e6b471f4ff64c4c2f52ca08dcccf2e32403135e4c"
+        }
+      ],
+      "camera": {
+        "position": [
+          -46.06763419038025,
+          44.91007005753479,
+          46.043749660472685
+        ],
+        "target": [
+          0.2,
+          0.35000000000000003,
+          0.2
+        ]
+      }
+    },
+    "miniature-railway-town/mimo-v2.6-flash": {
+      "entrySha256": "29689085fed90d2d67ccf8e4acea6836ef588ade2e4b5d362a31a640120a6987",
+      "modules": [
+        {
+          "path": "/assets/index-Br1FR9We.js",
+          "sha256": "604544c576e8bc33d57549af6aab62461be9fb768b875ea7f913217c75908cf4"
+        }
+      ],
+      "camera": {
+        "position": [
+          41.80000000000001,
+          41.800000000000004,
+          46.20000000000001
+        ],
+        "target": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    "miniature-railway-town/mimo-v2.6-pro": {
+      "entrySha256": "e46b0ab151b2385297c547fb7a79b5d8122823f4269799747c13478575c15f18",
+      "modules": [
+        {
+          "path": "/assets/index-CbIJZPil.js",
+          "sha256": "35620d56b7b70d4620b244f28fab0466f06ae50ef6075ed15734323dc7695300"
+        }
+      ],
+      "camera": {
+        "position": [
+          23.095999999999997,
+          20.120000000000005,
+          27.232
+        ],
+        "target": [
+          0.19999999999999996,
+          -0.3999999999999999,
+          -0.19999999999999996
+        ]
+      }
+    },
+    "miniature-railway-town/deepseek-v4.1-flash-extra": {
+      "entrySha256": "7c3cd0bccda5309134dbbea28725812e190c0545e045a89455f7a4b20a5605c2",
+      "modules": []
+    },
+    "miniature-railway-town/doubao-seed-evolving": {
+      "entrySha256": "eb6ec20e60a38a3f52a55676f20286c993a7c90f7e13c5975bbcc246c75e17b7",
+      "modules": [
+        {
+          "path": "/assets/index-Ck3fktCU.js",
+          "sha256": "85fa6eb3b474123d0994e1630ccf0d07ab144f62af895f12950a958e8547a7cb"
+        }
+      ],
+      "camera": {
+        "position": [
+          33.95,
+          29.118,
+          36.860000000000014
+        ],
+        "target": [
+          0,
+          0.6,
+          0
+        ]
+      }
+    },
+    "miniature-railway-town/swe-2": {
+      "entrySha256": "11dd40dd620678d19425cff8db4c90519745daff3c498a2bfce8938d7c5d2200",
+      "modules": [
+        {
+          "path": "/assets/index-MubFrHWX.js",
+          "sha256": "05cbc96feeffa5d52b9a51a3ef92cf01521818425be3d976fa01d64349178fd8"
+        }
+      ],
+      "camera": {
+        "position": [
+          33.000000000000014,
+          36.35,
+          33.05000000000001
+        ],
+        "target": [
+          0,
+          -0.5,
+          -0.5
+        ]
+      }
+    },
+    "miniature-railway-town/space-bunny-max": {
+      "entrySha256": "1d4e93177f1d3ee2100c38a3dc9c70a8af13a8d7af653187bc9a50c69fb89015",
+      "modules": [
+        {
+          "path": "/assets/index-DGDpNYSA.js",
+          "sha256": "afb5f707fee13b9bddc3f09c8f29af1114e9bf74d0756a28144bca894d318477"
+        }
+      ],
+      "camera": {
+        "position": [
+          -26.384486977725647,
+          34.13800273382025,
+          39.116610567408706
+        ],
+        "target": [
+          0,
+          1.1,
+          0
+        ]
+      }
+    },
+    "miniature-railway-town/minimax-m3": {
+      "entrySha256": "3aba22932b8960de727d7b713f3d39b15ed007c69df1493a42ac5a7126bf5f3f",
+      "modules": [
+        {
+          "path": "/assets/index-DmxmCFrB.js",
+          "sha256": "53dc5a5004bdd066043615d1d8bd3a90b906f74513932f8883473c19f41a38de"
+        }
+      ],
+      "camera": {
+        "position": [
+          27.379999999999995,
+          22.6,
+          27.119999999999997
+        ],
+        "target": [
+          -2,
+          0,
+          0
+        ]
+      }
+    },
+    "miniature-railway-town/deepseek-v4.1-flash-high": {
+      "entrySha256": "b826f0a71d87bb83b9e39ac499b9aaf05e4b0aacde10b85a44d5fc14ff139ae6",
+      "modules": [
+        {
+          "path": "/assets/index-D6nWaL1d.js",
+          "sha256": "aa3e15d9828fdbe8002652c3822287605df75af53f11d3ab6c9ec19806faa676"
+        }
+      ],
+      "camera": {
+        "position": [
+          50.29878383574206,
+          50.03384464395496,
+          51.898783835742066
+        ],
+        "target": [
+          -2,
+          0.3499999999999998,
+          -0.39999999999999986
+        ]
+      }
+    },
+    "miniature-railway-town/sonnet-5.5-high": {
+      "entrySha256": "8954b6c32a483cfa24a4d611e5987777b4d7bfca43bb123df3e2b3c345e0ecf0",
+      "modules": [
+        {
+          "path": "/assets/index-CRuD_3hB.js",
+          "sha256": "93d0f0d6c5808ad51a2b1645b80bb4dc7b4ef0e36cdcb3fdb0caae27a3702c30"
+        }
+      ],
+      "camera": {
+        "position": [
+          44.7782340806693,
+          57.01613962325671,
+          66.57178643939058
+        ],
+        "target": [
+          0,
+          -0.30000000000000004,
+          0.30000000000000004
+        ]
+      }
+    },
+    "miniature-railway-town/step-5-preview": {
+      "entrySha256": "fa35f096d87a09bb9818d1d1222c5461644b9662abbeb02a7a9824c47fc51ad1",
+      "modules": [
+        {
+          "path": "/assets/index-BDJz248t.js",
+          "sha256": "5b3dabab8b16567b69363222dc74396346da8c3088c63289833de084e02df5e3"
+        }
+      ],
+      "camera": {
+        "position": [
+          84.94466976680161,
+          69.29646771248595,
+          98.77287182186237
+        ],
+        "target": [
+          0,
+          -1.8199999992549418,
+          0
+        ]
+      }
+    },
+    "miniature-railway-town/glm-5.3": {
+      "entrySha256": "817bd20814ebeecf7e9aed763e855bfb192cf2501a1b367961ecdefa016a6bf6",
+      "modules": [
+        {
+          "path": "/assets/index-CwSJ3PpP.js",
+          "sha256": "1b623653e6326806aeddc1cbae5e1245e58ea5eef6947684da38efb58c62ec93"
+        }
+      ],
+      "camera": {
+        "position": [
+          38.60999999999999,
+          30.352000000000018,
+          46.800000000000026
+        ],
+        "target": [
+          0,
+          0.4,
+          0
+        ]
+      }
+    },
+    "miniature-railway-town/deepseek-v4-pro-high": {
+      "entrySha256": "30724f46d5902ac749090938d1329ebc8f33ecb06d875b5bb317dbb4ea9543fd",
+      "modules": []
+    },
+    "miniature-railway-town/kimi-k3-max": {
+      "entrySha256": "4792787d9b438250c8f1b8819c51b40d4d8e508eaf197472be47c915f7565f40",
+      "modules": [
+        {
+          "path": "/assets/index-MwxRhvj_.js",
+          "sha256": "255c0b4e94249d2eeb7a8ab6564bcfabd57d240b44175906cca708327dca7c2a"
+        }
+      ],
+      "camera": {
+        "position": [
+          44.100000000000044,
+          46.2,
+          48.400000000000034
+        ],
+        "target": [
+          -1,
+          0,
+          0
+        ]
+      }
+    },
+    "miniature-railway-town/qwen-latest-series-invite-2609-max": {
+      "entrySha256": "9038ea1cefcfb7bc143bb8b0c621de09fb80262e5b47d5c61c413ce588a59711",
+      "modules": [
+        {
+          "path": "/assets/index-Cr9QniPa.js",
+          "sha256": "cf989320910ca4532ce5330500eb9cbb9a1511033d49ea11809fda350c15a0d6"
+        }
+      ],
+      "camera": {
+        "position": [
+          98.29296291518652,
+          85.87179740574709,
+          86.65690360449388
+        ],
+        "target": [
+          0,
+          1.2,
+          0
+        ]
+      }
+    },
+    "miniature-railway-town/glm-5.3-flash": {
+      "entrySha256": "09545310be1e123d1564793a247bb0ca8cf1b029a4b49dcd8ec0e50b5ae53dc1",
+      "modules": [
+        {
+          "path": "/assets/index-CZpuaK8t.js",
+          "sha256": "bf292437c895b3888957bbd3b9be64a2711786406eb4a5f7d51bf5e41eb324bd"
+        }
+      ],
+      "camera": {
+        "position": [
+          23.750000000000004,
+          19.494999999999994,
+          24.700000000000003
+        ],
+        "target": [
+          0,
+          0.4,
+          0
+        ]
+      }
+    },
+    "miniature-railway-town/gemini-4.x-high": {
+      "entrySha256": "7628c21f1ea387a93522da178527a25e274c9839f32ef7d23f29fda3af39399f",
+      "modules": [
+        {
+          "path": "/assets/index-_0l9OoOv.js",
+          "sha256": "f0c617d56abe85bae4da05beaecd1aa6fe4e5710d5ea4f0e017ee7414c2be081"
+        }
+      ],
+      "camera": {
+        "position": [
+          35.43506999999999,
+          51.15999000000001,
+          64.970295
+        ],
+        "target": [
+          0,
+          -0.8000000000000003,
+          0.20000000000000007
+        ]
+      }
+    },
+    "miniature-railway-town/gpt-6.1-sol-max": {
+      "entrySha256": "1d81b463edd8a3727a4f0c318f6f56178b26238aa011b2b79ac2ee99e4f1df10",
+      "modules": []
+    },
+    "miniature-railway-town/claude-opus-5.5-max-zip": {
+      "entrySha256": "f904f75bf106c05c34e9a283ee1264789fff57bc79b7a059f0a965d40fb02cff",
+      "modules": []
+    },
+    "mechanical-keyboard/gpt-5.6-luna-max": {
+      "entrySha256": "fcfb319381b8dcc5dd6b3fb24627fc7df986ca5eb3e7860967b051c596557f64",
+      "modules": [
+        {
+          "path": "/assets/index-CbQYHkIF.js",
+          "sha256": "5e99164320609bde7bd0e8313f5f1002f6927ea4950b2df3cd85ebbbbc4667d2"
+        }
+      ]
+    },
+    "mechanical-keyboard/gpt-5.6-sol-max": {
+      "entrySha256": "6839023c68fc98223af10b4b3e0c8ebc698f49167ac4dc277230bc1fac72680b",
+      "modules": [
+        {
+          "path": "/assets/index-h-jCapv_.js",
+          "sha256": "ee1dfe92997c633a37f51e6b05e9d4677ef5ad15b9b296f5ce3894b65791d4f5"
+        }
+      ]
+    },
+    "mechanical-keyboard/gpt-5.6-terra-max": {
+      "entrySha256": "22926acbab5ef8e3983f1fb28cf9d694135abb7f679c555e3fae4d9b376654f2",
+      "modules": [
+        {
+          "path": "/assets/index-BT0LgFZY.js",
+          "sha256": "a0c02793beac4faef495f923d3bcafff873cfed2627b2d5c3c28e2436d5255b3"
+        }
+      ],
+      "camera": {
+        "position": [
+          8.520000000000003,
+          6.420000000000001,
+          13.080000000000007
+        ],
+        "target": [
+          0,
+          0.15,
+          0
+        ]
+      }
+    },
+    "mechanical-keyboard/gpt-6-astra-high": {
+      "entrySha256": "438426804943c816370f80c0efa0a796b476f59f4fbc2540a9ec004348ca2c9e",
+      "modules": [
+        {
+          "path": "/assets/index-CkR7j_tH.js",
+          "sha256": "b9b6890f545eb31043f74e4105d9a644440ba52900e265bc808364de72c8f1bf"
+        },
+        {
+          "path": "/assets/three-CNcsrGlT.js",
+          "sha256": "31a68237224140fc0530b91182f094acde2a79fdb640d3dbd400c18b758ce267"
+        }
+      ]
+    },
+    "mechanical-keyboard/gpt-6-luna-max": {
+      "entrySha256": "d887477656b46eb3222b45bbe61707fc7b882aefacc751e51d8ebd0808db26dd",
+      "modules": [
+        {
+          "path": "/assets/index-CvqYY7hB.js",
+          "sha256": "97768d8eba8f888b1287b5e73c74afd46a94e6a6a7710e7511b1a97cc407c64e"
+        }
+      ]
+    },
+    "mechanical-keyboard/gpt-6-sol-high": {
+      "entrySha256": "bec6dd98e7d72c0f4b5ddeedbb3d29ad666b96190d97bfbdb293d5049f96b68b",
+      "modules": [
+        {
+          "path": "/assets/index-DyjGNBz-.js",
+          "sha256": "76d7a1f3471496db8267727a953a27e278c71d018126f1cd0e61b2aea4a30d60"
+        }
+      ]
+    },
+    "mechanical-keyboard/gpt-6-sol-max": {
+      "entrySha256": "331dd5c042266187c291f51f37eed2cd8c92e8244902c5a73f76b86ba1581b1f",
+      "modules": [
+        {
+          "path": "/assets/index-BHSWywGd.js",
+          "sha256": "f90a5a7edc416a646d300ac832986714a31b072fb713d152e294f3ffd62ada84"
+        }
+      ]
+    },
+    "mechanical-keyboard/astra-pro": {
+      "entrySha256": "c39bcc30d0d5829f81f8a777774c3f9fa3c2badc055ecfb9aae8e8543b05bd50",
+      "modules": [
+        {
+          "path": "/assets/index-Cn4gDPI3.js",
+          "sha256": "253fd4d17e0375d94b7207988b54469d83d0fd1a0c94271b90cf60991450ac55"
+        },
+        {
+          "path": "/assets/keyboard-scene-DWTrZ2wp.js",
+          "sha256": "9943f3abc56d0370016df44ade5f7b20f602bfe315398b7a99ec0ec8660ed284"
+        },
+        {
+          "path": "/assets/three-BajsdAKP.js",
+          "sha256": "a7d3252714bcb3e74d974a045f463ab4f256ae4b97f0b3e613c60ef958c7b4ec"
+        }
+      ],
+      "camera": {
+        "position": [
+          3.68,
+          16.560000000000002,
+          22.08000000000001
+        ],
+        "target": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    "mechanical-keyboard/longcat-2.5": {
+      "entrySha256": "9580738943e764f494cb8721809dc86113a85fa4a61e9873909e0e5c89499730",
+      "modules": [
+        {
+          "path": "/assets/index-KBcdZwxF.js",
+          "sha256": "e640a0abf0c464482ae0dfe19cf9982ad96251e37038b846a4d0983dfcfbb50c"
+        }
+      ],
+      "camera": {
+        "position": [
+          0,
+          253,
+          323
+        ],
+        "target": [
+          0,
+          15,
+          0
+        ]
+      }
+    },
+    "mechanical-keyboard/deepseek-v4.1-flash": {
+      "entrySha256": "e59873e971f73694b79b105939bdb84cc90d3c03271e115ad5503c3de5b70654",
+      "modules": []
+    },
+    "mechanical-keyboard/glm-5.3-flash": {
+      "entrySha256": "82e1ad2dcb1613b2fbe3c26570180ba6393835c91ade33eac46ddc6aeb5513df",
+      "modules": [
+        {
+          "path": "/assets/index-B7IsAj-J.js",
+          "sha256": "5904869fc80842e1d860b708ba75354e59e745195fbf9002812782f7a3f610a0"
+        }
+      ]
+    },
+    "mechanical-keyboard/mimo-v2.6-flash": {
+      "entrySha256": "9e0444f49ae3eec997828a2fdca006f4dec3b8664406d6f26ec8ce6166e025ed",
+      "modules": [
+        {
+          "path": "/assets/index-Vk_tGqDm.js",
+          "sha256": "7ce69bb1314c372b8fe09cd99505714d8fc6775999cb2b2e872f98294e18d0dd"
+        },
+        {
+          "path": "/assets/three-eJgkS0Hg.js",
+          "sha256": "ab7d60ebbef852ebf58889099cc3a277f5b05d2fb07ab3b469f72c4dfe3bd2be"
+        }
+      ]
+    },
+    "mechanical-keyboard/mimo-v2.6-pro": {
+      "entrySha256": "16069a259f0dd8961b7523472ec3d6581dfea99ddacf7bc70024bdf0fd8178e7",
+      "modules": [
+        {
+          "path": "/assets/index-ChcjWDoK.js",
+          "sha256": "7679bf1f9e8cf23ca38ccff66179da21fd08de6cec0982b72e45d6cbf9de2b51"
+        }
+      ]
+    },
+    "mechanical-keyboard/step-5-preview-high": {
+      "entrySha256": "488b90d51cc9394bcc48af97b09ddcdf4e14ffbd7ed70fc50ee4d4ff817f2f15",
+      "modules": [
+        {
+          "path": "/assets/index-CsJlF8lc.js",
+          "sha256": "746592b565eeb4bcbf9ecac617b8441f0467250e889152b4c331ccf1c6400ab9"
+        }
+      ]
+    },
+    "mechanical-keyboard/gpt-6-luna-max-arena": {
+      "entrySha256": "19d0da49e02dd70fcbaa6f06a3053e5cca319aa14043e65200ab8a9857b44a81",
+      "modules": []
+    },
+    "mechanical-keyboard/gpt-6-astra-max-arena": {
+      "entrySha256": "7aa73bf15ff6e496a400a4dfdf9827e5bbcebad5a25a50c45b3c280e47bddc25",
+      "modules": []
+    },
+    "mechanical-keyboard/kimi-k3-max": {
+      "entrySha256": "91565b552399b505a4b18e866b202509930ed1081e19f9bc254bdbe44f82efa4",
+      "modules": [
+        {
+          "path": "/assets/index-DDjmViIw.js",
+          "sha256": "124af5c7ad096b2dfdc9349c129d1bc5deea7e086631cc38101487734ed58641"
+        }
+      ]
+    },
+    "mechanical-keyboard/qwen3.8-flash-next": {
+      "entrySha256": "2a76c610400ec5ddacbd58851583f339d0bde9b684b098a94a9f673feaf3702b",
+      "modules": [
+        {
+          "path": "/assets/index-BGsdfQ0t.js",
+          "sha256": "82915ba2919b435c555411d6b0559969599d24830d93c7adeaaf915a14dbf6ad"
+        }
+      ]
+    },
+    "mechanical-keyboard/sonnet-5.5-high": {
+      "entrySha256": "ce7693ad29aad430b2a8599bac053da7736a43f3f324f9da87ee2346326c3830",
+      "modules": [
+        {
+          "path": "/assets/index-DiCm06-R.js",
+          "sha256": "7de23ebfc950bc9425f9f1c8aa0e7a637ede032debc854190cfdfd0d5e56397e"
+        }
+      ]
+    },
+    "mechanical-keyboard/gemini-4.x-high": {
+      "entrySha256": "6ff16477b1fe072f64255fd7a8c775aad81f451e3230d55d2873edd4633aaf4c",
+      "modules": [
+        {
+          "path": "/assets/index-BR653nHd.js",
+          "sha256": "aba0c47e5bb6cef65d2e870434566ee1d2d5444497fd108082b0fda07ca7b2a8"
+        },
+        {
+          "path": "/assets/three-CMHJJ5kS.js",
+          "sha256": "aad3bb4fdb37cc1755d98f01ad38a4d36a73c27e132f98a50783920930eaf523"
+        }
+      ],
+      "camera": {
+        "position": [
+          1.2800000000000002,
+          14.220000000000002,
+          15.720000000000008
+        ],
+        "target": [
+          0,
+          -0.1,
+          0.2
+        ]
+      }
+    },
+    "mechanical-keyboard/claude-opus-5.5-max": {
+      "entrySha256": "ec91adddf4cef8d6def231ace2f2dcb079f08c01d942fa0d4a5a0d3e1ee7f28e",
+      "modules": [
+        {
+          "path": "/assets/index-DDOgn9oK.js",
+          "sha256": "fd378f3fda7bfd95211c523f9b4cba1de5d73027b0a7a904cd145f5bf5d0d75b"
+        }
+      ],
+      "camera": {
+        "position": [
+          94.86853941273019,
+          325.4147560547344,
+          424.2410554881237
+        ],
+        "target": [
+          0,
+          21.065955202815513,
+          0
+        ]
+      }
+    },
+    "boeing-787/astra-pro": {
+      "entrySha256": "5597efc47c2bfbe10229336b0e4881d4bc4ab49b5d714c2b1422eaf7fba26c96",
+      "modules": [
+        {
+          "path": "/assets/controls/OrbitControls.js",
+          "sha256": "80efaadea4f8a636a65fb0bd08bfef62f3d93a0bb94e2e7500f23176c5c07f4e"
+        },
+        {
+          "path": "/assets/three.module.js",
+          "sha256": "ce1fa418de16a19495a9f72495580e3015d7745c296d3ce0485897f902ddedfb"
+        }
+      ],
+      "camera": {
+        "position": [
+          -54.40608372202629,
+          21.8483356042404,
+          23.868475439340557
+        ],
+        "target": [
+          0,
+          5,
+          0
+        ]
+      }
+    },
+    "boeing-787/deepseek-v4.1-flash-high": {
+      "entrySha256": "0f6bb73c97f61fa5013fc29dfbde62091e0b7962fdff611b2fb56041c02daddc",
+      "modules": [
+        {
+          "path": "/assets/index-CFE0oeGZ.js",
+          "sha256": "85d1124e13d3893c51e3077c08a6fe83a1d8d7a41d26c849916ae803e4539335"
+        }
+      ]
+    },
+    "boeing-787/qwen3.8-flash-next-xhigh": {
+      "entrySha256": "c3ca3b12d974914560bbedacf5ed4d7f1ef5b70167171449c14e88028a4f785e",
+      "modules": [],
+      "camera": {
+        "position": [
+          62.64,
+          19.99199999999999,
+          79.91999999999999
+        ],
+        "target": [
+          0,
+          6.6,
+          0
+        ]
+      }
+    },
+    "boeing-787/claude-sonnet-5.5-high": {
+      "entrySha256": "0e6a0b9d98c899958ed4a2a3a8fedbfccf0f4e0c93c1a7399d44ba53562900e4",
+      "modules": [],
+      "camera": {
+        "position": [
+          85.766611735765,
+          47.099973420531434,
+          99.59993620927551
+        ],
+        "target": [
+          0,
+          5.6,
+          0
+        ]
+      }
+    },
+    "boeing-787/gpt-5.6-luna-max": {
+      "entrySha256": "dad1bbbea6e7c7a3d908205e530f9293620a5b9077f4c08ef4420afcf5d429aa",
+      "modules": []
+    },
+    "boeing-787/gpt-5.6-sol-max": {
+      "entrySha256": "8fa8f2e5d4ad1c51e0c023eebd2f032e9bbe8fbb5e43bb42398e638977d8e508",
+      "modules": [],
+      "camera": {
+        "position": [
+          54.179999999999986,
+          27.429999999999986,
+          -61.91999999999996
+        ],
+        "target": [
+          0,
+          5.5,
+          0
+        ]
+      }
+    },
+    "boeing-787/gpt-5.6-terra-max": {
+      "entrySha256": "8f5cffd7f135417d9bf5bfa72b568deb3a164842fb2e881a4d37247f8f651680",
+      "modules": [],
+      "camera": {
+        "position": [
+          47.06,
+          21.103999999999996,
+          59.75999999999999
+        ],
+        "target": [
+          8,
+          5.9,
+          -4.5
+        ]
+      }
+    },
+    "boeing-787/gpt-6-astra-high": {
+      "entrySha256": "29bb47151a82d4300cabac1a0bf8f73b9a185af9de91a5c5fc443da434f1bc20",
+      "modules": [],
+      "camera": {
+        "position": [
+          -51.71115652107869,
+          33.55454943935228,
+          58.641517704316044
+        ],
+        "target": [
+          0,
+          5.3,
+          0
+        ]
+      }
+    },
+    "boeing-787/gpt-6-astra-max": {
+      "entrySha256": "86749233ee94dfebfda0e366cb891636913c903a125fe97807698594765e59c7",
+      "modules": [],
+      "camera": {
+        "position": [
+          49.56160000000003,
+          36.59248,
+          -58.08
+        ],
+        "target": [
+          0,
+          4.3,
+          0
+        ]
+      }
+    },
+    "boeing-787/gpt-6-luna-max": {
+      "entrySha256": "cbc009b5b56e22d362d1afb374617a26899e6e0b217e2806fcb02a0f8188aed6",
+      "modules": [],
+      "camera": {
+        "position": [
+          63,
+          42.67999999999999,
+          -69.72000000000003
+        ],
+        "target": [
+          0,
+          7.4,
+          0
+        ]
+      }
+    },
+    "boeing-787/gpt-6-sol-high": {
+      "entrySha256": "a3646029beadd04df7a8a22127f71b10389fa3f0491b891916dc50a3f039a270",
+      "modules": [],
+      "camera": {
+        "position": [
+          -55.69200000000001,
+          38.415199999999984,
+          56.548800000000014
+        ],
+        "target": [
+          0,
+          5,
+          0
+        ]
+      }
+    },
+    "boeing-787/gpt-6-sol-max": {
+      "entrySha256": "94c171cfbf0bca21b5a56210a1c7f8e4fbb829620a6a087ba9a2203df34972f5",
+      "modules": [],
+      "camera": {
+        "position": [
+          -41.95273694038536,
+          28.805211135162352,
+          50.343284328462424
+        ],
+        "target": [
+          0,
+          5.4,
+          0
+        ]
+      }
+    },
+    "boeing-787/mimo-v2.6-flash": {
+      "entrySha256": "18c541bda07bbcf2dcdfd9bfa9b57e5515c882cb90e56200113eb56fb7aba01a",
+      "modules": [],
+      "camera": {
+        "position": [
+          54.519999999999996,
+          22.883999999999986,
+          58.279999999999994
+        ],
+        "target": [
+          0,
+          5.4,
+          0
+        ]
+      }
+    },
+    "boeing-787/mimo-v2.6-pro": {
+      "entrySha256": "5025a6a7ac87242a5fb98d6c463c9c6b4499c291ecc800bd61221ff399ea91ee",
+      "modules": [],
+      "camera": {
+        "position": [
+          37.79999999999999,
+          17.200000000000003,
+          42
+        ],
+        "target": [
+          0,
+          6,
+          0
+        ]
+      }
+    },
+    "boeing-787/claude-opus-5.5-max": {
+      "entrySha256": "5d9a6405cb323a466cad191688040bc7937ebb8ce13c10ba63cacf10901a9a19",
+      "modules": [],
+      "camera": {
+        "position": [
+          -91.47628713400857,
+          44.01840877171796,
+          85.40655233872225
+        ],
+        "target": [
+          0.5,
+          4.6,
+          0
+        ]
+      }
+    },
+    "boeing-787/minimax-m3.1-max": {
+      "entrySha256": "8991185a8ea922c1065dd0b13a562fa7c7f0b222eebb4d28cfb6166a8b639d0c",
+      "modules": []
+    },
+    "boeing-787/gemini-3.8-flash-high": {
+      "entrySha256": "0ca614d5715a33707929067977340e20038fbf4fd9b0e3ee51b7cb01d541ee4c",
+      "modules": [],
+      "camera": {
+        "position": [
+          41.279999999999994,
+          16.32,
+          45.00000000000001
+        ],
+        "target": [
+          0,
+          6,
+          2
+        ]
+      }
+    },
+    "boeing-787/gemini-4.x-high": {
+      "entrySha256": "16430689cd6f8e46962cb52bd082326e240bab5253190f53e628202a033c4098",
+      "modules": [],
+      "camera": {
+        "position": [
+          64.00000000000001,
+          25.000000000000018,
+          72
+        ],
+        "target": [
+          0,
+          4.8,
+          -1
+        ]
+      }
+    },
+    "boeing-787/deepseek-v4.1-flash-xhigh": {
+      "entrySha256": "abc070fdda04c5487f9d6b853da8065978faa9fda2dc675a7b6a39236b86605b",
+      "modules": [],
+      "camera": {
+        "position": [
+          51.8,
+          24.60000000000001,
+          63.94999999999999
+        ],
+        "target": [
+          0,
+          5,
+          -1.5
+        ]
+      }
+    },
+    "boeing-787/gpt-6.1-sol-max": {
+      "entrySha256": "79ec16f4fe61f5eae4c31a3cc427d080d105a38ce8988ca6775756aa8a0ef0fa",
+      "modules": [],
+      "camera": {
+        "position": [
+          -64.5029425210874,
+          38.25147126054372,
+          72.24329562361791
+        ],
+        "target": [
+          0,
+          6,
+          0
+        ]
+      }
+    },
+    "denza-z/astra-pro": {
+      "entrySha256": "458324a617a8e54b469caa83cb2575d4f8fa7ad1c3fd9ce158b06bdd8878998d",
+      "modules": [
+        {
+          "path": "/app.bundle.js",
+          "sha256": "a2abf9bebe678319ab5b1ba3c546c0b8ba92a21f2d357fc7426bae98c3c1514b"
+        },
+        {
+          "path": "/public/vendor/three.module.js",
+          "sha256": "6cd0f4796e1866a48e61f1145d07db945bae4f9cb059afb46711c0abd43d6f85"
+        },
+        {
+          "path": "/public/vendor/three.r140.min.js",
+          "sha256": "1baf8525cd80caceabd6eb50da7961aa47f191ac7a68adb454c3a761b29244e2"
+        },
+        {
+          "path": "/src/geometry.js",
+          "sha256": "c2e5060ec2fd1cbe2ac656ea9b0298c8ddf12e0b284e7bfc5a762f580b23abdc"
+        },
+        {
+          "path": "/src/main.js",
+          "sha256": "16836eb1df4cf8edc3bac44dfc7f8fce9d9977e392b14f8d86e13ffa9b0237e9"
+        },
+        {
+          "path": "/src/materials.js",
+          "sha256": "5dfa58eecd632855d3f297d30b0659d54f90b349c9c3abba1063e8698a601d8f"
+        },
+        {
+          "path": "/src/orbit.js",
+          "sha256": "bdb0f6a2363b76ea173cb6b9ffa7fca284202a51bfbdb8203970583f7581e3c2"
+        },
+        {
+          "path": "/src/spec.js",
+          "sha256": "fc7f5c049bb4add6488f4d187935a83ce8c25194ed7ec95c4d4665854448dd9a"
+        },
+        {
+          "path": "/src/studio.js",
+          "sha256": "599209dc4d37fea6393db738a42b10b3dd0c17c403b3678ed1bfec6237846179"
+        },
+        {
+          "path": "/src/vehicle.js",
+          "sha256": "11c4167de0c1cf070a26c44b5dd5792d538f3d9330ac7976d19aa3fe33ab06fc"
+        },
+        {
+          "path": "/src/wheels.js",
+          "sha256": "0ba31ef2c404cf7bda1bd7f8710bedcf5c6a37cef4410ff1152dd0ca45361b90"
+        }
+      ]
+    },
+    "denza-z/gemini-4.x-high": {
+      "entrySha256": "d21596de8f9ab21e459d1790295e4728d14d66ef778905bb518ed3c747d4c521",
+      "modules": [
+        {
+          "path": "/assets/index-C_EkbYM8.js",
+          "sha256": "d72f9c3cadce852d5d8539c88615190cad81b73c300ae4b9b78783d126a18514"
+        }
+      ]
+    },
+    "denza-z/claude-opus-5.5-max": {
+      "entrySha256": "1a2ebb4794470270beda61624590a36f92fa442ba248464208ccb17508baa8cb",
+      "modules": [
+        {
+          "path": "/assets/index-D_fj58JS.js",
+          "sha256": "2e2c6b0e80eff1ae2d52270c559356d24e37ee61e624fabb842b51866c75211d"
+        },
+        {
+          "path": "/assets/mc.worker-CoOG6E0c.js",
+          "sha256": "43f64b9edd5e54fb567848e432d013cfbecd1fc76ffcd318113fa8516a3805a4"
+        },
+        {
+          "path": "/assets/three-JbToujQg.js",
+          "sha256": "d56e7f14998f88786aa51c78cd3cb91a41284356c0671a36a182ae9a737c8a1f"
+        }
+      ]
+    },
+    "supernovai/gemini-4.x-high-short": {
+      "entrySha256": "347931243fb69441f4bd678fd14b6ce26e82e152252713d09f3d2f58720bed62",
+      "modules": [
+        {
+          "path": "/js/app.js",
+          "sha256": "0fde8fdbe5d22e4a4e552c6038c20341268529deb0b7213446eb0306f764e41c"
+        },
+        {
+          "path": "/js/data.js",
+          "sha256": "62b75d51578525aca44bc9df045ca6387d94967039f1f831f5a3404e4bdad777"
+        },
+        {
+          "path": "/js/simulator.js",
+          "sha256": "b45249779030a63fcdc859533baaafded919d444256daac4799509613f045d42"
+        }
+      ]
+    },
+    "supernovai/gemini-4.x-high-long": {
+      "entrySha256": "6dfbfe2499f37e7a334ab15dc8c0dc6be34000335d662e5183793a2c5155474c",
+      "modules": [
+        {
+          "path": "/assets/index-C51Fyult.js",
+          "sha256": "a8b4eaa5e6c7b0e30e05926ac5b06d7d6b941fb40eba36670d9a65df75b5a0a9"
+        }
+      ]
+    },
+    "voxel-mountain-city/gemini-4.x-high-short": {
+      "entrySha256": "8e42fadfcfa82ca181d3c14f5df982422e513cc4d3b034a981cb898f2bc09432",
+      "modules": [
+        {
+          "path": "/src/architecturePrefabs.js",
+          "sha256": "1004887617b38f7bb0560925507e4592261fcbc0112dfe666fdadc40662607d4"
+        },
+        {
+          "path": "/src/atmosphereEffects.js",
+          "sha256": "d194b01d22cb2511bfaf19e85965c3328da876d42c54d3bbfd40f2daf830fd54"
+        },
+        {
+          "path": "/src/cityBuilder.js",
+          "sha256": "dd39aca8c1c1b42ff99f30447c3a91979f854b3476a5acee3e73a28a6bca0f53"
+        },
+        {
+          "path": "/src/config.js",
+          "sha256": "acb39893d59b56f899f2a89ed571bcb3994bf66b3ffda213a8286e7fefccd347"
+        },
+        {
+          "path": "/src/dayNightCycle.js",
+          "sha256": "61dadb922f2b3d4dc4e76946fdbfca8f8585e268cacd7ef39880dcdaac8e2db2"
+        },
+        {
+          "path": "/src/main.js",
+          "sha256": "5ec5687539300a7e4b51bda3cbecc46c419dad3e9ac1266de997e47916e54bff"
+        },
+        {
+          "path": "/src/terrainGenerator.js",
+          "sha256": "5e89d5d80add75fe967f79f2bd57329544d86d11696c37a97f1d567b92310008"
+        },
+        {
+          "path": "/src/tourController.js",
+          "sha256": "ded6b80488aa434285466127580911ebf0ddebda58207b6e4b8ce375d6103448"
+        },
+        {
+          "path": "/src/voxelEngine.js",
+          "sha256": "17d8a5185709bee33ea684466ce56fc84104d8443c1b2e614c8f2af0b6bd721c"
+        },
+        {
+          "path": "/vendor/three.min.js",
+          "sha256": "170c6789f43217c96b3170f4b42fafe135de7f7cd48497a4218f9757ee1d49fa"
+        }
+      ]
+    },
+    "voxel-mountain-city/gemini-4.x-high-long": {
+      "entrySha256": "7fa46584a7dd9bb31f3b3fde51ee5aae3ea5543f841aa8bf5b01d5eee24113aa",
+      "modules": [
+        {
+          "path": "/src/architecture.js",
+          "sha256": "b0957229771522bb2d682f7555936a53d81dbdeb69a4fb7f6455d826d6d893d0"
+        },
+        {
+          "path": "/src/config.js",
+          "sha256": "4997ff50faba8f4e3970a2048cab9edb15558cd2b1749c5b83a41b0124636aa2"
+        },
+        {
+          "path": "/src/environment.js",
+          "sha256": "60cbd9fd57373f6fbbccc1b0fa7077ca8c83b3c80aba0b256b41ed313806af1a"
+        },
+        {
+          "path": "/src/main.js",
+          "sha256": "3e47a1da3b241a13562510b3803194bdf72936ffa8cef14f34bd435754cbeb85"
+        },
+        {
+          "path": "/src/roadsAndTour.js",
+          "sha256": "da4d9ac271a0a25bf8dfc5ca6051dcca6a4aa116a7494605512ecc87bd907d2b"
+        },
+        {
+          "path": "/src/terrain.js",
+          "sha256": "f2cd917390935409ed67d37c13b7b12179530f0f214d7f38b544484a28eef42d"
+        },
+        {
+          "path": "/src/voxelBuilder.js",
+          "sha256": "3534da3ca466e617ed803b8587570e4d2d39d33a2658d5f86fea5b97fbae11a5"
+        },
+        {
+          "path": "/vendor/three.min.js",
+          "sha256": "af52afc49e2c10e0aed485b5d0a349709a5d0e9326cb0a1f38b1f9e44c4eb996"
+        }
+      ]
+    },
+    "show1-005/gemini-4.x-high": {
+      "entrySha256": "70d33cf89ba60387759166443edcc02bf626f2f1f8e01458a1c81ac8c4867868",
+      "modules": [
+        {
+          "path": "/assets/index-ByBRegrk.js",
+          "sha256": "b6518abfb011eb1b3deb28e21447fbf9977e40b5c992f8fac89160ced4fdbb0e"
+        },
+        {
+          "path": "/assets/three-BJqpiiID.js",
+          "sha256": "049034fd3da1f12d7e7cea2d7a92d74276f0ee7510ac63d8efbccf04df5be57b"
+        }
+      ]
+    },
+    "show1-005/claude-opus-5.5-max": {
+      "entrySha256": "0919b7969a7b065cfa318192a9b1fae374bbcfbf7c2736e6470a99e420272f02",
+      "modules": [
+        {
+          "path": "/assets/index-CwI1xD8b.js",
+          "sha256": "69b18a793b3b923667523c78ed85b5f53d4edc563ed37a99d7b909de48de0c7f"
+        },
+        {
+          "path": "/assets/worldgen.worker-3mofpHjd.js",
+          "sha256": "b49a539672ff83eb7c76314b429c272b18cf7234e7977249fa1c2657b6999e86"
+        }
+      ]
+    },
+    "show1-007/gemini-4.x-high": {
+      "entrySha256": "a97241984b812096a9ac735e0a2fd41b908b836598686781c07391b0e53e0061",
+      "modules": [
+        {
+          "path": "/js/main.js",
+          "sha256": "f243e8fd4bcf333d107659073a07c7140639019a96d5cb5309e9ae742751dc3a"
+        },
+        {
+          "path": "/js/physics.js",
+          "sha256": "22ef3bec5e403607607b70cb1dfc2ef290346ef9ffaaf554b429cabd4a3029c5"
+        },
+        {
+          "path": "/js/shaders.js",
+          "sha256": "ff0fb9ff4887a73926ab64d6b7ef2c554611e3f52889d66a24c7475fe34a9420"
+        },
+        {
+          "path": "/js/vendor/OrbitControls.js",
+          "sha256": "1f92b77bedbaf9fd5c30a983af27460486b6757ed1e318e2dd0fe4e06cd75513"
+        },
+        {
+          "path": "/js/vendor/three.min.js",
+          "sha256": "170c6789f43217c96b3170f4b42fafe135de7f7cd48497a4218f9757ee1d49fa"
+        }
+      ]
+    },
+    "show1-007/claude-opus-5.5-max": {
+      "entrySha256": "6aab21633a6ddc8c91bafe18af7a1132dd7bcff2a5f8262e20893aa650f63284",
+      "modules": []
+    },
+    "voxel-construction-site/claude-opus-5.5-max": {
+      "entrySha256": "e4114b0ff9df9070505056d4b56e49c85d08893e7b81e4e850ea168eabd49237",
+      "modules": []
+    },
+    "voxel-construction-site/glm-5.3-flash-arena": {
+      "entrySha256": "6790db2495cb23ac9fb9dcae4a65b2f2dab07adf72081b8dec9da72953b0da30",
+      "modules": []
+    },
+    "voxel-construction-site/gpt-6-luna-max-arena": {
+      "entrySha256": "8de16c1da10155172709e3921309e3b6861f79a213b317383fa43e60d54a48ee",
+      "modules": []
+    },
+    "voxel-construction-site/claude-opus-5-high-arena": {
+      "entrySha256": "ddfde112289f638c4db2779b774d8cf7854bba56c10397528242eefb86a375b8",
+      "modules": []
+    },
+    "voxel-construction-site/qwen3.8-27b-arena": {
+      "entrySha256": "10e2ecc22efe8e6ac728cbe91ec0eeecf76b1516afdaf70f035d3eb0735c54cc",
+      "modules": []
+    },
+    "voxel-construction-site/gemini-3.7-flash-arena": {
+      "entrySha256": "7e4c28b3a4730ffe939125b740ff46726e50b122e8f16a07baddd638691fee0a",
+      "modules": []
+    },
+    "voxel-construction-site/seed-2.1-pro-preview-arena": {
+      "entrySha256": "3c56f07ed767b206c9ce5c1a52882674e5d4197f5f7e6d77affbdfc84b41cc80",
+      "modules": []
+    },
+    "voxel-construction-site/glm-5.3-max": {
+      "entrySha256": "898f4cc7b730bb683cffafab861c5bf2451b694bd12db23c0b18782aadb7cbdd",
+      "modules": []
+    },
+    "voxel-construction-site/gemini-3.8-flash-max": {
+      "entrySha256": "663943b27d4db0c0d8c80487f00fc2fc247823e5b625c8270eda1f6e9bca2157",
+      "modules": []
+    },
+    "voxel-construction-site/gpt-6-astra-max": {
+      "entrySha256": "ed87b38156f2be880d5cc6fb70934dbfa6a1601bf3914fa1dae4c5c70055c2fa",
+      "modules": []
+    },
+    "voxel-construction-site/glm-5.3-max-diary": {
+      "entrySha256": "d7c7e57663c284b391bfabe90e71a914f89d969a63834557e9c1eaaed0d0897f",
+      "modules": []
+    },
+    "rainy-lotus-pond/gemini-4.x-high": {
+      "entrySha256": "16be94a27ab4f545858aee04ae1415a6e8aba51f8ba8739734c513a38653e185",
+      "modules": [
+        {
+          "path": "/assets/index-DJbgTKfR.js",
+          "sha256": "966dc41a4aa0e8b4b5a90a18e76c1f84500ecec827cca1f68f13e27080750ed7"
+        }
+      ]
+    },
+    "rainy-lotus-pond/claude-opus-5.5-max": {
+      "entrySha256": "6a49495999294ac2614f071b2f761d384d2f5919d5cca11fdbf486844669c34c",
+      "modules": [
+        {
+          "path": "/assets/app-CQRUL77r.js",
+          "sha256": "7decfc553dfd88cdf2c1ee717b6b56907ecf0bd0b9c86497807d599a2b7b783a"
+        },
+        {
+          "path": "/assets/debug-sim-D7Y0XeYi.js",
+          "sha256": "41b871498ca7d383198365ddcfe897eefd19c5e4af4e3ba1e22002ef9821ca4d"
+        },
+        {
+          "path": "/assets/frontend-Cg8CxH17.js",
+          "sha256": "93288049410cca3c45939d8c6b8fc5d2f9717e2684e952156a17e53e336bcf33"
+        },
+        {
+          "path": "/assets/index-BELQHmVy.js",
+          "sha256": "dff3338e0811de49ee3bbaa5ee66ef3a53884a4be8191d6e692db9e682767abc"
+        },
+        {
+          "path": "/assets/pond-CeuYIscW.js",
+          "sha256": "456b7d84216dba8990909036caef3e4d548ff52aa937f9034e80e54a42946c65"
+        },
+        {
+          "path": "/assets/rain-render-CKzh_tOd.js",
+          "sha256": "4f1fc6bce772bac1268d96b9bc29a4f4742dd5f404b32a1748b8fb8eafe31a52"
+        },
+        {
+          "path": "/assets/water-sim-BOrNzLrf.js",
+          "sha256": "e6ec6282ea62ed63ba50b43e16edddd1e2ade086abd76abbe8ddadd65a23ceff"
+        }
+      ]
+    },
+    "hukou-waterfall/gpt-6.1-sol-max": {
+      "entrySha256": "63e4a044be113aff327a513ddf235f4e6d580dbe22adb62029f69e32315dc3d5",
+      "modules": [
+        {
+          "path": "/assets/index-DI5z1xO3.js",
+          "sha256": "f55be56d6960182a4f3ea30f89afe4030c8188fe10b4c5f83bc11e759ec220f1"
+        }
+      ]
+    },
+    "hukou-waterfall/claude-opus-5.5-max": {
+      "entrySha256": "7e72b6d8dd3decc5fa7a0a0fad14f2af11c60091f2aeb942cff0244b9c0f5252",
+      "modules": [
+        {
+          "path": "/assets/index-A9oPXg8K.js",
+          "sha256": "f4a771f825da627cc58f01be254ccae923baaa71973e5adc68d5d9ea2133558c"
+        }
+      ]
+    },
+    "desk-lamp/deepseek-v4.1-flash": {
+      "entrySha256": "a8bae8c995e3425dee44209bbab703789967205167f598867430f3193a91828b",
+      "modules": [
+        {
+          "path": "/assets/index-iwuU3wCZ.js",
+          "sha256": "bc69f075548289e3a2fe81b49a3ead5a5c8d9942d2f099ffc36de886be8b3187"
+        }
+      ]
+    },
+    "desk-lamp/glm-5.3-flash-max": {
+      "entrySha256": "2fc0bed90998567acf9987c1f020522af9a35d9566dc2a82456a5e69f05e4cfc",
+      "modules": [
+        {
+          "path": "/assets/index-Cg6dUVMU.js",
+          "sha256": "2fbf1667f13581fd5e74c9bd276e03f254d56ed230a76477ef4af098eff639fa"
+        }
+      ]
+    },
+    "desk-lamp/gpt-5.6-luna-max": {
+      "entrySha256": "2350f0efed34c150991599abe6d5602542dfeeb761069f1337a78c6028dbbc2f",
+      "modules": [
+        {
+          "path": "/assets/index-C77-ex7A.js",
+          "sha256": "c417b8b3df3ec47ee75de72f1fca49cbbeda41179eeda5151eaf91b176764da1"
+        }
+      ]
+    },
+    "desk-lamp/gpt-5.6-sol-max": {
+      "entrySha256": "2926d81412314e946cd34e9fd94b1f483dcf55e87d800aa70e6fc53448bcbd4a",
+      "modules": [
+        {
+          "path": "/assets/index-kxbfxzqc.js",
+          "sha256": "b031235471355f59930de4f3c8edc998bfec29769068c55ebd46803689f6ce7b"
+        }
+      ]
+    },
+    "desk-lamp/gpt-5.6-terra-max": {
+      "entrySha256": "af73b8f89d4613ddee574758ef9290292f996aa7954477ef7ce5ef61c13f8f1c",
+      "modules": [
+        {
+          "path": "/assets/index-BtlaDWiJ.js",
+          "sha256": "eed722f7cd89dee56fbe1a7aaede65ff1152299756959748af582efde1cfbfea"
+        }
+      ]
+    },
+    "desk-lamp/gpt-6-astra-high": {
+      "entrySha256": "42eb7f319dc2aa5039b1c9a35b0e1c9bbc19eb74511bd3dba9d901fa8e9cc842",
+      "modules": [
+        {
+          "path": "/assets/index-BEokwfVP.js",
+          "sha256": "2597cf58fe310cd6c89dbd7fd3a0de10b583ac8f014d962d66471757a0327075"
+        }
+      ]
+    },
+    "desk-lamp/gpt-6-astra-max": {
+      "entrySha256": "918b2a6cdd5deae0a5951aed39961060621ff7112244ca531b650672cb369c80",
+      "modules": [
+        {
+          "path": "/assets/index-AiWhEWzv.js",
+          "sha256": "ff61cb600c9193211b96281be7e35db76c7119f40ac39550409229b42feeeb4e"
+        }
+      ]
+    },
+    "desk-lamp/gpt-6-luna-max": {
+      "entrySha256": "814f9fd65560620438ac49f2d0d4ff131d4bd8dd235445e6adb1997d9ebbea85",
+      "modules": [
+        {
+          "path": "/assets/index-DGZjhapV.js",
+          "sha256": "dc3be2a1f524cffaa9e7c910e76e9a46f28d9314298ad5d2927a2eaed321c9a5"
+        }
+      ]
+    },
+    "desk-lamp/gpt-6-sol-high": {
+      "entrySha256": "3b5c1c49c521fcfd14321835c7c06282977dee54a20d5214df3cece76b2ff4a3",
+      "modules": [
+        {
+          "path": "/assets/index-BvM-bFSV.js",
+          "sha256": "1a02fe729a49a33d660accd412ee26567f21473c147eb98e06aa54556bdf3f32"
+        }
+      ]
+    },
+    "desk-lamp/gpt-6-sol-max": {
+      "entrySha256": "4862a7652e643f55393f1795ba2b766828ee20ae53defe23a266a04c93a65b50",
+      "modules": [
+        {
+          "path": "/assets/index-D9fOea7w.js",
+          "sha256": "37470e05004efc1c67cc2e0bfea37483c388279c2680387ee1d7b5399e70df28"
+        }
+      ]
+    },
+    "desk-lamp/mimo-v2.6-flash": {
+      "entrySha256": "541755795de291da9d852572081abc2032567f3fc04297ab30a78bf072e304ea",
+      "modules": [
+        {
+          "path": "/assets/index-CUxSFV2_.js",
+          "sha256": "6f41e13acb455d3db1499470233905b9cbabe976a88f125798116004756ae53f"
+        }
+      ]
+    },
+    "desk-lamp/claude-opus-5.5-max": {
+      "entrySha256": "5e70fc3f3235560cb035d1b02ab7622adfadb6cf274c623336c954750d9d4210",
+      "modules": [
+        {
+          "path": "/assets/index-BeUzm5Aj.js",
+          "sha256": "b582558cb2fe3bd76927bcb9932421343dfcda9c0e2a74b09b27c0d30cce9ff0"
+        }
+      ]
+    },
+    "classical-fountain/gemini-4.x-high": {
+      "entrySha256": "c6ca290cebc34982910aa018c92e0e8a2877d0f7ac0bd66e0555d1ec92740667",
+      "modules": [
+        {
+          "path": "/assets/index-Bjfim52v.js",
+          "sha256": "d054a0ad760d5d70f49dbab07e606f1e1ab27e808d82df9c0943603b01ad0329"
+        }
+      ]
+    },
+    "classical-fountain/claude-opus-5.5-max": {
+      "entrySha256": "a91750145429067fee3041be843cd01ec518814ef74adc371cb6510110c9e822",
+      "modules": [
+        {
+          "path": "/assets/index-CAAAwuFP.js",
+          "sha256": "d9b07ac3df82146e32c7b3cbbe9b4da31811bab2e1dd51c269012549c719c47e"
+        }
+      ]
+    },
+    "sydney-opera-house/astra-pro": {
+      "entrySha256": "3bb0b69dc74d29bd886975fbbace2ccae717313e10258d51b05e059fded17a5e",
+      "modules": [
+        {
+          "path": "/assets/index-Cfnf6uRp.js",
+          "sha256": "9725ad4a1f4d5d66d691106f9d8890f52d541871ce01afd6f79741f6478ce811"
+        }
+      ]
+    },
+    "sydney-opera-house/claude-opus-5.5-max": {
+      "entrySha256": "58a4e362412266107e72d4ca760df329758f013ce93af27a0b78f207ea9aca67",
+      "modules": []
+    },
+    "sydney-opera-house/longcat-2.5-high": {
+      "entrySha256": "37a42421ea9e0a1c30b8ef4acb1e75d237cecf561cf44896667cadd9f6774bd6",
+      "modules": [
+        {
+          "path": "/assets/index-x6NJ88_7.js",
+          "sha256": "2e1a6f411519f659e98ea91a9fc098cf33d45911da515cd036f630dd26cc9c4b"
+        }
+      ]
+    },
+    "sydney-opera-house/gpt-6-astra-max": {
+      "entrySha256": "d423844e2e2cb872995921af6c103deeb63a80d11d9513ff60d8fd0a7d52d7e8",
+      "modules": []
+    },
+    "sydney-opera-house/gemini-4.x-high": {
+      "entrySha256": "79a38ce2b0958b036cb9b20b91cad33fc27df90ba2bbbdeea7a9c076902ab40a",
+      "modules": [
+        {
+          "path": "/assets/index-CPhQF4T1.js",
+          "sha256": "8219c984efd9b294cdd3a1be0fa5111f2d5aceaf12de56e5d74c18a23aeb4792"
+        }
+      ]
+    },
+    "sydney-opera-house/gpt-6.1-sol-max": {
+      "entrySha256": "703690a4c0eaad04708dbaa5d264d53d86ee5b4f6c1f1496432140b6bafe5e4a",
+      "modules": [
+        {
+          "path": "/assets/index-ywS3yyq-.js",
+          "sha256": "07fcef9c3e2980faec3c0e8568341fd8893d31e7211bfa944c6d42792b8d16b6"
+        },
+        {
+          "path": "/assets/three-CCtrHIfy.js",
+          "sha256": "1fb20f55cdf6a6b9937d6f72cfd42389353266e16d0d7118195cfb9986c2decb"
+        }
+      ]
+    },
+    "sailboat/gemini-4.x-high": {
+      "entrySha256": "7fda998f17e2b9f71e5c671f4860bb40c47bcbb7edddb643357ecbb7dc3ac9fc",
+      "modules": [
+        {
+          "path": "/assets/index-Bw_rh8jv.js",
+          "sha256": "b807d3718f71197d260d349ec9e390e36a2b575bace5c46fe15a8578daa357b2"
+        }
+      ]
+    },
+    "sailboat/gpt-6.1-sol-max": {
+      "entrySha256": "26f20cca321b7cdc304e23debb4a3fb2ba8528f9c0ce96cc9bbfb9e6ef491e2b",
+      "modules": [
+        {
+          "path": "/assets/index-BEj7vv3M.js",
+          "sha256": "3bd250ea8fc2c3032ac85c184b96cd176733e499d44cc407af7a5d72b543aa4d"
+        }
+      ]
+    },
+    "sailboat/claude-opus-5.5-max": {
+      "entrySha256": "cfad31d3dd1a4cf0b6b39b18bfcb459bad5656c4e5440dbc056129a27662e93d",
+      "modules": [
+        {
+          "path": "/assets/index-nqfa47eT.js",
+          "sha256": "b79d2c5053724f8b105c618e7ff854d89c9f557986417f60000892e39b3cfaf7"
+        }
+      ]
+    },
+    "rocket-simulation/gemini-4.x-high": {
+      "entrySha256": "48df6bf7185597bf02e1767f2b7d18ad4bc3226c98449c334c078b0d117e6d3e",
+      "modules": [
+        {
+          "path": "/assets/index-By70lq1S.js",
+          "sha256": "7bc1f44528b33a8939c464b6a6d66a181b2adae9adc958400a65558a64ce8893"
+        }
+      ]
+    },
+    "rocket-simulation/gpt-6.1-sol-max": {
+      "entrySha256": "82213f827a1a2f3a3f1236be12ae9565fa2cfead9f3db859525a62cb4345110b",
+      "modules": [
+        {
+          "path": "/assets/index-CMnO6zzo.js",
+          "sha256": "9d1630518d0fba4f11cd067252d6f83216fd5a917d58e7ef9301d28a45282a21"
+        },
+        {
+          "path": "/assets/three-C-w7SpMn.js",
+          "sha256": "eb54cb61b1ba4c5caa834416e48286d2398c00789bcc0ff7c1132b59a7c2c981"
+        }
+      ]
+    },
+    "rocket-simulation/gpt-6-astra-max": {
+      "entrySha256": "99b58c99e3e66dcc4760df01509f0744a56a427e45ee780a2659bc0bbac889b2",
+      "modules": []
+    },
+    "tengwang-pavilion/gpt-6-astra-max": {
+      "entrySha256": "656a4459388f5f4794c2b7cbdc9fecf99abdb5aa607181c26fa569cc0703f265",
+      "modules": []
+    },
+    "tengwang-pavilion/step-5-high": {
+      "entrySha256": "6184d539ac24eef19201d073b435714fbb73cecc63358303036cc579ecf98c39",
+      "modules": [
+        {
+          "path": "/assets/index-0LRTSIN6.js",
+          "sha256": "2a3a68df11ed6203e069507f4b5e0ec118d1e9882950c9bf0988ec20ce1b1e7e"
+        }
+      ]
+    },
+    "tengwang-pavilion/gemini-4.x-high": {
+      "entrySha256": "87bd6f35fe93de628e4c116fa4fdffbef6bc0c918c114a664c7dd1498f7ee563",
+      "modules": [
+        {
+          "path": "/assets/index-B1NIX5kA.js",
+          "sha256": "51f2dbacd6696eae51117404943ffc2d587574c0ad5436e9f4f147200c5062fb"
+        },
+        {
+          "path": "/assets/three-Dpu27Vd0.js",
+          "sha256": "670760601ac7bd10429f7f170048b73a2a78429e94cd26864f609a3b7de72bde"
+        }
+      ]
+    },
+    "tengwang-pavilion/claude-opus-5.5-max-yunxiu": {
+      "entrySha256": "1e789bdd2e588f8904a998e421ddefa083cec3171fd3f4e6d03b1679e905d472",
+      "modules": []
+    },
+    "campfire-campsite/gemini-4.x-high": {
+      "entrySha256": "ce1c1851eeca79031cbc3b8912f40fbfda00560e56ba290d6866ea52ea6230c0",
+      "modules": [
+        {
+          "path": "/assets/index-DEe4u45e.js",
+          "sha256": "8690068f5e8cdf0a6a77f88ecbd5638c6c39e806841d3b8e61a980ca55fe14b1"
+        },
+        {
+          "path": "/standalone.js",
+          "sha256": "a0b7f117a630512d0a7eb4c8a6327dfa48f7dd00b9a801f91944e23d0aea35f0"
+        }
+      ]
+    },
+    "campfire-campsite/deepseek-v4.1-flash": {
+      "entrySha256": "b250d1c071ed86c911281e8cadb8130cc15a8f3241d45823720aaf25cf9aa221",
+      "modules": [
+        {
+          "path": "/assets/index-D72bjqWk.js",
+          "sha256": "5c24e6515b6876ad8ae90918c253f763d9e0e2568d45ce22bf11159e01a30cfb"
+        }
+      ]
+    },
+    "campfire-campsite/gemini-3.1-pro": {
+      "entrySha256": "7225275a245e08925b40e78d61ed106ba676126ffa9f332794f9389d9f5326df",
+      "modules": [
+        {
+          "path": "/assets/index-zMeldEsJ.js",
+          "sha256": "1b4b1b3b97834c6d1c41395afffef8c9d311df5eede436f9530f7e792dbe1242"
+        }
+      ]
+    },
+    "campfire-campsite/gemini-3.7-flash": {
+      "entrySha256": "ef34de3c6793b48df82cfa6d4ab97d44e3bc34f0ecffa053e1bf02a021368385",
+      "modules": []
+    },
+    "campfire-campsite/glm-5.3-flash-max": {
+      "entrySha256": "f53b6534421cb2aa60097b437431343f162936dadc50ebc59de7517fb5543076",
+      "modules": [
+        {
+          "path": "/assets/index-ByLgkIHG.js",
+          "sha256": "9403ed955fc9d1496c96e9434d859fa16d10824542402d67e95942c2d0cc14d3"
+        }
+      ]
+    },
+    "campfire-campsite/mimo-v2.6-flash": {
+      "entrySha256": "96e647bbf304212e78284c7747ecf1440ec96b8add689476cbe1f12283229b45",
+      "modules": [
+        {
+          "path": "/assets/index-CjZLbM3R.js",
+          "sha256": "6cd4d4b36b9e3152077309f72efd3330300de8abc41369a61801c709ddf5e49c"
+        }
+      ]
+    },
+    "campfire-campsite/mimo-v2.6-pro": {
+      "entrySha256": "5d4195f390569dee0ad88aae52dd859004cab38c7af7dfd4ea3d9b0dffd95b00",
+      "modules": [
+        {
+          "path": "/assets/index-CDOF9VUf.js",
+          "sha256": "20b8f63af91b634b63448fba7dfb315386890131baf3d93a43c2c59cfcb129df"
+        }
+      ]
+    },
+    "campfire-campsite/claude-opus-5.5-max": {
+      "entrySha256": "0992bd8ce464c1aad91db1bed2e0bbd99b0969a6e467ca81c3a9687140677246",
+      "modules": []
+    }
+  }
+}

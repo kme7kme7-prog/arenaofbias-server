@@ -620,7 +620,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     const body = await readJson(ctx.req);
     const task = String(body.task ?? '');
     const snapshot = checkDatapack(ctx, task);
-    return arena.createMatch(ctx.user, task, body.previous, snapshot);
+    return arena.createMatch(ctx.user, task, body.previous, snapshot, body.avoidCooling === true);
   });
   router.on('POST', '/api/arena/matches/:id/vote', async (ctx) => {
     limit.write(ctx.user?.id ?? ctx.ip);

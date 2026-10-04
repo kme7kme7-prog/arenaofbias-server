@@ -1,5 +1,16 @@
 # HANDOFF.md · 当前状态
 
+## Gallery 盲评软冷却与跳过不揭晓（2026-10-04，已提交，未推送、未部署）
+
+- 本轮仅修改独立后端；按用户要求派 GPT-6.1 Sol / medium 子代理分别负责抽样与清理逻辑、盲评测试。初始工作区干净，不改 Gallery、作品、数据包、配置或数据库迁移。
+- 与 Gallery 的约定：创建对局接受可选布尔 `avoidCooling`；随机模式带 `true`，收到 `409` / `code: 'cooling'` 本组略过该题，范围内全冷却时再不带参数请求，只评本题不带参数。投票（含跳过）返回后才预取下一组。跳过仅返回 `{ choice: 'skip', counted: false, reason: 'skipped', a: null, b: null }`，不揭晓模型或作品。
+- 登录用户（含管理员）软冷却取本人按 `created_at` 倒序最近 6 个已揭晓对局（`a` / `b` / `tie`），再只保留 `decided_at > now - 15 分钟`；同题两侧作品优先回避，其他题的揭晓也占轮数。再揭晓满 6 组或过 15 分钟先到先解除；跳过、未决定不占轮数，未绑定邮箱等不计票揭晓仍参与，匿名用户维持上一组回避。默认允许软回退，只有真耗尽才返回 `exhausted`；`avoidCooling=true` 在放开冷却还有候选时返回 `cooling`。
+- `q.decide` 写入 `decided_at`，复用现有 `matches_user(user_id, created_at)` 索引，无需迁移。清理仅删除过期、无正式票引用且 `(choice IS NULL OR user_id IS NULL)` 的对局；登录已决定历史（含跳过）保留，内容令牌仍按 3 小时失效。
+- 已全文检索 `matches` 消费者：`datapack-switch` 只切换目录链接，不访问数据库；`datapack` 修剪仅保留未超过有效期加宽限期的包，过期历史不会永久固定旧包；排行榜与用户票数只读 `votes`，匿名容量只数匿名无票对局；`vote-reset` 统计全部历史并明确清空全部对局与票；作品移题原已同步所有历史对局。`reconcile-catalog` 跳过过期对局身份修正，但保留原有退役作品引用拦截，新增保留历史可能增加需显式处理的引用，不能为切包静默删除历史或放宽保护。Show1 现有已决定占位对局也按同一用户历史规则计入最近 6 组，无需修改其写入或迁移脚本。
+- 最终验证：Node 24.16.0，`npm run check` 95 文件 / 0 错，盲评专项 16/16，完整 `npm test` 293/293（0 失败、取消、跳过），`git diff --check` 通过。新增 6 项回归包含真实 SQLite 与 HTTP，覆盖跨题轮数与同题作品隔离、时间边界、普通用户与两类管理员不计票揭晓、跳过空侧、软回退 / 冷却 / 耗尽、匿名行为与清理保留。专项初次 HTTP 夹具缺 Origin 返回 403，补齐同源 Origin 后通过，未修改生产门禁。
+- 本仓无 `build` / `check:intake` 脚本，未做浏览器、Gallery 前端端到端联调、生产账号投票、生产 Node 22 复验、SSH、实际数据包切换 / 修剪或部署；消费者兼容性由源码审计和现有测试核对。[本轮归档](docs/archive/2026-10-04-blind-reveal-cooldown-wsnxxxs.md)。
+- 补记：Gallery 侧随后用本仓工作区代码与临时库完成真实联调（9 组无 6 组内重复、跳过 `a/b: null`、`avoidCooling` 409 `cooling` 与软回退、页面预取与随机参数），详见 Gallery 同日归档 `2026-10-04-arena-preload-cooldown-wsnxxxs.md`。用户授权提交（不含推送）。
+
 ## 会话闲置期放宽至 7 天（2026-10-04，本地完成并提交，未推送、未部署）
 
 - 原因：管理员闲置 30 分钟即掉登录，后台审核常被打断。用户说明账号不含个人信息，目标只是防随手撞库 / AI 批量尝试，这由 Turnstile、5 次 15 分钟失败锁定、scrypt 和 `__Host-` HttpOnly Secure Cookie 承担，闲置期不参与；用户选定普通账号与管理员统一 7 天。

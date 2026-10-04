@@ -10,7 +10,7 @@ import { limits } from '../server/config.mjs';
 import { MIGRATIONS, openDatabase } from '../server/db.mjs';
 import { createFeatured, selectFeatured } from '../server/featured.mjs';
 import { createLibrary } from '../server/library.mjs';
-import { createArena } from '../server/arena.mjs';
+import { createArena, pairKey } from '../server/arena.mjs';
 import { fitBradleyTerry, rankEntries, rankWorks } from '../server/ranking.mjs';
 
 const work = (id, model = 'a', extra = {}) => ({ id, model, title: id, effort: 'High',
@@ -281,4 +281,147 @@ test('board totals count only comparisons the fit scored', async () => {
       assert.deepEqual((await f.arena.leaderboard({ by })).totals, { votes: 1, voters: 1, entries: 2, tasks: 1 }, by);
     }
   } finally { f.close(); }
+});
+
+const coolingUser = { id: 'cooling-user', name: 'cooling-user', role: 'user' };
+function coolingFixture(entries = results()) {
+  const f = fixture(entries);
+  f.enable();
+  f.db.prepare("INSERT INTO users (id, name, name_key, role, salt, hash, created_at) VALUES (?, ?, ?, 'user', '', '', 1)")
+    .run(coolingUser.id, coolingUser.name, coolingUser.name);
+  f.arena = createArena({ ...f, limits, random: () => 0 });
+  let serial = 0;
+  f.reveal = ({ task = 'one', a = 'a1', b = 'b1', choice = 'a', created = Date.now() - 1000,
+    decided = Date.now() - 500, user = coolingUser.id, expires = Date.now() + 60000 } = {}) => {
+    const id = `reveal-${++serial}`;
+    f.db.prepare(`INSERT INTO matches (id, user_id, task_id, a_work, b_work, a_token, b_token,
+      created_at, expires_at, choice, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, user, task, a, b, `${id}-a`, `${id}-b`, created, expires, choice, decided);
+    return id;
+  };
+  f.draw = (strict = true, user = coolingUser) => f.arena.createMatch(user, 'one', undefined, undefined, strict);
+  f.pair = (match) => {
+    const row = f.db.prepare('SELECT a_work, b_work FROM matches WHERE id = ?').get(match.id);
+    return [row.a_work, row.b_work].sort();
+  };
+  return f;
+}
+
+test('login cooldown avoids both revealed works for a, b and tie, but excludes skip and undecided rounds', async () => {
+  for (const [choice, decided, expected] of [
+    ['a', 1, ['a2', 'b2']], ['b', 1, ['a2', 'b2']], ['tie', 1, ['a2', 'b2']],
+    ['skip', 1, ['a1', 'b1']], [null, null, ['a1', 'b1']], ['a', null, ['a1', 'b1']], ['b', null, ['a1', 'b1']],
+  ]) {
+    const f = coolingFixture();
+    try {
+      f.reveal({ choice, decided: decided ? Date.now() - 500 : null, created: Date.now() - 2000 });
+      // A later unsubmitted round avoids different works, independently of reveal cooldown.
+      f.reveal({ a: 'a2', b: 'b2', choice: null, decided: null, created: Date.now() - 1000 });
+      assert.deepEqual(f.pair(await f.draw()), expected, `${choice}/${decided}`);
+    } finally { f.close(); }
+  }
+});
+
+test('cooldown takes six reveals by creation time across tasks, then applies the fifteen-minute cutoff', async (t) => {
+  const now = 1800000000000;
+  t.mock.method(Date, 'now', () => now);
+  const f = coolingFixture([work('a1'), work('b1', 'b')]);
+  try {
+    const old = f.reveal({ created: now - 10000, decided: now - 1 });
+    for (let i = 0; i < 5; i++) f.reveal({ task: 'other', created: now - 9000 + i, decided: now - 16 * 60e3 });
+    f.reveal({ task: 'other', choice: 'skip', created: now - 7000 });
+    f.reveal({ task: 'other', choice: null, decided: null, created: now - 6000 });
+    await assert.rejects(() => f.draw(), (error) => error.code === 'cooling', 'the sixth reveal still cools');
+    f.reveal({ task: 'other', created: now - 8000, decided: now - 16 * 60e3 });
+    assert.deepEqual(f.pair(await f.draw()), ['a1', 'b1'], 'six newer cross-task reveals evict it even with older decisions');
+    f.db.prepare('DELETE FROM matches WHERE id != ?').run(old);
+    f.db.prepare('UPDATE matches SET decided_at = ? WHERE id = ?').run(now - 15 * 60e3, old);
+    assert.deepEqual(f.pair(await f.draw()), ['a1', 'b1'], 'cutoff is strict');
+    f.db.prepare('UPDATE matches SET decided_at = ? WHERE id = ?').run(now - 16 * 60e3, old);
+    assert.deepEqual(f.pair(await f.draw()), ['a1', 'b1'], 'older than fifteen minutes expires');
+    f.db.exec('DELETE FROM matches');
+    f.reveal({ task: 'other', created: now - 1000, decided: now - 500 });
+    assert.deepEqual(f.pair(await f.draw()), ['a1', 'b1'], 'same work ids in another task are not avoided');
+  } finally { f.close(); }
+});
+
+test('uncounted login reveals cool works for users and staff; skip saves a decision without revealing identities', async () => {
+  for (const role of ['user', 'moderator', 'admin']) {
+    const f = coolingFixture();
+    const user = { ...coolingUser, role };
+    try {
+      const match = await f.draw(false, user);
+      assert.deepEqual(f.pair(match), ['a1', 'b1']);
+      const revealed = f.arena.vote(user, match.id, 'a');
+      assert.deepEqual([revealed.counted, revealed.reason], [false, 'unbound']);
+      assert.ok(revealed.a && revealed.b);
+      assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM votes').get().n, 0);
+      const next = await f.draw(true, user);
+      assert.deepEqual(f.pair(next), ['a2', 'b2'], role);
+      assert.deepEqual(f.arena.vote(user, next.id, 'skip'), {
+        choice: 'skip', counted: false, reason: 'skipped', a: null, b: null,
+      });
+      const saved = f.db.prepare('SELECT choice, decided_at FROM matches WHERE id = ?').get(next.id);
+      assert.equal(saved.choice, 'skip');
+      assert.ok(saved.decided_at > 0);
+      assert.deepEqual(f.pair(await f.draw(true, user)), ['a2', 'b2'], 'skipped works do not cool when previous avoidance must relax');
+    } finally { f.close(); }
+  }
+});
+
+test('strict draws report cooling, default draws fall back, and voted pools remain exhausted', async () => {
+  const f = coolingFixture([work('a1'), work('b1', 'b')]);
+  try {
+    f.reveal();
+    await assert.rejects(() => f.draw(), (error) => error.status === 409 && error.code === 'cooling');
+    assert.deepEqual(f.pair(await f.arena.createMatch(coolingUser, 'one')), ['a1', 'b1']);
+    assert.deepEqual(f.pair(await f.draw(true, null)), ['a1', 'b1'], 'anonymous draws do not use login cooldown');
+    f.db.prepare(`INSERT INTO votes (id, match_id, user_id, task_id, a_work, b_work, pair_key, choice, created_at)
+      VALUES ('voted', 'voted-match', ?, 'one', 'a1', 'b1', ?, 'a', ?)`).run(coolingUser.id, pairKey('one', 'a1', 'b1'), Date.now());
+    for (const strict of [false, true]) await assert.rejects(() => f.draw(strict), (error) => error.code === 'exhausted');
+  } finally { f.close(); }
+});
+
+test('cleanup retains expired login decisions without counted votes, including skips, and all voted matches', () => {
+  const f = coolingFixture();
+  try {
+    const expires = Date.now() - 1;
+    const retained = ['a', 'b', 'tie', 'skip'].map((choice) => f.reveal({ choice, expires }));
+    f.reveal({ choice: null, decided: null, expires });
+    f.reveal({ user: null, expires });
+    const voted = f.reveal({ user: null, choice: null, decided: null, expires });
+    f.db.prepare(`INSERT INTO votes (id, match_id, task_id, a_work, b_work, pair_key, choice, created_at)
+      VALUES ('saved', ?, 'one', 'a1', 'b1', 'saved', 'a', 1)`).run(voted);
+    retained.push(voted);
+    assert.equal(f.arena.cleanupExpiredMatches(), 2);
+    assert.deepEqual(f.db.prepare('SELECT id FROM matches ORDER BY id').all().map((row) => row.id), retained.sort());
+  } finally { f.close(); }
+});
+
+test('match HTTP route forwards only a boolean avoidCooling flag', async () => {
+  const f = coolingFixture([work('a1'), work('b1', 'b')]);
+  let platform, server;
+  try {
+    f.reveal();
+    platform = createPlatform({ config: f.config, limits });
+    let cookie;
+    platform.auth.startSession({ setHeader: (_name, value) => { cookie = value.split(';')[0]; } }, coolingUser.id);
+    server = createServer(platform.handleSite).listen(0, '127.0.0.1');
+    await new Promise((resolve) => server.once('listening', resolve));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const post = async (body) => {
+      const response = await fetch(`${base}/api/arena/matches`, {
+        method: 'POST', headers: { cookie, origin: base, 'Content-Type': 'application/json' }, body: JSON.stringify({ task: 'one', ...body }),
+      });
+      return { status: response.status, data: await response.json() };
+    };
+    const strict = await post({ avoidCooling: true });
+    assert.equal(strict.status, 409);
+    assert.equal(strict.data.code, 'cooling');
+    for (const body of [{}, { avoidCooling: false }, { avoidCooling: 'true' }]) assert.equal((await post(body)).status, 200);
+  } finally {
+    if (server) await new Promise((resolve) => server.close(resolve));
+    await platform?.close();
+    f.close();
+  }
 });

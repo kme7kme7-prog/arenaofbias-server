@@ -715,7 +715,9 @@ function editDialog(w) {
 // The camera answer arrives from the work's content origin via postMessage (server/bridge.mjs).
 let calibrationCapture = null;
 addEventListener('message', (event) => {
-  if (event.data?.aob === 'camera' && calibrationCapture) calibrationCapture(event.data.camera);
+  if (event.data?.aob === 'camera' && calibrationCapture
+    && event.source === calibrationCapture.frame.contentWindow
+    && event.origin === new URL(calibrationCapture.frame.src).origin) calibrationCapture(event.data.camera);
 });
 
 // Same contain-and-offset math as the arena frontend (Show1 lib/work-framing.ts), so the
@@ -849,15 +851,17 @@ function calibrationDialog(w) {
   dragLayer.addEventListener('pointercancel', endDrag);
   grab.addEventListener('click', () => {
     camState.textContent = '等待回包…';
-    view.contentWindow?.postMessage({ aob: 'get-camera' }, '*');
+    if (view.getAttribute('src')) view.contentWindow?.postMessage({ aob: 'get-camera' }, new URL(view.src).origin);
   });
   calibrationCapture = (cam) => {
     if (!cam) { camState.textContent = '这件作品没有可抓取的 3D 相机（可能是纯 2D 页面）。'; return; }
+    if (!['position', 'target'].every(key => Array.isArray(cam[key]) && cam[key].length === 3 && cam[key].every(Number.isFinite))) return;
     draft.camera = { position: [...cam.position], target: [...cam.target] };
     for (const key of ['position', 'target']) [0, 1, 2].forEach((i) => { form.querySelector(`[data-calib-num="${key}${i}"]`).value = Math.round(cam[key][i] * 1000) / 1000; });
     $('[data-calib-camera-enabled]', form).checked = true;
     camState.textContent = '已抓取当前视角 ✓';
   };
+  calibrationCapture.frame = view;
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     const num = (name) => Number(form.querySelector(`[data-calib-num="${name}"]`).value);

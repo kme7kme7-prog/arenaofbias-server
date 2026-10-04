@@ -6,15 +6,7 @@
 <meta name="theme-color" content="#121211">
 <link rel="icon" href="/admin/favicon.svg" type="image/svg+xml">
 <title>管理后台 · 同题异答</title>
-<script>
-// Restore each system's visual language before first paint.
-try {
-  const system = localStorage.getItem('admin-system') === 'arena' ? 'arena' : 'gallery';
-  document.documentElement.dataset.system = system;
-  document.documentElement.dataset.theme = localStorage.getItem(`admin-theme-${system}`)
-    || (system === 'gallery' ? localStorage.getItem('admin-theme') || 'dark' : 'light');
-} catch { /* private mode */ }
-</script>
+<script src="/admin/theme-boot.js"></script>
 <link rel="stylesheet" href="/admin/admin.css">
 </head>
 <body>

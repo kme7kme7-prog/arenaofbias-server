@@ -803,6 +803,8 @@ test('retired snapshot ballots never enter live vote or rating responses', () =>
     assert.equal((await call(base, 'POST', '/api/track', { body: 'not json', raw: true })).status, 204);
     assert.equal((await call(base, 'POST', '/api/track', { body: '{"path":"/x"}', raw: true })).status, 204);
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM page_views').get().n, 1, 'invalid payloads are dropped silently');
+    assert.equal((await call(base, 'POST', '/api/track', { body: { path: '/invented-path' } })).status, 204);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM page_views').get().n, 1, 'arbitrary paths cannot enter the admin statistics');
   }));
 
   test('retired share endpoints have no routes', () => withServer({}, async ({ base }) => {

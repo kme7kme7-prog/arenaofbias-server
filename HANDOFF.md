@@ -827,3 +827,9 @@
 - 最终部署集合与逐文件哈希通过：203 项 tracked 源码（生产数据包配置单独校验）、69 项 runtime、数据包 2283 文件、Gallery 2337 文件、game 941 文件；保留的 121 项旧 game 文件不变，旧包完整哈希保持。API v2 / 后端 9bf06d0 / Gallery 0a6 / game b549 共享同一官方目录 digest。
 - 24 项公网 HTTP 核对通过，涵盖 CORS、匿名权限、旧 game API 的 526 件作品 / 25 题、4 个 legacy 入口、fold 与内容 origin。服务 active / running、ExecMainStatus=0、NRestarts=0；主机 journal 不可读取，不据此声称日志无错误。未用生产账号登录或提交投票，未逐一验收全部作品交互。
 - 本次仅本地补记最新节与本轮 CSP 归档，不再 commit / push，保持正式部署 SHA；既有脏交接、归档与本地 pin 原样保留。
+
+## 漏洞报告核查补丁（2026-10-05，本地完成，未推送、未部署）
+
+- 验证码验证/绑定/重置增加独立每IP30次/分钟额度；登录挑战通过后占密码计算名额；TRUST_PROXY兼容loopback/1、拒绝其他非关闭值；Turnstile半配置失败关闭。后台相机校验当前iframe窗口/源及有限三元向量，主题启动外置、脚本CSP收紧；内容服务统一HSTS与错误页转义；统计限制合法路径，完整目录明确拒绝分页参数。
+- 不改竞猜、多贴纸主键、注销用户历史票或数据库迁移。新增SSH密钥认证模板但未安装；无运维凭据，生产代理配置、系统包和DNS尚待确认/处理。
+- check96/0、test302/302、diff检查通过。真实本地3D后台取景与消息来源校验通过，未保存业务参数；无生产发信、投票、并发攻击、推送或部署。日志在忽略output，临时库由Gallery harness管理。[本轮归档](docs/archive/2026-10-05-security-review-wsnxxxs.md)。

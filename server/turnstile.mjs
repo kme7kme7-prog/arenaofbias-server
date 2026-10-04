@@ -11,7 +11,10 @@ export const turnstileEnabled = () => Boolean(process.env.TURNSTILE_SITE_KEY && 
 
 // 三态结果：ok 放行 / fail 没过（脚本或 token 过期）/ down 校验服务够不着
 export const verifyTurnstile = async (token, ip) => {
-  if (!turnstileEnabled()) return 'ok';
+  if (!turnstileEnabled()) {
+    // An intentionally disabled local challenge differs from a half-configured one.
+    return process.env.TURNSTILE_SITE_KEY || process.env.TURNSTILE_SECRET_KEY ? 'down' : 'ok';
+  }
   if (typeof token !== 'string' || !token) return 'fail';
   const body = new URLSearchParams({
     secret: process.env.TURNSTILE_SECRET_KEY,

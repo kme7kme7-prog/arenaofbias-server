@@ -77,13 +77,14 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const readGuard = createReadGuard(config);
   const limit = {
     auth: rateLimit(60e3, 10, '尝试次数太多，请一分钟后再试'),
+    codes: rateLimit(60e3, 30, '验证码尝试过多，请一分钟后再试'),
     write: rateLimit(60e3, 120),
     drafts: rateLimit(10 * 60e3, 12, '上传太频繁，请稍后再试'),
     matches: rateLimit(60e3, 60),
   };
   const siteCsp = [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com",
+    "script-src 'self' https://challenges.cloudflare.com",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
@@ -214,12 +215,12 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     limit.auth(ctx.ip);
     const body = await readJson(ctx.req);
     const name = body.name ?? body.username;
+    // Challenge requests must not occupy the shared password-hashing budget.
+    const verdict = await verifyTurnstile(body.turnstileToken, ctx.ip);
+    if (verdict === 'fail') fail(400, '人机验证未通过，请重试。');
+    if (verdict === 'down') fail(503, '人机验证服务暂时不可用，请稍后重试。');
     const attempt = loginSecurity.begin(name, ctx.ip);
     try {
-      // Every account follows the same challenge flow, before checking credentials.
-      const verdict = await verifyTurnstile(body.turnstileToken, ctx.ip);
-      if (verdict === 'fail') fail(400, '人机验证未通过，请重试。');
-      if (verdict === 'down') fail(503, '人机验证服务暂时不可用，请稍后重试。');
       let user;
       try { user = await auth.login(name, body.password); }
       catch (error) {
@@ -236,9 +237,18 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   }));
   router.on('GET', '/api/auth/turnstile', () => ({ siteKey: turnstileEnabled() ? turnstileSiteKey() : null }));
   router.on('POST', '/api/auth/email/send', async (ctx) => emailAuth.send(await readJson(ctx.req), ctx.user, ctx.ip));
-  router.on('POST', '/api/auth/email/verify', async (ctx) => emailAuth.verify(await readJson(ctx.req), ctx.user));
-  router.on('POST', '/api/auth/email/bind', async (ctx) => ({ user: compatUser(emailAuth.bind(await readJson(ctx.req), ctx.user)) }));
-  router.on('POST', '/api/auth/password/reset', async (ctx) => emailAuth.reset(await readJson(ctx.req)));
+  router.on('POST', '/api/auth/email/verify', async (ctx) => {
+    limit.codes(ctx.ip);
+    return emailAuth.verify(await readJson(ctx.req), ctx.user);
+  });
+  router.on('POST', '/api/auth/email/bind', async (ctx) => {
+    limit.codes(ctx.ip);
+    return { user: compatUser(emailAuth.bind(await readJson(ctx.req), ctx.user)) };
+  });
+  router.on('POST', '/api/auth/password/reset', async (ctx) => {
+    limit.codes(ctx.ip);
+    return emailAuth.reset(await readJson(ctx.req));
+  });
   router.on('POST', '/api/auth/logout', (ctx) => {
     auth.endSession(ctx.req, ctx.res);
     return { ok: true };
@@ -765,6 +775,9 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         return serveSite(req, res, url.pathname);
       }
       if (req.method === 'GET' || req.method === 'HEAD') readGuard.api(req, url.pathname);
+      if (['GET', 'HEAD'].includes(req.method)
+        && ['/api/bootstrap', '/api/show1/works', '/api/works', '/api/prompts', '/api/votes', '/api/ratings'].includes(url.pathname)
+        && ['limit', 'offset', 'page'].some((key) => url.searchParams.has(key))) fail(400, '此接口返回完整目录，不支持分页参数', 'unsupported_pagination');
       const route = router.match(req.method, url.pathname);
       if (!route) fail(404, '接口不存在');
       if (route.methodNotAllowed) fail(405, '不支持这个操作');

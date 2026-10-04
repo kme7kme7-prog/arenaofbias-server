@@ -10,7 +10,61 @@ import { createPlatform } from '../server/app.mjs';
 import { guardCaptureContext } from '../server/capture.mjs';
 import { limits } from '../server/config.mjs';
 import { clientIp } from '../server/http.mjs';
+import { parseTrustProxy } from '../server/config.mjs';
+import { verifyTurnstile } from '../server/turnstile.mjs';
 
+test('proxy configuration accepts the safe legacy loopback value and rejects unknown values', () => {
+  assert.equal(parseTrustProxy('loopback'), true);
+  assert.equal(parseTrustProxy('1'), true);
+  assert.equal(parseTrustProxy('0'), false);
+  assert.equal(parseTrustProxy(), false);
+  assert.throws(() => parseTrustProxy('true'), /TRUST_PROXY/);
+});
+
+test('a partly configured challenge fails closed', async () => {
+  const previous = [process.env.TURNSTILE_SITE_KEY, process.env.TURNSTILE_SECRET_KEY];
+  try {
+    process.env.TURNSTILE_SITE_KEY = 'site-only';
+    delete process.env.TURNSTILE_SECRET_KEY;
+    assert.equal(await verifyTurnstile('anything', '127.0.0.1'), 'down');
+    delete process.env.TURNSTILE_SITE_KEY;
+    process.env.TURNSTILE_SECRET_KEY = 'secret-only';
+    assert.equal(await verifyTurnstile('anything', '127.0.0.1'), 'down');
+  } finally {
+    ['TURNSTILE_SITE_KEY', 'TURNSTILE_SECRET_KEY'].forEach((key, i) => {
+      if (previous[i] === undefined) delete process.env[key];
+      else process.env[key] = previous[i];
+    });
+  }
+});
+
+test('code verification and password reset share a source budget without spending the login budget', async () => {
+  await withSite(async (base) => {
+    for (let i = 0; i < 31; i++) {
+      const response = await fetch(base + (i % 2 ? '/api/auth/password/reset' : '/api/auth/email/verify'), {
+        method: 'POST', headers: { origin: base, 'content-type': 'application/json' },
+        body: JSON.stringify({ purpose: 'reset', username: 'missing', code: '000000', password: 'valid-length' }),
+      });
+      assert.equal(response.status, i < 30 ? 400 : 429);
+      if (i === 30) assert.ok(Number(response.headers.get('retry-after')) > 0);
+      await response.arrayBuffer();
+    }
+    const login = await fetch(base + '/api/auth/login', { method: 'POST',
+      headers: { origin: base, 'content-type': 'application/json' }, body: JSON.stringify({ name: 'missing', password: 'wrong' }) });
+    assert.equal(login.status, 401);
+    await login.arrayBuffer();
+  });
+});
+
+test('complete catalog endpoints reject unsupported pagination explicitly', async () => {
+  await withSite(async (base) => {
+    for (const query of ['limit=1', 'limit=-1', 'offset=-1', 'page=0']) {
+      const response = await fetch(base + '/api/bootstrap?' + query);
+      assert.equal(response.status, 400);
+      assert.equal((await response.json()).code, 'unsupported_pagination');
+    }
+  });
+});
 async function withSite(run, trustProxy = false) {
   const root = mkdtempSync(join(tmpdir(), 'security-regression-'));
   const dist = join(root, 'dist');

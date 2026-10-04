@@ -474,7 +474,10 @@ export function registerShow1Compat(router, deps) {
       let body = {};
       try { body = await readJson(ctx.req); } catch { body = {}; }
       const path = String(body?.path ?? '');
-      if (path && path.length <= 64) {
+      const roundPath = /^\/(?:#(?:arena|formal)|vote)\/(\d{3})$/.exec(path);
+      const knownPath = ['/', '/admin.html', '/#home', '/#play', '/#event', '/#guess', '/#prompts', '/#rank', '/#rank/formal', '/#arena', '/#random', '/#terms', '/#privacy'].includes(path)
+        || (roundPath && published(roundPath[1]));
+      if (knownPath) {
         const now = Date.now();
         const day = new Date(now + 8 * 3600e3).toISOString().slice(0, 10);
         q.pageView.run(day, path, sha256(`${saltOf(day)}:${ctx.ip}`), now);

@@ -16,6 +16,9 @@ const SCRIPTS = {
 };
 
 function errorPage(res, status, title, detail, headers = {}) {
+  const escape = (value) => String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+  title = escape(title);
+  detail = escape(detail);
   const body = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title>`
     + '<style>html{color-scheme:light dark}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#121211;color:#ecebe6;font:15px/1.7 system-ui,sans-serif;text-align:center}b{display:block;font:600 22px "Songti SC","Noto Serif SC",serif;letter-spacing:.04em}span{color:#8d8a82;font-size:13px}</style>'
     + `<main><b>${title}</b><span>${detail}</span></main>`;
@@ -157,6 +160,7 @@ export function createContentHandler({ config, library, arena, siteOrigins, read
   }
 
   return async (req, res) => {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000');
     try {
       return await serve(req, res);
     } catch (error) {

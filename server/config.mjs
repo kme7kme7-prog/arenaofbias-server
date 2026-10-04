@@ -9,6 +9,12 @@ const env = process.env;
 const int = (value, fallback) => (/^\d+$/.test(value ?? '') ? Number(value) : fallback);
 const list = (value, fallback) => (value ?? fallback).split(',').map((item) => item.trim()).filter(Boolean);
 
+export function parseTrustProxy(value = '') {
+  if (['1', 'loopback'].includes(value)) return true;
+  if (['', '0'].includes(value)) return false;
+  throw new Error('TRUST_PROXY must be 0, 1, or loopback');
+}
+
 const port = int(env.PORT, 5173);
 const contentPort = int(env.CONTENT_PORT, 5180);
 
@@ -51,7 +57,7 @@ export const config = {
   },
   secureCookies: env.COOKIE_SECURE === '1',
   cookieSameSite: env.COOKIE_SAME_SITE || 'Lax',
-  trustProxy: env.TRUST_PROXY === '1',
+  trustProxy: parseTrustProxy(env.TRUST_PROXY),
   readLimits: {
     api: Math.max(1, int(env.READ_API_PER_MIN, 180)),
     catalog: Math.max(1, int(env.READ_CATALOG_PER_MIN, 30)),

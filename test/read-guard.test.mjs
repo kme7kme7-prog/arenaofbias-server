@@ -112,6 +112,7 @@ test('API static files and work hosts share resource budgets, with a separate HT
     assert.equal((await request('/', { content: true, headers: host('2') })).status, 200);
     const page = await request('/index.html?cache=two', { content: true, method: 'HEAD', headers: host('3') });
     assert.equal(page.status, 429);
+    assert.equal(page.headers.get('strict-transport-security'), 'max-age=31536000');
     assert.ok(Number(page.headers.get('retry-after')) > 0);
     assert.equal((await request('/app.js', { content: true, headers: host('4') })).status, 200);
     const file = await request('/app.js?cache=three', { content: true, headers: host('5') });

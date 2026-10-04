@@ -1,5 +1,13 @@
 # HANDOFF.md · 当前状态
 
+## 后端发布前核对（2026-10-04，已验证，待统一推送部署）
+
+- 用户授权提交已有修改、联调、适用分支合并、推送与部署，指定 GPT-6.1 Sol / medium；本代理只负责独立后端，生产 SSH 与统一部署由父代理执行。初始 main 干净，源码为 `8e8e6f8a52bc290bd3c9ed6340899e47296eb3d4`。fetch/prune 与实际远端 heads 核对：origin 仅 main=`dc1977c`，待推两条提交为会话 7 天与盲评软冷却；五条本地支线都没有 main 之外的提交，无需合并。
+- 所有 worktree 已核对。旧 backend-integration 的本地 datapack 配置、gallery-csp-repair 的历史上线补记与 review 隔离发布暂存/未跟踪副本均保留；review 源码是 main 已含功能的旧版本，不能为清脏或合支线覆盖主线。没有收入配置、生成物或业务数据。
+- 审查会话闲置、`avoidCooling`、跳过空侧返回和历史清理；与 origin/main 没有新迁移或配置差异。现有后端已支持注册邮箱发码、必填邮箱/验证码、事务创建已绑定账户与重复邮箱校验，Gallery 注册分支无需后端新分支。
+- Node 24.16.0，`npm run check` 95 文件 / 0 错；首次完整测试 292/293，既有随机端口被 fetch 拒绝（bad port）；未改无关测试，完整重跑 `npm test` 293/293，0 失败/取消/跳过。`git diff --check` 通过。真实本地目录只读加载：20 题 / 176 件，digest `b9a2a5d29c8705089d4cf9b16752bee2cf589c2393f7816734c28da677621cab`。
+- 本仓无 build/check:intake 脚本；本代理未做浏览器、真实 SMTP/CAPTCHA、生产账号写入、SSH、部署或生产 Node 22 复验。测试日志保留在忽略 output/coordinated-backend-release-20261004-test*.log；跨前端和统一发布结果由父代理补记。[本轮归档](docs/archive/2026-10-04-backend-release-readiness-wsnxxxs.md)。
+
 ## Gallery 盲评软冷却与跳过不揭晓（2026-10-04，已提交，未推送、未部署）
 
 - 本轮仅修改独立后端；按用户要求派 GPT-6.1 Sol / medium 子代理分别负责抽样与清理逻辑、盲评测试。初始工作区干净，不改 Gallery、作品、数据包、配置或数据库迁移。

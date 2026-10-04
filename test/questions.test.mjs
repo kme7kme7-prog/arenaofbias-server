@@ -116,6 +116,45 @@ test('admin question edits validate metadata, preserve decisions and protect exi
   } finally { db.close(); }
 });
 
+test('authors resubmit a rejected question that was never public', () => {
+  const db = openDatabase(':memory:');
+  try {
+    for (const id of ['owner', 'other']) db.prepare('INSERT INTO users (id, name, name_key, salt, hash, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(id, id, id, 'unused', 'unused', 1);
+    const questions = createQuestions(db);
+    const owner = { id: 'owner', name: 'owner', role: 'user' }, other = { id: 'other', name: 'other', role: 'user' }, admin = { id: 'admin', name: 'root', role: 'admin' };
+    const body = { title: 'Question', summary: 'Summary', prompt: 'Line one\nVague', category: '静态网页', templates: ['static'], domains: ['数学'] };
+    const question = questions.create(owner, body);
+    const row = () => db.prepare('SELECT * FROM questions WHERE id = ?').get(question.id);
+    const mine = () => questions.byOwner('owner', owner).find((item) => item.id === question.id);
+    const refused = (actor, data, status) => assert.throws(() => questions.resubmit(actor, question.id, data), (error) => error.status === status);
+    refused(owner, { prompt: 'Changed' }, 409);
+    assert.equal(Object.hasOwn(mine(), 'resubmittable'), false);
+    questions.review(admin, question.id, { status: 'rejected', reason: 'Add the canvas size' });
+    assert.equal(mine().resubmittable, true);
+    refused(other, { prompt: 'Changed' }, 404);
+    for (const data of [{ title: 'Question' }, { acceptsUploads: false }, { prompt: 'Changed', removeSamples: 'yes' }]) refused(owner, data, 400);
+    db.prepare(`INSERT INTO works (id, task_id, owner_id, title, model_other, content_key, source_name, root,
+      entry, file_count, bytes, digest, checks, trial, created_at, updated_at)
+      VALUES ('sample', ?, 'owner', 'Sample', 'Model', 'sample-key', 'sample.html', '', 'index.html', 1, 100, 'digest', '[]', '{}', 1, 1)`).run(question.id);
+    const saved = questions.resubmit(owner, question.id, { ...body, prompt: 'Line one\nCanvas 1280×720', removeSamples: true });
+    const stored = JSON.parse(row().moderation);
+    assert.deepEqual(saved.moderation, { status: 'pending', at: stored.at, round: 2, previous: { reason: 'Add the canvas size', at: stored.previous.at } });
+    assert.equal(stored.previous.prompt, body.prompt); assert.equal(stored.previous.reviewer, 'root');
+    assert.equal(row().prompt, 'Line one\nCanvas 1280×720');
+    assert.ok(db.prepare('SELECT deleted_at FROM works WHERE id = ?').get('sample').deleted_at);
+    const audit = JSON.parse(db.prepare("SELECT detail FROM audit WHERE task_id = ? AND action = 'question-resubmit'").get(question.id).detail);
+    assert.equal(audit.samples, 1); assert.equal(audit.prompt.changed, '已修改'); assert.equal(audit.title, undefined);
+    questions.review(admin, question.id, { status: 'rejected', reason: 'Still vague' });
+    assert.equal(JSON.parse(row().moderation).round, 2);
+    for (const n of [1, 2, 3]) questions.create(owner, { ...body, title: `Other ${n}` });
+    refused(owner, { title: 'Third try' }, 429);
+    questions.review(admin, question.id, { status: 'approved' });
+    questions.review(admin, question.id, { status: 'rejected', reason: 'Withdrawn' });
+    assert.equal(mine().resubmittable, false);
+    refused(owner, { title: 'Again' }, 409);
+  } finally { db.close(); }
+});
+
 describe('question and sample review lifecycle', () => {
   let root, platform, site, content, base;
   const cookies = new Map();

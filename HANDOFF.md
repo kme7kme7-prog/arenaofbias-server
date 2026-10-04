@@ -1,5 +1,10 @@
 # HANDOFF.md · 当前状态
 
+## 被拒题目修改后重新提交（2026-10-05，已本地提交，未推送、未部署）
+
+- 新增 `POST /api/questions/:id/resubmit`：作者本人、rejected 且从未 approved 的数据库题目可改字段后回到 pending；不查发起资格，计入 3 道待审限额，无改动 400，可选 removeSamples。moderation 记 round 与上次理由、审核人和内容；新决定保留 round。`GET /api/me` 的 rejected 题目带 resubmittable。无迁移。
+- check95/0、test299/299（新增作者重提单元回归）。配套 Gallery 本地真实后端浏览器联调通过。[交付记录](docs/archive/2026-10-05-question-resubmit-wsnxxxs.md)。
+
 ## 单独建题参与门槛（2026-10-05，本地完成，未推送、未部署）
 
 - 单独 POST /api/questions 要求成功计票 100 次或已提交且未删除作品 10 件，任一即可；待审核计入，试上传、跳过和未计票不计。用户确认附带有效示例豁免，moderator/admin 也豁免；邮箱与待审配额保持。

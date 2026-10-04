@@ -738,17 +738,19 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 不附作品时传题目字段；附示例时另传 `draftId`、`confirmed:true`、`work`（同作品表单字段）。草稿须属于本人、未过期且 task=__new__。题目与示例及审计在同一事务写入，失败保留可重试草稿。响应 `{ "question": <题目作者视图>, "work"?: <作品作者视图> }`，统一 author/mine DTO。
 
-所有角色发起的新题目均为 pending，只有高级管理员可人工通过；普通用户至多 3 道未删除 pending 题目，工作人员免限额。附带作品按发布者角色决定内容审查：普通用户照常审查，工作人员 human / approved，但保持 unverified；题目与作品必须各自通过才公开。本人题目在 `GET /api/me` 中可见。保留的 `POST /api/admin/questions` 仅高级管理员可调用，也创建 pending。
+所有角色发起的新题目均为 pending，只有高级管理员可人工通过；普通用户至多 3 道未删除 pending 题目，工作人员免限额。附带作品按发布者角色决定内容审查：普通用户照常审查，工作人员 human / approved，但保持 unverified；题目与作品必须各自通过才公开。本人题目在 `GET /api/me` 中可见；rejected 题目另带 `resubmittable`，从未被 approved（无 question-review approved 审计）时为 true。保留的 `POST /api/admin/questions` 仅高级管理员可调用，也创建 pending。
 
 **`GET /api/admin/questions`**：仅高级管理员，返回全部未删除题目（数据包及数据库，含 pending / rejected / 已撤下）。统一 DTO 加 moderation、works、votes、samples；有账号的 author.name 为昵称。works 合计两种存储，samples 仅数据库题目发起者附带的示例。示例 scene 使用私密预览令牌。
 
-**`POST /api/questions/:id/moderation`**：仅高级管理员。请求 `status=approved|rejected` 与 reason，拒绝须给非空理由，最多 500 字；通过可调整 category/domains，沿用分类与模板兼容校验。数据包题目的决定写覆盖表。拒绝已公开题目等于撤下，关联作品隐藏且票暂停计分，重新 approved 后恢复。写 question-review 审计并刷新排行缓存。
+**`POST /api/questions/:id/moderation`**：仅高级管理员。请求 `status=approved|rejected` 与 reason，拒绝须给非空理由，最多 500 字；通过可调整 category/domains，沿用分类与模板兼容校验。数据包题目的决定写覆盖表。拒绝已公开题目等于撤下，关联作品隐藏且票暂停计分，重新 approved 后恢复。写 question-review 审计并刷新排行缓存。新决定保留 moderation.round，丢弃 previous。
 
 **`POST /api/admin/questions/batch-moderation`**：仅高级管理员，1–100 个题目 ID，复用单件规则；每件独立事务，返回逐件 results，失败项含状态码与理由。高级管理员可审核自己的题目。
 
 **`POST /api/admin/questions/:id/meta`**：仅高级管理员，任何题目可改 title / summary / prompt / category / domains / acceptsUploads / cover。acceptsUploads 须为布尔值，cover 须为同题现有作品 ID，null 清除。公开且有作品的题目不能改提示词；有作品的题目不能改提交格式（作品数合计两种存储）。数据包写 question_overrides，数据库写本行；保持原 moderation，写 question-edit 审计，提示词只记录是否变化与长度。
 
 亦接受 references 与 referenceCredit，只有这两个字段的修改合法；可混合本题已保存 id 与当前管理员本人新上传 id。公开且有作品时参考图顺序、文件名、说明和来源一并锁定，变更返回 409 与中文提示；同值重发合法。改动写 question-edit 审计，图片与题目一起人工审核；自动图片内容审核未接入。
+
+**`POST /api/questions/:id/resubmit`**：作者修改被拒题目后重新提交。登录并绑定邮箱，write 限流，请求体上限 6 MB。只接受本人数据库题目，否则 404；状态须为 rejected 且从未 approved，否则 409。字段为 title / summary / prompt / category / domains / templates / references / referenceCredit 的子集，校验同 meta；另可传布尔 `removeSamples` 软删除本人示例作品（写 delete 审计）。其他字段 400；没有任何改动返回 400「内容和上次相同」。普通用户受 3 道 pending 限额（429），不检查发起资格。成功后 moderation 为 `{ status: pending, at, round: n+1, previous: { reason, reviewer, at, title, summary, prompt, category, domains } }`，写 question-resubmit 审计（字段变化，提示词只记长度）。作者视图只含 round 与 previous.reason/at；管理员列表含完整 previous 供对比。无迁移。
 
 **`DELETE /api/questions/:id`**：高级管理员可删除任意无票题目；有 Gallery 或 Show1 投票返回 409。作者删除自己题目沿用原规则：公開题目有其他作者作品或有票不可删。数据包题目覆盖层软删除，题下数据包作品随之隐藏，关联数据库作品同步软删除；文件不动。公开、本人与管理员列表不返回已删除题目，写 question-delete 审计。
 

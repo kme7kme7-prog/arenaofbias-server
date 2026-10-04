@@ -8,7 +8,9 @@ import { compatibleTemplates, defaultTemplates, requireCategory, requireDomains 
 
 const tagName = (value) => String(value).normalize('NFKC').trim().replace(/^#+/, '').trim();
 const tagKey = (value) => tagName(value).toLowerCase();
-const authorModeration = ({ status, reason, at }) => ({ status, ...(status === 'rejected' ? { reason } : {}), ...(at ? { at } : {}) });
+// Authors see the decision on the current round, and while a resubmission waits, the reason it answers.
+const authorModeration = ({ status, reason, at, round, previous }) => ({ status, ...(status === 'rejected' ? { reason } : {}), ...(at ? { at } : {}),
+  ...(round > 1 ? { round } : {}), ...(previous ? { previous: { reason: previous.reason, at: previous.at } } : {}) });
 const publicQuestion = (question) => ['legacy', 'approved'].includes(question.moderation.status);
 function required(value, label, max) {
   if (typeof value !== 'string' || !value.trim()) fail(400, `请填写${label}`);
@@ -46,6 +48,7 @@ export function createQuestions(db, { references = null } = {}) {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(task_id) DO UPDATE SET display_json = excluded.display_json,
     moderation = excluded.moderation, accepts_uploads = excluded.accepts_uploads, cover_work = excluded.cover_work,
     deleted_at = excluded.deleted_at, updated_by = excluded.updated_by, updated_at = excluded.updated_at`);
+  const approvedBefore = db.prepare(`SELECT 1 FROM audit WHERE task_id = ? AND action = 'question-review' AND json_extract(detail, '$.status') = 'approved' LIMIT 1`);
   const deletedPackWork = db.prepare('SELECT deleted_at FROM work_overrides WHERE task_id = ? AND work_id = ?');
   function fromRow(row) {
     if (!row) return null;
@@ -162,7 +165,9 @@ export function createQuestions(db, { references = null } = {}) {
       const privileged = question && (viewer?.id === question.owner_id || isStaff(viewer));
       return question && (publicQuestion(question) || privileged) ? dto(question, viewer, privileged ? isSenior(viewer) ? 'admin' : true : false) : null;
     },
-    byOwner: (id, viewer = null) => owned.all(id).map((row) => dto(fromRow(row), viewer, isSenior(viewer) ? 'admin' : true)),
+    // A rejected question its author can still resubmit: one that was never approved.
+    byOwner: (id, viewer = null) => owned.all(id).map(fromRow).map((question) => ({ ...dto(question, viewer, isSenior(viewer) ? 'admin' : true),
+      ...(question.moderation.status === 'rejected' ? { resubmittable: !approvedBefore.get(question.id) } : {}) })),
     pendingCount: () => allQuestions().filter((question) => question.moderation.status === 'pending').length,
     adminAll: (viewer = null) => allQuestions().map((question) => adminQuestion(question, viewer)),
     create(user, body, existingTags = []) {
@@ -207,7 +212,8 @@ export function createQuestions(db, { references = null } = {}) {
       if (body.status === 'rejected' && !reason) fail(400, '请填写拒绝理由');
       const next = body.status === 'approved' ? meta(question, { category: body.category ?? question.category,
         ...(body.domains !== undefined ? { domains: body.domains } : {}) }) : question;
-      const moderation = { status: body.status, source: 'human', reason, reviewer: actor.name, at: Date.now() }, detail = { ...moderation };
+      const moderation = { status: body.status, source: 'human', reason, reviewer: actor.name, at: Date.now(),
+        ...(question.moderation.round ? { round: question.moderation.round } : {}) }, detail = { ...moderation };
       for (const field of ['category', 'domains', 'templates']) if (JSON.stringify(question[field]) !== JSON.stringify(next[field])) detail[field] = { from: question[field], to: next[field] };
       transaction(db, () => {
         saveMeta(actor, question, next);
@@ -216,6 +222,41 @@ export function createQuestions(db, { references = null } = {}) {
         audit.run(moderation.at, actor.id, actor.name, 'question-review', id, null, JSON.stringify(detail));
       });
       return dto(lookup(id), actor, 'admin', true);
+    },
+    // An author answers a rejection on a question that was never public: the edited question waits
+    // for review again, keeping the last decision and content so reviewers can compare.
+    resubmit(user, id, body) {
+      const question = lookup(id);
+      if (!question || question.packaged || question.owner_id !== user.id) fail(404, '题目不存在');
+      if (question.moderation.status !== 'rejected') fail(409, '只有未通过审核的题目可以修改后重新提交');
+      if (approvedBefore.get(id)) fail(409, '公开过的题目不能修改后重新提交');
+      if (!body || typeof body !== 'object' || Array.isArray(body)) fail(400, '请提供要修改的题目信息');
+      const { removeSamples = false, ...fields } = body;
+      if (typeof removeSamples !== 'boolean') fail(400, '示例结果选项无效');
+      if (Object.keys(fields).some((field) => !['title', 'summary', 'prompt', 'category', 'domains', 'templates', 'references', 'referenceCredit'].includes(field))) fail(400, '题目信息格式不正确');
+      if (!isStaff(user) && pending.get(user.id).n >= 3) fail(429, '你已有 3 道题目在等待审核');
+      const now = Date.now();
+      transaction(db, () => {
+        const removed = removeSamples ? works.all(id).filter((work) => work.owner_id === user.id) : [];
+        for (const work of removed) {
+          db.prepare('UPDATE works SET deleted_at = ?, updated_at = ? WHERE id = ?').run(now, now, work.id);
+          audit.run(now, user.id, user.name, 'delete', id, work.id, '重新提交题目时移除');
+        }
+        const next = meta(question, fields, user), detail = {};
+        for (const field of ['title', 'summary', 'category', 'domains', 'templates', 'references', 'referenceCredit']) {
+          if (JSON.stringify(question[field]) !== JSON.stringify(next[field])) detail[field] = { from: question[field], to: next[field] };
+        }
+        if (next.prompt !== question.prompt) detail.prompt = { changed: '已修改', fromLength: question.prompt.length, toLength: next.prompt.length };
+        if (removed.length) detail.samples = removed.length;
+        if (!Object.keys(detail).length) fail(400, '内容和上次相同，请按审核意见修改后再提交');
+        const { reason, reviewer, at, round = 1 } = question.moderation;
+        const moderation = { status: 'pending', at: now, round: round + 1, previous: { reason, reviewer, at,
+          ...Object.fromEntries(['title', 'summary', 'prompt', 'category', 'domains'].map((key) => [key, question[key]])) } };
+        saveMeta(user, question, next, true);
+        db.prepare('UPDATE questions SET moderation = ? WHERE id = ?').run(JSON.stringify(moderation), id);
+        audit.run(now, user.id, user.name, 'question-resubmit', id, null, JSON.stringify(detail));
+      });
+      return dto(lookup(id), user, true);
     },
     remove(actor, id) {
       const question = lookup(id);

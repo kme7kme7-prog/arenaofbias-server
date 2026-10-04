@@ -345,7 +345,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 `GET /api/auth/turnstile` 返回 `{ "siteKey": string | null }`。只有 `TURNSTILE_SITE_KEY` 与 `TURNSTILE_SECRET_KEY` 都配置时才启用；发码请求校验 `turnstileToken`，注册提交无需 token。
 
-`POST /api/auth/email/send`：绑定请求 `{ "purpose": "bind", "email": "…", "turnstileToken": "…" }`，需登录，成功返回 `{ "sent": true, "email": "归一化邮箱" }`；邮箱已被其他账号绑定时返回 `409`，该判断在限流与 Turnstile 之后。重置请求 `{ "purpose": "reset", "username": "…", "turnstileToken": "…" }`，无论账号是否存在或是否绑定邮箱，成功响应均为 `{ "sent": true, "email": "" }`；不提供邮箱占用提示。发码按 IP 和目标邮箱每 15 分钟限流，另有同地址 60 秒冷却（可用 `MAIL_*` 调整）。SMTP 未配置时绑定返回 `503`；重置仍采用统一响应。
+`POST /api/auth/email/send`：绑定请求 `{ "purpose": "bind", "email": "…", "turnstileToken": "…" }`，需登录，成功返回 `{ "sent": true, "email": "归一化邮箱" }`；邮箱已被其他账号绑定时返回 `409`，该判断在限流与 Turnstile 之后。重置请求 `{ "purpose": "reset", "username": "…", "turnstileToken": "…" }`，无论账号是否存在或是否绑定邮箱，成功响应均为 `{ "sent": true, "email": "" }`；不提供邮箱占用提示。默认同 IP 每 15 分钟最多 30 次请求，同邮箱每 15 分钟最多成功发送 3 封，验证码另有同用途同地址 60 秒冷却（可用 `MAIL_*` 调整）。IP 统计失败请求；邮箱发送中先占额度，SMTP 失败退回，未通过人机验证、邮件未就绪和冷却拒绝不占发信额度。注册/绑定的限流响应为 `429 { error, code, retryAfter }`，并带同值 `Retry-After` 秒数；code 分别为 `email_ip_limited`、`email_limited`、`email_cooldown`。重置请求的 IP 限流也返回 429；邮箱额度、短冷却及后台投递失败仍采用统一成功响应，以免泄露账号存在性。SMTP 未配置时绑定返回 `503`；重置仍采用统一响应。
 
 `POST /api/auth/email/verify`：`{ "purpose": "bind", "email": "…", "code": "六位数字" }` 或 `{ "purpose": "reset", "username": "…", "code": "六位数字" }`。成功 `{ "ok": true }`，不消耗验证码。验证码默认 10 分钟有效、输错 5 次作废；数据库只存哈希。
 

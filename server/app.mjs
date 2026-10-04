@@ -765,7 +765,8 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       if (!res.headersSent) return sendJson(res, 200, result ?? { ok: true });
     } catch (error) {
       if (res.headersSent) return res.destroy();
-      if (error instanceof HttpError) return sendJson(res, error.status, { error: error.message, ...(error.code ? { code: error.code } : {}) },
+      if (error instanceof HttpError) return sendJson(res, error.status, { error: error.message, ...(error.code ? { code: error.code } : {}),
+        ...(error.retryAfter ? { retryAfter: error.retryAfter } : {}) },
         error.retryAfter ? { 'Retry-After': String(error.retryAfter) } : {});
       console.error(error);
       return sendJson(res, 500, { error: '服务器出错了，请稍后再试' });

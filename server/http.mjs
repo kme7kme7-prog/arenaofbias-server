@@ -126,7 +126,7 @@ export function createRouter() {
 }
 
 // Fixed-window counters per key; enough to blunt scripted abuse on a single server.
-export function rateLimit(windowMs, max, message = '操作太频繁，请稍后再试') {
+export function rateLimit(windowMs, max, message = '操作太频繁，请稍后再试', code = '') {
   const hits = new Map();
   return (key) => {
     const now = Date.now();
@@ -136,11 +136,16 @@ export function rateLimit(windowMs, max, message = '操作太频繁，请稍后�
       hits.set(key, bucket);
       if (hits.size > 10000) for (const [k, v] of hits) if (v.reset <= now) hits.delete(k);
     }
-    if (++bucket.count > max) {
-      const error = new HttpError(429, message);
+    if (bucket.count >= max) {
+      const error = new HttpError(429, message, code);
       error.retryAfter = Math.ceil((bucket.reset - now) / 1000);
       throw error;
     }
+    bucket.count++;
+    // A caller reserving a delivery can refund it if delivery fails. Keep the original
+    // bucket so a late failure never refunds a request in a newer window.
+    let reserved = true;
+    return () => { if (reserved) { bucket.count--; reserved = false; } };
   };
 }
 

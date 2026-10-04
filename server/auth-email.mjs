@@ -1,7 +1,7 @@
 // Verified email for registration and existing accounts. Codes are one-use and only their hashes
 // are stored. Reset requests always return the same public response.
 import { createHash, randomInt, timingSafeEqual } from 'node:crypto';
-import { fail, rateLimit } from './http.mjs';
+import { fail, HttpError, rateLimit } from './http.mjs';
 import { mailReady, sendVerificationEmail } from './mail.mjs';
 import { verifyTurnstile } from './turnstile.mjs';
 import { nameKey } from './auth.mjs';
@@ -28,8 +28,14 @@ export function createEmailAuth(db, auth, { mailer = { ready: mailReady, send: s
   const codeTtl = Number(process.env.MAIL_CODE_TTL_MS || 600000);
   const cooldown = Number(process.env.MAIL_COOLDOWN_MS || 60000);
   const maxAttempts = Number(process.env.MAIL_CODE_MAX_ATTEMPTS || 5);
-  const ipLimit = rateLimit(15 * 60000, Number(process.env.MAIL_IP_MAX || 8), '发送太频繁，请稍后再试。');
-  const emailLimit = rateLimit(15 * 60000, Number(process.env.MAIL_EMAIL_MAX || 3), '发送太频繁，请稍后再试。');
+  const ipLimit = rateLimit(15 * 60000, Number(process.env.MAIL_IP_MAX || 30), '当前网络发送请求较多。', 'email_ip_limited');
+  const emailLimit = rateLimit(15 * 60000, Number(process.env.MAIL_EMAIL_MAX || 3), '该邮箱发送次数已达上限。', 'email_limited');
+
+  async function deliver(email, code, purpose) {
+    const refund = emailLimit(digest(email));
+    try { await mailer.send({ to: email, code, purpose }); }
+    catch (error) { refund(); throw error; }
+  }
 
   async function gate(token, ip) {
     const verdict = await verifyTurnstile(token, ip);
@@ -41,11 +47,15 @@ export function createEmailAuth(db, auth, { mailer = { ready: mailReady, send: s
     const emailHash = digest(email);
     const previous = q.code.get(purpose, emailHash);
     const now = Date.now();
-    if (previous && now - previous.last_sent_at < cooldown) fail(429, '发送太频繁，请稍后再试。');
+    if (previous && now - previous.last_sent_at < cooldown) {
+      const error = new HttpError(429, '验证码刚刚发送。', 'email_cooldown');
+      error.retryAfter = Math.ceil((previous.last_sent_at + cooldown - now) / 1000);
+      throw error;
+    }
     const code = String(randomInt(1000000)).padStart(6, '0');
     q.save.run(purpose, emailHash, digest(`${purpose}:${emailHash}:${code}`), now + codeTtl, now);
     try {
-      await mailer.send({ to: email, code, purpose });
+      await deliver(email, code, purpose);
     } catch (error) {
       if (previous) q.restore.run(previous.code_hash, previous.expires_at, previous.attempts, previous.last_sent_at, purpose, emailHash);
       else q.delete.run(purpose, emailHash);
@@ -93,9 +103,8 @@ export function createEmailAuth(db, auth, { mailer = { ready: mailReady, send: s
       const email = purpose !== 'reset' ? normalizeEmail(body.email) : q.userByName.get(nameKey(String(body.username ?? '')))?.email;
       if (purpose !== 'reset' && !validEmail(email)) fail(400, '请填写正确的邮箱地址。');
       ipLimit(ip);
-      emailLimit(digest(email || nameKey(String(body.username ?? ''))));
       await gate(body.turnstileToken, ip);
-      // Ownership is checked only after the limits and the human check. A taken address
+      // Ownership is checked only after the IP limit and the human check. A taken address
       // asking to register gets the ordinary response and a notice instead of a code.
       const owner = purpose !== 'reset' ? q.userByEmail.get(email) : null;
       if (owner && purpose === 'bind' && owner.id !== user.id) fail(409, '该邮箱已被其他账号绑定，请换一个。');
@@ -106,8 +115,9 @@ export function createEmailAuth(db, auth, { mailer = { ready: mailReady, send: s
       if (!email) return resetResponse;
       if (owner && purpose === 'register') {
         try {
-          await mailer.send({ to: email, code: null, purpose: 'registered' });
+          await deliver(email, null, 'registered');
         } catch (error) {
+          if (error.status === 429) throw error;
           console.error('Email delivery failed:', error);
           fail(503, '验证码邮件发送失败，请稍后重试。');
         }
@@ -115,7 +125,7 @@ export function createEmailAuth(db, auth, { mailer = { ready: mailReady, send: s
       }
       if (purpose === 'reset') {
         const delivery = issue(purpose, email).catch((error) => {
-          console.error('Reset email delivery failed:', error);
+          if (error.status !== 429) console.error('Reset email delivery failed:', error);
         });
         background.add(delivery);
         void delivery.finally(() => background.delete(delivery));

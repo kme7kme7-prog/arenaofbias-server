@@ -34,7 +34,7 @@ async function post(path, body, session = '') {
     headers: { origin: base, 'content-type': 'application/json', ...(session ? { cookie: session } : {}) },
     body: JSON.stringify(body),
   });
-  return { status: response.status, data: await response.json(), cookie: cookie(response) };
+  return { status: response.status, data: await response.json(), cookie: cookie(response), retryAfter: response.headers.get('Retry-After') };
 }
 async function me(session) {
   return (await (await fetch(base + '/api/auth/me', { headers: { cookie: session } })).json()).user;
@@ -230,11 +230,15 @@ test('email and IP send limits apply independently', async () => {
     assert.equal((await post('/api/auth/email/send', { purpose: 'bind', email }, alice)).status, 200);
     platform.db.prepare("UPDATE email_codes SET last_sent_at = 0 WHERE purpose = 'bind'").run();
   }
-  assert.equal((await post('/api/auth/email/send', { purpose: 'bind', email }, alice)).status, 429);
+  const limited = await post('/api/auth/email/send', { purpose: 'bind', email }, alice);
+  assert.equal(limited.status, 429);
+  assert.equal(limited.data.code, 'email_limited');
+  assert.equal(limited.data.retryAfter, Number(limited.retryAfter));
+  assert.ok(limited.data.retryAfter > 0 && limited.data.retryAfter <= 900);
   process.env.MAIL_IP_MAX = '1';
   const limiter = createEmailAuth(platform.db, platform.auth);
   await limiter.send({ purpose: 'bind', email: 'ip-one@test.invalid' }, platform.auth.userFrom({ headers: { cookie: alice } }), 'new-ip');
-  await assert.rejects(() => limiter.send({ purpose: 'bind', email: 'ip-two@test.invalid' }, platform.auth.userFrom({ headers: { cookie: alice } }), 'new-ip'), { status: 429 });
+  await assert.rejects(() => limiter.send({ purpose: 'bind', email: 'ip-two@test.invalid' }, platform.auth.userFrom({ headers: { cookie: alice } }), 'new-ip'), { status: 429, code: 'email_ip_limited' });
   process.env.MAIL_IP_MAX = '100';
 });
 
@@ -339,4 +343,67 @@ test('configured Turnstile gates code sends and registration uses only the sent 
     delete process.env.TURNSTILE_SECRET_KEY;
     delete process.env.TURNSTILE_VERIFY_URL;
   }
+});
+
+test('failed challenges, delivery failures and cooldown retries do not consume email sends', async () => {
+  const email = 'refunded@test.invalid';
+  let failing = true;
+  const auth = createEmailAuth(platform.db, platform.auth, { mailer: { ready: () => true,
+    send: async () => { if (failing) throw Object.assign(new Error('fake delivery failure'), { status: 503 }); } } });
+  process.env.TURNSTILE_SITE_KEY = 'fake';
+  process.env.TURNSTILE_SECRET_KEY = 'fake';
+  try {
+    for (let i = 0; i < 4; i++) await assert.rejects(() => auth.send({ purpose: 'register', email }, null, 'refund-ip'), { status: 400 });
+  } finally {
+    delete process.env.TURNSTILE_SITE_KEY;
+    delete process.env.TURNSTILE_SECRET_KEY;
+  }
+  for (let i = 0; i < 4; i++) await assert.rejects(() => auth.send({ purpose: 'register', email }, null, 'refund-ip'), { status: 503 });
+  failing = false;
+  await auth.send({ purpose: 'register', email }, null, 'refund-ip');
+  for (let i = 0; i < 4; i++) await assert.rejects(() => auth.send({ purpose: 'register', email }, null, 'refund-ip'),
+    (e) => e.status === 429 && e.code === 'email_cooldown' && e.retryAfter > 0);
+  for (let i = 0; i < 2; i++) {
+    platform.db.prepare("UPDATE email_codes SET last_sent_at=0 WHERE purpose='register' AND email_hash=?").run(createHash('sha256').update(email).digest('hex'));
+    await auth.send({ purpose: 'register', email }, null, 'refund-ip');
+  }
+  platform.db.prepare("UPDATE email_codes SET last_sent_at=0 WHERE purpose='register' AND email_hash=?").run(createHash('sha256').update(email).digest('hex'));
+  await assert.rejects(() => auth.send({ purpose: 'register', email }, null, 'refund-ip'), { code: 'email_limited' });
+  const sent = await post('/api/auth/email/send', { purpose: 'register', email: 'cooldown-http@test.invalid' });
+  assert.equal(sent.status, 200);
+  const cooldown = await post('/api/auth/email/send', { purpose: 'register', email: 'cooldown-http@test.invalid' });
+  assert.equal(cooldown.data.code, 'email_cooldown');
+  assert.equal(cooldown.data.retryAfter, Number(cooldown.retryAfter));
+  assert.ok(cooldown.data.retryAfter > 0);
+});
+
+test('pending deliveries reserve shared email quota and refund it on failure', async () => {
+  process.env.MAIL_EMAIL_MAX = '1';
+  let release;
+  let entered;
+  const started = new Promise((resolve) => { entered = resolve; });
+  const mailer = { ready: () => true, send: () => { entered(); return new Promise((_, reject) => { release = reject; }); } };
+  const auth = createEmailAuth(platform.db, platform.auth, { mailer });
+  process.env.MAIL_EMAIL_MAX = '3';
+  const email = 'pending-quota@test.invalid';
+  const pending = assert.rejects(() => auth.send({ purpose: 'register', email }, null, 'pending-ip'), { status: 503 });
+  await started;
+  const user = platform.auth.userFrom({ headers: { cookie: (await post('/api/auth/login', { username: 'alice', password: 'new correct horse' })).cookie } });
+  try {
+    await assert.rejects(() => auth.send({ purpose: 'bind', email }, user, 'other-ip'), { code: 'email_limited' });
+  } finally {
+    release(Object.assign(new Error('fake delivery failure'), { status: 503 }));
+    await pending;
+  }
+  mailer.send = async () => {};
+  await auth.send({ purpose: 'bind', email }, user, 'other-ip');
+});
+
+test('default IP quota still limits failed requests after thirty attempts', async () => {
+  delete process.env.MAIL_IP_MAX;
+  const auth = createEmailAuth(platform.db, platform.auth, { mailer: { ready: () => false } });
+  process.env.MAIL_IP_MAX = '100';
+  for (let i = 0; i < 30; i++) await assert.rejects(() => auth.send({ purpose: 'register', email: 'unavailable@test.invalid' }, null, 'default-ip'), { status: 503 });
+  await assert.rejects(() => auth.send({ purpose: 'register', email: 'unavailable@test.invalid' }, null, 'default-ip'),
+    (e) => e.status === 429 && e.code === 'email_ip_limited' && e.retryAfter > 0);
 });

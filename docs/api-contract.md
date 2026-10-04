@@ -43,7 +43,7 @@
 - 认证基于 **Cookie 会话**。注册 / 登录成功后，响应头种下：
   `COOKIE_SECURE=1` 时为 `Set-Cookie: __Host-sp_session=<token>; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000; Secure`（无 Domain）；未启用 Secure 的本地环境仍用 `sp_session`。
 - 会话 Cookie 为 HttpOnly，前端脚本不可读；服务端只存其 SHA-256。重名会话 Cookie 按未登录处理。
-- 登录与注册生成新会话并撤销请求中唯一的旧会话 Cookie。绝对有效期仍为 30 天；服务端闲置有效期普通账号为 24 小时，管理员为 30 分钟，以有效认证请求刷新。v32 为 sessions 追加 last_seen_at，旧会话从创建时间计算闲置期，不延长原过期时间。
+- 登录与注册生成新会话并撤销请求中唯一的旧会话 Cookie。绝对有效期仍为 30 天；服务端闲置有效期普通账号与管理员均为 7 天，以有效认证请求刷新。v32 为 sessions 追加 last_seen_at，旧会话从创建时间计算闲置期，不延长原过期时间。
 - 前端请求需携带 Cookie（`fetch` 使用 `credentials: 'include'`，XHR 使用 `withCredentials = true`）。`COOKIE_SAME_SITE` 支持 `Lax`（默认）、`Strict`、`None`；跨站 HTTPS 部署设 `None` 并开启 `COOKIE_SECURE=1`，否则服务拒绝启动。第三方 Cookie 仍受浏览器设置限制，建议前端与 API 使用同站域名。
 - 生产会话 Cookie 只属于 `api.arenaofbias.icu`；game 与 Gallery 都必须直接请求 `https://api.arenaofbias.icu` 才能共用登录状态，经前端自身域名反代的 `/api` 会产生独立会话。
 - 登出（`POST /api/auth/logout`）删除服务端会话并下发 `Max-Age=0` 的清空 Cookie。

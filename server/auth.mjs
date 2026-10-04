@@ -23,7 +23,7 @@ export function avatarOf(user) {
 }
 
 export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', sessionTtl,
-  sessionIdleTtl = 24 * 3600e3, adminSessionIdleTtl = 30 * 60e3 }) {
+  sessionIdleTtl = 7 * 24 * 3600e3, adminSessionIdleTtl = 7 * 24 * 3600e3 }) {
   if (!['Lax', 'Strict', 'None'].includes(cookieSameSite)) throw new Error('COOKIE_SAME_SITE must be Lax, Strict or None');
   if (cookieSameSite === 'None' && !secureCookies) throw new Error('COOKIE_SAME_SITE=None requires COOKIE_SECURE=1');
   const q = {

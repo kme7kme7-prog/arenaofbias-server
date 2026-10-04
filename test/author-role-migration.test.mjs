@@ -34,7 +34,7 @@ for (const version of [36, 37]) test(`v${version} to v38 backfills creation role
       VALUES ('v', 'v', 'task', 'historical', 'ordinary', 'pair', 'a', 1, 'regular', '{"curated":true,"modelId":"old"}')`);
     const history = { votes: db.prepare('SELECT * FROM votes').all(), audit: db.prepare('SELECT * FROM audit').all() };
     db.close(); db = openDatabase(file);
-    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 38);
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, MIGRATIONS.length);
     assert.equal(db.prepare('PRAGMA foreign_keys').get().foreign_keys, 1);
     assert.equal(db.prepare('SELECT content_key FROM curated_content_keys').get()?.content_key, version === 37 ? 'c' + 'a'.repeat(32) : undefined);
     assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);

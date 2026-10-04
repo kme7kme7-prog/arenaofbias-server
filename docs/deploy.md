@@ -91,13 +91,26 @@ else
   npm run build
 fi
 cp -a dist/. "$work/out/"
+if [ "$site" = gallery ]; then
+  node --input-type=module - "$work/out" <<'NODE'
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+const root = process.argv[2];
+const { assets } = JSON.parse(readFileSync(join(root, 'version.json'), 'utf8'));
+const html = readFileSync(join(root, 'index.html'), 'utf8');
+const versions = [...html.matchAll(/[?&]v=([^"'&\s<>]+)/g)].map(match => decodeURIComponent(match[1]));
+if (typeof assets !== 'string' || !assets || !versions.length || versions.some(version => version !== assets)) {
+  throw new Error('version.json assets must match every index.html asset version');
+}
+NODE
+fi
 (cd "$work/out" && find . -type f -print0 | sort -z | xargs -0 sha256sum) > "$work/manifest.sha256"
 scp "$work/manifest.sha256" "$host:/root/static-deploy-$site-$sha.manifest"
 ```
 
 game 的 `npm run build` 自动读取已入库的 `.env.production`（`VITE_API_BASE_URL=https://api.arenaofbias.icu`），也可显式使用 `VITE_API_BASE_URL=https://api.arenaofbias.icu npm run build`。game 的 `/api` 反代用于兼容上线前已打开的旧页面；移除条件、验收与回滚见[第 9 节](#9-移除-game-api-反代)，满足条件并获用户明确同意前保留。
 
-Gallery 的 `GITHUB_SHA` 必须是该次前端源码 SHA，`API_BASE_URL` 设为 `https://api.arenaofbias.icu/`；前端请求层会把根地址规范化为 `/api/` 目录。两站产物都在各自 `dist/`。上传之前检查入口文件和构建结果。完整 manifest **先**上传，在服务器上对比当前正式目录，产生变化及缺失列表、过时文件列表：
+Gallery 的 `GITHUB_SHA` 必须是该次前端源码 SHA，`API_BASE_URL` 设为 `https://api.arenaofbias.icu/`；前端请求层会把根地址规范化为 `/api/` 目录。两站产物都在各自 `dist/`。Gallery 根目录的 `version.json` 内容为 `{"assets":"<资产版本>"}`，`assets` 由该次构建生成，必须与该次 `index.html` 中所有 `?v=` 一致，用于旧标签页加载失败后判断是否可以刷新恢复。上传之前检查入口文件和构建结果。完整 manifest **先**上传，必须包含 `version.json`，不能从目标文件清单中排除它，否则会被误判为过时文件。在服务器上对比当前正式目录，产生变化及缺失列表、过时文件列表：
 
 ```bash
 set -euo pipefail
@@ -108,6 +121,9 @@ job=/root/static-deploy-$site-$sha
 mkdir -m 700 "$job"
 mv "/root/static-deploy-$site-$sha.manifest" "$job/manifest.sha256"
 sed -n 's/^[0-9a-f]\{64\}  \.\///p' "$job/manifest.sha256" | sort > "$job/target-files.txt"
+if [ "$site" = gallery ]; then
+  grep -Fx version.json "$job/target-files.txt"
+fi
 find "$live" -type f -printf '%P\n' | sort > "$job/live-files.txt"
 comm -23 "$job/live-files.txt" "$job/target-files.txt" > "$job/deleted.txt"
 while IFS= read -r line; do
@@ -120,15 +136,23 @@ done < "$job/manifest.sha256" > "$job/changed.txt"
 wc -l "$job/changed.txt" "$job/deleted.txt"
 ```
 
-人工核对清单后，将 `changed.txt` 传回本机；从**已构建产物**仅打包所列新增或变化文件，上传差异包。删除清单不打包，保留在服务器。以下命令在本机执行：
+人工核对清单后，将 `changed.txt` 传回本机；从**已构建产物**仅打包所列新增或变化文件，上传差异包。Gallery 的完整 manifest 包含 `version.json`，变化比较也按完整 manifest 执行，只有资产差异包排除它：先上传完整资产和 `index.html` 的差异包，最后单独上传 `version.json` 到暂存任务目录，即使标记哈希未变也单独上传，避免漏传。删除清单不打包，保留在服务器。以下命令在本机执行：
 
 ```bash
 scp "$host:$job/changed.txt" "$work/changed.txt"
-(cd "$work/out" && tar -cf "$work/changed.tar" -T "$work/changed.txt")
+if [ "$site" = gallery ]; then
+  sed '/^version\.json$/d' "$work/changed.txt" > "$work/asset-changed.txt"
+else
+  cp "$work/changed.txt" "$work/asset-changed.txt"
+fi
+(cd "$work/out" && tar -cf "$work/changed.tar" -T "$work/asset-changed.txt")
 scp "$work/changed.tar" "$host:$job/changed.tar"
+if [ "$site" = gallery ]; then
+  scp "$work/out/version.json" "$host:$job/version.json"
+fi
 ```
 
-服务器上用普通复制生成 `.next`，不能用硬链接；所有删除只对 `.next` 执行。核对完整 SHA-256 manifest 和**精确文件集合**均通过后才切换，留下 `.prev` 供快速回滚。已有 `.prev` 时先移入相应历史备份目录，不能覆盖。以下命令在服务器上执行：
+服务器上用普通复制生成 `.next`，不能用硬链接；所有删除只对 `.next` 执行。核对完整 SHA-256 manifest 和**精确文件集合**均通过后才切换，留下 `.prev` 供快速回滚。Gallery 必须先上线完整资产和 `index.html`，最后独立发布 `version.json`；提前发布新标记会让旧标签页刷新到半套新版。下面先在 `.next` 校验完整目标，再暂留正式站的旧标记（首次发布无旧标记时暂不放标记），切换目录后才原子替换新标记。标记暂存在同一文件系统的兄弟路径，避免跨文件系统移动变成复制。已有 `.prev` 时先移入相应历史备份目录，不能覆盖。以下命令在服务器上执行：
 
 ```bash
 next="${live}.next"
@@ -140,8 +164,21 @@ while IFS= read -r rel; do
   case "$rel" in ''|/*|..|../*|*/../*) exit 1;; esac
   rm -f -- "$next/$rel"
 done < "$job/deleted.txt"
+if [ "$site" = gallery ]; then
+  cp -p "$job/version.json" "$next/version.json"
+fi
 (cd "$next" && sha256sum -c "$job/manifest.sha256")
 find "$next" -type f -printf '%P\n' | sort | cmp - "$job/target-files.txt"
+if [ "$site" = gallery ]; then
+  marker="${live}.version-$sha.json"
+  test ! -e "$marker"
+  cp -p "$next/version.json" "$marker"
+  if [ -f "$live/version.json" ]; then
+    cp -p "$live/version.json" "$next/version.json"
+  else
+    rm -f "$next/version.json"
+  fi
+fi
 if [ -e "$prev" ]; then
   stamp=$(date -u +%Y%m%dT%H%M%SZ)
   if [ "$site" = show1 ]; then
@@ -153,9 +190,49 @@ if [ -e "$prev" ]; then
 fi
 mv "$live" "$prev"
 mv "$next" "$live"
+if [ "$site" = gallery ]; then
+  mv -f "$marker" "$live/version.json"
+  (cd "$live" && sha256sum -c "$job/manifest.sha256")
+  find "$live" -type f -printf '%P\n' | sort | cmp - "$job/target-files.txt"
+fi
 ```
 
-切换后核对首页、JS/CSS/JSON 的响应与缓存头，并在桌面和窄屏检查关键页面。若验收失败，先保留新目录作调查，可用 `mv "$live" "${live}.failed-$sha"`、`mv "$prev" "$live"` 回滚；不要在正式目录上直接解包或删除文件。Nginx 配置若需同步修改，按上节备份、`-t`、reload。此流程描述操作方法，本页修改本身不执行发布。
+切换后核对首页、JS/CSS/JSON 的响应与缓存头，并在桌面和窄屏检查关键页面。Gallery vhost 的 `/version.json` 必须返回 `Cache-Control: no-cache` 或 `no-store`，不能进入长缓存或 `immutable`；前置 CDN / 反代也不得缓存这个路径。本地已有文档与历史 vhost 样本中的 JSON `no-cache` 规则满足此要求，无需另加 location；这些记录不代表当前生产已验收，应在发布时核对实际响应。若为 `version.json` 确需新增 location，其中必须 include `security-headers.conf`，避免丢失安全头；本文不新增配置。Nginx 配置若需同步修改，按上节备份、`-t`、reload。
+
+本地配置核对：`static-private-paths.conf`、`read-zones.conf` 和 ArenaGalleri 的 `gallery-private-files.conf` 均不阻止 `version.json`；它走普通资源限流 20 次/秒、突发 200，不加入 catalog 限流。
+
+Gallery 发布验收增加以下请求（由获准发布的操作者执行）：
+
+```bash
+curl -I https://gallery.arenaofbias.icu/version.json
+curl -fsS https://gallery.arenaofbias.icu/version.json
+curl -fsS https://gallery.arenaofbias.icu/index.html
+```
+
+HEAD 应为 HTTP 200、包含 `no-cache`（或 `no-store`），无 `immutable`；GET 的 `assets` 必须与返回 HTML 的 `app.js?v=` 及其他全部资产版本一致。还须验证旧标签页的加载失败恢复提示和刷新后的关键页面，不能只凭构建或 HTTP 200 宣称交互通过。
+
+若验收失败，先保留新目录作调查。Show1 沿用 `mv "$live" "${live}.failed-$sha"`、`mv "$prev" "$live"`。Gallery 回退 `gallery.prev` 时也先恢复完整资产和 `index.html`，最后恢复旧 `version.json`；复制到独立回滚暂存目录，不直接修改 `.prev`：
+
+```bash
+set -euo pipefail
+rollback="${live}.rollback-next"
+rollback_marker="${live}.rollback-version-$sha.json"
+test ! -e "$rollback"
+test ! -e "$rollback_marker"
+test -f "$prev/version.json"
+cp -a "$prev" "$rollback"
+cp -p "$rollback/version.json" "$rollback_marker"
+if [ -f "$live/version.json" ]; then
+  cp -p "$live/version.json" "$rollback/version.json"
+else
+  rm -f "$rollback/version.json"
+fi
+mv "$live" "${live}.failed-$sha"
+mv "$rollback" "$live"
+mv -f "$rollback_marker" "$live/version.json"
+```
+
+若 `.prev` 来自尚无 `version.json` 的旧构建，上述 Gallery 回滚脚本会停止；须先确认该旧版不支持版本恢复，再使用整目录切换回退，不能伪造或沿用新版标记。回滚后重新核对标记与 HTML 版本和缓存头。不要在正式目录上直接解包或删除资产文件。此流程描述操作方法，本页修改本身不执行发布。
 
 两站登录互通验收：在 game 登录后，打开 Gallery 应显示已登录；在 Gallery 登出后，切回 game 应显示未登录。DevTools 中新会话 Cookie 只出现在 `api.arenaofbias.icu`。首次上线后，原本在 game 上登录的用户需要重新登录一次；旧 game Cookie 自然过期，不需要清理。
 
@@ -174,7 +251,7 @@ node -e 'const {DatabaseSync}=require("node:sqlite"); const db=new DatabaseSync(
 tar -C "$live" --exclude='./.git' --exclude='./.data' --exclude='./.datapack' --exclude='./output' -czf "$backup/code.tar.gz" .
 ```
 
-数据库先做一致性快照，代码另行打包。投稿文件与媒体由现有每日 restic 归档保存；若本次变更会改动它们，另做同步文件备份。当前仓库的 `scripts/archive-backup.sh` 已先 `VACUUM INTO`，再把 `works`、`media`、数据包和快照交给 restic。恢复较早数据库时，多出的作品目录会在服务启动时移至 `.data/orphans`。
+数据库先做一致性快照，代码另行打包。投稿文件、媒体和题目参考图由每日 restic 归档保存；若本次变更会改动它们，另做同步文件备份。当前仓库的 `scripts/archive-backup.sh` 已先 `VACUUM INTO`，再把 `works`、`media`、已存在的 `references`、数据包和快照交给 restic。参考图存于 `DATA_DIR/references`，与数据库 `reference_uploads` 一起备份和恢复；部署新脚本时按第 5 节同步 `/root/archive-backup.sh`。恢复较早数据库时，多出的作品目录会在服务启动时移至 `.data/orphans`。
 
 在服务器克隆到临时目录、检出明确的目标 SHA 并运行门禁：
 
@@ -241,6 +318,10 @@ curl -fsS http://127.0.0.1:5273/api/bootstrap
 
 检查 JSON 的 `serverVersion` 等于目标代码 SHA，`datapack` 等于目标产物 SHA，并核对 `catalogDigest`、作品数和关键登录/榜单接口。代码部署目录没有 `.git`，所以 `.server-version` 是 `serverVersion` 的依据。若从旧会话 Cookie 升级到 `COOKIE_SECURE=1` 下的 `__Host-sp_session`，会让现有用户登出一次。若本轮含数据库迁移，重启时自动执行追加迁移，部署前须另核对迁移版本；数据库不能靠切回旧代码自动降级。
 
+题目参考图首次发布追加 v39：在生产一致性快照的独立副本上运行目标代码的 `openDatabase`，确认 `user_version=39`、`foreign_key_check` 无行、`integrity_check=ok`，并逐表核对所有旧列和旧行。v1–v38 不改；v39 只新增 `questions.reference_credit`、`reference_uploads` 及索引。正式切换前停服后再保存数据库快照，避免把演练后新增的业务写入漏掉。参考图需人工审核，未接入自动图片内容审核，图片校验不做完整像素解码。
+
+投稿模型预览不需要数据库迁移，但必须另安装已经审阅的运行媒体，步骤见 [投稿预览安装](upload-preview-adaptations.md)。每件先核对运行库记录所指入口 HTML 的 SHA-256 等于 `preview.json.sourceDigest`，再安装清单与模型 / 海报，保持原作字节不变；不安装临时 `extract/`。发布后核对 API 预览字段及实际媒体 GET / HEAD、权限和文件 SHA；只更新源码不会自动带上这些生成物。显式 `PENDING_PER_USER` 会覆盖新的默认 8，发布前核对服务环境中的额度值。
+
 ## 4. 回滚
 
 先停止服务，把当前 `.data/platform.db` 和现有代码另存以便调查。恢复备份的代码和数据库，恢复旧数据包链接，确认 `.server-version`，再启动服务。若新版本已经产生业务写入，恢复旧数据库会丢弃这段时间的写入；应先决定是否做人工数据恢复。跨数据库版本回滚必须使用兼容旧代码的备份。
@@ -256,7 +337,7 @@ systemctl status arenaofbias-server --no-pager
 curl -fsS http://127.0.0.1:5273/api/bootstrap
 ```
 
-若新版本删除或改名了旧代码文件，回滚前按第 1 节记录的清单恢复或清理；tar 解包也不会自动删除新增文件。`.data/works` 与 `.data/media` 不随代码覆盖，必要时从 restic 日备份恢复。
+若新版本删除或改名了旧代码文件，回滚前按第 1 节记录的清单恢复或清理；tar 解包也不会自动删除新增文件。`.data/works`、`.data/media` 与 `.data/references` 不随代码覆盖，必要时从同一数据库备份对应的 restic 快照恢复。
 
 ## 5. 运维文件
 
@@ -433,7 +514,7 @@ add_header X-Frame-Options "SAMEORIGIN" always;
 以下是候选修复的发布步骤，不表示已上线。先按第 0 节核实现场版本并确保目标提交进入上游 main。后端、管理端与两个前端必须配套发布：生产配置 Turnstile 后，所有密码登录都需提交 `turnstileToken`，服务端在验密前校验，验证不可用时返回 503。沿用现有 `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY`，不得在仓库保存密钥。管理员页面 CSP 已放行 `challenges.cloudflare.com`，两个前端也须保留脚本与 iframe 许可。
 
 - 同一账号跨 IP、同一 IP 跨账号 15 分钟内 5 次错误密码后，登录临时封禁 15 分钟；全站最多 32 个在途登录流程，超额立即返回 429 与 Retry-After。管理员失败与触发封禁记入 audit，封禁同时写 journal。封禁状态为进程内状态，重启清除；不自动给任何管理员降权，也不按用户名永久封禁。
-- 登录撤销请求中唯一的旧会话 Cookie；普通账号闲置 24 小时、管理员 30 分钟失效，绝对有效期仍为 30 天。上线前备份 SQLite；启动自动追加 v32 `sessions.last_seen_at`，旧会话按原创建时间回填，部分用户需重新登录。回滚代码时保留新库与之后写入，不恢复旧业务库。
+- 登录撤销请求中唯一的旧会话 Cookie；普通账号与管理员均闲置 7 天失效（原为普通 24 小时、管理员 30 分钟，已放宽），绝对有效期仍为 30 天。上线前备份 SQLite；启动自动追加 v32 `sessions.last_seen_at`，旧会话按原创建时间回填，部分用户需重新登录。回滚代码时保留新库与之后写入，不恢复旧业务库。
 - 匿名对局已有 3 小时过期时间，改为启动与每分钟确定清理无正式票引用的过期行，匿名无票对局最多 10000 条。练习模式始终只存内存，原有 5000 局上限，新增 3 小时 TTL；不强制练习登录。
 - 部署 `deploy/nginx/security-headers.conf`、`static-private-paths.conf` 与更新的 `read-zones.conf` / `read-server.conf`。主域、game、gallery、API 在 server 级加入 security-headers include；自带 `add_header` 的 location 同样加入，避免丢失 HSTS / nosniff / CSP。CSP 按 host 在 read-zones 中定义，API / 作品域不叠加前端 CSP。作品沙箱保持原策略。Gallery 的 `/results/`、`/_sandtable/`、`/_scenes/` 和 game 的 `/art/pelican-cover.html` 题库封面及 `/works/` 内置作品路径仅使用 `frame-ancestors 'self'`，允许各自同源嵌入；其他页面保留对应 host 的原 CSP（包括 game 顶层 `frame-ancestors 'none'`）。发布此映射后核对 game 题库封面 iframe，以及顶层、API 和上传作品响应头。
 - 三个静态站在其他正则 location 之前 include `static-private-paths.conf`，隐藏文件与仓库配置返回 404，ACME 路径保留。Gallery 使用 hash 路由，`try_files $uri $uri/ =404`；game 静态导出用 `try_files $uri $uri/ $uri.html =404`，保留实际导出页面。`robots.txt` 仅返回真实文件，不回退 HTML。主域到 game 的既有旧路径跳转按原用途保留。

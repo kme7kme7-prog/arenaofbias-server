@@ -1,5 +1,6 @@
 # HANDOFF.md · 当前状态
 
+
 ## 删除旧Show1占位题（2026-10-04，本地完成）
 
 - 用户确认删除show1-002/003/006及对应测试记录。它们不在当前共享questions/数据包和线上Gallery公开目录。compat-data.json移除三题、43作品及映射、62快照票、1回填评论；不移除其他题，也不改作品源文件内容。
@@ -36,6 +37,74 @@
 - 用户授权。新增 apex-camera.mjs 精确匹配 bundle SHA256，仅竞技场取景/娱乐场景参数的 HTML 使用动态模块，距离上限220扩大到2200并注册已有桥接；content.mjs 仍先检查作品访问门禁。版本变化不自动套用。普通/展览馆/正式m保留原bundle，不改作品、数据库、相机协议或部署配置。
 - check 89/0、test 265/265；Show1真实APEX浏览器回归：滚轮拉远、抓取、保存值模拟恢复、其他显示路径不转发。未实点后台保存；无 commit/push/deploy。本地副本服务已重启，保留其他遗留。
 
+
+## 后端发布前核对（2026-10-04，已验证，待统一推送部署）
+
+- 用户授权提交已有修改、联调、适用分支合并、推送与部署，指定 GPT-6.1 Sol / medium；本代理只负责独立后端，生产 SSH 与统一部署由父代理执行。初始 main 干净，源码为 `8e8e6f8a52bc290bd3c9ed6340899e47296eb3d4`。fetch/prune 与实际远端 heads 核对：origin 仅 main=`dc1977c`，待推两条提交为会话 7 天与盲评软冷却；五条本地支线都没有 main 之外的提交，无需合并。
+- 所有 worktree 已核对。旧 backend-integration 的本地 datapack 配置、gallery-csp-repair 的历史上线补记与 review 隔离发布暂存/未跟踪副本均保留；review 源码是 main 已含功能的旧版本，不能为清脏或合支线覆盖主线。没有收入配置、生成物或业务数据。
+- 审查会话闲置、`avoidCooling`、跳过空侧返回和历史清理；与 origin/main 没有新迁移或配置差异。现有后端已支持注册邮箱发码、必填邮箱/验证码、事务创建已绑定账户与重复邮箱校验，Gallery 注册分支无需后端新分支。
+- Node 24.16.0，`npm run check` 95 文件 / 0 错；首次完整测试 292/293，既有随机端口被 fetch 拒绝（bad port）；未改无关测试，完整重跑 `npm test` 293/293，0 失败/取消/跳过。`git diff --check` 通过。真实本地目录只读加载：20 题 / 176 件，digest `b9a2a5d29c8705089d4cf9b16752bee2cf589c2393f7816734c28da677621cab`。
+- 本仓无 build/check:intake 脚本；本代理未做浏览器、真实 SMTP/CAPTCHA、生产账号写入、SSH、部署或生产 Node 22 复验。测试日志保留在忽略 output/coordinated-backend-release-20261004-test*.log；跨前端和统一发布结果由父代理补记。[本轮归档](docs/archive/2026-10-04-backend-release-readiness-wsnxxxs.md)。
+
+## Gallery 盲评软冷却与跳过不揭晓（2026-10-04，已提交，未推送、未部署）
+
+- 本轮仅修改独立后端；按用户要求派 GPT-6.1 Sol / medium 子代理分别负责抽样与清理逻辑、盲评测试。初始工作区干净，不改 Gallery、作品、数据包、配置或数据库迁移。
+- 与 Gallery 的约定：创建对局接受可选布尔 `avoidCooling`；随机模式带 `true`，收到 `409` / `code: 'cooling'` 本组略过该题，范围内全冷却时再不带参数请求，只评本题不带参数。投票（含跳过）返回后才预取下一组。跳过仅返回 `{ choice: 'skip', counted: false, reason: 'skipped', a: null, b: null }`，不揭晓模型或作品。
+- 登录用户（含管理员）软冷却取本人按 `created_at` 倒序最近 6 个已揭晓对局（`a` / `b` / `tie`），再只保留 `decided_at > now - 15 分钟`；同题两侧作品优先回避，其他题的揭晓也占轮数。再揭晓满 6 组或过 15 分钟先到先解除；跳过、未决定不占轮数，未绑定邮箱等不计票揭晓仍参与，匿名用户维持上一组回避。默认允许软回退，只有真耗尽才返回 `exhausted`；`avoidCooling=true` 在放开冷却还有候选时返回 `cooling`。
+- `q.decide` 写入 `decided_at`，复用现有 `matches_user(user_id, created_at)` 索引，无需迁移。清理仅删除过期、无正式票引用且 `(choice IS NULL OR user_id IS NULL)` 的对局；登录已决定历史（含跳过）保留，内容令牌仍按 3 小时失效。
+- 已全文检索 `matches` 消费者：`datapack-switch` 只切换目录链接，不访问数据库；`datapack` 修剪仅保留未超过有效期加宽限期的包，过期历史不会永久固定旧包；排行榜与用户票数只读 `votes`，匿名容量只数匿名无票对局；`vote-reset` 统计全部历史并明确清空全部对局与票；作品移题原已同步所有历史对局。`reconcile-catalog` 跳过过期对局身份修正，但保留原有退役作品引用拦截，新增保留历史可能增加需显式处理的引用，不能为切包静默删除历史或放宽保护。Show1 现有已决定占位对局也按同一用户历史规则计入最近 6 组，无需修改其写入或迁移脚本。
+- 最终验证：Node 24.16.0，`npm run check` 95 文件 / 0 错，盲评专项 16/16，完整 `npm test` 293/293（0 失败、取消、跳过），`git diff --check` 通过。新增 6 项回归包含真实 SQLite 与 HTTP，覆盖跨题轮数与同题作品隔离、时间边界、普通用户与两类管理员不计票揭晓、跳过空侧、软回退 / 冷却 / 耗尽、匿名行为与清理保留。专项初次 HTTP 夹具缺 Origin 返回 403，补齐同源 Origin 后通过，未修改生产门禁。
+- 本仓无 `build` / `check:intake` 脚本，未做浏览器、Gallery 前端端到端联调、生产账号投票、生产 Node 22 复验、SSH、实际数据包切换 / 修剪或部署；消费者兼容性由源码审计和现有测试核对。[本轮归档](docs/archive/2026-10-04-blind-reveal-cooldown-wsnxxxs.md)。
+- 补记：Gallery 侧随后用本仓工作区代码与临时库完成真实联调（9 组无 6 组内重复、跳过 `a/b: null`、`avoidCooling` 409 `cooling` 与软回退、页面预取与随机参数），详见 Gallery 同日归档 `2026-10-04-arena-preload-cooldown-wsnxxxs.md`。用户授权提交（不含推送）。
+
+## 会话闲置期放宽至 7 天（2026-10-04，本地完成并提交，未推送、未部署）
+
+- 原因：管理员闲置 30 分钟即掉登录，后台审核常被打断。用户说明账号不含个人信息，目标只是防随手撞库 / AI 批量尝试，这由 Turnstile、5 次 15 分钟失败锁定、scrypt 和 `__Host-` HttpOnly Secure Cookie 承担，闲置期不参与；用户选定普通账号与管理员统一 7 天。
+- `server/auth.mjs` 两个闲置默认值改为 7 天，绝对 30 天不变，不改迁移、Cookie 属性与登录限速；`auth-security` 闲置用例改为 8 天过期 / 6 天保留，`api-contract.md`、`deploy.md` 同步描述。
+- npm run check 95 文件 / 0 错，npm test 287/287。线上需部署后生效，现有会话按 7 天重新计算。未改 COOKIE_SAME_SITE 等生产配置，未核对线上 Cookie 属性，未做 2FA。
+
+## 空标题与随机混合联调核对（2026-10-04，已验证，待统一部署）
+
+- 用户授权四仓核对近期修改、适用分支合并、提交推送及最终部署，指定 GPT-6.1 Sol / high；本代理只负责独立后端，生产发布由父代理统一执行。初始工作区干净，main 为 b3b1433；fetch 全部实际远端并 prune 后 origin/main 为 13b7aaa，只有空标题功能提交尚未推送。五条本地支线均没有 main 之外的提交，无需重复合并。
+- 审查空标题上传、编辑、审核的默认值与省略标题保留规则；仅修正 API 契约的旧「缺标题」错误说明并补充默认标题规则，不改后端功能、数据库、依赖、配置或数据包。Gallery 随机混合仍发送具体 task 与 previous，现有 API 兼容。
+- 隔离真实 HTTP / 合成 SQLite 核对普通用户本人回避：两题对战池均为 2 件 / 2 配置，本人作品题返回 409 insufficient，另一题返回 200；证据交给 Gallery 处理随机范围跳题，后端语义保持。
+- npm run check 95 文件 / 0 错，最终 npm test 287/287，git diff --check 通过。前两次完整测试均遇到已有随机监听端口被 Node fetch 拒绝（bad port）；第一轮 286/287，第二轮 282 通过 / 5 取消，第三轮完整通过，未改无关测试。正式本地包 catalog 可读，20 题 / 176 件，摘要 b9a2a5d29c8705089d4cf9b16752bee2cf589c2393f7816734c28da677621cab。
+- 本仓无 build / check:intake 脚本；未做浏览器、生产账号写入、SSH 或部署。日志和 HTTP 复现保存在忽略 output/coordinated-integration-20261004-backend-final/，不入库。[本轮归档](docs/archive/2026-10-04-backend-final-integration-wsnxxxs.md)。
+
+## 服务端空作品标题兜底（2026-10-04，本地完成并提交，未推送、未部署）
+
+- `server/library.mjs` 新增小函数 `defaultTitle`，三处空标题校验均在解析模型身份和档位之后取「模型名称 · 推理档位」（截断 40 字）；编辑未传 title 保留原标题。已有模型 / 档位校验保持，旧记录两者均缺失且显式清空标题时仍返回 400「请填写作品标题」。
+- 新增 3 项真实 HTTP / 合成 SQLite 回归，覆盖上传空字符串 / 纯空白 / 未传标题、注册模型名称解析、默认值超过 40 字、本人 / 管理员元数据 / 管理员审核的空标题与省略标题，以及两者缺失时的 400。同步更新 admin-inbox 测试中的旧空标题拒绝断言，未改 `server/inbox.mjs`。
+- 最终 `npm run check` 95 文件 / 0 错，`npm test` 287/287，`git diff --check` 通过。首轮完整测试 286/287，唯一失败是旧断言期望空标题 400；更新预期后完整重跑通过。日志在忽略 `output/default-work-title-20261004/`。
+- 无数据库结构、数据包、依赖、其他字段校验或前端改动；相邻 Gallery 已有未提交文件保留。本仓无 build / check:intake 脚本，未验收浏览器、生产账号或部署。按用户轮次约定以 wsnxxxs noreply 身份作一条英文简单句本地提交。[本轮归档](docs/archive/2026-10-04-default-work-title-wsnxxxs.md)。
+
+## 近期提交联调与分支核对（2026-10-04，本地完成，待统一推送部署）
+
+- 用户授权四仓近期提交联调、必要分支合并、推送与部署，指定 GPT-6.1 Sol / high 并行；本仓仅负责独立后端。初始 main 为 bd90812、工作区干净；fetch 后 origin/main 为 f3ac0ca，只有管理员本人盲评提交未推送。其余五条本地支线均已包含在 main，没有独有提交，无需重复合并或删除。
+- 后端本人投稿配对和计票均使用 isStaff，moderator/admin 豁免、普通用户仍回避；API 仍以 counted/reason 告知匿名、未绑定、作品变化、本人及重复组合状态，分屏无需新增接口。只修正 API 契约 2.6 总述的旧本人回避条件，不改功能、数据库、依赖或配置。
+- 本轮 npm run check 95/0、npm test 284/284、git diff --check 通过；真实本地已安装包通过 catalog 读取，20题/176件、schema1，目录摘要与当前正式包一致。测试包括两种管理员本人作品计票、普通用户回避、角色降级及组合耗尽。无 build/check:intake 脚本；未重做浏览器、生产账号投票或迁移演练。
+- 本代理未 push、SSH、部署，统一发布由父代理协调；bd90812 本身没有迁移或配置影响。若线上比 f3ac0ca 更早，按部署文档核对已有 v39、参考图备份和已审阅预览媒体；显式 PENDING_PER_USER 继续覆盖默认8。证据在忽略 output/coordinated-integration-20261004-backend/。[本轮归档](docs/archive/2026-10-04-backend-integration-audit-wsnxxxs.md)。
+
+## 管理员盲评本人投稿（2026-10-04，本地完成并提交，未推送、未部署）
+
+- 用户要求本人投稿回避只限制普通用户，普通管理员与高级管理员均豁免。`server/arena.mjs` 在配对排除与 `own` 不计票两处复用现有 `isStaff`；当前角色为 `moderator` / `admin` 时可评本人投稿并正常计票。参评资格、邮箱、重复计票和管理员审核本人作品规则沿用，不改变数据库结构、迁移或 API 形状。
+- 新增一项真实 SQLite / library / arena 专项，覆盖两类管理员的本人作品配对与计票、普通用户配对不足、投票前降为普通用户后的 `own` 拦截、已评组合继续耗尽。首次专项因空题夹具未创建 dist 失败，补目录创建后专项10/10、check95/0、完整test284/284通过。
+- Gallery 文案同步，check59/0、test27/27、build176件/66site、CI=1 intake0错/8既有提示；Browser 合成接口真实构建的规则展开及截图目检。线上只读目录核对「二十四节气」18件/18配置；未取得反馈账号失败请求、未做生产投票或手机验证。
+- 两仓各一本地英文简单句提交，未 push、部署、写生产或改数据包 pin；本仓没有 build/intake 脚本。日志在忽略 `output/admin-own-vote-20261004/`。[本轮归档](docs/archive/2026-10-04-admin-own-blind-vote-wsnxxxs.md)。
+
+## 包参考图联调与 Linux 脚本修正（2026-10-04，待统一发布）
+
+- 联调发现包题目页靠回退显示五图，但管理/审核直接读API导致缺失；旧契约原本明确包refs为空，本轮按新授权更新为只读包引用与来源。新增声明/题目权限校验的media/pack-references路径，原包字节直接读取，不复制、不写上传表，上传图权限不变；包metadata同值可重发，变更仍在数据仓维护。
+- 定向13/13、check95/0、完整test283/283。正式包真实HTTP五图GET/HEAD200、JPEG MIME/CORS/逐图SHA与包一致；bootstrap/admin/review字段一致，公开且有包作品时同值保存200，上传表0行。未做生产和完整浏览器交互。
+- 父代理Linux staged唯一失败定位datapack-sync.sh的CRLF；补*.sh text eol=lf并仅归一三个部署shell脚本，Bash语法与diff检查通过。父代理换新SHA/tar后重跑Linux，不能沿用dcfcd95源码包。本轮不改pin/迁移版本，证据保留output/coordinated-release-20261004；[本轮归档](docs/archive/2026-10-04-pack-reference-release-fix-wsnxxxs.md)。
+
+## 四仓后端联调整理（2026-10-04，已验证，待统一发布）
+
+- 用户本轮授权全部已有修改提交、必要分支合并、推送及联调发布。后端隔离合并 origin/main 3ef8ec7（父代理核实已在线）与本地版本标记文档、投稿预览、成员默认8；既有题目参考图v39/契约/测试和历史发布补记一起整理，其他支线无独有功能。
+- 隔离源码 check95/0、完整 test283/283。生产快照副本试迁移v38→v39，20张旧表原列/旧行SHA逐表保持，外键0、integrity ok、二次打开幂等，源快照SHA保持。参考图存references，补齐每日备份与部署步骤，Bash语法与diff检查通过。
+- 11组模型媒体用生产库副本及原HTML演练全量核验和安装通过；运行源摘要或任一媒体摘要不符必须停止。生成物独立安装、不覆盖原作、不复制extract，运行媒体需父代理统一上线。
+- 本仓无build/intake脚本；前端/跨端与生产切换由各代理和父代理执行。正式pin更新、正规安装并激活数据仓CI发布不可变包，真实catalog20题/176件/digest一致；最终主线check95/0、test283/283。本轮功能提交f1292cc后合并远端主线，不把隔离测试称为全部交互通过。证据在忽略目录output/coordinated-release-20261004；[本轮归档](docs/archive/2026-10-04-coordinated-backend-release-wsnxxxs.md)。
+
 ## 配置表单与竞技场取景预览（2026-10-04，本地）
 
 - arena-fold.js 收窄场景隔离的表单保护，配置 radio/range/select 且无凭据/textarea 可隐藏；登录/普通表单和开始体验入口保持。admin/admin.js 竞技场取景接入 arena-fold 及对应类别 arena-scene，bridge/face 保留，展览馆不变。API 契约更新，不修改源作品或数据库。
@@ -51,12 +120,56 @@
 - 仅本地下载副本 API 5190/内容 5191 与 Show1 5441，未触及生产、未 commit/push/deploy，无迁移/依赖/CSP/nginx/部署配置变更。不是整批入口重新 HTTP 验收：中途 bulk HEAD 命中 60/min 限流，未放宽限流，也未据此报告剩余入口逐件全绿。
 
 
-## 四仓最新功能合并（2026-10-03，待统一发布）
+## 上传待核验额度（2026-10-04，已本地提交，未推送、未部署）
 
-- 用户授权四仓联调、合并、提交、推送和部署；本仓在隔离 worktree 将本地 `216879e`（分类扩充与 CDN / 重试修复）与远端 `ca3e2ca`（娱乐小窗 `arena-fold` / 键盘 `arena-scene`）合并。其他本地功能分支均为主线祖先，无独有提交需再次合并。
-- 保留 Gallery 原折叠及娱乐独立 opt-in，修正文档冲突，并给娱乐脚本补齐 `#err` / `#error` / alert 错误恢复控件保护，避免再次隐藏换源按钮；普通控制面板仍折叠。远端运维脚本保留，本轮不运行清理、不安装 cron。
-- Windows Node 24.16.0：check 87 / 0、test 262 / 262，无失败、取消或跳过；迁移仍 v38，`server/db.mjs` 与远端及合并前相同。邮箱验证注册、三级权限、统一作品管理、领域扩充、内容门禁及娱乐阈值回归通过。
-- 原工作区未提交 HANDOFF / datapack / 旧归档与未跟踪归档原样保留；本轮不改消费 pin、不写生产库、不推送或部署。父代理从合并后的完整 SHA 统一发布，后端先于游戏；生产现场、显式 CDN 白名单、SMTP / Turnstile 和浏览器验收由父代理核对。[本轮归档](docs/archive/2026-10-03-latest-backend-integration-wsnxxxs.md)。
+- 用户授权修复 Gallery 管理员误限并将普通成员默认额度改 8；本仓仅把 `PENDING_PER_USER` 默认 5 改 8、同步 API 契约示例与说明，并增加一项真实 HTTP 回归。普通与高级管理员原有 null/不限规则和可信成员20规则保留，无数据库迁移。
+- check95/0，最终完整 npm test282/282；新增额度专项验证成员第8件成功、第9件429，两种投稿入口同额度，普通/高级管理员已满8仍可投稿及新题示例。初次全套280/282（bad port、机审时序409），定向37/38（另一随机bad port），最终全套重跑通过；没有修改无关测试或机审逻辑。
+- Gallery check59/0、test27/27；隔离源码快照 npm build176件/66site、CI=1 intake0错/8既有提示；Browser合成会话真实上传模块核对成员7/8、8/8、两角色100件、可信19/20与旧有限字段管理员。未上线、生产读写、SMTP/CAPTCHA/付费审核或完整上传流程；本仓无build/intake脚本。
+- 显式 PENDING_PER_USER 仍覆盖默认，上线需核对服务环境；根交接保留本地，原有参考图改动、配置和他轮材料均保留，只提交本轮额度片段、测试和归档。详见 docs/archive/2026-10-04-upload-quota-wsnxxxs.md。
+- 本仓提交 `bb7b8c2`，Gallery `707e764`，各4文件，一条英文简单句，wsnxxxs noreply身份；未推送、部署。本轮临时预览已关闭。
+
+## 投稿预览适配（2026-10-04，本地完成并提交，未推送、未部署）
+
+- 用户授权修复截图页面的缺图、模型和取景，并指定 GPT-6 Luna / Max 分工；共4个子代理参与，最多同时3个。独立后端增加来源校验的投稿预览媒体和本地生成工具，Gallery消费API字段，不改原作、数据包或数据库结构，不新增npm依赖。
+- `readWorkPreview` 只对可读的非curated作品给出媒体字段，核对原入口及模型/海报SHA；路由沿用已有作品权限，清单不公开。`DATAPACK_SOURCE_DIR`用于烘焙源码输入，后端运行 `DATA_DIR` 仍单独指运行数据。提取architecture过滤与按题目sceneProfile展示分开，海报使用现有Gallery渲染器。
+- 已生成两车、四营地、滕王阁、破壁、深海启航、掠海长航和追加壶口共11组真实模型/海报，全部来源和文件哈希检查通过、逐张目检。模型方向与取景已优化，壶口保留真实瀑布水体，不需截图回退；工具合并配置后按新env另烘营地1 ready/0 failed。
+- 工作区check95/0、test281/281，暂存代码隔离副本check91/0、test265/265。真实HTTP模型/海报200、CORS与字节哈希、preview.json404、内容拒绝后媒体404通过。Gallery工作区check58/0、test26/26、build176件/66site、严格intake0错/8提示；暂存代码check55/0、test23/23、build176件/64site、intake0错/8提示。Browser核对四任务封面与11模型、汽车切换/指针、390宽度；未验证全部原作交互、真机或其他浏览器。
+- 后端提交 `2afde38`、Gallery提交 `ec55528`，负责人的英文简单句，一仓一条；原有其他轮次脏文件和根交接保留本地。未推送、部署、安装实际运行媒体、写生产库或修改pin。[本轮归档](docs/archive/2026-10-04-upload-preview-adaptation-wsnxxxs.md)。
+- 生成物与暂存代码副本保留 `output/page-adaptation-20261004/`；原始HTML下载和浏览器截图在Gallery同名output。安装流程见 `docs/upload-preview-adaptations.md`，必须对照运行库入口SHA，不能复制extract替换原作。本地只读UI预览4434保留供查看。
+
+## Gallery 版本标记部署配套（2026-10-04，文档已获授权本地提交，未推送、未部署）
+
+- 用户要求仅修改部署文档 / 必要配置，并指定 GPT-6.1 Sol / high 分工；两个子代理完成配置审计与部署文档，父代理集成与验证。明确禁止 commit / push / 部署 / 生产登录，未修改 Gallery 前端，原有脏文件保留。
+- docs/deploy.md 完整 manifest 包含 version.json，构建检查 assets 与 index.html 全部 ?v= 一致；资产差异包排除标记，先上传资产和 index.html、最后独立上传标记（哈希未变也传）。.next 完整核验后先切资产与入口，最后原子发布标记；回退 gallery.prev 同样最后恢复标记且不改原 .prev，旧构建无标记时示例在切换前停止。
+- 现有 JSON no-cache 规则满足 /version.json 的缓存要求，文档补充禁止长缓存 / immutable 及 CDN / 反代缓存；未来新增 location 必须 include security-headers.conf。static-private-paths.conf、read-zones.conf、Gallery gallery-private-files.conf 不拦截此路径，走普通 20r/s、burst 200 / 64 并发，不加入 catalog。配置无需修改；vhost 证据仅为本地历史样本，未核实当前生产。
+- 本地验证：npm run check 91 / 0，npm test 278 / 278，六个相关 Bash 块语法通过；合成目录验证新旧标记、首次引入、标记哈希不变及 Show1 发布，核对最后单传 / 生效、完整树、回退与缺少旧标记时切换前停止。Windows Git Bash manifest 分隔符 / 换行已在合成夹具中规范化，非生产 Linux 实跑；未新增测试。git diff --check / 文档相对链接检查通过，测试含他轮原有功能。
+- 未执行生产 HEAD / GET、Nginx -t / reload、CDN 缓存或浏览器恢复验收；未部署、commit、push、登录或请求生产。server 无 build / check:intake，未构建 Gallery。发布验收要求 version.json 200、no-cache（或 no-store），assets 与 index.html app.js?v= / 全部资产版本一致。证据在忽略目录 output/gallery-version-deploy-20261004-gz9e7zfx；[本轮归档](docs/archive/2026-10-04-gallery-version-deploy-wsnxxxs.md)。
+
+## 题目参考图（2026-10-04，本地完成，未提交、未推送、未部署）
+
+- 用户授权按 Gallery 已实现契约补齐后端，并指定 GPT-6.1 Sol / high 子代理分工；图片服务、题目与迁移、真实 HTTP 测试分别完成，父代理负责接口接线、契约文档与真实浏览器联调。本轮明确禁止 commit / push / deploy，优先于会话早先的默认提交约定；原有脏交接、datapack.json 与他轮归档保留。
+- SQLite 追加幂等 v39（questions.reference_credit、reference_uploads 表与索引），v1–v38 不改，API 仍为 2。bootstrap 提供 8 张 / 每张 5 MiB；POST /api/references 绑定邮箱、共享 drafts 限流、检查包版本提示，按 JPEG / PNG / WebP 结构嗅探并拒绝扩展名不符。保留压缩像素与宽高，无依赖移除 EXIF 等元数据，保存清理后 bytes / SHA-256；不生成可选缩略图。
+- 新建含示例与高级管理员编辑支持有序参考图、文件名、说明、来源；已有公开作品锁定参考图与来源，改动写审计。公开、本人、review（仅高级管理员题目清单）、admin/questions DTO 带参考图；绑定前按上传者 / 管理员读取，绑定后按题目作者 / 管理员或公开权限读取。媒体具正确 MIME、nosniff、inline 文件名、immutable 缓存和前端源 CORS。未绑定图在 24 小时后启动 / 每分钟清理；删除题目删除绑定图，拒绝保留。
+- 包题目 DTO 参考图与来源为空，前端使用包资源；非空后台覆盖返回中文提示。修正普通包元数据编辑意外快照 prompt，使更新后的包题面可进入 DTO；既有显式 prompt 覆盖保留。真实 HTTP 合成 a→b 包刷新验证新【参考图】段落进入公开与管理 DTO 且不复制图片。当前本地正式消费包的 denza-z 仍为旧工作区措辞，未改数据仓、真实包或 pin，更新需由数据发布流程完成。
+- 验证：npm run check 91 / 0、最终完整 npm test 278 / 278、git diff --check 通过；16 项新增测试涵盖三种格式 / EXIF、大小、过期清理、他人 id、数量 / Unicode 名称、编辑锁定、DTO、私密权限、CORS / HEAD / 预检、迁移 / 事务与包刷新。保留 decoder 范围：只校验容器结构与尺寸，不进行完整像素解码。
+- Browser 使用 Gallery 现有构建、真实后端、隔离库，前端 4422 / API 4423 跨源，参考图接口完全无 mock。真实上传 5 张 JPEG、发题、审核卡片、排序 / 改名 / 改说明、审核通过、公开题面 / 大图均已核对，实际图片 2000×1333；浏览器 ZIP 下载 5 文件、顺序 / 文件名 / CRC / 保存图片 SHA-256 全一致。下载事件等待曾超时，但文件实际已落盘并验证；此瞬时工具限制未当成下载失败。未捕获页面脚本 error / warn。
+- 未做：生产迁移 / SMTP / CAPTCHA / 自动图片内容审核、Safari / Firefox / 真机与全部作品交互；后端无 build / check:intake 脚本，不重复构建 Gallery，前端源码未改。本轮临时服务已关闭，合成库、ZIP 与截图保留在忽略目录 output/reference-images-20261004；Gallery 原 mock harness 与其他轮次服务不动。[本轮归档](docs/archive/2026-10-04-question-reference-images-wsnxxxs.md)。
+
+## MiniMax 787 盲评加载与错误重试修复（2026-10-03，本地完成，未推送、未部署）
+
+- 用户在原因及库来源核对后要求修复，并已通过会话开头约定授权功能完成后 commit。本轮只改独立后端：默认 CDN 加入 registry.npmmirror.com，但作品 CSP、截图网络守卫和上传检查均只允许已核对的 `/three/0.170.0/files/`；其他包和版本仍拦截。显式 CONTENT_CDN_ALLOWLIST 继续覆盖默认值，生产如有显式配置需同步加入该域名。
+- fold.js 保留 #err / #error / role=alert|alertdialog 内的换源和重试按钮；普通控制面板沿用原折叠和覆盖面积保护。未改原作、作品包、数据库、消费 pin 或 Gallery 功能源码。README 与 API 契约同步。
+- 后端 check86/0、test261/261；Gallery check52/0、test19/19、build176件/62site、严格intake0错/8既有提示。Browser 用现有 createContentHandler + 缓存原作 + 合成 m key，在默认桌面与实际390×844宽度验证默认 npmmirror 可渲染；移除该源模拟失败后重试按钮可见，点击 unpkg 恢复。桌面普通控制面板仍隐藏；手机原作面板由既有面积保护保留，不据此宣称全作品交互验收。
+- 手机默认源的首次加载层等待曾超时，随后 DOM 核对 canvas390×844 / FPS135、错误层隐藏、加载层 display:none，截图确认渲染；如实记录该瞬时等待，未改不相关的动画或取景。未测真机、Safari/Firefox、完整账号/投稿/投票、生产对局或自动截图浏览器实跑。
+- 本轮功能与新归档已保存为 `216879e`（英文简单句，wsnxxxs noreply 身份）；根交接保留本地，原有脏文件不纳入。临时服务与页面已关闭，截图在 Gallery 忽略目录 output/boeing-cdn-repair-20261003。[本轮归档](docs/archive/2026-10-03-boeing-cdn-repair-wsnxxxs.md)。仅发布本轮时须单独应用该提交，不夹带上一轮尚未发布的领域扩充功能。
+
+## 设计分类与领域扩充（2026-10-03，本地完成，未推送、未部署）
+
+- 配合用户确认的方案，领域扩至25项，保留原11项，每题仍选1–2项；bootstrap增加四组domainGroups供前台/后台共同使用。分类值与API v2、数据库v38沿用，界面显示文本/设计/三维。
+- 后台新建/编辑共用领域分组复选项、计数与上限交互，新建可选两项；题目弹窗720px上限，手机组名在选项上方，沿用既有主题token。初次目检发现误读静态目录分组，已修正boot读取bootstrap并重测新建/保存。
+- check86/0、test259/259；扩充既有题目测试验证新增领域创建/通过/目录/排行榜。Gallery隔离真实后端integration smoke及词表兼容核对通过；Browser核对后台新建/编辑、390手机浅色与前台1440/390/360深浅主题、提交/审核/保存和公共筛选；修正后无新增捕获脚本错误。未逐页测全部后台、真机、Safari/Firefox，本仓无build/intake脚本。
+- 原有HANDOFF、datapack配置和他轮归档保留，不提交这些既有改动；没有生产写入、推送、部署或数据迁移。[本轮归档](docs/archive/2026-10-03-question-taxonomy-wsnxxxs.md)。
+- 本轮功能提交后端 `7f83bd6`、Gallery `832179b`，均未推送、未部署。根交接保留本地，本轮功能与新归档已提交。
 
 ## 四仓联调后端合并（2026-10-03，待统一发布）
 
@@ -81,24 +194,6 @@
 - **范围与未做**：排名实现、回放脚本、Show1 兼容层源码和他轮归档原样保留；仅新身份快照省略 curated，旧票读取 / 排行规则保持。未修改 Gallery、另一前端、数据包源码或 pin，未验收双前端同步发布、生产迁移 / SMTP / CAPTCHA / 外部审查、全部作品交互、移动端或多浏览器；本仓没有 build / check:intake 脚本。Gallery 与后端须同时发布 v2。
 - [本轮归档](docs/archive/2026-10-03-unified-authorship-api-v2-wsnxxxs.md)。本地证据在忽略目录 output/unify-authorship-20261003-parent；旧外部临时目录的清理被自动审批拒绝（见归档），未无差别清理。
 
-## 键盘场景小窗（2026-10-03，仅本地）
-
-- arena-fold.js 额外支持 aob=arena-scene，唯一大 Canvas 和祖先链铺满、链外内容 CSS 隐藏、触发原 resize。无/多 Canvas 保守不选，处理迟加载/替换。Show1 仅 010 娱乐小窗附加；放大/正式原样。不改作品文件、Gallery fold.js、相机或门禁。
-- check 85/0、test 249/249 通过；Show1 截图两份真实键盘的小窗尺寸/比例、放大恢复、正式对照及保护 fixtures 通过，其他键盘未逐件视觉验收。本地已重启，未部署/提交，他人脚本改动保留。
-
-## 娱乐小窗说明标签收起（2026-10-03，本地完成，未提交部署）
-
-- 用户要求娱乐小窗默认收起标签/控件，放大显示原作，正式模式不受影响。Show1 改为仅娱乐 blind 小窗附加 aob=arena-fold，取消类别白名单和前端开关；正式/放大不附加。原 Gallery fold.js、m 语义及访问门禁保持。
-- server/arena-fold.js 补充大幅 Canvas 上的非交互投影标签层检测，多个短文本绝对定位子节点一致才隐藏，迟加载也处理；不按 .tag 名称批量删除。不保证 Canvas 内文字及复杂布局覆盖。docs/api-contract.md 同步。
-- check 85/0、npm test 249/249 通过。Show1 浏览器保护 fixtures、真实截图飞机标签/面板小窗隐藏、放大完整显示、关闭不重载底层、正式对照保留原标签/控件通过（正式用户只在隔离浏览器 mock，未登录或写库）。本地 API 已重启，未生产部署。保留前述他人脚本改动。
-
-## Show1 控件折叠试版（2026-10-03，仅本地、未提交部署）
-
-- 用户授权可行性试做。server/content.mjs 新增 aob=arena-fold opt-in 及受既有内容门禁保护的 /__aob_fold.js；新增 server/arena-fold.js 自动检测大幅 Canvas 上的浮动控制容器，默认隐藏、父消息可恢复原 DOM 状态，迟加载继续检测，入口/表单/语义介绍保留。不更改原 server/fold.js、Gallery、源作品、相机、CSP、迁移或部署。
-- docs/api-contract.md 已记录独立 opt-in。test/platform.test.mjs 覆盖新旧脚本互斥和返回字节；修正该测试 helper 丢弃 query 的问题。npm run check 85/0、npm test 249/249 通过。
-- Show1 scripts/validate-work-controls.mjs 本地浏览器验证：保护 fixture、恢复 DOM/输入、迟加载、消息来源、双 iframe 切换不重载、放大继承选择、键盘例外。9 个真实飞机样本中 8 个有识别结果，部分仅工具栏；不代表全面兼容。布局侧栏/Canvas 内 UI 暂不处理。5441/5190/5191 本地副本服务已重启，无生产写入。
-- 检查期间出现 scripts/archive-backup.sh、scripts/datapack-sync.sh、scripts/cleanup-retention.sh 他人改动，未触碰；本轮不 commit/push/deploy。
-
 ## 娱乐盲测十件作品门槛（2026-10-03，本地完成，未提交、推送、部署）
 
 - 用户确认实施报告后授权：Show1 公开娱乐题目须当前至少 10 件不同 id 的非演示公开娱乐作品；前端同时保留跨模型要求。不隐藏题库清单、不删除历史票/榜单、不影响 Gallery 正式盲测。
@@ -118,13 +213,6 @@
 - 动工前公网只读 curl --ssl-no-revoke：464 HTML，177 p / 287 w，刚取 p 样本 200；没有声称历史失效地址已恢复。未部署、未写生产库、未验收公网新 c 200，发布需先备份生产 SQLite 并验收 v37；生产版本须现场核对。
 - 后续提交禁止 Co-authored-by / Generated with 等联合署名，英文简单句。本轮不 commit/push/deploy，不新增归档或决策日志。
 
-## 共池分支发布（2026-10-03，发布准备完成）
-
-- 用户明确授权发布，并选择统一开启当前数据包作品的正式盲评；计划只恢复当前目录内 90 件关闭的作品，其他 87 件已开启，保留退役记录、校准、其他门面开关及全部业务数据。
-- 数据源码 7c1933f 的私有 CI 成功，固定不可变产物 3c82309f65ec2a405741a53e581bd68aeb09460d；后端 tracked pin 与 Gallery 本地 pin 同步。Gallery 从 4c3a084 构建，177 件 / 20 题，两端目录 digest 一致。
-- 部署前核对公网与现场后端 57a6cc9；实际 runtime 与该 main 提交逐文件核对一致，代码、pin、数据版本和 SQLite 已备份。Linux check / 247 项测试通过，Gallery check / 19 项测试 / build / intake / 固定源码包联调通过。
-- 上线结果另行追加；此处没有宣称已切换。见[发布归档](docs/archive/2026-10-03-pool-release-wsnxxxs.md)。
-
 ## 四仓分支合并与逻辑核对（2026-10-03，本地验证完成）
 
 - 后端已合并 92aa058，保留主线 model_vendor、HTML 上传警告、fold 与安全改动；删除旧收录/回填及失效 npm 命令。247 项测试及新包隔离联调通过；显式 override 保留，旧快照轮次娱乐默认关闭；来源分流延期项没有实现。
@@ -142,8 +230,31 @@
 - 验证：check 82/0，test 240/240（一次因测试内网络请求偶发失败，重跑通过）。用去掉 5 件重复作品的真实数据包加临时库调接口：篝火营地池 8 件 8 配置，12 组不再抽到重复件；game 名单 394 件 id 唯一，数据包作品 132 件且不含 004/005/007；13 道题的同名 Opus 各自打开本题页面；审核接口 177 件数据包作品均带盲评状态；旧收录接口 404。浏览器联调见 Gallery 同名分支。
 - 上线顺序：数据仓 remove-duplicate-works 出包 → 后端与 Gallery 同时换数据包 pin → 部署后端 → 部署 Gallery。本地 main 上未提交的「自定义厂商」改动迁移号 v33 与远端冲突，合并时需改为 v35。未连生产库。 见[归档](docs/archive/2026-10-03-unify-datapack-works-wsnxxxs.md)。
 
+
+## 馆藏默认进正式盲评池（2026-10-03，本地修改，未提交、未部署）
+
+## 共池分支已上线（2026-10-03）
+
+- 发布完成于 2026-10-03 04:32:51 UTC（Brisbane 14:32:51）。后端 5527c5e、Gallery 4c3a084；两端消费同一验证包，公开目录 177 件 / 20 题，catalogDigest 相同。用户明确授权统一开启当前数据包作品的正式盲评，实际经后端 batchSetFaceSettings 恢复 90 件，另 87 件已开启，当前 177 件全部 eligible；校准、其他门面开关和 5 条退役关闭记录保留。篝火营地正式池 11 件 / 11 配置，展示目录 12 件（含 4 件投稿，展示与正式资格规则不同）。
+- 私有数据 CI、后端两次主线 CI、Linux check / 247 tests、Gallery check / 19 tests / 固定提交构建 / intake 0 错 9 条既有提示 / 跨仓联调均通过。后端安装文件与固定 main 逐文件哈希一致；数据包及静态站完整集合和 SHA256 校验通过。线上重启后数据库 v36，votes=369、works=360、questions=14、users=31、matches=370、reactions=1 的行内容哈希与停服前一致；只有授权的 work_overrides 和逐件审计变化。公网版本、共享 digest、营地正式池、retired scene 404、fold.js 200、跨站 CORS、游戏入口及旧 game API 兼容路径通过。浏览器目录桌面正常，Gallery 与游戏无捕获的 console error；未逐一测试全部作品交互，未登录生产管理员或提交投票。服务 active；该机 journald 无可读取 journal，未据此宣称日志没有错误。
+- 数据源固定 7c1933fb877458f1b56ae64b212a6de26aac2228，不可变产物 3c82309f65ec2a405741a53e581bd68aeb09460d，sourceDirty=false。
+- 旧静态站在 gallery.prev，现场代码 / SQLite / pin 和变更开关备份在服务器 /root/aob-pool-release-20261003；回退代码和包时保留投票、投稿等后续业务写入。发布证据位于后端忽略目录 output/pool-release-20261003。
+- 完成归档：[本轮归档](docs/archive/2026-10-03-pool-release-wsnxxxs.md)。本轮功能提交已推送；本节与完成结果追加留本地交接，原有未提交材料原样保留。
+
+## 共池分支发布（2026-10-03，发布准备完成）
+
+- 用户明确授权发布，并选择统一开启当前数据包作品的正式盲评；计划只恢复当前目录内 90 件关闭的作品，其他 87 件已开启，保留退役记录、校准、其他门面开关及全部业务数据。
+- 数据源码 7c1933f 的私有 CI 成功，固定不可变产物 3c82309f65ec2a405741a53e581bd68aeb09460d；后端 tracked pin 与 Gallery 本地 pin 同步。Gallery 从 4c3a084 构建，177 件 / 20 题，两端目录 digest 一致。
+- 部署前核对公网与现场后端 57a6cc9；实际 runtime 与该 main 提交逐文件核对一致，代码、pin、数据版本和 SQLite 已备份。Linux check / 247 项测试通过，Gallery check / 19 项测试 / build / intake / 固定源码包联调通过。
+- 上线结果另行追加；此处没有宣称已切换。见[发布归档](docs/archive/2026-10-03-pool-release-wsnxxxs.md)。
+
+- 生产只读核对：19 件 Opus 5.5 Max 等 09-28 / 10-01 新收的约 94 件馆藏从未进池（馆藏 override 缺省 show_arena=0，只有旧 5 题馆藏曾开启）。用户选择馆藏默认进池。
+- library.mjs flagsOf：馆藏无 override 时 show_arena 缺省改为 1；已有 override（管理员关闭或校准 / 娱乐开关时按旧缺省写入的 0）保持原值。admin / blind-pool / platform 4 条断言随新缺省更新，api-contract 同步。check 88/0、test 254/254。
+- 发布须与删去 3 件 Opus `-zip` 和篝火营地 `gemini-3.8-flash` 的新数据包同时上线，否则同一份代码会以两个模型配置进池。arena-backfill 的 DUPLICATE_CURATED_WORKS 在新包下 present=false，未改。
+
 ## 作品控件折叠协议接入（2026-10-03，本地验证完成）
 
+- 本轮提交完成：后端 `6f8b09f`，Gallery `857182d`；均仅本地，未推送、未部署。生成构建与浏览器证据用于本地验证，发布时需从确定提交重新构建。
 - 用户要求 Gallery 盲评 / 并排显示控件开关，并让投稿公开地址按参数注入 fold.js；3 个 GPT-6.1 Sol / high 子代理并行完成两处 Gallery 与本仓服务端。父代理汇总验证、文档和提交，身份 wsnxxxs；本轮每仓一条英文提交，未推送、未部署。
 - server/content.mjs：公开 / 预览 HTML 带 aob=fold 时注入，aob=bridge&aob=fold 可并用；/__sp_fold.js 资源不依赖页面参数。盲评默认注入、草稿试加载和普通作品地址保持原行为。
 - server/app.mjs：GET/HEAD /api/fold.js 返回同一份 server/fold.js 原始字节，沿用 API 读取限流、trusted frontend CORS；Gallery CSP 允许 API 域名，无需放宽 Nginx 策略。fold.js 对已经加载的文档立即扫描并保留 600/1800/4000ms 后续扫描；检测启发式与保护阈值沿用现有脚本。
@@ -151,9 +262,21 @@
 - 未改另一前端、作品 / 数据包、数据库 / 部署配置或生产；未验收真实生产上传 / 登录 / 投票、全部作品、多浏览器或真机。生成浏览器证据在相邻 Gallery 忽略目录 output/fold-controls-20261003；保留他轮未提交记录。[归档](docs/archive/2026-10-03-work-controls-wsnxxxs.md)。
 
 
-## 四仓协调发布（2026-10-03，联调部署进行中）
 
-- 用户授权联调部署四仓现有改动。保留线上 v33/v34，贴纸与厂商为 v35/v36；新包固定 389199bd。check 88/0、test 251/251；生产库副本迁移和身份更正幂等验证通过，原始票面保留。实际发布结果随后追加到 docs/archive/2026-10-03-coordinated-release-wsnxxxs.md。
+## 单 HTML 上传缺失本地引用改为警告（2026-10-03，已提交、推送、部署）
+
+- 起因：SupernovAI.html 第 1731 行残留 `<script src="mock-engine.js">`，引擎已内联在后面，页面能运行，但预检直接 400。用户确认平台收录模型原始输出，不改作品，放宽规则。
+- server/inspect.mjs：只有 ZIP 缺关键脚本 / 样式仍返回 400；单个 HTML 缺本地引用归入 `local` 检查的 `warn`，交给试加载判断。安全边界（独立源、CSP 沙箱、包体检查）不变。api-contract.md 同步；platform.test.mjs 加一条单 HTML 警告 / ZIP 拒绝用例。
+- 验证：check 88 / 0，test 252/252；真实样本 inspectUpload 通过，local=warn「mock-engine.js」。未在平台内实际上传、未做试加载、未部署。
+- 发布轮：用户授权提交、推送并部署；复用已完成的英文提交 `57a6cc9`，身份 wsnxxxs / GitHub noreply，不另建重复功能提交。父代理负责 Git 和服务器，Sol high 子代理复跑本地 check 88/0、test 252/252、原始样本预检及三文件差异核对。公网 bootstrap 与正式版本文件均为 `a280874`，数据库 v36 / quick_check=ok；待完成正式源码比对、备份与切换。见[发布归档](docs/archive/2026-10-03-html-upload-warning-release-wsnxxxs.md)。
+- 完成：`57a6cc93f5dc7ba1cbdc77ad9cb2a0dfd9ebeb18` 已推送 origin/main，并于 Brisbane 2026-10-03 12:49:37 部署。固定 LF 候选在 Linux check 88/0、test 252/252；现场切换前后 71 个运行文件均分别匹配对应 Git 基线。正式检查器接受未改的 SupernovAI.html，local=warn；公网版本、双站 200、CORS、作品路径 frame-ancestors self、未登录草稿 401 通过。数据库 v36 / quick_check=ok，数据包指针和 db.mjs / Nginx 哈希保持，后端与审核 tunnel active。未做真实账号上传 / 平台内试加载 / 正式作品提交。备份 `/root/aob-html-warning-release-20261003-57a6cc9/backup`；证据在本机及服务器同轮 output / job 目录，完成结果仅本地追加，不另建第二条功能提交。
+
+## 四仓协调发布（2026-10-03，已提交、推送、部署）
+
+- 源码 a280874 已推送 origin/main；2026-10-02T19:00:25Z（Brisbane 10-03 05:00:25）与双前端协调上线，数据包 389199bd，catalogDigest 31bed22d1a8987cb6c23d04ec27e9641dc335004ee7e01cbc9b7b26acb3a1bd5。此前各节「未提交 / 未部署」是历史状态，以本节为准。
+- 保留线上 v1–v34，贴纸 / 厂商追加 v35 / v36。生产 users 31、works 353、votes 364、matches 366、comments 16、questions 14 保留，原始票面与用户 / 评论 / 题目哈希一致；按已确认的贴纸迁移将 62 条旧 reactions 清零。16 件投稿模型登记、251 个票面侧写入 correction，原始 identity 保持；无未结束对局侧需要更正，重复执行零变更，integrity ok。
+- Windows 与 Linux check 88/0、test 251/251；固定 LF 源码跨仓 integration-smoke 和真实后端隔离浏览器 8 项通过，公网只读验收通过。Nginx -t、后端与 moderation tunnel 正常，既有 Gallery CSP 哈希保持。真实 CAPTCHA 登录、SMTP 和外部审核调用未生产写入验收。
+- 备份 /root/aob-coordinated-release-20261003/backup，保留切换前后数据库、源码、配置和旧目录；证据 output/coordinated-release-20261003。回退不能直接用旧库覆盖上线后的新业务写入。见 [本轮归档](docs/archive/2026-10-03-coordinated-release-wsnxxxs.md)。每仓本轮一条英文发布提交已推送；完成结果只追加本地交接 / 归档，不另建第二条提交。
 
 ## Gallery 内置作品 CSP 修复持久化（2026-10-03，源码就绪）
 
@@ -697,18 +820,37 @@
 - 未执行：未逐件覆盖手机、全部滚动/指南/部件动画、交互后新建面板或音频可听性；这些超出本轮实际证据，不宣称全部交互验收。前端开关由另一人实现，本轮未改前端；未连接生产、未部署、未提交或推送后端。本轮本地审计服务已停止。
 - 后续数据整理与发布（2026-10-01）：按用户另行授权，data PR #5 的38件完成题目去重映射、模型注册与收录验收，并已合入 main，源码 `638937a58d6aec02644106d76e2b84d51fbf9fe9`；不可变 tag `datapack/638937a58d6aec02644106d76e2b84d51fbf9fe9` 指向产物 `39a2fa43b25488b09069644fdcd6df50adc06dc0`。发布包 schema 1、sourceDirty false、20题/121件、37展示模型/203完整模型、11 Harness/10服务商；PR CI 36731000102 与发布 CI 36731686651 均成功。本地 data check 28文件/0错、测试16/16、完整构建成功、收录检查0错/4提示；原作已有空白提示保留，范围与限制见 data 本轮归档。本轮只提交/推送/合并 data，未更新消费者 pin、未部署、未提交后端；上面的折叠审计仍只覆盖固定正式83件，不包含新增38件。合并、产物与CI核对证据位于 data 忽略目录 `output/intake-pr5-reconcile/worktree/output/pr5-review/published-package-verification.json`。
 
+## 篝火营地排行榜计票排查（2026-10-03，仅检查）
 
-## 差异包根链接复制修复（2026-10-03，发布前必要修复）
+- 用户反馈刚做了很多篝火营地对比，Opus 5.5 未更新；按用户要求派 GPT-6.1 Sol / medium 子代理只读核对计票、身份、排行缓存与登录提示。用户随后确认当时没有登录。
+- 生产只读查询：Brisbane 14:33:58–14:37:45，新增 38 组，其中 37 组已选择、1 组未选择；37 组均无登录身份、均无正式 votes 行。Opus 5.5 Max 涉及 8 组、8 次获胜，均为匿名体验。篝火营地正式票仍为原有 1 张，与公网榜单一致。
+- 正式票仅在已登录且绑定邮箱等资格条件满足时写入，成功后立即清排行榜缓存；未发现本次排行聚合漏票。没有补写匿名票、修正身份、清票、修改源码、重启、部署或推送。
+- 核对线上 Gallery arena.js：投票前、投票后均有不计票提示，但为 13px 灰色文字，没有弹窗。另发现会话失效后内存登录外观可能未及时同步：匿名接口返回 200，而 platform.api 仅在 401 时清旧 user；此次用户确认未登录，不能将该候选问题认定为此次根因。未修改 Gallery。
+- 验证结果见本轮归档：docs/archive/2026-10-03-campfire-vote-investigation-wsnxxxs.md。保留本轮开始时已有交接和归档文件；本轮只追加此节及新建归档，密码未写入材料。
+
+## 排行算法离线评估（2026-10-03，结论：不换算法，代码已丢弃）
+
+- 评估了分层 Bradley–Terry（模型×题目随机效应）、题目降权和用户×题×配置对 1/n 权重。用正式库只读快照回放：440 票、4 位投票者（最多一人 232 票），按整题留出验证，现行 rankEntries 最好；分层模型最优 τ=0.25，与现行差 ≤0.001；题目降权差 0.05–0.09。现行 BT 比五五开低 0.13–0.19，6 道核心题均更好。
+- 决定：不上线分层模型和权重，区间与暂定规则不变。实验分支 codex/hierarchical-bt-replay 未提交，已删除；本地快照已删除。汇总留在忽略目录 output/ranking-replay/real-20261003T075800Z/summary.md（不含用户身份）。
+- 建议在投票者 ≥20 且没有人超过总票数 25% 时重新评估；当前瓶颈是投票人数少，以及票集中在 chinese-architecture（263/440）。
+
+
+## 差异包根链接复制修复与发布完成（2026-10-03）
 
 - 父代理在实际差异包部署中确认 cpSync(oldRoot) 会保留 .datapack/current 根符号链接，后续删除和更新写穿旧版本。仅修改 scripts/datapack-delta.mjs 与既有 delta 测试：先 realpathSync 解析旧根，基线核验和复制均使用实体目录，资源内部链接继续由 inventory 拒绝。
 - 新 root-link 回归使用 Windows junction / Linux directory symlink，确认旧版本树 SHA256 不变、current 保持链接、目标是实体目录并通过目标校验。修复前 Windows cp 报 EPERM，修复后 2 / 2 专项通过；npm run check 86 / 0、完整 npm test 259 / 259、diff --check 通过。
 - 本轮不操作生产，不重跑数据库迁移；线上受影响文件恢复与旧版本完整校验由父代理负责。保留父代理已更新但未提交的 datapack.json 与原脏文档。本补充与脚本 / 测试作为必要修复独立提交，父代理重新固定后端来源后发布。
+- 发布完成补记（2026-10-03，依据父代理实际执行证据）：后端以固定 a7179f28c3c6c2de46f4da4b2b5e1ca4aa6fa6a1 部署成功，API v2 / 数据库 v38；Linux 固定源码 check 86 / 0、test 259 / 259 通过。统一验证的数据包已切换；公网验收由父代理继续，未宣称全部交互通过。
+- 差异包事件：旧 apply 在暂存阶段保留 current 根链接，写穿旧包更新 5 文件、删除 8 文件。父代理短暂停服，从事先保存的完整旧包缓存恢复全部 13 文件；旧包完整文件集合及 SHA256 精确恢复后，才以实体路径重新暂存。新修复保持源目录不变、目标为实体目录；正式数据库迁移另行进行。
+- 停服迁移前 users=31、votes=444、works=360、questions=14、matches=445、reactions=2；恢复服务前，19 张既有表原列内容哈希均保持，只有授权 member -> user 角色变更；外键与 integrity_check 通过。旧包保留，代码和停服一致库备份在 /root/aob-integrated-release-20261003/backup（code.tar.gz / platform-stopped.db）。
+- 本次只补交接与归档，不新提交或推送，保持线上固定 SHA；他人未提交文档和本地 pin 保留。
 
 
-## 游戏内置作品同源嵌入修复（2026-10-03，待现场验收）
+## 游戏内置作品同源嵌入与四仓发布完成（2026-10-03）
 
 - 公网联调发现 game 题库封面 /art/pelican-cover.html 和历史 /works/ 预览被站点默认 frame-ancestors none 拦截。仅在现有 host / normalized URI map 中对该封面精确路径与 game /works/ 目录返回 frame-ancestors 'self'，允许游戏自己的 iframe；query 不参与 $uri。Gallery 原例外、game 顶层 none、API / 上传作品策略和 iframe sandbox 保留。
 - 修改 deploy/nginx/read-zones.conf、docs/deploy.md；npm run check 86 / 0、完整 npm test 259 / 259、diff --check 通过。未改 JS，也未新增重复实现测试。
+<<<<<<< HEAD
 - 现场 Nginx -t / reload、游戏顶层 none / 两类预览 self 响应头及实际 iframe 渲染由父代理执行，当前没有宣称部署验收完成。本轮新归档见 docs/archive/2026-10-03-game-bundled-csp-wsnxxxs.md；只提交本节及本轮文件，既有脏交接 / 归档 / pin 保留。
 
 ## 展览馆新题到Show1目录漏同步（2026-10-04，仅调查）
@@ -716,3 +858,9 @@
 - 只读线上bootstrap/prompts/works及game发布JS。二十四节气q-48c3b43eeb284f6d最新21件非演示、19模型（调查期间由18增长）；公开Gallery与Show1 works均有该题作品，但Show1 prompts25道均为旧编号，无此题。橘子题q-5ebd7c84dff7cd8f也有36件、26模型而无题目目录。
 - show1compat.promptCatalog无arenaId即continue；liveWorks允许数据库questions题并以q-*为round，导致目录/作品不一致。published依赖目录，不能只在前端造入口。线上题目解析器和本地Show1 lib/prompts.ts仅接受三位数字；随机池从目录选题，故十件门槛不是本次阻断原因。
 - 未修业务代码、写DB、修改源作品、提交/推送/部署；建议后续统一新题ID及目录、作品、投票契约，保留旧编号与十件跨模型门槛。之前未完成的娱乐视角校准验证保持待续。
+=======
+- 父代理于 2026-10-03T11:21:38Z 完成最终 9bf06d0abd8c5213bebb66eceab032edbf5b6c54 上线；Nginx -t / reload 成功。game 精确封面与 /works/ 的 CSP 为 self、顶层仍 none；浏览器 390px 手机与 1440px 桌面鹈鹕示例真实渲染，iframe 拒绝文案消失，无捕获 console error。归档见 docs/archive/2026-10-03-game-bundled-csp-wsnxxxs.md。
+- 最终部署集合与逐文件哈希通过：203 项 tracked 源码（生产数据包配置单独校验）、69 项 runtime、数据包 2283 文件、Gallery 2337 文件、game 941 文件；保留的 121 项旧 game 文件不变，旧包完整哈希保持。API v2 / 后端 9bf06d0 / Gallery 0a6 / game b549 共享同一官方目录 digest。
+- 24 项公网 HTTP 核对通过，涵盖 CORS、匿名权限、旧 game API 的 526 件作品 / 25 题、4 个 legacy 入口、fold 与内容 origin。服务 active / running、ExecMainStatus=0、NRestarts=0；主机 journal 不可读取，不据此声称日志无错误。未用生产账号登录或提交投票，未逐一验收全部作品交互。
+- 本次仅本地补记最新节与本轮 CSP 归档，不再 commit / push，保持正式部署 SHA；既有脏交接、归档与本地 pin 原样保留。
+>>>>>>> origin/main

@@ -43,7 +43,7 @@
 - 认证基于 **Cookie 会话**。注册 / 登录成功后，响应头种下：
   `COOKIE_SECURE=1` 时为 `Set-Cookie: __Host-sp_session=<token>; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000; Secure`（无 Domain）；未启用 Secure 的本地环境仍用 `sp_session`。
 - 会话 Cookie 为 HttpOnly，前端脚本不可读；服务端只存其 SHA-256。重名会话 Cookie 按未登录处理。
-- 登录与注册生成新会话并撤销请求中唯一的旧会话 Cookie。绝对有效期仍为 30 天；服务端闲置有效期普通账号为 24 小时，管理员为 30 分钟，以有效认证请求刷新。v32 为 sessions 追加 last_seen_at，旧会话从创建时间计算闲置期，不延长原过期时间。
+- 登录与注册生成新会话并撤销请求中唯一的旧会话 Cookie。绝对有效期仍为 30 天；服务端闲置有效期普通账号与管理员均为 7 天，以有效认证请求刷新。v32 为 sessions 追加 last_seen_at，旧会话从创建时间计算闲置期，不延长原过期时间。
 - 前端请求需携带 Cookie（`fetch` 使用 `credentials: 'include'`，XHR 使用 `withCredentials = true`）。`COOKIE_SAME_SITE` 支持 `Lax`（默认）、`Strict`、`None`；跨站 HTTPS 部署设 `None` 并开启 `COOKIE_SECURE=1`，否则服务拒绝启动。第三方 Cookie 仍受浏览器设置限制，建议前端与 API 使用同站域名。
 - 生产会话 Cookie 只属于 `api.arenaofbias.icu`；game 与 Gallery 都必须直接请求 `https://api.arenaofbias.icu` 才能共用登录状态，经前端自身域名反代的 `/api` 会产生独立会话。
 - 登出（`POST /api/auth/logout`）删除服务端会话并下发 `Max-Age=0` 的清空 Cookie。
@@ -95,7 +95,7 @@
 | --- | --- | --- | --- |
 | auth | 10 次 / 分钟 | 客户端 IP | 注册、登录 |
 | write | 120 次 / 分钟 | 用户 ID（未登录时为 IP） | 投稿提交、投票、表情、评论写入/删除、校准写回 |
-| drafts | 12 次 / 10 分钟 | 用户 ID | 上传草稿 |
+| drafts | 12 次 / 10 分钟 | 用户 ID | 上传草稿与题目参考图共享 |
 | matches | 60 次 / 分钟 | 用户 ID（未登录时为 IP） | 创建对战 |
 | guess result | 20 次 / 分钟 | 客户端 IP | `POST /api/guess/result`，另受 guess/matches 桶约束 |
 | export | 2000 次 / 分钟 | 导出令牌 | 导出元数据及文件；另有每 IP 10000 次 / 分钟兜底 |
@@ -217,7 +217,7 @@ HTTP 公开视图恒为：
 
 数据库字段：`id`、`match_id`（唯一）、`user_id`、`task_id`、`a_work` / `b_work`、`pair_key`（`题目:作品A+作品B`，ID 排序后拼接）、`choice`（`a` / `b` / `tie`，`skip` 不产生投票行）、`created_at`，以及 `a_identity` / `b_identity` JSON 原始快照、`a_correction` / `b_correction` JSON 显式更正和 `source`（`arena` / `show1` / `legacy`，v18 删除冗余的 `identity_source`）。快照含当时模型 ID、名称、厂商、档位、归一化档位、model/config 计分 key、内容摘要 `digest`，以及 `harnessId`、`providerId`。这两项不参与 `configKey` 或 `digest` 计算；旧快照里的 `harnessVersion` 读取输出时忽略，不重写原始快照。数据包摘要为入口页 SHA-256，投稿为全包 SHA-256。v8 迁移前的 legacy 票在 `a_identity` / `b_identity` 中存的是裸的旧模型 ID，并非 JSON；这类票不参与计分，也不能按推测更正。迁移前没有身份快照的对局不能再投票。新票按持久快照或显式更正计分，原始快照保持不变。约束：`UNIQUE(user_id, pair_key)`——**同一用户对同一作品组合只计一票**。
 
-计入排行的投票需同时满足：投票时已登录、双方作品当前均为 `verified` 且存在、非本人作品、未评过该组合。作品被标记存疑或删除后，其相关投票即时退出排行；恢复后重新计入（见 3.9）。审核只影响是否计入，不会改写新票的计分归属。需要改正归属时由管理员明确更正单票，审计记录包含更正前有效值、更正后值、理由和操作者；缺少原始双侧快照的 legacy 票不可按推测更正。
+计入排行的投票需同时满足：投票时已登录、双方作品当前均为 `verified` 且存在、普通用户不涉及本人作品（普通与高级管理员豁免）、未评过该组合。作品被标记存疑或删除后，其相关投票即时退出排行；恢复后重新计入（见 3.9）。审核只影响是否计入，不会改写新票的计分归属。需要改正归属时由管理员明确更正单票，审计记录包含更正前有效值、更正后值、理由和操作者；缺少原始双侧快照的 legacy 票不可按推测更正。
 
 ### 2.7 审核状态流转
 
@@ -266,7 +266,7 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
     "autoModeration": true,
     "efforts": ["Low", "Medium", "High", "XHigh", "Max"],
     "emojis": ["lick", "lol", "press", "luck", "yes", "drool", "knock", "stare", "no"],
-    "limits": { "uploadBytes": 31457280, "coverBytes": 3145728, "pendingPerUser": 5, "provisionalGames": 30 }
+    "limits": { "uploadBytes": 31457280, "coverBytes": 3145728, "referenceCount": 8, "referenceBytes": 5242880, "pendingPerUser": 8, "provisionalGames": 30 }
   },
   "works": [ /* 两种存储中 visibleTo(show2) 的作品，已应用覆盖 */ ],
   "questions": [ /* 两种存储中全部公开题目，已应用覆盖，见 2.2 */ ],
@@ -278,7 +278,7 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
   "arena": { "chinese-architecture": { "works": 40, "entries": 33 } },
   "featured": { "chinese-architecture": { "cover": "work-id", "models": { "model-id": "work-id", "x:custom model": "up-work-id" } } },
   "totals": { "votes": 128, "voters": 17, "entries": 33 },
-  "me": { "votes": 12, "pending": 1, "pendingLimit": 5, "updates": 0 },
+  "me": { "votes": 12, "pending": 1, "pendingLimit": 8, "updates": 0 },
   "review": null
 }
 ```
@@ -293,7 +293,7 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
 - `site.capture` 表示截图当前是否可用；浏览器启动失败后为 false，冷却五分钟后的下一件作品会尝试恢复。`site.contentModeration` 表示内容审核开关；`site.autoModeration` 为 `moderator.enabled && Boolean(apiKey) && capturer.available`，只有开关、密钥与截图能力齐备时为 true，截图恢复后自动变回 true。前端在内容审核开启且 autoModeration=false 时显示「管理员检查内容」；旧后端缺少该字段时按 true 兼容。
 - `user.emailBound` 仅当前会话用户在 bootstrap 中返回，反映是否绑定邮箱；不加入 `auth.public`，评论等公开用户数据不包含该字段。
 - `me.pending` 只统计本人未删除、仍为 `unverified` 的投稿，排除内容已拒绝或所属题目已拒绝的作品；内容 `pending` / `review` 与题目待审的示例仍占名额。上传作品和创建题目附示例共用此计数。
-- `me.pendingLimit` 为本人实际等待核验上限；基础上限由 `PENDING_PER_USER` 配置（默认 5），`site.limits.pendingPerUser` 保留此基础值。未删除的 `verified` 作品至少 `TRUSTED_MIN_VERIFIED` 件（默认 3），且近 90 天没有被标为存疑的作品，采用 `TRUSTED_PENDING_PER_USER`（默认 20）。存疑检查包括当前状态与存疑审计记录，删除作品或后来恢复为已验证不会消除该次存疑。高级与普通管理员不受限制，返回 `null`。
+- `me.pendingLimit` 为本人实际等待核验上限；基础上限由 `PENDING_PER_USER` 配置（默认 8），`site.limits.pendingPerUser` 保留此基础值。未删除的 `verified` 作品至少 `TRUSTED_MIN_VERIFIED` 件（默认 3），且近 90 天没有被标为存疑的作品，采用 `TRUSTED_PENDING_PER_USER`（默认 20）。存疑检查包括当前状态与存疑审计记录，删除作品或后来恢复为已验证不会消除该次存疑。高级与普通管理员不受限制，返回 `null`。
 - `me.updates` 为本人未删除投稿中，最近一次核验（`reviewed_at`）或内容审核决定（`moderation.at`）晚于 `users.works_seen_at` 的件数；内容排队 `pending` / `review` 不算决定。尚未标记已读时只统计最近 7 天的变化。调用 `POST /api/me/works/seen` 后已发生的变化归零。
 - `providers` 固定返回上述两项，不依赖数据包中的历史登记表。作品公开、作者与管理员视图的 `provider` 只为 `official`、`unofficial` 或 null，不再返回 `providerName`。
 
@@ -445,6 +445,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 - `confirmed` 必须为 `true`（作者已在试加载中确认运行正常），否则 `400`。
 - 模型二选一：`modelId` 命中数据包模型表，或自填 `modelName`。
+- `title` 可省略或留空；NFKC 归一化并去首尾空白后为空时，用解析后的「模型名称 · 推理档位」作为默认标题，最多 40 字。作者 PATCH、管理员 meta 与审核显式传空标题时同样取默认值；编辑未传 `title` 时保留原标题。旧作品的模型名称和推理档位都缺失、无法生成默认值时仍返回 `400 请填写作品标题`。
 - `trial` 为试加载探针回传数据，服务端逐字段消毒（数值截断、字符串截长、样例限条数）。
 - `cover` 仅接受 PNG / JPEG / WebP（魔数校验），≤3 MB。
 - `harnessId` 须存在于当前数据包注册表，停用的 `listed: false` 条目仍可引用；也可填写 `harnessOther`。Harness ID 与「其他」不能同时非空；设置一边会清空另一边。`harnessOther` 经 NFKC 归一化并去首尾空白后最多 40 字。字段未出现时保持原值，旧数据包没有注册表时可填 Harness「其他」。
@@ -462,7 +463,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 截图浏览器只允许当前作品源的文档，以及该源和 HTTPS CDN 白名单内的 GET/HEAD 资源。请求逐跳检查重定向，跨源导航、WebSocket、Service Worker 及未经过路由的浏览器连接被阻断；截图环境须预配置 Playwright ≥ 1.48 和 Chrome。
 
-错误：`401`；`404 试加载已过期`；`400`（未确认 / 缺标题 / 缺 Harness 与 tool / 模型不存在或缺失 / 来源字段无效 / 封面无效）；`413 封面图片不能超过 3 MB`；等待核验满额时 `429`，文案为 `你已有 N 件作品在等待核验（上限 M 件），核验完成或删除作品后名额会释放`，N 与 bootstrap 的 `me.pending` 相同，M 为 `me.pendingLimit`。
+错误：`401`；`404 试加载已过期`；`400`（未确认 / 缺 Harness 与 tool / 模型不存在或缺失 / 来源字段无效 / 封面无效）；`413 封面图片不能超过 3 MB`；等待核验满额时 `429`，文案为 `你已有 N 件作品在等待核验（上限 M 件），核验完成或删除作品后名额会释放`，N 与 bootstrap 的 `me.pending` 相同，M 为 `me.pendingLimit`。
 
 **`PATCH /api/works/:task/:id`** —— 作者修改投稿信息
 
@@ -606,9 +607,9 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 **认证**：无（匿名可创建，但不计票）。**限流**：matches 桶（60 次/分钟）。
 
-对局有效期 3 小时。服务启动及每分钟清理过期且没有正式票引用的记录，保留正式票及其对局；匿名无票对局全站最多 10000 条，容量已满返回 `429 anonymous-capacity` 与 `Retry-After: 60`。猜模型练习局只存内存，已有 5000 局容量上限，另加 3 小时有效期，过期返回 `404 game-expired`。
+对局有效期 3 小时。服务启动及每分钟清理过期、没有正式票引用且未决定或未绑定登录用户的记录；登录用户已决定的对局（含跳过与不计票揭晓）及正式票引用的对局保留为历史，令牌仍按原有效期失效。匿名无票对局全站最多 10000 条，容量已满返回 `429 anonymous-capacity` 与 `Retry-After: 60`。猜模型练习局只存内存，已有 5000 局容量上限，另加 3 小时有效期，过期返回 `404 game-expired`。
 
-请求体：`{ "task": "chinese-architecture", "previous": "<上一场对局id，选填>" }`
+请求体：`{ "task": "chinese-architecture", "previous": "<上一场对局id，选填>", "avoidCooling": true }`；`avoidCooling` 为选填布尔值，缺省为 `false`。
 
 成功 `200`：
 
@@ -624,10 +625,13 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 - `counted`：登录且绑定邮箱时为 `true`，匿名或未绑定邮箱时为 `false`。
 - 对局创建时一次捕获当前数据包目录和两侧身份。随后切换数据包，旧令牌仍从原目录提供 HTML 与相对资源，旧对局仍可揭晓/投票；部署应保留该目录到相关对局全部过期并经过清理宽限期。
 - 前端在写请求上携带 `X-Datapack-Version: <前端所构建的数据仓库 SHA>`（读请求不带，避免跨源 GET 预检）；创建数据包对局、数据包题目草稿及该草稿的正式投稿时，如果该值与服务端当前可信 SHA 不同，请求照常处理，响应头增加 `X-Datapack-Stale: 1`，响应体形状不变。对局仍绑定创建时的服务端快照。题目不参与此检查；缺少请求头时不增加提示头。
-- 抽样规则：按 `promptVariant`（缺失为空串）与「模型+档位」分组，只在同一提示词版本的不同配置间抽取，再各均匀抽一件作品；长短版不跨组，配置分仍跨版本合计。偏向对局数少的配置、偏向实力相近者（同档 90% 概率软匹配，分差过大重掷 2 次）；避开上一场两侧作品、本人作品与已评组合。无提示词变体的题目行为不变。
+- 抽样规则：按 `promptVariant`（缺失为空串）与「模型+档位」分组，只在同一提示词版本的不同配置间抽取，再各均匀抽一件作品；长短版不跨组，配置分仍跨版本合计。偏向对局数少的配置、偏向实力相近者（同档 90% 概率软匹配，分差过大重掷 2 次）；避开上一场两侧作品与已评组合。仅普通用户回避本人作品，普通管理员（`moderator`）与高级管理员（`admin`）可以配到本人作品并正常计票。无提示词变体的题目行为不变。
 - `previous` 缺省时，登录用户自动取本人该题最近一场对局作为「上一场」回避。
+- 登录用户（含管理员）的揭晓作品软冷却：先取本人最近 6 个 `choice` 为 `a` / `b` / `tie` 的对局（按 `created_at` 倒序），再保留 `decided_at` 严格晚于当前时间减 15 分钟的记录；两侧作品按「题目 + 作品 ID」回避，只影响同题抽样。其他题的揭晓也占这 6 组的位置；跳过和未投票不占轮数。作品在再揭晓满 6 组或经过 15 分钟时解除，先到先解除；不计票的登录揭晓也参与冷却。匿名用户沿用上一场回避。
+- 优先回避上一场与冷却作品，无候选时先放开上一场回避。仍无候选且 `avoidCooling=true` 时，如果放开冷却后还有未评组合，返回 `409 cooling`；真的评完则返回 `409 exhausted`。缺省或 `false` 时继续按上一场回避、完全放开的顺序退回，冷却不会使用户无题可评。
+- Gallery 随机模式带 `avoidCooling: true`，遇到 `cooling` 则本组略过该题；范围内全部冷却时再不带该参数请求一次，只评本题也不带该参数。前端等投票（含跳过）返回后才预取下一组，使刚揭晓的作品已进入冷却查询。
 
-错误：`404 题目不存在`；`409 + code:"insufficient"` 对战池不足两个配置；`409 + code:"exhausted"` 该用户已评完全部组合；`429`。
+错误：`404 题目不存在`；`409 + code:"insufficient"` 对战池不足两个配置；`409 + code:"cooling"`（「这道题剩下的组合都有刚揭晓过的作品」）；`409 + code:"exhausted"` 该用户已评完全部组合；`429`。
 
 ### 3.9 `POST /api/arena/matches/:id/vote` —— 投票并揭晓
 
@@ -642,9 +646,9 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
   "a": <作品公开视图>, "b": <作品公开视图> }
 ```
 
-- 响应的 `a` / `b` 即**揭晓**：投票后返回两侧作品的完整公开视图（含模型名）。
-- `counted=false` 时 `reason` 取值：`skipped`（skip）、`anonymous`（未登录）、`unbound`（未绑定邮箱）、`changed`（投票时某侧作品已失效）、`own`（涉及本人作品）、`duplicate`（已评过该组合）。未绑定账号正常揭晓双方结果，但不写入投票。
-- `skip` 同样终局化对局，但不产生投票记录。
+- 选择 `a` / `b` / `tie` 时响应的 `a` / `b` 即**揭晓**：返回两侧作品的完整公开视图（含模型名）。
+- `counted=false` 时 `reason` 取值：`skipped`（skip）、`anonymous`（未登录）、`unbound`（未绑定邮箱）、`changed`（投票时某侧作品已失效）、`own`（普通用户涉及本人作品，管理员豁免）、`duplicate`（已评过该组合）。未绑定账号正常揭晓双方结果，但不写入投票。
+- `skip` 同样终局化对局并写入 `decided_at`，但不产生投票记录、不揭晓、不进入冷却；仅返回 `{ "choice": "skip", "counted": false, "reason": "skipped", "a": null, "b": null }`，不返回作品或模型字段。
 - 对局绑定创建者：登录用户创建的对局仅本人可投；匿名创建的对局任何人可投（但仍不计票）。
 - 作品被标记存疑 / 删除后，其参与的历史投票**即时退出**排行统计；恢复验证后自动回归。
 
@@ -726,6 +730,16 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 **`POST /api/questions`**：登录并绑定邮箱，write 限流，请求体上限 6 MB。`title` / `summary` / `prompt` 必填，长度上限 70 / 400 / 20000 字；提示词仅去首尾空白。`category` 为文学 / 静态网页 / 建模；`domains` 有值时为词表内 1–2 项；`templates` 文学固定 text，其他分类为 static / vite 的非空子集；可选 tags 沿用既有规则。
 
+可选 `references: [{id, name, caption}]` 与 `referenceCredit`。参考图最多 8 张，数组顺序就是交给模型的顺序；图片须为本人尚未过期且未绑定其他题目的上传。name 匹配 `^\d{2}-[\p{L}\p{N}-]+\.(jpg|png|webp)$`（Unicode），扩展名须与实际类型一致；id 和 name 均不可重复。说明最多 40 字，来源最多 80 字。带示例作品时在同一事务绑定参考图，失败保留临时上传。
+
+**`POST /api/references?name=<原文件名>`**：登录并绑定邮箱，write 与 drafts 限流；请求体为 PNG / JPEG / WebP 原始图片字节，上限 `site.limits.referenceBytes`（5 MiB），超限返回 413 与中文 error。类型以文件头和结构判断，扩展名不符返回 400，Content-Type 不作为类型依据。无损移除 EXIF、文本、ICC 等元数据，保留压缩像素与宽高；JPEG `.jpeg` 规范为存储扩展名 `.jpg`。记录清理后的 bytes 与 SHA-256，不生成缩略图。响应 `{reference: {id, name, src, width, height, bytes}}`。携带的 `X-Datapack-Version` 过时则响应 `X-Datapack-Stale: 1`，不拒绝上传。未绑定图片在 24 小时后清理，启动时及每分钟检查；移除的图片重新作为临时上传计时。
+
+数据库题目 DTO（公开、本人、审核及管理视图）增加 `references: [{id, name, src, caption, width, height}]` 和 `referenceCredit`，src 为 `media/references/<id>.<ext>` 相对媒体路径。`GET /api/review` 增加 questions，高级管理员取得题目管理视图，普通管理员为空数组。数据包题目也返回当前包声明的参考图与来源，包图没有上传 id，src 映射为 `media/pack-references/<task>/<name>`（路径段 URL 编码）；后台不复制图片、不写入 reference_uploads。包图和来源仅由数据仓维护；元数据编辑可同值重发有序 name / caption 与来源，变更返回 400，客户端 id / src 不用于图片绑定。包题面继续从当前 catalog 读取，普通元数据编辑不新建 prompt 覆盖；既有显式 prompt 覆盖保留。新增 SQLite v39，仅追加 `questions.reference_credit` 与 `reference_uploads` 表和索引，API 版本保持 2。
+
+**`GET /media/references/<id>.<ext>`**（亦支持 HEAD）：临时上传仅上传者和管理员可读；绑定后按题目权限，未公开仅题目作者和管理员可读，公开后所有人可读，不能读取返回 404。正确 MIME、nosniff、`Content-Disposition: inline; filename*=UTF-8''<name>`，公开缓存 `public, max-age=31536000, immutable`，私密缓存使用 private；`Vary: Origin, Cookie`。沿用配置的前端源 CORS 与凭据许可，支持 GET/HEAD 预检，公开图片可供跨源 fetch 打包下载。
+
+**`GET /media/pack-references/<task>/<name>`**（亦支持 HEAD）：只提供当前包该题声明的图片，未声明文件或无题目读取权限返回 404；包题目撤回公开后只允许工作人员读取。返回原包字节及对应 MIME、nosniff、`Cache-Control: no-cache`、`Vary: Origin, Cookie`，沿用前端源凭据 CORS 与 GET/HEAD 预检，不复用上传参考图表或文件存储。
+
 不附作品时传题目字段；附示例时另传 `draftId`、`confirmed:true`、`work`（同作品表单字段）。草稿须属于本人、未过期且 task=__new__。题目与示例及审计在同一事务写入，失败保留可重试草稿。响应 `{ "question": <题目作者视图>, "work"?: <作品作者视图> }`，统一 author/mine DTO。
 
 所有角色发起的新题目均为 pending，只有高级管理员可人工通过；普通用户至多 3 道未删除 pending 题目，工作人员免限额。附带作品按发布者角色决定内容审查：普通用户照常审查，工作人员 human / approved，但保持 unverified；题目与作品必须各自通过才公开。本人题目在 `GET /api/me` 中可见。保留的 `POST /api/admin/questions` 仅高级管理员可调用，也创建 pending。
@@ -738,7 +752,11 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 **`POST /api/admin/questions/:id/meta`**：仅高级管理员，任何题目可改 title / summary / prompt / category / domains / acceptsUploads / cover。acceptsUploads 须为布尔值，cover 须为同题现有作品 ID，null 清除。公开且有作品的题目不能改提示词；有作品的题目不能改提交格式（作品数合计两种存储）。数据包写 question_overrides，数据库写本行；保持原 moderation，写 question-edit 审计，提示词只记录是否变化与长度。
 
+亦接受 references 与 referenceCredit，只有这两个字段的修改合法；可混合本题已保存 id 与当前管理员本人新上传 id。公开且有作品时参考图顺序、文件名、说明和来源一并锁定，变更返回 409 与中文提示；同值重发合法。改动写 question-edit 审计，图片与题目一起人工审核；自动图片内容审核未接入。
+
 **`DELETE /api/questions/:id`**：高级管理员可删除任意无票题目；有 Gallery 或 Show1 投票返回 409。作者删除自己题目沿用原规则：公開题目有其他作者作品或有票不可删。数据包题目覆盖层软删除，题下数据包作品随之隐藏，关联数据库作品同步软删除；文件不动。公开、本人与管理员列表不返回已删除题目，写 question-delete 审计。
+
+删除数据库题目后删除其绑定参考图文件与上传记录；拒绝题目保留图片，读取权限随题目撤回公开状态。
 
 上述写接口均遵循 Origin 校验、write 限流和通用错误格式。普通管理员对题目管理接口返回 403。历史 v22/v23/v29 字段和原审核记录保留，v38 增加发布者与覆盖层（见 2.2.1）。
 

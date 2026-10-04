@@ -30,3 +30,13 @@
 ## 下一步建议
 
 父代理部署固定 main 配置后 Nginx -t / reload，核对游戏顶层 none、封面及 /works/ self，目视题库及历史预览渲染；通过后在本归档补记结果。
+
+
+## 2026-10-03 · 最终生产与公网验收完成
+
+- 父代理提供的实际发布证据：9bf06d0abd8c5213bebb66eceab032edbf5b6c54 于 2026-10-03T11:21:38Z 上线，Nginx -t / reload 成功。game 封面精确路径和 /works/ 返回 frame-ancestors 'self'，顶层保留 'none'。
+- 390px 手机及 1440px 桌面浏览器实际渲染鹈鹕示例，iframe 拒绝文案消失，无捕获 console error；此结果覆盖实际观察页面，未宣称全部作品交互验收。
+- 最终部署文件集合和逐文件哈希均通过：203 tracked 源码（生产 datapack 配置单独核对）、69 runtime、包 2283 / Gallery 2337 / game 941 文件；保留的 121 个旧 game 文件不变，事件恢复后的旧包完整文件哈希继续保持。
+- 24 项公网 HTTP 检查通过。API v2，后端 9bf06d0、Gallery 0a6、game b549 消费同一官方目录 digest；CORS、匿名权限、旧 game API 526 件作品 / 25 题、4 legacy 入口、fold 和内容 origin 均通过。
+- systemd 服务 active / running，ExecMainStatus=0、NRestarts=0。主机 journal 不可读取，不据此宣称日志没有错误。未测试生产账号登录或提交投票，未逐件覆盖全部作品交互。
+- 本补记替代上述待部署状态；只更新本轮最新 HANDOFF 节与本归档追加结果，不 commit / push，保留部署 SHA 与他人未提交材料。

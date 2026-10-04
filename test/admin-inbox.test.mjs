@@ -144,8 +144,9 @@ describe('admin inbox', () => {
     assert.equal(edited.status, 200);
     assert.equal(edited.data.work.title, '新标题');
     assert.equal(edited.data.work.modelName, '新模型');
-    const broken = await call('root', 'POST', `/api/admin/works/${work.task}/${work.id}/meta`, { title: '' });
-    assert.equal(broken.status, 400);
+    const defaulted = await call('root', 'POST', `/api/admin/works/${work.task}/${work.id}/meta`, { title: '' });
+    assert.equal(defaulted.status, 200);
+    assert.equal(defaulted.data.work.title, '新模型 · Default');
     const curated = await call('root', 'POST', '/api/admin/works/one/a1/meta', { title: 'x' });
     assert.equal(curated.status, 200);
   });

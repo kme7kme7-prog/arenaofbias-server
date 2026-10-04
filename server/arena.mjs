@@ -7,7 +7,7 @@
 // Sampling follows arenaofbias: first two different entries (model + effort), then one work
 // of each, so an entry with many works is not shown more often. Pairs are weighted towards
 // entries with few comparisons, prefer entries of similar strength, and avoid the previous
-// round's works, the voter's own uploads and pairs the voter has already judged.
+// round's works, ordinary voters' own uploads and pairs the voter has already judged.
 import { randomBytes } from 'node:crypto';
 import { Worker } from 'node:worker_threads';
 import { effortKey, entityKey, modelKey, providerOf } from './catalog.mjs';
@@ -16,8 +16,9 @@ import { fail, HttpError } from './http.mjs';
 import { rankEntries, rankWorks } from './ranking.mjs';
 import { generationOf } from './generation.mjs';
 import { isTextTask } from './categories.mjs';
+import { isStaff } from './roles.mjs';
 
-const MATCH = { tierWidth: 150, sameTierRate: 0.9, blowoutGap: 400, rerolls: 2 };
+const MATCH = { tierWidth: 150, sameTierRate: 0.9, blowoutGap: 400, rerolls: 2, cooldownRounds: 6, cooldownMs: 15 * 60e3 };
 const ANONYMOUS_MATCH_MAX = 10000;
 // The dense solver grows roughly cubically with entry count: 40 entries took
 // 112–128 ms locally, while 1000 blocked the main thread for 2.45 s. Use a
@@ -45,9 +46,10 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     insertMatch: db.prepare('INSERT INTO matches (id, user_id, task_id, a_work, b_work, a_token, b_token, created_at, expires_at, datapack_root, datapack_version, a_identity, b_identity) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
     match: db.prepare('SELECT * FROM matches WHERE id = ?'),
     lastMatch: db.prepare('SELECT * FROM matches WHERE user_id = ? AND task_id = ? ORDER BY created_at DESC LIMIT 1'),
+    recentReveals: db.prepare("SELECT task_id, a_work, b_work, decided_at FROM matches WHERE user_id = ? AND choice IN ('a', 'b', 'tie') ORDER BY created_at DESC LIMIT ?"),
     matchByToken: db.prepare('SELECT * FROM matches WHERE (a_token = ? OR b_token = ?) AND expires_at > ?'),
     decide: db.prepare('UPDATE matches SET choice = ?, decided_at = ? WHERE id = ? AND choice IS NULL'),
-    purge: db.prepare('DELETE FROM matches WHERE expires_at <= ? AND id NOT IN (SELECT match_id FROM votes)'),
+    purge: db.prepare('DELETE FROM matches WHERE expires_at <= ? AND (choice IS NULL OR user_id IS NULL) AND id NOT IN (SELECT match_id FROM votes)'),
     anonymousMatches: db.prepare('SELECT COUNT(*) AS n FROM matches WHERE user_id IS NULL AND id NOT IN (SELECT match_id FROM votes)'),
     insertVote: db.prepare("INSERT INTO votes (id, match_id, user_id, task_id, a_work, b_work, pair_key, choice, created_at, a_identity, b_identity, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'arena')"),
     votedPair: db.prepare('SELECT 1 FROM votes WHERE user_id = ? AND pair_key = ?'),
@@ -291,12 +293,12 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     workScores,
     poolStats,
 
-    async createMatch(user, taskId, previousId, snapshot = catalog.snapshot()) {
+    async createMatch(user, taskId, previousId, snapshot = catalog.snapshot(), avoidCooling = false) {
       if (!snapshot.task(taskId) && !catalog.task(taskId)) fail(404, '题目不存在');
       if (Date.now() - lastCleanup >= 60e3) cleanupExpiredMatches();
       const groups = new Map();
       for (const work of library.eligible(taskId, snapshot)) {
-        if (user && work.ownerId === user.id) continue;
+        if (user && !isStaff(user) && work.ownerId === user.id) continue;
         const key = JSON.stringify([work.promptVariant ?? '', entityKey(work)]);
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push(work);
@@ -306,9 +308,23 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       const votedRows = user ? q.votedPairs.all(user.id, taskId).filter((row) => row.pair_key.startsWith(`${taskId}:`)) : [];
       const voted = new Set(votedRows.map((row) => row.pair_key));
       const previous = previousId ? q.match.get(String(previousId)) : user ? q.lastMatch.get(user.id, taskId) : null;
-      const avoid = new Set(previous?.task_id === taskId ? [previous.a_work, previous.b_work] : []);
-      let candidates = candidatesFor(groups, votedRows, avoid);
-      if (!candidates.length && avoid.size) candidates = candidatesFor(groups, votedRows, new Set());
+      const previousWorks = new Set(previous?.task_id === taskId ? [previous.a_work, previous.b_work] : []);
+      const cooling = new Set();
+      const cutoff = Date.now() - MATCH.cooldownMs;
+      for (const row of user ? q.recentReveals.all(user.id, MATCH.cooldownRounds) : []) {
+        if (row.task_id === taskId && row.decided_at > cutoff) {
+          cooling.add(row.a_work);
+          cooling.add(row.b_work);
+        }
+      }
+      let candidates = candidatesFor(groups, votedRows, new Set([...previousWorks, ...cooling]));
+      if (!candidates.length && previousWorks.size) candidates = candidatesFor(groups, votedRows, cooling);
+      if (!candidates.length && avoidCooling && candidatesFor(groups, votedRows, new Set()).length)
+        fail(409, '这道题剩下的组合都有刚揭晓过的作品', 'cooling');
+      if (!candidates.length && !avoidCooling) {
+        if (previousWorks.size) candidates = candidatesFor(groups, votedRows, previousWorks);
+        if (!candidates.length) candidates = candidatesFor(groups, votedRows, new Set());
+      }
       if (!candidates.length) fail(409, '这道题的组合你都已经评过了，换一道题试试', 'exhausted');
 
       const chosen = pick(candidates, await leaderboard({ task: taskId, snapshot }));
@@ -348,20 +364,23 @@ export function createArena({ db, catalog, library, limits, random = Math.random
         || !match.a_identity || !match.b_identity) fail(404, '这一组已经失效，请开始新的一组');
       if (match.choice) fail(409, '这一组已经提交过了');
       if (!['a', 'b', 'tie', 'skip'].includes(choice)) fail(400, '选择无效');
+      if (choice === 'skip') {
+        transaction(db, () => q.decide.run(choice, Date.now(), match.id));
+        return { choice, counted: false, reason: 'skipped', a: null, b: null };
+      }
       const snapshot = catalog.at(match.datapack_root);
       const a = library.work(match.task_id, match.a_work, snapshot);
       const b = library.work(match.task_id, match.b_work, snapshot);
       const aIdentity = fromIdentity(match.a_identity);
       const bIdentity = fromIdentity(match.b_identity);
       let counted = false;
-      let reason = choice === 'skip' ? 'skipped' : '';
+      let reason = '';
       transaction(db, () => {
         q.decide.run(choice, Date.now(), match.id);
-        if (choice === 'skip') return;
         if (!user) { reason = 'anonymous'; return; }
         if (!user.email) { reason = 'unbound'; return; }
         if (!library.isEligible(library.work(match.task_id, match.a_work)) || !library.isEligible(library.work(match.task_id, match.b_work))) { reason = 'changed'; return; }
-        if (aIdentity.ownerId === user.id || bIdentity.ownerId === user.id) { reason = 'own'; return; }
+        if (!isStaff(user) && (aIdentity.ownerId === user.id || bIdentity.ownerId === user.id)) { reason = 'own'; return; }
         const key = pairKey(match.task_id, match.a_work, match.b_work);
         if (q.votedPair.get(user.id, key)) { reason = 'duplicate'; return; }
         q.insertVote.run(randomBytes(12).toString('hex'), match.id, user.id, match.task_id, match.a_work, match.b_work, key, choice, Date.now(),

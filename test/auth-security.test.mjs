@@ -40,18 +40,18 @@ test('member and effective admin sessions expire when idle and retain absolute e
     db.prepare("UPDATE users SET role = 'member' WHERE id = ?").run(reserved.id);
     for (const user of [admin, reserved]) {
       const cookie = session(auth, user);
-      db.prepare('UPDATE sessions SET last_seen_at = ? WHERE user_id = ?').run(Date.now() - 31 * 60e3, user.id);
+      db.prepare('UPDATE sessions SET last_seen_at = ? WHERE user_id = ?').run(Date.now() - 8 * 24 * 3600e3, user.id);
       assert.equal(auth.userFrom(request(cookie)), null);
       assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sessions WHERE user_id = ?').get(user.id).n, 0);
     }
     const cookie = session(auth, member);
-    db.prepare('UPDATE sessions SET last_seen_at = ?').run(Date.now() - 23 * 3600e3);
+    db.prepare('UPDATE sessions SET last_seen_at = ?').run(Date.now() - 6 * 24 * 3600e3);
     const absoluteExpiry = db.prepare('SELECT expires_at FROM sessions').get().expires_at;
     assert.equal(auth.userFrom(request(cookie)).id, member.id);
     const touched = db.prepare('SELECT last_seen_at, expires_at FROM sessions').get();
     assert.ok(touched.last_seen_at > Date.now() - 1000);
     assert.equal(touched.expires_at, absoluteExpiry);
-    db.prepare('UPDATE sessions SET last_seen_at = ?').run(Date.now() - 25 * 3600e3);
+    db.prepare('UPDATE sessions SET last_seen_at = ?').run(Date.now() - 8 * 24 * 3600e3);
     assert.equal(auth.userFrom(request(cookie)), null);
     const expired = session(auth, member);
     db.prepare('UPDATE sessions SET expires_at = ?').run(Date.now() - 1);

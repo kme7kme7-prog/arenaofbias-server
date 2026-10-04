@@ -523,6 +523,28 @@ const MIGRATIONS = [
       ELSE COALESCE((SELECT CASE WHEN role IN ('admin', 'moderator') THEN role ELSE 'user' END FROM users WHERE users.id = works.owner_id), 'user') END
       WHERE author_role IS NULL;`);
   }, { foreignKeysOff: true }),
+  // Question reference images keep upload ownership and their ordered association.
+  (db) => {
+    const columns = new Set(db.prepare('PRAGMA table_info(questions)').all().map((column) => column.name));
+    if (!columns.has('reference_credit')) db.exec("ALTER TABLE questions ADD COLUMN reference_credit TEXT NOT NULL DEFAULT ''");
+    db.exec(`CREATE TABLE IF NOT EXISTS reference_uploads (
+      id TEXT PRIMARY KEY,
+      owner_id TEXT NOT NULL REFERENCES users(id),
+      task_id TEXT,
+      original_name TEXT NOT NULL,
+      name TEXT NOT NULL,
+      caption TEXT NOT NULL DEFAULT '',
+      position INTEGER NOT NULL DEFAULT 0,
+      ext TEXT NOT NULL,
+      width INTEGER NOT NULL,
+      height INTEGER NOT NULL,
+      bytes INTEGER NOT NULL,
+      sha256 TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS reference_uploads_task_position ON reference_uploads(task_id, position);
+    CREATE INDEX IF NOT EXISTS reference_uploads_owner_created ON reference_uploads(owner_id, created_at);`);
+  },
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

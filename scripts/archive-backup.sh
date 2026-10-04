@@ -22,8 +22,10 @@ trap 'rm -f "$TEMP_DB"' EXIT
 node -e 'const { DatabaseSync } = require("node:sqlite"); const db = new DatabaseSync(process.argv[1], { readOnly: true }); db.exec("VACUUM INTO \x27" + process.argv[2] + "\x27");' "$DATA/platform.db" "$TEMP_DB"
 mv -f "$TEMP_DB" "$STAGING/platform.db"
 
-# 加密快照：投稿作品、媒体、当前馆藏（软链解引用）、数据库快照。
-restic -r "$REPO/restic" backup "$DATA/works" "$DATA/media" "$DIST/" "$STAGING/platform.db" --tag daily --quiet
+# 加密快照：投稿作品、媒体、题目参考图、当前馆藏（软链解引用）、数据库快照。
+sources=("$DATA/works" "$DATA/media" "$DIST/" "$STAGING/platform.db")
+if [[ -d "$DATA/references" ]]; then sources+=("$DATA/references"); fi
+restic -r "$REPO/restic" backup "${sources[@]}" --tag daily --quiet
 
 git add -A
 if git diff --cached --quiet; then

@@ -204,6 +204,71 @@ async function withModeratedUpload(run) {
   }, { moderation: { enabled: true } });
 }
 
+test('uploads default blank titles from resolved models and efforts and truncate at 40 characters', async () => withPlatform(async ({ call }) => {
+  const longName = '模型'.repeat(18);
+  const cases = [
+    { title: '', modelId: 'ma', modelName: '忽略此名', effort: 'high', expected: '模型甲 · High' },
+    { title: ' \t\n ', modelName: ' 模型丙 ', effort: ' Default ', expected: '模型丙 · Default' },
+    { modelId: 'mb', effort: 'Max', expected: '模型乙 · Max' },
+    { title: '', modelName: longName, effort: 'High', expected: `${longName} · High`.slice(0, 40) },
+  ];
+  for (const { expected, ...body } of cases) {
+    const draft = await call('voter', 'POST', '/api/drafts?task=one&name=work.html', html, true);
+    assert.equal(draft.status, 200, JSON.stringify(draft.data));
+    const submitted = await call('voter', 'POST', '/api/works', {
+      draftId: draft.data.draft.id, confirmed: true, providerId: 'official', harnessOther: '测试工具', ...body,
+    });
+    assert.equal(submitted.status, 200, JSON.stringify(submitted.data));
+    assert.equal(submitted.data.work.title, expected);
+  }
+  const draft = await call('voter', 'POST', '/api/drafts?task=one&name=work.html', html, true);
+  assert.equal(draft.status, 200, JSON.stringify(draft.data));
+  const missing = await call('voter', 'POST', '/api/works', {
+    draftId: draft.data.draft.id, confirmed: true, title: ' ', modelName: '', effort: '',
+    providerId: 'official', harnessOther: '测试工具',
+  });
+  assert.equal(missing.status, 400);
+}));
+
+test('author and admin edits default explicit blank titles but preserve omitted titles', async () => withModeratedUpload(async ({ call, id, work }) => {
+  const routes = [
+    ['voter', 'PATCH', `/api/works/one/${id}`, {}],
+    ['root', 'POST', `/api/admin/works/one/${id}/meta`, {}],
+    ['root', 'POST', `/api/works/one/${id}/review`, { status: 'unverified' }],
+  ];
+  for (const [actor, method, path, base] of routes) {
+    const originalTitle = work().title;
+    const unchanged = await call(actor, method, path, { ...base, modelId: 'ma', effort: 'High' });
+    assert.equal(unchanged.status, 200, JSON.stringify(unchanged.data));
+    assert.equal(unchanged.data.work.title, originalTitle);
+    const empty = await call(actor, method, path, { ...base, title: '', modelName: '模型丁', effort: 'max' });
+    assert.equal(empty.status, 200, JSON.stringify(empty.data));
+    assert.equal(empty.data.work.title, '模型丁 · Max');
+    const whitespace = await call(actor, method, path, { ...base, title: ' \t\n ' });
+    assert.equal(whitespace.status, 200, JSON.stringify(whitespace.data));
+    assert.equal(whitespace.data.work.title, '模型丁 · Max');
+  }
+}));
+
+test('edits reject an empty default when both existing model name and effort are missing', async () => withModeratedUpload(async ({ platform, call, id, work }) => {
+  platform.db.prepare("UPDATE works SET model_id = NULL, model_other = '', effort = '' WHERE id = ?").run(id);
+  const originalTitle = work().title;
+  const routes = [
+    ['voter', 'PATCH', `/api/works/one/${id}`, {}],
+    ['root', 'POST', `/api/admin/works/one/${id}/meta`, {}],
+    ['root', 'POST', `/api/works/one/${id}/review`, { status: 'unverified' }],
+  ];
+  for (const [actor, method, path, base] of routes) {
+    const unchanged = await call(actor, method, path, { ...base, summary: '修正摘要' });
+    assert.equal(unchanged.status, 200, JSON.stringify(unchanged.data));
+    assert.equal(unchanged.data.work.title, originalTitle);
+    const empty = await call(actor, method, path, { ...base, title: '' });
+    assert.equal(empty.status, 400);
+    assert.equal(empty.data.error, '请填写作品标题');
+    assert.equal(work().title, originalTitle);
+  }
+}));
+
 test('admin metadata corrections preserve approved content and allow verification', async () => withModeratedUpload(async ({ call, id, work, moderation }) => {
   const edited = await call('root', 'POST', `/api/admin/works/one/${id}/meta`, { effort: 'High', modelId: 'ma' });
   assert.equal(edited.status, 200, JSON.stringify(edited.data));

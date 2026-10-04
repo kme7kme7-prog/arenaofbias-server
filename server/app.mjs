@@ -21,6 +21,7 @@ import { createLibrary } from './library.mjs';
 import { createAdmin } from './admin.mjs';
 import { createInbox } from './inbox.mjs';
 import { createQuestions } from './questions.mjs';
+import { createReferences } from './references.mjs';
 import { DOMAIN_GROUPS, DOMAINS, requireCategory, requireDomains } from './categories.mjs';
 import { createProfile } from './profile.mjs';
 import { registerShow1Compat } from './show1compat.mjs';
@@ -39,7 +40,12 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     catch { return 'dev'; }
   })();
   const db = openDatabase(join(config.dataDir, 'platform.db'));
-  const questions = createQuestions(db);
+  const references = createReferences({ db, config, limits });
+  const questions = createQuestions(db, { references });
+  references.bindQuestions(questions);
+  references.cleanup();
+  const referenceCleanup = setInterval(() => references.cleanup(), 60e3);
+  referenceCleanup.unref();
   const profile = createProfile(db);
   const catalog = createCatalog(config.dist, questions);
   catalog.refresh();
@@ -150,7 +156,8 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         efforts: EFFORTS,
         emojis: EMOJIS,
         avatars: AVATARS,
-        limits: { uploadBytes: limits.uploadBytes, coverBytes: limits.coverBytes, pendingPerUser: limits.pendingPerUser, provisionalGames: limits.provisionalGames },
+        limits: { uploadBytes: limits.uploadBytes, coverBytes: limits.coverBytes, referenceCount: limits.referenceCount,
+          referenceBytes: limits.referenceBytes, pendingPerUser: limits.pendingPerUser, provisionalGames: limits.provisionalGames },
       },
       works: publicList(library.allWorks().filter((work) => library.visibleTo(work, 'show2')), user),
       questions: questions.all(user),
@@ -307,6 +314,16 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   });
 
   // Upload: the raw ZIP/HTML/text body is inspected and staged for the trial load.
+  router.on('POST', '/api/references', async (ctx) => {
+    const user = emailBound(ctx);
+    limit.write(user.id);
+    limit.drafts(user.id);
+    const supplied = ctx.req.headers['x-datapack-version'];
+    if (supplied && supplied !== catalog.snapshot().commit) ctx.res.setHeader('X-Datapack-Stale', '1');
+    const buffer = await readBody(ctx.req, limits.referenceBytes);
+    return { reference: references.upload(user, ctx.url.searchParams.get('name') ?? '', buffer) };
+  });
+
   router.on('POST', '/api/drafts', async (ctx) => {
     const user = emailBound(ctx);
     limit.write(user.id);
@@ -423,7 +440,8 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   });
   router.on('GET', '/api/review', (ctx) => {
     const admin = staffOnly(ctx);
-    return { works: library.allWorks().map((work) => library.adminWork(work, admin)), audit: library.auditLog() };
+    return { works: library.allWorks().map((work) => library.adminWork(work, admin)), audit: library.auditLog(),
+      questions: isSenior(admin) ? questions.adminAll(admin) : [] };
   });
 
   // Account administration for the admin web app (the CLI in server/cli.mjs does the same).
@@ -602,7 +620,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     const body = await readJson(ctx.req);
     const task = String(body.task ?? '');
     const snapshot = checkDatapack(ctx, task);
-    return arena.createMatch(ctx.user, task, body.previous, snapshot);
+    return arena.createMatch(ctx.user, task, body.previous, snapshot, body.avoidCooling === true);
   });
   router.on('POST', '/api/arena/matches/:id/vote', async (ctx) => {
     limit.write(ctx.user?.id ?? ctx.ip);
@@ -629,7 +647,33 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
 
   function serveSite(req, res, pathname) {
     readGuard.file(req);
-    const media = /^\/media\/(up-[a-z0-9]{8})\/(cover\.(?:png|jpg|webp)|first\.jpg|mobile\.jpg)$/.exec(pathname);
+    const packagedReference = /^\/media\/pack-references\/([^/]+)\/([^/]+)$/.exec(pathname);
+    if (pathname.startsWith('/media/pack-references/')) {
+      const taskId = packagedReference && decodeURIComponent(packagedReference[1]);
+      const name = packagedReference && decodeURIComponent(packagedReference[2]);
+      const snapshot = catalog.snapshot();
+      const image = taskId && questions.get(taskId, auth.userFrom(req))
+        && snapshot.task(taskId)?.references.find((ref) => ref.name === name);
+      const found = image && resolveInside(snapshot.root, `/${image.src}`);
+      if (!found) return sendJson(res, 404, { error: '文件不存在' });
+      return streamFile(req, res, found, { 'Cache-Control': 'no-cache', 'Vary': 'Origin, Cookie',
+        'Content-Security-Policy': "default-src 'none'" });
+    }
+    const reference = /^\/media\/references\/([a-z0-9-]+)\.(png|jpg|webp)$/.exec(pathname);
+    if (reference) {
+      const image = references.file(reference[1], auth.userFrom(req));
+      if (!image || extname(image.path) !== `.${reference[2]}`) return sendJson(res, 404, { error: '文件不存在' });
+      const found = resolveInside(config.dataDir, `/references/${reference[1]}.${reference[2]}`);
+      if (!found) return sendJson(res, 404, { error: '文件不存在' });
+      return streamFile(req, res, found, {
+        'Content-Type': image.type,
+        'Cache-Control': `${image.public ? 'public' : 'private'}, max-age=31536000, immutable`,
+        'Vary': 'Origin, Cookie',
+        'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(image.name).replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`)}`,
+        'Content-Security-Policy': "default-src 'none'",
+      });
+    }
+    const media = /^\/media\/(up-[a-z0-9]{8})\/(cover\.(?:png|jpg|webp)|first\.jpg|mobile\.jpg|preview\.(?:sbox|webp|jpg))$/.exec(pathname);
     if (pathname.startsWith('/media/')) {
       const work = media && library.uploadById(media[1]);
       if (!library.canRead(work, auth.userFrom(req))) return sendJson(res, 404, { error: '文件不存在' });
@@ -690,10 +734,12 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
           res.setHeader('Access-Control-Expose-Headers', 'X-Datapack-Stale');
         }
       }
-      if (req.method === 'OPTIONS' && url.pathname.startsWith('/api/')) {
+      const referenceMedia = url.pathname.startsWith('/media/references/') || url.pathname.startsWith('/media/pack-references/');
+      if (req.method === 'OPTIONS' && (url.pathname.startsWith('/api/') || referenceMedia)) {
         assertSameOrigin(req, config);
         const method = req.headers['access-control-request-method'];
-        const route = router.match(method, url.pathname);
+        const route = referenceMedia && ['GET', 'HEAD'].includes(method)
+          ? { handler: true } : router.match(method, url.pathname);
         if (!route) fail(404, '接口不存在');
         if (route.methodNotAllowed) fail(405, '不支持这个操作');
         const headers = String(req.headers['access-control-request-headers'] ?? '').toLowerCase().split(',').map((header) => header.trim()).filter(Boolean);
@@ -730,6 +776,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     db,
     auth,
     library,
+    references,
     arena,
     featured,
     capturer,
@@ -738,6 +785,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     handleContent: createContentHandler({ config, library, arena, siteOrigins: config.siteOrigins, readGuard }),
     async close() {
       clearInterval(matchCleanup);
+      clearInterval(referenceCleanup);
       await emailAuth.drain();
       await Promise.all([moderator.close(), capturer.close()]);
       await featured.close();

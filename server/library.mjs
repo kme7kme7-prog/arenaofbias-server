@@ -13,11 +13,13 @@ import { fail } from './http.mjs';
 import { inspectUpload } from './inspect.mjs';
 import { isTextTask, templatesOf } from './categories.mjs';
 import { GENERATION_FIELDS, IGNORED_GENERATION_FIELDS, generationFrom, generationOf, generationAudit, generationAuditView } from './generation.mjs';
+import { readWorkPreview } from './work-previews.mjs';
 
 const token = (prefix) => `${prefix}${randomBytes(16).toString('hex')}`;
 const workId = () => `up-${[...randomBytes(8)].map((byte) => (byte % 36).toString(36)).join('')}`;
 const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
 const clip = (value, max) => String(value ?? '').normalize('NFKC').trim().slice(0, max);
+const defaultTitle = (modelName, effort) => [modelName, effort].filter(Boolean).join(' · ').slice(0, 40);
 const plainObject = (value) => value && typeof value === 'object' && !Array.isArray(value);
 const pendingModeration = () => ({ status: 'pending', revision: token('r'), at: Date.now() });
 const moderationText = (work) => JSON.stringify([work.title, work.summary, work.modelName, work.modelId ? '' : work.vendor, work.effort, work.note,
@@ -618,6 +620,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
         files: work.files,
         bytes: work.bytes,
         calibration: work.trial.calibration ?? null,
+        ...(!work.curated && this.canRead(work, viewer) ? readWorkPreview(dirs.media, work) : null),
         ...(privileged ? { checks: work.checks, trial: work.trial, sourceName: work.sourceName, root: work.root, entry: work.entry, reviewer: work.reviewerName } : {}),
       };
     },
@@ -809,8 +812,6 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
         if (!task.acceptsUploads) fail(409, '这道题暂不接受上传');
       }
       if (body.confirmed !== true) fail(400, '请先确认作品在试加载中运行正常');
-      const title = clip(body.title, 40);
-      if (!title) fail(400, '请填写作品标题');
       // Old clients submit only tool; store it in the one free-text Harness field.
       const source = provenance(!body.harnessId && !body.harnessOther && body.tool
         ? { ...body, harnessOther: clip(body.tool, 40) } : body);
@@ -821,6 +822,8 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       const promptVariant = promptVariantFrom(draft.task_id, body, '', !isStaff(user));
       if (!isStaff(user) && !source.harnessId && !source.harnessOther) fail(400, '请选择或填写 Harness');
       const who = identity(body);
+      const title = clip(body.title, 40) || defaultTitle(who.modelName, effort);
+      if (!title) fail(400, '请填写作品标题');
       const cover = coverFrom(body.cover);
       // Admins stage inbox registrations as unverified works in bulk; the per-user
       // pending cap only exists to throttle regular submitters.
@@ -896,14 +899,14 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
         if (!catalog.task(target) && !q.questionExists.get(target)) fail(400, '目标题目不存在', 'invalid_task');
         moved = { from: taskId, to: target };
       }
-      const title = body.title === undefined ? work.title : clip(body.title, 40);
-      if (!title) fail(400, '请填写作品标题');
       const summary = body.summary === undefined ? work.summary : clip(body.summary, 200);
       const currentIdentity = displayIdentity(work);
       const who = body.modelId !== undefined || body.modelName !== undefined || body.vendor !== undefined
         ? identity({ ...currentIdentity, vendor: currentIdentity.modelId ? '' : work.vendor,
           ...(body.modelName !== undefined ? { modelId: null } : {}), ...body }) : currentIdentity;
       const effort = body.effort !== undefined ? effortOf(body.effort) : work.effort;
+      const title = body.title === undefined ? work.title : clip(body.title, 40) || defaultTitle(who.modelName, effort);
+      if (!title) fail(400, '请填写作品标题');
       const source = provenance(body, work);
       if (body.effort !== undefined && !effort) fail(400, '请选择或填写推理档位');
       if (Object.hasOwn(body, 'providerId') && !source.providerId) fail(400, '请选择服务商');
@@ -1023,7 +1026,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       const nextAudience = gallery && arena ? 'both' : gallery ? 'show2' : arena ? 'show1' : 'hidden';
       if (!inbox && work.audience === 'hidden' && status === 'verified' && nextAudience === 'hidden' && body.show_gallery === undefined && body.show_arena === undefined) fail(400, '请选择审核通过后展示的网站');
       if (nextAudience !== 'hidden' && status !== 'verified' && work.audience === 'hidden') fail(400, '隐藏作品须先审核通过才能发布');
-      const title = body.title === undefined ? work.title : clip(body.title, 40);
+      const title = body.title === undefined ? work.title : clip(body.title, 40) || defaultTitle(who.modelName, effort);
       if (!title) fail(400, '请填写作品标题');
       const summary = body.summary === undefined ? work.summary : clip(body.summary, 200);
       const now = Date.now();

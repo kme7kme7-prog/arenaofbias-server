@@ -1,5 +1,11 @@
 # HANDOFF.md · 当前状态
 
+## 成员列表统计与最近活跃（2026-10-05，已提交，未推送、未部署）
+
+- 配合 Gallery「全部成员」：`GET /api/admin/users` 每项增加 `nickname`、`avatar`、`fixed`（ADMIN_USERNAMES）、打码 `email` 与 `emailVerified`、`lastSeenAt`、`works`（已核验 / 存疑 / 待审 / 内容拒绝，未删除且题目未删除）、`questions`、`votes`、`trusted`、`pendingLimit`。`auth.list()` 出账号字段，`admin.mjs` 新增 `members()` 三条分组统计，`library` 拆出 `trusted()` 供 `pendingLimit` 复用；权限、角色接口与审计不变，无依赖变化。
+- 用户确认加最近活跃迁移：MIGRATIONS 末尾追加 `users.last_seen_at`（幂等，按现存会话最大 last_seen_at 回填）；登录写入，`userFrom` 每次请求按「超过 1 分钟才写」更新，退出与会话清理后保留。会话查询的 `sessions.last_seen_at` 改别名 `session_seen_at`，避免与新列同名。新增 `test/last-seen-migration.test.mjs`；用户管理测试加删除会话后最近活跃仍在的断言（随后恢复会话行）。api-contract 同步，`/admin/` 页只用旧字段不受影响。
+- check97/0；首轮301/302为批量核验既有随机端口 bad port，未改无关测试，重跑通过。用户管理测试改为断言新字段集合、邮箱打码、固定标记、会话活跃与计数与库一致。v39 迁移测试的版本号断言改为 `MIGRATIONS.length`；最终 test303/303。Gallery 真实页面联调见 Gallery HANDOFF。[交付记录](docs/archive/2026-10-05-member-list-stats-wsnxxxs.md)。
+
 ## 单独建题参与门槛（2026-10-05，本地完成，未推送、未部署）
 
 - 单独 POST /api/questions 要求成功计票 100 次或已提交且未删除作品 10 件，任一即可；待审核计入，试上传、跳过和未计票不计。用户确认附带有效示例豁免，moderator/admin 也豁免；邮箱与待审配额保持。

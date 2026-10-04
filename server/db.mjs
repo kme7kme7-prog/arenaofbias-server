@@ -545,6 +545,12 @@ const MIGRATIONS = [
     CREATE INDEX IF NOT EXISTS reference_uploads_task_position ON reference_uploads(task_id, position);
     CREATE INDEX IF NOT EXISTS reference_uploads_owner_created ON reference_uploads(owner_id, created_at);`);
   },
+  // Last activity per account survives logout and session cleanup; sessions keep their own idle clock.
+  (db) => {
+    const columns = new Set(db.prepare('PRAGMA table_info(users)').all().map((column) => column.name));
+    if (!columns.has('last_seen_at')) db.exec('ALTER TABLE users ADD COLUMN last_seen_at INTEGER');
+    db.exec('UPDATE users SET last_seen_at = (SELECT MAX(last_seen_at) FROM sessions WHERE user_id = users.id) WHERE last_seen_at IS NULL');
+  },
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

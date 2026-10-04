@@ -64,7 +64,7 @@ test('v38 to v39 preserves earlier columns and records, and reference migration 
     const tables = ['questions', 'users', 'votes', 'audit', 'curated_content_keys'];
     const before = tables.map(table => ({ table, columns: db.prepare(`PRAGMA table_info(${table})`).all().map(row => row.name), rows: db.prepare(`SELECT * FROM ${table}`).all() }));
     db.close(); db = openDatabase(file);
-    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 39);
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, MIGRATIONS.length);
     for (const { table, columns, rows } of before) assert.deepEqual(db.prepare(`SELECT ${columns.join(', ')} FROM ${table}`).all(), rows);
     assert.equal(db.prepare('SELECT reference_credit FROM questions').get().reference_credit, '');
     const service = referencesFixture(db), refsBefore = db.prepare('SELECT * FROM reference_uploads').all();

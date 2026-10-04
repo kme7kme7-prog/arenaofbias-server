@@ -582,11 +582,15 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 成功 `200`（按注册时间升序）：
 
 ```json
-{ "users": [ { "id": "…", "name": "alice", "role": "user", "createdAt": "2026-09-27T08:00:00.000Z" } ] }
+{ "users": [ { "id": "…", "name": "alice", "nickname": "Alice", "avatar": "fox", "role": "user", "fixed": false,
+  "email": "a***@example.com", "emailVerified": true, "createdAt": "2026-09-27T08:00:00.000Z", "lastSeenAt": "2026-10-05T07:00:00.000Z",
+  "works": { "verified": 3, "questioned": 0, "pending": 1, "rejected": 0 }, "questions": 1, "votes": 120, "trusted": true, "pendingLimit": 20 } ] }
 ```
 
-- 每项仅含 `id` / `name` / `role` / `createdAt`：`name` 为登录用户名（非昵称），`createdAt` 为 ISO 时间；不下发昵称、`name_key` 与凭据（`salt` / `hash`）。
-- `role` 为生效角色：`ADMIN_USERNAMES` 内的账号无论库中存值恒为 `admin`。
+- `name` 为登录用户名，`nickname` 未设置时同 `name`；`avatar` 为生效头像。不下发 `name_key`、完整邮箱与凭据（`salt` / `hash`）；`email` 只保留首字符与域名，未绑定为 `null`。
+- `role` 为生效角色：`ADMIN_USERNAMES` 内的账号无论库中存值恒为 `admin`，并带 `fixed: true`。
+- `lastSeenAt` 取 `users.last_seen_at`：登录时写入，之后带会话的请求最多每分钟更新一次，退出或会话清理后保留；从未登录为 `null`。
+- `works` 统计未删除且所属题目未删除的作品：`rejected` 为内容审核拒绝，其余按核验状态；`questions` 为未删除的题目数，`votes` 为计票数（跳过不入库）。`trusted` 与 `pendingLimit` 沿用投稿额度规则，管理员为 `false` / `null`（不限）。
 
 错误：`401`（未登录）/ `403 仅管理员可以操作`。
 

@@ -26,9 +26,32 @@ export function createAdmin({ db, catalog, library }) {
     SELECT task_id, a_work AS work_id FROM votes WHERE choice != 'skip'
     UNION ALL SELECT task_id, b_work FROM votes WHERE choice != 'skip') GROUP BY task_id, work_id`);
 
+  // Member list counts: live works by where they stand, live questions and counted ballots (skips are not stored).
+  const worksByOwner = db.prepare(`SELECT owner_id,
+      COUNT(*) FILTER (WHERE rejected) AS rejected,
+      COUNT(*) FILTER (WHERE NOT rejected AND status = 'verified') AS verified,
+      COUNT(*) FILTER (WHERE NOT rejected AND status = 'questioned') AS questioned,
+      COUNT(*) FILTER (WHERE NOT rejected AND status = 'unverified') AS pending
+    FROM (SELECT owner_id, status, COALESCE(json_extract(moderation, '$.status'), '') = 'rejected' AS rejected FROM works
+      WHERE owner_id IS NOT NULL AND deleted_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM questions WHERE questions.id = works.task_id AND questions.deleted_at IS NOT NULL))
+    GROUP BY owner_id`);
+  const questionsByOwner = db.prepare('SELECT owner_id, COUNT(*) AS n FROM questions WHERE deleted_at IS NULL GROUP BY owner_id');
+  const votesByUser = db.prepare('SELECT user_id, COUNT(*) AS n FROM votes WHERE user_id IS NOT NULL GROUP BY user_id');
+
   const task = (id, viewer) => catalog.task(id, viewer) ?? fail(404, '题目不存在', 'not_found');
   const iso = (ms) => new Date(ms).toISOString();
   return {
+    members(users) {
+      const works = new Map(worksByOwner.all().map((row) => [row.owner_id, row]));
+      const questions = new Map(questionsByOwner.all().map((row) => [row.owner_id, row.n]));
+      const votes = new Map(votesByUser.all().map((row) => [row.user_id, row.n]));
+      return users.map((user) => {
+        const { verified = 0, questioned = 0, pending = 0, rejected = 0 } = works.get(user.id) ?? {};
+        return { ...user, works: { verified, questioned, pending, rejected }, questions: questions.get(user.id) ?? 0, votes: votes.get(user.id) ?? 0,
+          trusted: library.trusted(user), pendingLimit: library.pendingLimit(user) };
+      });
+    },
     works(query, viewer) {
       const taskId = query.get('task') || null;
       if (taskId) task(taskId, viewer);

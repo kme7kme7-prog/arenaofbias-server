@@ -463,10 +463,10 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       questions: isSenior(admin) ? questions.adminAll(admin) : [] };
   });
 
-  // Account administration for the admin web app (the CLI in server/cli.mjs does the same).
+  // Account administration for Gallery's member list and the admin web app (the CLI in server/cli.mjs does the same).
   router.on('GET', '/api/admin/users', (ctx) => {
     adminOnly(ctx);
-    return { users: auth.list() };
+    return { users: adminService.members(auth.list()) };
   });
   router.on('POST', '/api/admin/users/:id/role', async (ctx) => {
     const admin = adminOnly(ctx);

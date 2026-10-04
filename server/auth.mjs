@@ -13,6 +13,8 @@ const DUMMY_SALT = randomBytes(16).toString('hex');
 export const newId = (bytes = 12) => randomBytes(bytes).toString('hex');
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 export const nameKey = (name) => name.normalize('NFKC').trim().toLowerCase();
+// a***@example.com: enough to recognise an address without handing it out.
+const maskEmail = (email) => (email ? `${email.slice(0, 1)}***${email.slice(email.lastIndexOf('@'))}` : null);
 
 // The picked avatar, or a stable default: FNV-1a of the user id over the frozen first 16.
 export function avatarOf(user) {
@@ -41,8 +43,10 @@ export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', 
     resetPassword: db.prepare('UPDATE users SET salt = ?, hash = ?, hash_params = NULL WHERE id = ?'),
     deleteUserSessions: db.prepare('DELETE FROM sessions WHERE user_id = ?'),
     insertSession: db.prepare('INSERT INTO sessions (token_hash, user_id, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?)'),
-    session: db.prepare('SELECT users.*, sessions.last_seen_at FROM sessions JOIN users ON users.id = sessions.user_id WHERE token_hash = ? AND expires_at > ?'),
+    session: db.prepare('SELECT users.*, sessions.last_seen_at AS session_seen_at FROM sessions JOIN users ON users.id = sessions.user_id WHERE token_hash = ? AND expires_at > ?'),
     touchSession: db.prepare('UPDATE sessions SET last_seen_at = ? WHERE token_hash = ?'),
+    // Account activity is written at most once a minute.
+    touchUser: db.prepare('UPDATE users SET last_seen_at = ? WHERE id = ? AND COALESCE(last_seen_at, 0) < ?'),
     deleteSession: db.prepare('DELETE FROM sessions WHERE token_hash = ?'),
     purgeSessions: db.prepare('DELETE FROM sessions WHERE expires_at <= ?'),
   };
@@ -184,6 +188,7 @@ export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', 
         if (previous) q.deleteSession.run(sha256(previous));
         q.purgeSessions.run(now);
         q.insertSession.run(sha256(token), userId, now, now + sessionTtl, now);
+        q.touchUser.run(now, userId, now);
       });
       res.setHeader('Set-Cookie', `${cookieName}=${token}; Path=/; HttpOnly; SameSite=${cookieSameSite}; Max-Age=${Math.floor(sessionTtl / 1000)}${secureCookies ? '; Secure' : ''}`);
     },
@@ -202,12 +207,13 @@ export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', 
       const user = q.session.get(tokenHash, now);
       if (!user) return null;
       const idleTtl = isStaff({ role: roleFor(user) }) ? adminSessionIdleTtl : sessionIdleTtl;
-      if (now - user.last_seen_at >= idleTtl) {
+      if (now - user.session_seen_at >= idleTtl) {
         q.deleteSession.run(tokenHash);
         return null;
       }
       q.touchSession.run(now, tokenHash);
-      delete user.last_seen_at;
+      q.touchUser.run(now, user.id, now - 60e3);
+      delete user.session_seen_at;
       return syncRole(user);
     },
 
@@ -220,9 +226,12 @@ export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', 
       return { ...user, role };
     },
 
-    // Admin web app: every account with its effective role, never the credentials.
+    // Admin member list: every account with its effective role, never the credentials or a full email.
     list() {
-      return q.listUsers.all().map((user) => ({ id: user.id, name: user.name, role: roleFor(user), createdAt: new Date(user.created_at).toISOString() }));
+      const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
+      return q.listUsers.all().map((user) => ({ id: user.id, name: user.name, nickname: user.nickname || user.name, avatar: avatarOf(user),
+        role: roleFor(user), fixed: admins.includes(user.name_key), email: maskEmail(user.email), emailVerified: Boolean(user.email && user.email_verified_at),
+        createdAt: iso(user.created_at), lastSeenAt: iso(user.last_seen_at) }));
     },
 
     setRole(actor, userId, role) {

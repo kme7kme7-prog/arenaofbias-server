@@ -890,7 +890,23 @@ describe('platform lifecycle', () => {
     const alice = list.data.users.find((user) => user.name === 'alice');
     const root = list.data.users.find((user) => user.name === 'root');
     assert.ok(alice && root);
-    assert.deepEqual(Object.keys(alice).sort(), ['createdAt', 'id', 'name', 'role'], 'the list never carries salt or hash');
+    assert.deepEqual(Object.keys(alice).sort(), ['avatar', 'createdAt', 'email', 'emailVerified', 'fixed', 'id', 'lastSeenAt', 'name', 'nickname',
+      'pendingLimit', 'questions', 'role', 'trusted', 'votes', 'works'], 'the list never carries salt or hash');
+    const stored = platform.db.prepare('SELECT email FROM users WHERE id = ?').get(alice.id).email;
+    assert.equal(alice.email, stored ? `${stored[0]}***${stored.slice(stored.indexOf('@'))}` : null, 'emails are masked');
+    assert.equal(root.fixed, true, 'ADMIN_USERNAMES accounts are marked fixed');
+    assert.equal(root.pendingLimit, null);
+    assert.ok(alice.lastSeenAt, 'requests record last activity');
+    const sessions = platform.db.prepare('SELECT * FROM sessions WHERE user_id = ?').all(alice.id);
+    platform.db.prepare('DELETE FROM sessions WHERE user_id = ?').run(alice.id);
+    const afterLogout = (await call('root', 'GET', '/api/admin/users')).data.users.find((user) => user.id === alice.id);
+    assert.equal(afterLogout.lastSeenAt, alice.lastSeenAt, 'last activity outlives the session');
+    const restore = platform.db.prepare('INSERT INTO sessions (token_hash, user_id, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?)');
+    for (const row of sessions) restore.run(row.token_hash, row.user_id, row.created_at, row.expires_at, row.last_seen_at);
+    const count = (sql) => platform.db.prepare(sql).get(alice.id).n;
+    assert.equal(alice.works.verified, count("SELECT COUNT(*) AS n FROM works WHERE owner_id = ? AND deleted_at IS NULL AND status = 'verified'"));
+    assert.equal(alice.votes, count('SELECT COUNT(*) AS n FROM votes WHERE user_id = ?'));
+    assert.equal(alice.questions, count('SELECT COUNT(*) AS n FROM questions WHERE owner_id = ? AND deleted_at IS NULL'));
 
     assert.equal((await call('alice', 'POST', `/api/admin/users/${alice.id}/role`, { role: 'admin' })).status, 403, 'members cannot promote anyone');
     const promoted = await call('root', 'POST', `/api/admin/users/${alice.id}/role`, { role: 'admin' });

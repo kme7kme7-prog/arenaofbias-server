@@ -257,12 +257,17 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       ['approved', 'rejected'].includes(work.moderation.status) ? work.moderation.at ?? 0 : 0);
   }
 
-  function pendingLimit(user) {
-    if (isStaff(user)) return null;
+  // Trusted members: enough verified works and nothing questioned in the last 90 days.
+  function trusted(user) {
+    if (isStaff(user)) return false;
     const since = Date.now() - 90 * 24 * 3600e3;
     const credit = q.trustOf.get(since, user.id, since, user.id);
-    return credit.verified >= limits.trustedMinVerified && credit.questioned === 0
-      ? limits.trustedPendingPerUser : limits.pendingPerUser;
+    return credit.verified >= limits.trustedMinVerified && credit.questioned === 0;
+  }
+
+  function pendingLimit(user) {
+    if (isStaff(user)) return null;
+    return trusted(user) ? limits.trustedPendingPerUser : limits.pendingPerUser;
   }
 
   function audit(actor, action, work, detail = '') {
@@ -1131,6 +1136,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
 
     pendingCount: (userId) => q.pendingOf.get(userId).n,
     pendingLimit,
+    trusted,
     updatesCount: (userId) => q.updatesOf.get(userId, seenAt(userId)).n,
     markWorksSeen(userId) { q.markWorksSeen.run(Date.now(), userId); },
     auditLog(limit = 200) {

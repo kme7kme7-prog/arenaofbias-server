@@ -1,5 +1,10 @@
 # HANDOFF.md · 当前状态
 
+## 投稿模型更正与排名归属同步（2026-10-05，验证通过，准备推送部署）
+
+- 错误模型名改正后旧排名保留来自原始票身份快照，并非缓存；管理员投稿meta/review现在事务内对同作品同digest的arena票写显式correction、逐侧审计，原identity/来源/选择/票数保留。待决对局继续可用，投票时同内容投稿写已更正归属，旧名不再回榜；包版本化身份、legacy/Show1票与无关标题修改保持。
+- 父代理只读复核 tengwang-pavilion/up-3mm5847a：当前gpt-6.1-sol/Max，原GPT6.1/Max六侧arena身份没有correction，六侧digest一致，meta audit1246。新增离线默认dry-run定点工具，apply需新backup，必须明确task/work/old-name/model/digest/expected/actor并核对原始身份；未写生产。
+- check108/0、test317/317、diff检查通过，无迁移仍v40；真实HTTP/SQLite回归覆盖历史转移、原票不变、待决继续、标题隔离及审核档位。生产副本/正式定点修复、部署与公网核对由父代理执行。[归档](docs/archive/2026-10-05-upload-attribution-ranking-wsnxxxs.md)。
 ## 后端统一联调整合（2026-10-05，验证通过，准备推送，生产由父代理统一发布）
 
 - 用户授权适用分支整合、提交、推送和部署；本仓合入 origin/main a64797de 的社区题/娱乐就绪/相机适配与 question-resubmit 90179b7，保留main今天验证码、资格、安全、成员统计，其他支线无独有功能。仅HANDOFF冲突，保留两侧有效记录并清除远端遗留冲突标记；旧worktree遗留不动。

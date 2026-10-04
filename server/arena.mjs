@@ -17,6 +17,7 @@ import { rankEntries, rankWorks } from './ranking.mjs';
 import { generationOf } from './generation.mjs';
 import { isTextTask } from './categories.mjs';
 import { isStaff } from './roles.mjs';
+import { uploadAttribution } from './vote-attribution.mjs';
 
 const MATCH = { tierWidth: 150, sameTierRate: 0.9, blowoutGap: 400, rerolls: 2, cooldownRounds: 6, cooldownMs: 15 * 60e3 };
 const ANONYMOUS_MATCH_MAX = 10000;
@@ -383,8 +384,17 @@ export function createArena({ db, catalog, library, limits, random = Math.random
         if (!isStaff(user) && (aIdentity.ownerId === user.id || bIdentity.ownerId === user.id)) { reason = 'own'; return; }
         const key = pairKey(match.task_id, match.a_work, match.b_work);
         if (q.votedPair.get(user.id, key)) { reason = 'duplicate'; return; }
-        q.insertVote.run(randomBytes(12).toString('hex'), match.id, user.id, match.task_id, match.a_work, match.b_work, key, choice, Date.now(),
+        const voteId = randomBytes(12).toString('hex');
+        q.insertVote.run(voteId, match.id, user.id, match.task_id, match.a_work, match.b_work, key, choice, Date.now(),
           match.a_identity, match.b_identity);
+        for (const [side, original, work] of [['a', aIdentity, a], ['b', bIdentity, b]]) {
+          const next = uploadAttribution(original, work);
+          if (!next) continue;
+          (side === 'a' ? q.correctA : q.correctB).run(JSON.stringify(next), voteId);
+          q.audit.run(Date.now(), user.id, user.name, 'vote-identity-correction', match.task_id, work.id,
+            JSON.stringify({ voteId, side, previous: original, next, reason: '按同内容上传作品已更正的模型归属或档位计票' }));
+          Object.assign(original, next);
+        }
         counted = true;
       });
       if (counted) invalidate();

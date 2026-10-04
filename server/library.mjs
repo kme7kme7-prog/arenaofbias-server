@@ -14,6 +14,7 @@ import { inspectUpload } from './inspect.mjs';
 import { isTextTask, templatesOf } from './categories.mjs';
 import { GENERATION_FIELDS, IGNORED_GENERATION_FIELDS, generationFrom, generationOf, generationAudit, generationAuditView } from './generation.mjs';
 import { readWorkPreview } from './work-previews.mjs';
+import { uploadAttribution } from './vote-attribution.mjs';
 
 const token = (prefix) => `${prefix}${randomBytes(16).toString('hex')}`;
 const workId = () => `up-${[...randomBytes(8)].map((byte) => (byte % 36).toString(36)).join('')}`;
@@ -272,6 +273,22 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
 
   function audit(actor, action, work, detail = '') {
     q.audit.run(Date.now(), actor?.id ?? null, actor?.name ?? '系统', action, work?.taskId ?? null, work?.id ?? null, detail);
+  }
+
+  const attributionVotes = db.prepare("SELECT * FROM votes WHERE source = 'arena' AND task_id = ? AND (a_work = ? OR b_work = ?) AND json_valid(a_identity) AND json_valid(b_identity)");
+  const correctAttribution = ['a', 'b'].map((side) => db.prepare(`UPDATE votes SET ${side}_correction = ? WHERE id = ?`));
+  function correctUploadAttribution(actor, previous, next) {
+    if (!isStaff(actor) || previous.curated || ['modelId', 'modelName', 'vendor', 'effort'].every((key) => previous[key] === next[key])) return;
+    for (const row of attributionVotes.all(next.taskId, next.id, next.id)) {
+      for (const [index, side] of ['a', 'b'].entries()) {
+        if (row[`${side}_work`] !== next.id) continue;
+        const before = JSON.parse(row[`${side}_correction`] ?? row[`${side}_identity`]);
+        const after = uploadAttribution(before, next);
+        if (!after) continue;
+        correctAttribution[index].run(JSON.stringify(after), row.id);
+        audit(actor, 'vote-identity-correction', next, JSON.stringify({ voteId: row.id, side, previous: before, next: after, reason: '管理员更正同一上传作品的模型归属或档位' }));
+      }
+    }
   }
 
   function upload(taskId, id, archive = catalog) {
@@ -940,6 +957,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
           ...GENERATION_FIELDS.map((key) => generation[key]), promptVariant, note, Date.now(), id);
         audit(actor, 'meta', work, `编辑信息${generationAudit(work, generation)}${moved ? `；归属题目 ${moved.from} → ${moved.to}` : ''}`);
         const next = upload(moved ? moved.to : taskId, id);
+        correctUploadAttribution(actor, work, next);
         if (author && !isStaff(actor) && config.moderation?.enabled && moderationText(work) !== moderationText(next)) q.moderation.run(JSON.stringify(pendingModeration()), id);
       };
       if (inTransaction) apply();
@@ -1051,6 +1069,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
           status === 'verified' && work.reviewedGalleryAt == null ? now : null,
           status === 'verified' && work.reviewedArenaAt == null ? now : null, now, id);
         const routeNote = inbox ? '送进收件箱' : publishAll ? '三面公开' : firstVerify ? '娱乐盲测随首次核验开启' : '';
+        if (!work.curated) correctUploadAttribution(admin, work, upload(taskId, id));
         audit(admin, status, work, [labels[status], reason, routeNote].filter(Boolean).join('：') + generationAudit(work, generation));
       };
       if (inTransaction) apply();

@@ -647,6 +647,47 @@ test('package metadata uses the unified endpoint and removes the old display rou
   assert.equal((await call('root', 'GET', '/api/bootstrap')).data.works.find((work) => work.id === 'a').title, '改名后的作品');
 }));
 
+test('admin upload attribution corrections move existing and in-flight ballots without rewriting snapshots', async () => withPlatform(async ({ platform, call }) => {
+  const upload = await call('root', 'POST', '/api/admin/works/upload?effort=Max&providerId=official&task=two&generationMode=single-turn&humanIntervention=none&name=wrong.html&title=Wrong&modelName=GPT6.1&show_gallery=1', html, true);
+  const id = upload.data.work.id;
+  assert.equal(upload.status, 200);
+  const other = await call('root', 'POST', '/api/admin/works/upload?effort=Max&providerId=official&task=two&generationMode=single-turn&humanIntervention=none&name=other.html&title=Other&modelName=Other&show_gallery=1', html.replace('作品', '对照'), true);
+  assert.equal(other.status, 200);
+  for (const workId of [id, other.data.work.id]) assert.equal((await call('root', 'POST', `/api/works/two/${workId}/review`, { status: 'verified', show_arena: true })).status, 200);
+  const voter = platform.db.prepare("SELECT * FROM users WHERE name = 'voter'").get();
+  const admin = platform.db.prepare("SELECT * FROM users WHERE name = 'root'").get();
+  platform.auth.bindEmail(admin.id, 'root@example.test');
+  admin.email = 'root@example.test';
+  const first = await platform.arena.createMatch(voter, 'two');
+  const pending = await platform.arena.createMatch(admin, 'two');
+  assert.equal(platform.arena.vote(voter, first.id, 'a').counted, true);
+  const original = platform.db.prepare('SELECT * FROM votes WHERE match_id = ?').get(first.id);
+  assert.ok((await platform.arena.leaderboard({ task: 'two' })).rows.some((row) => row.modelName === 'GPT6.1'));
+  const edit = await call('root', 'POST', `/api/admin/works/two/${id}/meta`, { modelId: 'ma' });
+  assert.equal(edit.status, 200);
+  const corrected = platform.db.prepare('SELECT * FROM votes WHERE id = ?').get(original.id);
+  assert.deepEqual([corrected.a_identity, corrected.b_identity, corrected.choice, corrected.source],
+    [original.a_identity, original.b_identity, original.choice, original.source]);
+  const side = corrected.a_work === id ? 'a' : 'b';
+  assert.equal(JSON.parse(corrected[`${side}_correction`]).configKey, 'ma|max');
+  const board = await platform.arena.leaderboard({ task: 'two' });
+  assert.ok(board.rows.some((row) => row.model === 'ma' && row.games === 1));
+  assert.ok(!board.rows.some((row) => row.modelName === 'GPT6.1'));
+  assert.equal(platform.arena.vote(admin, pending.id, 'a').counted, true, 'an existing match remains usable');
+  const second = platform.db.prepare('SELECT * FROM votes WHERE match_id = ?').get(pending.id);
+  const secondSide = second.a_work === id ? 'a' : 'b';
+  assert.equal(JSON.parse(second[`${secondSide}_identity`]).modelName, 'GPT6.1');
+  assert.equal(JSON.parse(second[`${secondSide}_correction`]).modelId, 'ma');
+  assert.ok(!(await platform.arena.leaderboard({ task: 'two' })).rows.some((row) => row.modelName === 'GPT6.1'));
+  const audits = () => platform.db.prepare("SELECT COUNT(*) AS n FROM audit WHERE action = 'vote-identity-correction' AND work_id = ?").get(id).n;
+  assert.equal(audits(), 2);
+  assert.equal((await call('root', 'POST', `/api/admin/works/two/${id}/meta`, { title: 'Renamed title' })).status, 200);
+  assert.equal(audits(), 2, 'title changes do not change scoring attribution');
+  assert.equal((await call('root', 'POST', `/api/works/two/${id}/review`, { status: 'verified', effort: 'High' })).status, 200);
+  assert.equal(audits(), 4, 'review corrections update both existing votes');
+  assert.ok((await platform.arena.leaderboard({ task: 'two' })).rows.some((row) => row.key === 'ma|high' && row.games === 2));
+}));
+
 test('moderator routes enforce senior permissions and forbid decisions on own works', async () => withPlatform(async ({ platform, call }) => {
   const senior = platform.db.prepare("SELECT * FROM users WHERE name = 'root'").get();
   const staff = await platform.auth.register('staff', 'correct horse');

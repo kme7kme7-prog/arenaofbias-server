@@ -311,6 +311,14 @@ Show1 娱乐盲测小窗可单独 opt-in `aob=arena-fold`，注入 `/__aob_fold.
 
 娱乐建模/3D 场景/物理模拟/体素世界小窗在上述参数之外附加 `aob=arena-scene`，仅在存在唯一可识别大 Canvas 时将其原容器链铺满，收起链外产品页内容并触发原作品 resize；不移动/重建 Canvas 或修改相机。没有 Canvas 或多个候选时不选择。含 radio/range/select 且不含邮箱、密码或 textarea 的产品配置表单可随场景隔离隐藏；普通表单、凭据输入与开始体验入口仍保留。场景布局不受 `sp-arena` 面板开关控制；放大/正式使用不含两项 Arena 参数的原地址恢复完整页面。后台竞技场取景沿用同一类别与 opt-in 参数，并保留 bridge 相机通信；展览馆取景不附加 Arena 参数。源文件及访问权限不变。
 
+APEX-65 当前打包版本使用独立 SHA256 固定的相机适配：仅竞技场取景（aob=bridge、face=arena）与 arena-scene 文档动态引用 /__aob_apex_camera.mjs，将 OrbitControls 最远距离从 220 扩到 2200，并注册既有抓取/恢复桥接。普通、展览馆、正式 m 文档不改；版本不匹配不适配，模块请求仍经过原作品访问门禁，不改存储文件或相机数据格式。Tessera 65 同样按 bundle SHA256 固定适配，仅上述竞技场路径引用 /__aob_tessera_camera.mjs：取消隐藏工具栏的相机留白，距离扩为 baseRadius 的 0.08–10 倍，跳过预览相机入场补间并接入既有抓取/恢复。
+
+娱乐专用批量镜头保存在 `server/entertainment-calibration.json`，以 `task/id` 索引，入口与允许转换的本地脚本分别校验 SHA256。该配置不写数据库共享的 `calibration_arena`：只有非 draft、非正式 `m` 的竞技场取景（`face=arena&aob=bridge`）或 `aob=arena-scene` 文档读取新镜头。普通作品、展览馆和正式盲测不读取本批配置；不匹配的版本保持原文件。
+
+内容服务按上述版本匹配为本地脚本附加 `aob=entertainment-camera`，仍先经过原内容访问门禁，再动态接入相机桥接。源文件不落盘改写，外部脚本地址不改。娱乐镜头包含 position/target；个别透视作品可另存受限的 fov（20–100），不扩展共享相机 API 格式。桥接在绘制前保持娱乐保存镜头，关闭娱乐预览的自动绕转；直接 canvas 拖动/滚轮后释放镜头保持，窗口调整保留当前视角。未带娱乐标记的桥接仍沿用既有行为。
+
+娱乐 `arena-fold` 的非正式文档使用独立就绪探针：DOM 可用后每 80ms 检查，连续两次满足条件才上报 `aob:work-ready`；`arena-scene` 还要求 Canvas 实际绘制且已识别的大加载浮层消失。它不依赖 `window load` 或不可见 iframe 的帧回调，也不使用 8 秒强制成功。普通/Gallery 与正式 `m` 探针保持原策略。Show1 娱乐前端场景文档就绪预算为 30 秒，静态为 10 秒、导航为 20 秒；失败最多刷新换组一次，刷新期间废弃旧 iframe 的就绪信号。加载浮层识别是启发式判断，不保证识别 Canvas 内或任意自定义加载页。
+
 ### 3.2 `POST /api/auth/register` —— 注册
 
 **认证**：无。**限流**：auth 桶（10 次/分钟/IP）。
@@ -837,7 +845,7 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 
 | 方法与路径 | 请求与响应 |
 | --- | --- |
-| `GET /api/prompts` | `{ prompts: [...] }`；合并历史快照与数据包正式题目，竞技场 editorial 覆盖对应题目的 `commentary`、`weights`。 |
+| `GET /api/prompts` | `{ prompts: [...] }`；合并历史快照、数据包题目与已审核公开的数据库题目。已有 `arenaId` 保留三位编号，其他题目沿用 canonical task ID（如 `q-48c3b43eeb284f6d`），无需另行登记竞技场编号；竞技场 editorial 覆盖对应题目的 `commentary`、`weights`。 |
 | `GET /api/works` | `{ works: [...] }`；快照作品加符合条件的 live 投稿与公开收录。快照 HTML 和 live 投稿还须通过内容源当前的 `publicContent` 门禁；任务缺失、撤下或不可公开的源不进入清单，快照非 HTML 内容保留。历史身份映射、票与题目定义不删除。 |
 | `GET /api/votes?scope=entertainment\|formal` | `{ votes: [...] }`；只读库内 `source=show1` 的票，按时间和 ID 排序，不合入旧快照。scope 必填，非法或缺失为 400。 |
 | `POST /api/votes` | 登录必需；提交 `id`、`promptId`、`winnerRid/Mid`、`loserRid/Mid`、`mode`、`outcome`。未绑定邮箱时有效请求返回 `200 { counted: false, reason: 'unbound' }`，不写入对局或票；已绑定时成功 `201 { vote }`，同 ID 同票幂等重放，已投同一对返回 `409 pair`；`formal` 仅管理员。新 `blind` / `party` 票要求该题当前公开娱乐作品至少 10 件（非演示、按 id 去重），不足返回 `409 { code: "pool", error: "作品收集中（数量/10），暂未开放娱乐盲测" }`；已存票幂等重放及历史榜单保留，正式范围不套此门槛。 |
@@ -849,7 +857,9 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 | `POST /api/reactions` | 登录且绑定邮箱；请求 `id`、`promptId`、`mid`、`kind`，成功 `201 { counts, mine }`；`kind:null` 撤销。未绑定返回 `403 email_required`。 |
 | `POST /api/track` | 最佳努力记录 `path` 浏览量，成功 `204`。 |
 
-正式题目在数据仓库登记 `arenaId`（稳定三位编号）、`kind`（`text` / `web`）和 `category`。共享后端将同一个 task ID 映射到 Show1 编号，新增题目及其已验证、开启竞技场展示的投稿会保留在公开清单中；娱乐盲测须至少有 10 件不同 id 的非演示公开娱乐作品且有跨模型组合，未达门槛仍可浏览；长短提示词使用同一个 task ID 与编号，以 `promptVariants: [{id, label, prompt}]` 返回两份原文，由前端按钮切换；作品可通过 `promptVariant` 标明使用的版本，同一模型的两版展示在一起。既有快照题目保留编号、名称及权重，正式提示词由数据包提供；未进入数据包的历史题目仍保留。此登记不写入SQLite 的 `questions` 表，也不改变作品审核和展示开关。
+正式题目在数据仓库登记 `arenaId`（稳定三位编号）、`kind`（`text` / `web`）和 `category`。共享后端保留这些编号；无 `arenaId` 的公开数据包题及展览馆创建、已审核公开的数据库题，直接沿用 task ID。兼容层题目 ID 契约为 `/^(?:\d{3}|[a-z][a-z0-9-]{0,63})$/`；题目、作品、投票、评论和反应统一使用此 ID。数据库题未提供 `kind` 时由类别与 templates 判定文字或网页。待审、拒绝或删除的数据库题不进入公开题目/作品目录，作品仍须通过原有公开内容、审核和娱乐展示门禁。
+
+新增题目及其已验证、开启竞技场展示的投稿会保留在公开清单中；娱乐盲测须至少有 10 件不同 id 的非演示公开娱乐作品且有跨模型组合，未达门槛仍可浏览，降到门槛以下关闭新对局。长短提示词使用同一个 task ID 与编号，以 `promptVariants: [{id, label, prompt}]` 返回两份原文，由前端按钮切换；作品可通过 `promptVariant` 标明使用的版本，同一模型的两版展示在一起。既有快照题目保留编号、名称及权重，正式提示词由数据包提供；未进入数据包的历史题目仍保留。不新增数据库迁移，不改变展览馆审核、作品展示开关或正式盲测接口。Show1 前端须同步支持 canonical ID 后再对外发布此兼容层改动。
 
 旧分享卡端点已移除，访问返回 `404`。兼容层的详细字段可参考 `test/fixtures/show1-golden/` 中的固定响应。
 

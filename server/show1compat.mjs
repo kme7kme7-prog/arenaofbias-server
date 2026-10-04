@@ -26,6 +26,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { transaction } from './db.mjs';
 import { fail, rateLimit, readJson } from './http.mjs';
 import { buildShow1Boards, replayShow1Ratings } from './show1-ranking.mjs';
+import { isTextTask } from './categories.mjs';
 
 const REACTION_EMOJI = { up: '👍', down: '👀', laugh: '🤯' };
 const EMOJI_KIND = { '👍': 'up', '👀': 'down', '🤯': 'laugh' };
@@ -75,27 +76,28 @@ export function registerShow1Compat(router, deps) {
     pageView: db.prepare('INSERT INTO page_views (day, path, ip_hash, created_at) VALUES (?, ?, ?, ?)'),
     arenaEditorial: db.prepare("SELECT commentary, weights_json FROM task_editorial WHERE task_id = ? AND face = 'arena'"),
     liveWorks: db.prepare("SELECT id, task_id, model_id, model_other, model_vendor, title, content_key, entertainment_route FROM works WHERE status = 'verified' AND show_entertainment = 1 AND json_extract(moderation, '$.status') IN ('legacy', 'approved') AND curated_as IS NULL AND deleted_at IS NULL ORDER BY created_at, id"),
-    communityTasks: db.prepare('SELECT id FROM questions WHERE deleted_at IS NULL'),
   };
 
-  // Stable arena IDs live with the authoritative question definitions in the datapack.
-  // Unmigrated legacy questions and their historical identities remain in the snapshot.
+  // Keep legacy arena numbers; other public questions retain their canonical task ID.
+  // catalog.tasks() is the public question catalog, including reviewed database questions.
   function promptCatalog() {
     const taskByRound = { ...snapshot.taskByRound }, roundByTask = { ...snapshot.roundByTask };
     const prompts = new Map(snapshot.prompts.map((prompt) => [prompt.id, prompt]));
     for (const task of deps.catalog.tasks?.() ?? []) {
-      if (!task.arenaId) continue;
-      if (!/^\d{3}$/.test(task.arenaId) || (taskByRound[task.arenaId] && taskByRound[task.arenaId] !== task.id)
-        || (roundByTask[task.id] && roundByTask[task.id] !== task.arenaId)) {
+      const round = task.arenaId ?? roundByTask[task.id] ?? task.id;
+      if (!/^(?:\d{3}|[a-z][a-z0-9-]{0,63})$/.test(round)
+        || (taskByRound[round] && taskByRound[round] !== task.id)
+        || (roundByTask[task.id] && roundByTask[task.id] !== round)) {
         throw new Error(`Conflicting arena question ID: ${task.id}`);
       }
-      const previous = prompts.get(task.arenaId);
-      taskByRound[task.arenaId] = task.id;
-      roundByTask[task.id] = task.arenaId;
-      prompts.set(task.arenaId, {
-        ...previous, id: task.arenaId, kind: task.kind,
+      const previous = prompts.get(round);
+      const kind = task.kind ?? (isTextTask(task) ? 'text' : 'web');
+      taskByRound[round] = task.id;
+      roundByTask[task.id] = round;
+      prompts.set(round, {
+        ...previous, id: round, kind,
         category: previous?.category ?? task.category,
-        code: previous?.code ?? (task.kind === 'text' ? 'STORY' : 'WEB'),
+        code: previous?.code ?? (kind === 'text' ? 'STORY' : 'WEB'),
         name: previous?.name ?? task.title, prompt: task.prompt,
         ...(task.promptVariants?.length ? { promptVariants: task.promptVariants } : {}),
         commentary: previous?.commentary ?? task.summary,
@@ -116,11 +118,10 @@ export function registerShow1Compat(router, deps) {
   // The roster sorted by rid once: every "first work of a mid/task" lookup is deterministic.
   const liveWorks = () => {
     const { roundByTask } = promptCatalog();
-    const community = new Set(q.communityTasks.all().map((row) => row.id));
-    // Work gates stay in the SQL. This only admits a community question beside an arena id,
-    // and keeps an unassigned inbox item out even if its switch was turned on.
+    // A work must belong to the same public catalog used by prompts and ballots.
+    // Pending/deleted community questions and unassigned inbox items stay out.
     const uploads = q.liveWorks.all().filter((row) => row.entertainment_route !== 1 && !snapshot.upToRid[row.id]
-      && (roundByTask[row.task_id] || community.has(row.task_id))
+      && roundByTask[row.task_id]
       && (!library || library.publicContent(library.byContentKey(row.content_key))))
       .map((row) => ({ ...row, round: roundByTask[row.task_id] ?? row.task_id,
         modelName: row.model_id ? (deps.catalog.model(row.model_id)?.name ?? row.model_id) : row.model_other,

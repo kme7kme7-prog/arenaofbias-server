@@ -16,6 +16,7 @@ import { limits as defaultLimits } from '../server/config.mjs';
 import { MIGRATIONS, openDatabase } from '../server/db.mjs';
 import { HttpError, createRouter, fail, sendJson } from '../server/http.mjs';
 import { registerShow1Compat } from '../server/show1compat.mjs';
+import { createQuestions } from '../server/questions.mjs';
 import { resetVotes } from '../server/vote-reset.mjs';
 
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
@@ -66,8 +67,10 @@ function fixtureSnapshot(votes = { entertainment: [], formal: [] }) {
 function createFixture({ snapshot = fixtureSnapshot(), admins = ['root'], tasks = [], library } = {}) {
   const db = openDatabase(':memory:');
   const auth = createAuth(db, { admins, secureCookies: false, sessionTtl: 60000 });
+  const questions = createQuestions(db);
+  questions.bindCatalog({ snapshot: () => ({ tasks: () => [], task: () => null, works: () => [] }) });
   const router = createRouter();
-  registerShow1Compat(router, { db, library, catalog: { tasks: () => tasks, model: (id) => ({ name: `Model ${id.at(-1).toUpperCase()}` }) }, snapshot, config: { contentTemplate: 'https://{token}.works.test' }, limit: {} });
+  registerShow1Compat(router, { db, library, catalog: { tasks: () => [...tasks, ...questions.all()], model: (id) => ({ name: `Model ${id.at(-1).toUpperCase()}` }) }, snapshot, config: { contentTemplate: 'https://{token}.works.test' }, limit: {} });
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://test.invalid');
@@ -81,11 +84,11 @@ function createFixture({ snapshot = fixtureSnapshot(), admins = ['root'], tasks 
       return sendJson(res, 500, { error: '服务器出错了，请稍后再试' });
     }
   });
-  return { db, auth, server };
+  return { db, auth, server, questions };
 }
 
 async function withServer(options, run) {
-  const { db, auth, server } = createFixture(options);
+  const { db, auth, server, questions } = createFixture(options);
   let base;
   // Windows may assign a port that fetch refuses under the browser unsafe-port list.
   for (;;) {
@@ -98,7 +101,7 @@ async function withServer(options, run) {
     }
   }
   try {
-    await run({ db, auth, base });
+    await run({ db, auth, base, questions });
   } finally {
     await new Promise((resolve) => server.close(resolve));
     db.close();
@@ -397,6 +400,76 @@ test('retired snapshot ballots never enter live vote or rating responses', () =>
     assert.equal((await call(base, 'GET', '/api/comments?round=014')).status, 200);
     db.prepare("UPDATE works SET show_entertainment = 0 WHERE id = 'up-long-b'").run();
     assert.equal((await call(base, 'GET', '/api/works')).data.works.some((work) => work.id === 'up-long-b'), false);
+  }));
+
+  test('new public questions automatically share catalog, works, ballots and interactions', () => withServer({}, async ({ db, auth, base, questions }) => {
+    const admin = (await signIn(auth, 'root')).user;
+    const body = { title: '二十四节气', summary: '节气测试', prompt: '设计二十四节气网页', category: '静态网页', templates: ['static'] };
+    const question = questions.createByAdmin(admin, body);
+    seedWorks(db);
+    const columns = db.prepare('PRAGMA table_info(works)').all().map(column => column.name);
+    const add = i => db.exec(`INSERT INTO works (${columns.join(', ')}) SELECT ${columns.map(name => ({
+      id: `'up-community-${i}'`, task_id: `'${question.id}'`, content_key: `'wcommunity${i}'`, digest: `'dcommunity${i}'`,
+      model_id: `'model-${i % 2 ? 'a' : 'b'}'`,
+    })[name] ?? name).join(', ')} FROM works WHERE id = 'up-aaaa0001'`);
+    for (let i = 0; i < 9; i++) add(i);
+    const prompts = async () => (await call(base, 'GET', '/api/prompts')).data.prompts;
+    const works = async () => (await call(base, 'GET', '/api/works')).data.works.filter(work => work.promptId === question.id);
+    assert.equal((await prompts()).some(prompt => prompt.id === question.id), false, 'pending questions are not public');
+    assert.equal((await works()).length, 0, 'pending questions cannot leak a roster');
+    questions.review(admin, question.id, { status: 'approved' });
+    const prompt = (await prompts()).find(prompt => prompt.id === question.id);
+    assert.equal(prompt.kind, 'web');
+    assert.equal(prompt.name, body.title);
+    assert.equal((await works()).length, 9, 'underfilled questions remain browsable');
+    const voter = await signIn(auth, 'community-voter');
+    const ballot = { promptId: question.id, winnerRid: 'up-community-0', winnerMid: 'model-b',
+      loserRid: 'up-community-1', loserMid: 'model-a', mode: 'blind' };
+    const vote = id => call(base, 'POST', '/api/votes', { cookie: voter.cookie, body: { id, ...ballot } });
+    assert.equal((await vote(randomUUID())).data.code, 'pool');
+    add(9);
+    const voteId = randomUUID();
+    const accepted = await vote(voteId);
+    assert.equal(accepted.status, 201, accepted.text);
+    assert.equal(accepted.data.vote.promptId, question.id);
+    assert.equal(accepted.data.vote.promptKind, 'web');
+    assert.equal(db.prepare('SELECT task_id FROM votes WHERE id = ?').get(voteId).task_id, question.id);
+    assert.equal((await call(base, 'GET', `/api/comments?round=${question.id}`)).status, 200);
+    const comment = await call(base, 'POST', '/api/comments', { cookie: voter.cookie,
+      body: { id: randomUUID(), roundId: question.id, side: 'a', body: '视角清晰' } });
+    assert.equal(comment.status, 201, comment.text);
+    const reaction = await call(base, 'POST', '/api/reactions', { cookie: voter.cookie,
+      body: { id: randomUUID(), promptId: question.id, mid: 'model-a', kind: 'up' } });
+    assert.equal(reaction.status, 201, reaction.text);
+    assert.equal((await call(base, 'GET', `/api/reactions?prompt=${question.id}`)).data.counts['model-a'].up, 1);
+    db.prepare("UPDATE works SET show_entertainment = 0 WHERE id = 'up-community-9'").run();
+    assert.equal((await works()).length, 9);
+    assert.equal((await vote(voteId)).status, 200, 'stored votes replay below ten');
+    const another = await call(base, 'POST', '/api/votes', { cookie: voter.cookie, body: { id: randomUUID(), ...ballot,
+      loserRid: 'up-community-3' } });
+    assert.equal(another.data.code, 'pool');
+    questions.edit(admin, question.id, { title: '二十四节气新标题' });
+    assert.equal((await prompts()).find(prompt => prompt.id === question.id).name, '二十四节气新标题');
+    questions.review(admin, question.id, { status: 'rejected', reason: '测试下架' });
+    assert.equal((await prompts()).some(prompt => prompt.id === question.id), false);
+    assert.equal((await works()).length, 0);
+    assert.equal((await vote(randomUUID())).status, 400);
+    assert.equal((await call(base, 'GET', '/api/votes?scope=entertainment')).data.votes.at(-1).promptId, question.id);
+    const text = questions.createByAdmin(admin, { ...body, title: '文学新题', category: '文学', templates: ['text'] });
+    questions.review(admin, text.id, { status: 'approved' });
+    assert.equal((await prompts()).find(prompt => prompt.id === text.id).kind, 'text');
+    const deleted = questions.createByAdmin(admin, body);
+    questions.review(admin, deleted.id, { status: 'approved' });
+    questions.remove(admin, deleted.id);
+    assert.equal((await prompts()).some(prompt => prompt.id === deleted.id), false);
+  }));
+
+  test('public package questions without an arena number keep stable canonical IDs', () => withServer({ tasks: [
+    { id: 'new-season', title: '新题', summary: '简介', prompt: '正文', category: '静态网页', templates: ['static'] },
+  ] }, async ({ base }) => {
+    const prompt = (await call(base, 'GET', '/api/prompts')).data.prompts.find(prompt => prompt.id === 'new-season');
+    assert.equal(prompt.kind, 'web');
+    assert.equal(prompt.name, '新题');
   }));
 
   test('live votes retain different weights saved between editorial changes', () => withServer({}, async ({ db, auth, base }) => {
@@ -893,11 +966,16 @@ describe('real compat snapshot', () => {
   const snapshot = loadJson(new URL('../server/show1/compat-data.json', import.meta.url));
 
   test('structure and referential integrity hold', () => {
-    assert.equal(snapshot.prompts.length, 8);
-    assert.equal(snapshot.works.length, 262);
-    assert.equal(snapshot.votes.entertainment.length, 546);
-    assert.equal(snapshot.votes.formal.length, 53);
-    assert.equal(Object.keys(snapshot.taskByRound).length, 8);
+    assert.equal(snapshot.prompts.length, 5);
+    assert.equal(snapshot.works.length, 219);
+    assert.equal(snapshot.votes.entertainment.length, 490);
+    assert.equal(snapshot.votes.formal.length, 47);
+    assert.equal(Object.keys(snapshot.taskByRound).length, 5);
+    for (const id of ['002', '003', '006']) {
+      assert.ok(!snapshot.prompts.some(row => row.id === id));
+      assert.ok(!snapshot.works.some(row => row.promptId === id));
+      assert.equal(snapshot.taskByRound[id], undefined);
+    }
     assert.equal(snapshot.taskByRound['004'], 'chinese-architecture');
     assert.deepEqual(Object.keys(snapshot.roundByTask).sort(), Object.values(snapshot.taskByRound).sort());
     for (const [rid, work] of Object.entries(snapshot.workMap)) {
@@ -916,12 +994,12 @@ describe('real compat snapshot', () => {
       const content = JSON.parse(work.content);
       if (content.kind === 'html') assert.match(content.src, /^https:\/\/w[a-z0-9]+\.w\.arenaofbias\.icu\/$/, `src rewritten for ${work.id}`);
     }
-    assert.equal(snapshot.commentsBackfill.length, 16);
+    assert.equal(snapshot.commentsBackfill.length, 15);
   });
 
   test('roster remains available while retired snapshot votes stay excluded', () => withServer({ snapshot }, async ({ base }) => {
-    assert.equal((await call(base, 'GET', '/api/prompts')).data.prompts.length, 8);
-    assert.equal((await call(base, 'GET', '/api/works')).data.works.length, 262);
+    assert.equal((await call(base, 'GET', '/api/prompts')).data.prompts.length, 5);
+    assert.equal((await call(base, 'GET', '/api/works')).data.works.length, 219);
     for (const scope of ['entertainment', 'formal']) {
       const response = await call(base, 'GET', `/api/votes?scope=${scope}`);
       assert.deepEqual(response.data.votes, [], scope);

@@ -50,10 +50,21 @@ function wrap(Base){
 }
 A.wrap=wrap;
 function setVec(v,a){if(v&&a&&a.length===3){v.x=a[0];v.y=a[1];v.z=a[2];}}
-A.register=function(c){if(c&&c.object){A.controls.push(c);A.apply(c);}};
+A.register=function(c){if(c&&c.object&&A.controls.indexOf(c)<0){A.controls.push(c);A.apply(c);}};
 A.apply=function(c){
   var s=A.saved;if(!s||!c||!c.object)return;
   try{
+    if(window.__AOB_ENTERTAINMENT__&&c.object.position&&c.target){
+      c.autoRotate=false;
+      var fov=window.__AOB_ENTERTAINMENT__.fov;
+      if(fov&&c.object.isPerspectiveCamera&&c.object.fov!==fov){
+        c.object.fov=fov;c.object.updateProjectionMatrix();
+        setTimeout(function(){dispatchEvent(new Event('resize'));},0);
+      }
+      var dx=s.position[0]-s.target[0],dy=s.position[1]-s.target[1],dz=s.position[2]-s.target[2];
+      var distance=Math.sqrt(dx*dx+dy*dy+dz*dz);
+      if(distance>0){c.minDistance=Math.min(c.minDistance||0,distance*.1);c.maxDistance=Math.max(c.maxDistance||0,distance*10);}
+    }
     setVec(c.object.position,s.position);
     if(c.target)setVec(c.target,s.target);
     if(typeof c.update==='function')c.update();
@@ -65,7 +76,24 @@ A.getState=function(){
   return {position:[p.x,p.y,p.z],target:[t.x,t.y,t.z]};
 };
 A.setState=function(s){A.saved=s;for(var i=0;i<A.controls.length;i++)A.apply(A.controls[i]);};
+A.prepareCamera=function(renderCamera){
+  if(!window.__AOB_ENTERTAINMENT__||!A.saved||A.manual)return;
+  for(var i=0;i<A.controls.length;i++){
+    var c=A.controls[i],s=A.saved;if(!c||!c.object||(renderCamera&&c.object!==renderCamera))continue;
+    setVec(c.object.position,s.position);if(c.target)setVec(c.target,s.target);
+    if(typeof c.object.lookAt==='function')c.object.lookAt(s.target[0],s.target[1],s.target[2]);
+  }
+};
 function applyAll(){for(var i=0;i<A.controls.length;i++)A.apply(A.controls[i]);}
+if(window.__AOB_ENTERTAINMENT__){
+  function manual(e){if(e.target&&e.target.tagName==='CANVAS')A.manual=true;}
+  addEventListener('pointerdown',manual,true);addEventListener('wheel',manual,true);
+  addEventListener('resize',function(){
+    if(!A.saved)return;
+    var current=A.getState();if(!current)return;
+    requestAnimationFrame(function(){var saved=A.saved;A.saved=current;applyAll();A.saved=saved;});
+  });
+}
 if(A.saved)[50,150,400,900,1600].forEach(function(d){setTimeout(applyAll,d);});
 if(window.__AOB_CAPTURE__){
   addEventListener('message',function(e){

@@ -1,5 +1,41 @@
 # HANDOFF.md · 当前状态
 
+## 删除旧Show1占位题（2026-10-04，本地完成）
+
+- 用户确认删除show1-002/003/006及对应测试记录。它们不在当前共享questions/数据包和线上Gallery公开目录。compat-data.json移除三题、43作品及映射、62快照票、1回填评论；不移除其他题，也不改作品源文件内容。
+- 新scripts/remove-show1-placeholders.mjs仅清理这三个固定task，默认dry-run；apply要求显式db/新backup/actor，VACUUM INTO后事务清理目标业务记录，外键检查与聚合审计；若出现共享questions记录拒绝删除。必须停服务执行并重启。无迁移或部署配置改动。
+- 本地下载测试库已备份并清理44作品、1票、1对局、1评论；非目标记录逐行相同。遗留文件在本地orphans，Windows原生移动解决Node rename EPERM。Show1 API返回26题/442作品且目标均0。check96/0、test275/275（真实快照不变量更新为5种子题/219作品，其他兼容测试保留）；前端检查通过及四张封面接入。
+- 未执行生产清理、提交或部署。发布配套更新前端种子和封面、兼容快照；生产先dry-run确认实际数量、停服务备份apply重启。未动相机/社区题/加载策略等同期改动。
+
+## 娱乐作品加载探针（2026-10-04，本地完成）
+
+- 新 server/work-ready.mjs 仅替换非正式娱乐 arena-fold 文档探针：静态 DOM 可用，场景实际 Canvas 绘制且已识别的大加载浮层消失才发 ready；定时轮询避免透明 iframe 帧回调节流，没有原 8 秒强制成功。正式 m 与普通/Gallery 原探针不改；无作品源、数据库、CSP 或部署配置修改。
+- check 95 文件/0 错误、npm test 275/275；新增静态 DOM、场景绘制/加载浮层、正式旧策略隔离三项测试。Show1 16 项就绪恢复回归通过；真实慢飞机两侧绘制后入场、无已识别加载浮层。原作品内部初始化与外部依赖性能仍独立存在。
+- 本地后端已重启；未提交/推送/部署。保留同期兼容层社区题和相机校准改动。发布须配套 Show1 的旧窗口信号隔离和场景等待预算。
+
+## 展览馆新题自动同步娱乐题库（2026-10-04，本地完成）
+
+- 用户授权调查后修复：show1compat promptCatalog 统一接入已审核公开 questions 与无 arenaId 数据包题，旧编号保持，其他题沿用 task ID。liveWorks 不再单独放行所有未删除 questions，而须位于同一公开目录；投票、评论、反应沿用统一映射。kind 缺失由类别/templates 判定。既有 publicContent、审核、娱乐开关、十件及跨模型门槛不改，无迁移、源文件或 Gallery API 改动。
+- check93/0、test272/272，兼容层27/27：pending不可见、公开九件可浏览/不可投，第十件可投/评论/反应，降九件关闭新票但历史重放保留，编辑同步、拒绝/删除退出目录、文字kind派生、未编号数据包题。Show1 前端 typecheck/lint/build及19项浏览器入口回归通过；详细报告在 Show1 docs/qa/2026-10-04-community-prompts.md。
+- 未提交/推送/部署或写生产数据；必须协调部署 Show1 前端（支持canonical ID）和本后端，无手工补编号/迁移步骤。既有相机适配、参数与其他 dirty 文件保留，本轮只改 show1compat/test 与相关契约/交接记录。
+
+## 独立娱乐批量相机（2026-10-04，本地）
+
+- 三个GPT-6 Luna代理审阅当前445件公开作品；77件专用镜头保存在server/entertainment-calibration.json，task/id索引与入口/模块SHA256匹配。content.mjs仅娱乐arena-scene/竞技场取景读取，正式m、gallery、普通路径不读取本批配置；不写共享calibration_arena、作品源或数据库。
+- entertainment-calibration.mjs接入打包OrbitControls与四种自定义相机；bridge绘制前防作者相机复位，直接canvas操作释放保持，resize保留当前视角。007Grok娱乐FOV65单独保存，gallery原48；未知版本不转换。上线需这些代码、参数与既有APEX/Tessera适配模块共同部署并重启，无迁移。
+- check93/0、test270/270；473模块/374内联脚本语法通过；77镜头隔离检查通过。真实浏览器冷启动/静置/resize、canvas手动释放、FOV隔离通过。修复render转换截断$变量的运行时黑屏，新增回归用例；Grok/Minimax/Dots/Muse复查200、0pageerror、画面可见。详见Show1 docs/qa/2026-10-04-entertainment-calibration.md及.local证据。
+- 005GPT4o云遮挡/005Dots场景限制保留，011Astra同步构建场景慢。未commit/push/deploy或写生产数据；本轮未动同期出现的show1compat社区提示词改动。
+
+## Tessera 65 缩放与偏移（2026-10-04，本地）
+
+- 新tessera-camera.mjs按bundle SHA256适配竞技场取景/娱乐场景：隐藏UI后的相机insets归零、距离0.08–10倍baseRadius、跳过预览相机入场补间、注册既有桥接。content.mjs保持访问门禁和其他展示路径；存储作品/数据库不改，未知版本不适配。
+- check91/0、test266/266；真实Tessera与APEX浏览器回归通过，取景滚轮双向、抓取/保存值模拟恢复、其他路径不转发，截图已查看。未实点后台保存、未提交/推送/部署；本地副本服务已重启。
+
+## APEX-65 竞技场取景距离（2026-10-04，本地）
+
+- 用户授权。新增 apex-camera.mjs 精确匹配 bundle SHA256，仅竞技场取景/娱乐场景参数的 HTML 使用动态模块，距离上限220扩大到2200并注册已有桥接；content.mjs 仍先检查作品访问门禁。版本变化不自动套用。普通/展览馆/正式m保留原bundle，不改作品、数据库、相机协议或部署配置。
+- check 89/0、test 265/265；Show1真实APEX浏览器回归：滚轮拉远、抓取、保存值模拟恢复、其他显示路径不转发。未实点后台保存；无 commit/push/deploy。本地副本服务已重启，保留其他遗留。
+
 ## 配置表单与竞技场取景预览（2026-10-04，本地）
 
 - arena-fold.js 收窄场景隔离的表单保护，配置 radio/range/select 且无凭据/textarea 可隐藏；登录/普通表单和开始体验入口保持。admin/admin.js 竞技场取景接入 arena-fold 及对应类别 arena-scene，bridge/face 保留，展览馆不变。API 契约更新，不修改源作品或数据库。
@@ -674,3 +710,9 @@
 - 公网联调发现 game 题库封面 /art/pelican-cover.html 和历史 /works/ 预览被站点默认 frame-ancestors none 拦截。仅在现有 host / normalized URI map 中对该封面精确路径与 game /works/ 目录返回 frame-ancestors 'self'，允许游戏自己的 iframe；query 不参与 $uri。Gallery 原例外、game 顶层 none、API / 上传作品策略和 iframe sandbox 保留。
 - 修改 deploy/nginx/read-zones.conf、docs/deploy.md；npm run check 86 / 0、完整 npm test 259 / 259、diff --check 通过。未改 JS，也未新增重复实现测试。
 - 现场 Nginx -t / reload、游戏顶层 none / 两类预览 self 响应头及实际 iframe 渲染由父代理执行，当前没有宣称部署验收完成。本轮新归档见 docs/archive/2026-10-03-game-bundled-csp-wsnxxxs.md；只提交本节及本轮文件，既有脏交接 / 归档 / pin 保留。
+
+## 展览馆新题到Show1目录漏同步（2026-10-04，仅调查）
+
+- 只读线上bootstrap/prompts/works及game发布JS。二十四节气q-48c3b43eeb284f6d最新21件非演示、19模型（调查期间由18增长）；公开Gallery与Show1 works均有该题作品，但Show1 prompts25道均为旧编号，无此题。橘子题q-5ebd7c84dff7cd8f也有36件、26模型而无题目目录。
+- show1compat.promptCatalog无arenaId即continue；liveWorks允许数据库questions题并以q-*为round，导致目录/作品不一致。published依赖目录，不能只在前端造入口。线上题目解析器和本地Show1 lib/prompts.ts仅接受三位数字；随机池从目录选题，故十件门槛不是本次阻断原因。
+- 未修业务代码、写DB、修改源作品、提交/推送/部署；建议后续统一新题ID及目录、作品、投票契约，保留旧编号与十件跨模型门槛。之前未完成的娱乐视角校准验证保持待续。

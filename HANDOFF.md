@@ -1,5 +1,13 @@
 # HANDOFF.md · 当前状态
 
+## 空标题与随机混合联调核对（2026-10-04，已验证，待统一部署）
+
+- 用户授权四仓核对近期修改、适用分支合并、提交推送及最终部署，指定 GPT-6.1 Sol / high；本代理只负责独立后端，生产发布由父代理统一执行。初始工作区干净，main 为 b3b1433；fetch 全部实际远端并 prune 后 origin/main 为 13b7aaa，只有空标题功能提交尚未推送。五条本地支线均没有 main 之外的提交，无需重复合并。
+- 审查空标题上传、编辑、审核的默认值与省略标题保留规则；仅修正 API 契约的旧「缺标题」错误说明并补充默认标题规则，不改后端功能、数据库、依赖、配置或数据包。Gallery 随机混合仍发送具体 task 与 previous，现有 API 兼容。
+- 隔离真实 HTTP / 合成 SQLite 核对普通用户本人回避：两题对战池均为 2 件 / 2 配置，本人作品题返回 409 insufficient，另一题返回 200；证据交给 Gallery 处理随机范围跳题，后端语义保持。
+- npm run check 95 文件 / 0 错，最终 npm test 287/287，git diff --check 通过。前两次完整测试均遇到已有随机监听端口被 Node fetch 拒绝（bad port）；第一轮 286/287，第二轮 282 通过 / 5 取消，第三轮完整通过，未改无关测试。正式本地包 catalog 可读，20 题 / 176 件，摘要 b9a2a5d29c8705089d4cf9b16752bee2cf589c2393f7816734c28da677621cab。
+- 本仓无 build / check:intake 脚本；未做浏览器、生产账号写入、SSH 或部署。日志和 HTTP 复现保存在忽略 output/coordinated-integration-20261004-backend-final/，不入库。[本轮归档](docs/archive/2026-10-04-backend-final-integration-wsnxxxs.md)。
+
 ## 服务端空作品标题兜底（2026-10-04，本地完成并提交，未推送、未部署）
 
 - `server/library.mjs` 新增小函数 `defaultTitle`，三处空标题校验均在解析模型身份和档位之后取「模型名称 · 推理档位」（截断 40 字）；编辑未传 title 保留原标题。已有模型 / 档位校验保持，旧记录两者均缺失且显式清空标题时仍返回 400「请填写作品标题」。

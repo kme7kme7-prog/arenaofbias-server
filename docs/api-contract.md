@@ -437,6 +437,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 - `confirmed` 必须为 `true`（作者已在试加载中确认运行正常），否则 `400`。
 - 模型二选一：`modelId` 命中数据包模型表，或自填 `modelName`。
+- `title` 可省略或留空；NFKC 归一化并去首尾空白后为空时，用解析后的「模型名称 · 推理档位」作为默认标题，最多 40 字。作者 PATCH、管理员 meta 与审核显式传空标题时同样取默认值；编辑未传 `title` 时保留原标题。旧作品的模型名称和推理档位都缺失、无法生成默认值时仍返回 `400 请填写作品标题`。
 - `trial` 为试加载探针回传数据，服务端逐字段消毒（数值截断、字符串截长、样例限条数）。
 - `cover` 仅接受 PNG / JPEG / WebP（魔数校验），≤3 MB。
 - `harnessId` 须存在于当前数据包注册表，停用的 `listed: false` 条目仍可引用；也可填写 `harnessOther`。Harness ID 与「其他」不能同时非空；设置一边会清空另一边。`harnessOther` 经 NFKC 归一化并去首尾空白后最多 40 字。字段未出现时保持原值，旧数据包没有注册表时可填 Harness「其他」。
@@ -454,7 +455,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 截图浏览器只允许当前作品源的文档，以及该源和 HTTPS CDN 白名单内的 GET/HEAD 资源。请求逐跳检查重定向，跨源导航、WebSocket、Service Worker 及未经过路由的浏览器连接被阻断；截图环境须预配置 Playwright ≥ 1.48 和 Chrome。
 
-错误：`401`；`404 试加载已过期`；`400`（未确认 / 缺标题 / 缺 Harness 与 tool / 模型不存在或缺失 / 来源字段无效 / 封面无效）；`413 封面图片不能超过 3 MB`；等待核验满额时 `429`，文案为 `你已有 N 件作品在等待核验（上限 M 件），核验完成或删除作品后名额会释放`，N 与 bootstrap 的 `me.pending` 相同，M 为 `me.pendingLimit`。
+错误：`401`；`404 试加载已过期`；`400`（未确认 / 缺 Harness 与 tool / 模型不存在或缺失 / 来源字段无效 / 封面无效）；`413 封面图片不能超过 3 MB`；等待核验满额时 `429`，文案为 `你已有 N 件作品在等待核验（上限 M 件），核验完成或删除作品后名额会释放`，N 与 bootstrap 的 `me.pending` 相同，M 为 `me.pendingLimit`。
 
 **`PATCH /api/works/:task/:id`** —— 作者修改投稿信息
 

@@ -1,5 +1,12 @@
 # HANDOFF.md · 当前状态
 
+## 近期提交联调与分支核对（2026-10-04，本地完成，待统一推送部署）
+
+- 用户授权四仓近期提交联调、必要分支合并、推送与部署，指定 GPT-6.1 Sol / high 并行；本仓仅负责独立后端。初始 main 为 bd90812、工作区干净；fetch 后 origin/main 为 f3ac0ca，只有管理员本人盲评提交未推送。其余五条本地支线均已包含在 main，没有独有提交，无需重复合并或删除。
+- 后端本人投稿配对和计票均使用 isStaff，moderator/admin 豁免、普通用户仍回避；API 仍以 counted/reason 告知匿名、未绑定、作品变化、本人及重复组合状态，分屏无需新增接口。只修正 API 契约 2.6 总述的旧本人回避条件，不改功能、数据库、依赖或配置。
+- 本轮 npm run check 95/0、npm test 284/284、git diff --check 通过；真实本地已安装包通过 catalog 读取，20题/176件、schema1，目录摘要与当前正式包一致。测试包括两种管理员本人作品计票、普通用户回避、角色降级及组合耗尽。无 build/check:intake 脚本；未重做浏览器、生产账号投票或迁移演练。
+- 本代理未 push、SSH、部署，统一发布由父代理协调；bd90812 本身没有迁移或配置影响。若线上比 f3ac0ca 更早，按部署文档核对已有 v39、参考图备份和已审阅预览媒体；显式 PENDING_PER_USER 继续覆盖默认8。证据在忽略 output/coordinated-integration-20261004-backend/。[本轮归档](docs/archive/2026-10-04-backend-integration-audit-wsnxxxs.md)。
+
 ## 管理员盲评本人投稿（2026-10-04，本地完成并提交，未推送、未部署）
 
 - 用户要求本人投稿回避只限制普通用户，普通管理员与高级管理员均豁免。`server/arena.mjs` 在配对排除与 `own` 不计票两处复用现有 `isStaff`；当前角色为 `moderator` / `admin` 时可评本人投稿并正常计票。参评资格、邮箱、重复计票和管理员审核本人作品规则沿用，不改变数据库结构、迁移或 API 形状。

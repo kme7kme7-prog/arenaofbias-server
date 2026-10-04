@@ -720,6 +720,10 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 ### 3.14 题目与人工审核（schema v38）
 
+**`GET /api/questions/eligibility`**：需登录，返回 `{ eligibility: { allowed, exempt, votes, uploads, requiredVotes: 100, requiredUploads: 10 } }`，bootstrap 的 `me.questionEligibility` 提供相同结构。`allowed` 仅表示能否不附示例单独建题：当前账号 votes 表成功计票记录满 100 次，或 works 表本人未删除作品满 10 件即可；无时间窗口，待审核作品计入，试上传、跳过与未计票对局不计，删除作品后实时重算。`exempt` 对 moderator/admin 为 true。此资格不代替邮箱、待审配额或内容校验。
+
+单独 `POST /api/questions` 未达标时返回 `403` / `code: question_ineligible` 和中文提示，在创建题目与绑定参考图之前拒绝。附带有效示例（本人未过期的 `__new__` 草稿、完整 work 与 confirmed）不受此门槛限制，沿用原有校验和事务；伪造或缺失示例字段不能绕过。两类管理员可直接建题，管理员专用接口继续仅高级管理员可用。无数据库迁移。
+
 **`POST /api/questions`**：登录并绑定邮箱，write 限流，请求体上限 6 MB。`title` / `summary` / `prompt` 必填，长度上限 70 / 400 / 20000 字；提示词仅去首尾空白。`category` 为文学 / 静态网页 / 建模；`domains` 有值时为词表内 1–2 项；`templates` 文学固定 text，其他分类为 static / vite 的非空子集；可选 tags 沿用既有规则。
 
 可选 `references: [{id, name, caption}]` 与 `referenceCredit`。参考图最多 8 张，数组顺序就是交给模型的顺序；图片须为本人尚未过期且未绑定其他题目的上传。name 匹配 `^\d{2}-[\p{L}\p{N}-]+\.(jpg|png|webp)$`（Unicode），扩展名须与实际类型一致；id 和 name 均不可重复。说明最多 40 字，来源最多 80 字。带示例作品时在同一事务绑定参考图，失败保留临时上传。

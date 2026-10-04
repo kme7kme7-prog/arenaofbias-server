@@ -8,6 +8,7 @@ import { test } from 'node:test';
 import { createPlatform } from '../server/app.mjs';
 import { limits } from '../server/config.mjs';
 import { MIGRATIONS, openDatabase } from '../server/db.mjs';
+import { seedQuestionVotes } from './helpers/question-eligibility.mjs';
 
 const html = '<!doctype html><html><head><title>作品</title></head><body><h1>作品</h1></body></html>';
 
@@ -711,6 +712,7 @@ test('moderator routes enforce senior permissions and forbid decisions on own wo
 }));
 
 test('bootstrap v2 unifies questions and works with package overrides and resource boundaries', async () => withPlatform(async ({ platform, call }) => {
+  seedQuestionVotes(platform.db, platform.db.prepare("SELECT id FROM users WHERE name = 'voter'").get().id);
   const body = { title: '用户题目', summary: '题目简述', prompt: '请生成一个简单页面', category: '建模', domains: ['物理'], templates: ['static'] };
   const created = await call('voter', 'POST', '/api/questions', body);
   assert.equal(created.status, 200, JSON.stringify(created.data));

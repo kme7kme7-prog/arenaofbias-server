@@ -7,6 +7,7 @@ import { after, before, describe, test } from 'node:test';
 import { createPlatform } from '../server/app.mjs';
 import { limits } from '../server/config.mjs';
 import { verifiedUser } from './helpers/email.mjs';
+import { seedQuestionVotes } from './helpers/question-eligibility.mjs';
 import { referenceJpeg, referencePng, referenceWebp } from './helpers/reference-images.mjs';
 
 const png = referencePng;
@@ -62,7 +63,8 @@ describe('reference image HTTP contract', () => {
     await new Promise(resolve => site.once('listening', resolve));
     base = `http://127.0.0.1:${site.address().port}`;
     for (const name of ['author', 'other', 'errors', 'quota', 'sample', 'moderator']) {
-      await verifiedUser(platform.auth, name);
+      const user = await verifiedUser(platform.auth, name);
+      seedQuestionVotes(platform.db, user.id);
       if (name === 'moderator') platform.auth.promote(name, 'moderator');
       const login = await call(name, 'POST', '/api/auth/login', { name, password: 'correct horse' });
       assert.equal(login.status, 200, JSON.stringify(login.data));

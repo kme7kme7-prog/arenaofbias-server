@@ -1,5 +1,11 @@
 # HANDOFF.md · 当前状态
 
+## 单独建题参与门槛（2026-10-05，本地完成，未推送、未部署）
+
+- 单独 POST /api/questions 要求成功计票 100 次或已提交且未删除作品 10 件，任一即可；待审核计入，试上传、跳过和未计票不计。用户确认附带有效示例豁免，moderator/admin 也豁免；邮箱与待审配额保持。
+- GET /api/questions/eligibility 和 bootstrap me.questionEligibility 下发当前计数与 allowed/exempt；未达标单独创建返回403 question_ineligible，在创建/绑定参考图前拒绝。附示例继续原有草稿、元数据与事务校验，无迁移或依赖。
+- check95/0、最终test298/298；两项新增HTTP回归覆盖99/100、9/10、删除、草稿/跳过排除、两类管理员、有效示例和伪造字段。Gallery跨仓smoke及真实本地页面核对通过，未生产写入或发布。[交付记录](docs/archive/2026-10-05-question-eligibility-wsnxxxs.md)。
+
 ## 验证码限流补丁（2026-10-05，本地完成，未推送、未部署）
 
 - 默认 IP 额度改为 30 次 / 15 分钟，仍统计失败请求；邮箱额度 3 封 / 15 分钟在发送时占位、失败退回，失败人机验证和短冷却不占邮箱额度。注册/绑定的 IP、邮箱和短冷却分别返回 code 与 retryAfter，HTTP 同时保留 Retry-After；找回密码的邮箱级拒绝仍返回统一响应。

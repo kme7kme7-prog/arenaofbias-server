@@ -58,6 +58,12 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const adminService = createAdmin({ db, catalog, library });
   const inbox = createInbox({ library, config, limits });
   const arena = createArena({ db, catalog, library, limits });
+  const uploadedCount = db.prepare('SELECT COUNT(*) AS n FROM works WHERE owner_id = ? AND deleted_at IS NULL');
+  const questionEligibility = (user) => {
+    const votes = arena.votesBy(user.id), uploads = uploadedCount.get(user.id).n;
+    const exempt = isStaff(user);
+    return { allowed: exempt || votes >= 100 || uploads >= 10, exempt, votes, uploads, requiredVotes: 100, requiredUploads: 10 };
+  };
   const matchCleanup = setInterval(() => arena.cleanupExpiredMatches(), 60e3);
   matchCleanup.unref();
   const featured = createFeatured({ db, catalog, library, arena });
@@ -167,6 +173,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       totals: (await arena.leaderboard()).totals,
       me: user ? {
         votes: arena.votesBy(user.id), pending: library.pendingCount(user.id),
+        questionEligibility: questionEligibility(user),
         pendingLimit: library.pendingLimit(user), updates: library.updatesCount(user.id),
       } : null,
       review: isStaff(user) ? {
@@ -237,12 +244,14 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     return { ok: true };
   });
 
+  router.on('GET', '/api/questions/eligibility', (ctx) => ({ eligibility: questionEligibility(signedIn(ctx)) }));
   router.on('POST', '/api/questions', async (ctx) => {
     const user = emailBound(ctx);
     limit.write(user.id);
     const body = await readJson(ctx.req, 6 * 1024 * 1024);
     requireCategory(body.category);
     if (!Object.hasOwn(body, 'draftId') && !Object.hasOwn(body, 'work') && !Object.hasOwn(body, 'confirmed')) {
+      if (!questionEligibility(user).allowed) fail(403, '单独提交题目需要完成 100 次有效盲评或上传 10 件作品；附带示例结果可直接发起。', 'question_ineligible');
       const question = transaction(db, () => questions.create(user, body, catalog.tags()));
       return { question };
     }

@@ -20,6 +20,7 @@ const results = () => [work('a1'), work('a2'), work('b1', 'b'), work('b2', 'b')]
 function fixture(entries = results(), textEntries = []) {
   const root = mkdtempSync(join(tmpdir(), 'blind-pool-'));
   const dist = join(root, 'dist');
+  mkdirSync(dist, { recursive: true });
   for (const item of [...entries, ...textEntries]) {
     mkdirSync(join(dist, item.scene), { recursive: true });
     writeFileSync(join(dist, item.scene, 'index.html'), `<title>${item.id}</title>`);
@@ -93,6 +94,39 @@ test('admin views report pool membership, and text tasks are exempt from generat
     assert.deepEqual([view('one', 'multi').arena_eligible, view('one', 'multi').arena_generation_ok], [false, false]);
     assert.deepEqual([view('one', 'a1').arena_eligible, view('one', 'a1').arena_generation_ok], [true, true]);
   } finally { f.close(); }
+});
+
+test('only staff can draw and count blind votes on their own uploads', async () => {
+  for (const role of ['user', 'moderator', 'admin']) {
+    const f = fixture([]);
+    const user = { id: 'owner', name: 'owner', role, email: 'owner@example.test' };
+    try {
+      f.db.prepare(`INSERT INTO users (id, name, name_key, role, salt, hash, created_at, email)
+        VALUES (?, ?, ?, ?, '', '', 1, ?)`).run(user.id, user.name, user.name, role, user.email);
+      const insert = f.db.prepare(`INSERT INTO works (id, task_id, owner_id, title, model_id, model_other,
+        content_key, source_name, root, entry, file_count, bytes, digest, checks, created_at, updated_at,
+        status, show_arena, generation_mode, human_intervention)
+        VALUES (?, 'one', ?, ?, ?, '', ?, 'work.html', '', 'index.html', 1, 1, 'digest', '[]', 1, 1,
+          'verified', 1, 'single-turn', 'none')`);
+      for (const model of ['a', 'b']) insert.run(`own-${model}`, user.id, model, model, `own-${model}`);
+      assert.deepEqual(f.arena.poolStats('one'), { works: 2, entries: 2 });
+      if (role === 'user') {
+        await assert.rejects(() => f.arena.createMatch(user, 'one'), (error) => error.code === 'insufficient');
+        // A role change before voting must also restore the ordinary user's restriction.
+        const match = await f.arena.createMatch({ ...user, role: 'admin' }, 'one');
+        const result = f.arena.vote(user, match.id, 'a');
+        assert.deepEqual([result.counted, result.reason], [false, 'own']);
+        assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM votes').get().n, 0);
+      } else {
+        const match = await f.arena.createMatch(user, 'one');
+        const row = f.db.prepare('SELECT a_work, b_work FROM matches WHERE id = ?').get(match.id);
+        assert.deepEqual([row.a_work, row.b_work].sort(), ['own-a', 'own-b']);
+        assert.equal(f.arena.vote(user, match.id, 'tie').counted, true, role);
+        assert.equal((await f.arena.leaderboard({ task: 'one' })).totals.votes, 1);
+        await assert.rejects(() => f.arena.createMatch(user, 'one'), (error) => error.code === 'exhausted');
+      }
+    } finally { f.close(); }
+  }
 });
 
 test('prompt variants never cross-match and configuration keys stay shared', async () => {

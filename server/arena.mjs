@@ -7,7 +7,7 @@
 // Sampling follows arenaofbias: first two different entries (model + effort), then one work
 // of each, so an entry with many works is not shown more often. Pairs are weighted towards
 // entries with few comparisons, prefer entries of similar strength, and avoid the previous
-// round's works, the voter's own uploads and pairs the voter has already judged.
+// round's works, ordinary voters' own uploads and pairs the voter has already judged.
 import { randomBytes } from 'node:crypto';
 import { Worker } from 'node:worker_threads';
 import { effortKey, entityKey, modelKey, providerOf } from './catalog.mjs';
@@ -16,6 +16,7 @@ import { fail, HttpError } from './http.mjs';
 import { rankEntries, rankWorks } from './ranking.mjs';
 import { generationOf } from './generation.mjs';
 import { isTextTask } from './categories.mjs';
+import { isStaff } from './roles.mjs';
 
 const MATCH = { tierWidth: 150, sameTierRate: 0.9, blowoutGap: 400, rerolls: 2 };
 const ANONYMOUS_MATCH_MAX = 10000;
@@ -296,7 +297,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       if (Date.now() - lastCleanup >= 60e3) cleanupExpiredMatches();
       const groups = new Map();
       for (const work of library.eligible(taskId, snapshot)) {
-        if (user && work.ownerId === user.id) continue;
+        if (user && !isStaff(user) && work.ownerId === user.id) continue;
         const key = JSON.stringify([work.promptVariant ?? '', entityKey(work)]);
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push(work);
@@ -361,7 +362,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
         if (!user) { reason = 'anonymous'; return; }
         if (!user.email) { reason = 'unbound'; return; }
         if (!library.isEligible(library.work(match.task_id, match.a_work)) || !library.isEligible(library.work(match.task_id, match.b_work))) { reason = 'changed'; return; }
-        if (aIdentity.ownerId === user.id || bIdentity.ownerId === user.id) { reason = 'own'; return; }
+        if (!isStaff(user) && (aIdentity.ownerId === user.id || bIdentity.ownerId === user.id)) { reason = 'own'; return; }
         const key = pairKey(match.task_id, match.a_work, match.b_work);
         if (q.votedPair.get(user.id, key)) { reason = 'duplicate'; return; }
         q.insertVote.run(randomBytes(12).toString('hex'), match.id, user.id, match.task_id, match.a_work, match.b_work, key, choice, Date.now(),

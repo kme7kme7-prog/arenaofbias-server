@@ -1,5 +1,10 @@
 # HANDOFF.md · 当前状态
 
+## 数据包作品改档位后旧票自动更正（2026-10-06，已推送、已上线）
+
+- c80161d：后台保存作品信息或审核时按当前归属更正该作品旧票（包作品按题目+ID，投稿要求同 digest），重新保存可补遗漏；新增 `npm run reconcile:attribution`（默认 dry-run）。check109/0、test318/318。
+- 生产停服备份后部署并更正 137 侧（Astra Pro High/Max→Default、Qwen 0902→qwen3.8-max、DeepSeek Extra→XHigh、MiniMax M3 空档位→Default），后台逻辑保存 5 件投稿（含 up-esj2b4ji→minimax-m3.1、up-2xp5x707→seed-2.1-pro，即上一节待办）自动更正 56 侧。integrity ok、v40、服务正常；公网榜单作品为 0 的行清零。备份与证据在服务器 `/root/aob-attribution-20261006/`。[交付记录](docs/archive/2026-10-06-package-attribution-correction-wsnxxxs.md)。
+
 ## 数据包 pin 更新：模型名统一（2026-10-05，已推送，未部署）
 
 - 数据仓 7fde837 统一模型名（MiniMax M3.1 → MiniMax M3.1 Flash Preview；中式建筑 Qwen3.8 Max 0902 作品归入 qwen3.8-max，0902 设 listed:false），CI 出包 640346405751b4f1a22e84bea356d35cacc14c35，本仓 datapack.json 改指向该包。无代码或迁移改动。

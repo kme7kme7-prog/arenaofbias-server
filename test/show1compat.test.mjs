@@ -207,8 +207,8 @@ test('countedVotes only feeds source=arena votes to Bradley–Terry', async () =
       task: () => null, tasks: () => [], at: () => null,
     };
     const library = {
-      work: (task, id) => ({ id, taskId: task, modelId: id, modelName: id, vendor: '', effort: '' }),
-      isEligible: () => true,
+      ballotWork: (task, id) => ({ id, taskId: task, modelId: id, modelName: id, vendor: '', effort: '' }),
+      countsVotes: () => true,
       eligible: () => [],
     };
     const arena = createArena({ db, catalog, library, limits: defaultLimits });

@@ -125,7 +125,7 @@ npm start
 | DELETE | `/api/drafts/:id` | 丢弃草稿（需登录） |
 | POST | `/api/works` | 由草稿正式投稿，入审核队列并排队截图（需登录） |
 | PATCH | `/api/works/:task/:id` | 作者在核验前修改投稿信息（含提示词版本与生成信息） |
-| DELETE | `/api/works/:task/:id` | 删除投稿（需登录，本人或管理员） |
+| DELETE | `/api/works/:task/:id` | 下架作品，已有票继续计入；管理员可作废对局，高级管理员可清除文件 |
 | POST | `/api/works/:task/:id/review` | 审核投稿（仅管理员） |
 | POST | `/api/works/:task/:id/moderation` | 人工内容通过/拒绝，需理由（仅管理员） |
 | POST | `/api/works/:task/:id/moderation/retry` | 重新排队自动内容审查（仅管理员） |

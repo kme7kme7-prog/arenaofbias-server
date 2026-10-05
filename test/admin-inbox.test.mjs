@@ -151,14 +151,15 @@ describe('admin inbox', () => {
     assert.equal(curated.status, 200);
   });
 
-  test('works with votes refuse deletion', async () => {
+  test('works with votes are withdrawn instead of erased', async () => {
     const list = await call('root', 'GET', '/api/admin/works?task=one&source=upload');
     const work = list.data.works.find((item) => item.id.startsWith('up-'));
     platform.db.prepare(`INSERT INTO votes (id, match_id, user_id, task_id, a_work, b_work, pair_key, choice, created_at)
       VALUES ('v-test', 'm-test', NULL, ?, ?, ?, 'p-test', 'a', ?)`).run(work.task, work.id, 'other', Date.now());
     const deleted = await call('root', 'DELETE', `/api/works/${work.task}/${work.id}`);
-    assert.equal(deleted.status, 409);
-    assert.match(deleted.data.error, /对局记录/);
+    assert.equal(deleted.status, 200);
+    assert.equal(platform.db.prepare('SELECT COUNT(*) AS n FROM votes WHERE id = ?').get('v-test').n, 1, 'the ballot survives');
+    assert.match(platform.db.prepare("SELECT detail FROM audit WHERE action = 'delete' AND work_id = ?").get(work.id).detail, /保留 1 票对局/);
     const clean = list.data.works.find((item) => item.id !== work.id && item.id.startsWith('up-'));
     assert.ok(clean, 'a vote-free upload exists');
     assert.equal((await call('root', 'DELETE', `/api/works/${clean.task}/${clean.id}`)).status, 200);

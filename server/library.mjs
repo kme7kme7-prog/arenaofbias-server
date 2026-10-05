@@ -109,6 +109,9 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
     deleteDraft: db.prepare('DELETE FROM drafts WHERE id = ?'),
     work: db.prepare(`${WORK} WHERE works.id = ? AND ${liveWork}`),
+    // Withdrawn uploads stay readable for ballot history; a removed question still hides them.
+    withdrawnWork: db.prepare(`${WORK} WHERE works.id = ? AND NOT EXISTS (
+      SELECT 1 FROM questions WHERE questions.id = works.task_id AND questions.deleted_at IS NOT NULL)`),
     questionExists: db.prepare('SELECT 1 FROM questions WHERE id = ? AND deleted_at IS NULL'),
     // Re-homing an upload to another task moves its historical ballots, matches,
     // comments and reactions along, so nothing points at the old task afterwards.
@@ -149,6 +152,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       show_gallery = ?, show_arena = ?, show_entertainment = ?, entertainment_route = ?, title = ?, summary = ?, note = ?, reviewed_at = ?,
       reviewed_gallery_at = COALESCE(?, reviewed_gallery_at), reviewed_arena_at = COALESCE(?, reviewed_arena_at), updated_at = ? WHERE id = ?`),
     remove: db.prepare('UPDATE works SET deleted_at = ?, updated_at = ? WHERE id = ?'),
+    voidWork: db.prepare("UPDATE works SET status = 'questioned', status_reason = ?, reviewed_at = ?, updated_at = ? WHERE id = ?"),
     captures: db.prepare('UPDATE works SET captures = ? WHERE id = ?'),
     moderation: db.prepare('UPDATE works SET moderation = ? WHERE id = ? AND deleted_at IS NULL'),
     moderationResult: db.prepare('UPDATE works SET moderation = ? WHERE id = ? AND moderation = ? AND deleted_at IS NULL'),
@@ -356,6 +360,9 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
   const eligibleEffective = (work) => Boolean(work && work.status === 'verified' && work.dir && !work.curatedAs &&
     visibleEffective(work, 'show1') && generationQualified(work));
   const isEligible = (work) => eligibleEffective(withDisplay(work));
+  // Ballots outlive the blind pool: withdrawn or arena-off works keep their history. Only a
+  // voided comparison drops out (questioned, content pulled, generation no longer qualified).
+  const countsVotes = (work) => Boolean(work && work.status === 'verified' && contentAllowedEffective(work) && generationQualified(work));
   // The blind-pool rule read once for every client: in the pool, turned off by an admin, or why not.
   const arenaState = (work) => {
     if (eligibleEffective(work)) return { state: 'in_pool' };
@@ -483,10 +490,10 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     return known ?? effort;
   };
   const DISPLAY_KEYS = ['title', 'summary', 'modelId', 'modelName', 'vendor', 'effort', 'harnessId', 'harnessOther', 'providerId', 'generationMode', 'humanIntervention', 'promptVariant', 'note'];
-  function withDisplay(work) {
+  function withDisplay(work, withdrawn = false) {
     if (!work?.curated) return work;
     const row = q.override.get(work.taskId, work.id);
-    if (row?.deleted_at) return null;
+    if (row?.deleted_at && !withdrawn) return null;
     let patch = {};
     try { patch = JSON.parse(row?.display_json || '{}'); } catch { /* ignore malformed display data */ }
     const next = { ...work, status: row?.status ?? 'verified', reason: row?.reason ?? '',
@@ -516,6 +523,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
 
   return {
     isEligible,
+    countsVotes,
     isInteractive,
     visibleTo,
     flagsOf,
@@ -559,6 +567,14 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       const archive = snapshot ?? catalog.snapshot();
       const curated = archive.work(taskId, id);
       return curated ? withDisplay(curated) : upload(taskId, id, archive);
+    },
+    // Like work(), but withdrawn works still resolve: ballots and audits outlive removal.
+    ballotWork(taskId, id, snapshot = null) {
+      const archive = snapshot ?? catalog.snapshot();
+      const curated = archive.work(taskId, id);
+      if (curated) return withDisplay(curated, true);
+      const row = q.withdrawnWork.get(id);
+      return row && row.task_id === taskId ? fromRow(row, archive) : null;
     },
     byContentKey(key) {
       const row = q.workByKey.get(key);
@@ -1114,19 +1130,36 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       }));
     },
 
-    remove(user, taskId, id) {
-      const work = this.work(taskId, id);
+    // Withdrawing keeps ballots counting and hosted files on disk. Staff may also void the
+    // comparisons (reason required) and senior admins purge hosted files, both even after
+    // the author withdrew it. Vote-free uploads lose their files straight away as before.
+    remove(user, taskId, id, body = {}) {
+      const voided = body.void === true;
+      const purge = body.purge === true;
+      if (voided && !isStaff(user)) fail(403, '只有管理员可以作废对局');
+      if (purge && !isSenior(user)) fail(403, '只有高级管理员可以清除作品文件');
+      const reason = clip(body.reason, 500);
+      if (voided && !reason) fail(400, '作废对局时请写明原因');
+      const live = this.work(taskId, id);
+      const work = live ?? (voided || purge ? this.ballotWork(taskId, id) : null);
       if (!work) fail(404, '作品不存在');
-      if (work.ownerId !== user.id && !isSenior(user)) fail(403, '只能删除自己上传的作品');
+      if (work.ownerId !== user.id && !isSenior(user) && !(voided && isStaff(user))) fail(403, '只能删除自己上传的作品');
       const votes = q.votesOfWork.get(taskId, id, id).n;
-      if (votes > 0) fail(409, `这件作品已有 ${votes} 票对局记录，删除会破坏历史。请用「标记存疑」让它下线`);
       const now = Date.now();
       transaction(db, () => {
-        if (work.curated) q.removePack.run(taskId, id, now, user.id, now);
-        else q.remove.run(now, now, id);
-        audit(user, 'delete', work, user.id === work.ownerId ? '作者删除' : '管理员删除');
+        if (voided) {
+          if (work.curated) q.reviewPack.run(taskId, id, 'questioned', reason, user.id, now, user.id, now);
+          else q.voidWork.run(reason, now, now, id);
+        }
+        if (live) {
+          if (work.curated) q.removePack.run(taskId, id, now, user.id, now);
+          else q.remove.run(now, now, id);
+        }
+        const how = [live ? (user.id === work.ownerId ? '作者下架' : '管理员下架') : '',
+          voided ? `作废 ${votes} 票对局：${reason}` : votes && live ? `保留 ${votes} 票对局` : '', purge && !work.curated ? '清除文件' : ''];
+        audit(user, live ? 'delete' : 'delete-followup', work, how.filter(Boolean).join('；'));
       });
-      if (!work.curated) {
+      if (!work.curated && (purge || !votes)) {
         rmSync(join(dirs.works, id), { recursive: true, force: true });
         rmSync(join(dirs.media, id), { recursive: true, force: true });
       }

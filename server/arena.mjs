@@ -76,7 +76,8 @@ export function createArena({ db, catalog, library, limits, random = Math.random
   let cache = new Map();
   const invalidate = () => { cache = new Map(); };
 
-  // Eligibility follows current moderation/catalog membership; identity and score keys
+  // Counting follows current moderation/catalog membership, not the blind pool: withdrawn
+  // and arena-off works keep their ballots; identity and score keys
   // come from the vote's saved snapshot and never drift with later label edits.
   // Votes without a snapshot (pre-snapshot test data) are not scored.
   // A vote counts only when BOTH saved identities match the provenance filters.
@@ -93,8 +94,8 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     const lookup = (task, id) => {
       const key = `${task}/${id}`;
       if (!works.has(key)) {
-        const work = library.work(task, id, snapshot);
-        works.set(key, library.isEligible(work) ? work : null);
+        const work = library.ballotWork(task, id, snapshot);
+        works.set(key, library.countsVotes(work) ? work : null);
       }
       return works.get(key);
     };

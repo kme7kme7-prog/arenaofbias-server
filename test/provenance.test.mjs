@@ -154,10 +154,9 @@ test('package metadata and review decisions apply everywhere while files and sco
     assert.throws(() => library.remove(moderator, 'one', 'b1'), (error) => error.status === 403);
     db.prepare(`INSERT INTO votes (id, match_id, task_id, a_work, b_work, pair_key, choice, created_at)
       VALUES ('v', 'm', 'one', 'a1', 'b1', 'a1/b1', 'a', 1)`).run();
-    assert.throws(() => library.remove(senior, 'one', 'a1'), (error) => error.status === 409 && /票/.test(error.message));
-    db.exec('DELETE FROM votes');
     library.remove(senior, 'one', 'a1');
     assert.equal(library.work('one', 'a1'), null);
+    assert.equal(library.countsVotes(library.ballotWork('one', 'a1')), true, 'a withdrawn package work keeps its ballots');
     assert.equal(library.visibleTo(catalog.work('one', 'a1')), false);
     assert.equal(library.allWorks().some((item) => item.id === 'a1'), false);
     assert.deepEqual(readFileSync(entry), original);

@@ -378,8 +378,10 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     arena.invalidate();
     return { work: library.toPublic(work, user) };
   });
-  router.on('DELETE', '/api/works/:task/:id', (ctx) => {
-    library.remove(signedIn(ctx), ctx.params.task, ctx.params.id);
+  router.on('DELETE', '/api/works/:task/:id', async (ctx) => {
+    const user = signedIn(ctx);
+    const body = ctx.req.headers['content-type'] ? await readJson(ctx.req) : {};
+    library.remove(user, ctx.params.task, ctx.params.id, body);
     arena.invalidate();
     return { ok: true };
   });

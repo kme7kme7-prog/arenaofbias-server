@@ -1,5 +1,11 @@
 # HANDOFF.md · 当前状态
 
+## 有票作品下架与作废对局（2026-10-05，已提交推送，未部署）
+
+- 用户确认方案并接受排行变动：`DELETE /api/works/:task/:id` 不再对有票作品返回409。默认下架为软删除，作品退出展厅与盲评池，已有票继续计入；有票投稿保留托管文件，无票投稿照旧删文件。可选体 `void`+`reason`（管理员，作品转questioned、相关票退榜）、`purge`（高级管理员，清除投稿文件），两者可对已下架作品再调用，审计 `delete` / `delete-followup`。
+- 计票改用 `library.ballotWork` + `countsVotes`：要求 verified、内容放行、生成方式合格，不再要求 `show_arena` 或未下架。**线上排行会变**：此前因关闭盲评开关（或旧规则前已删除）而剔除的票会重新计入。匹配池、投票时 `changed` 判定、内容服务仍用 `isEligible`。无迁移，仍v40。
+- check108/0；test317/317两次全过，另几轮全量各有1–2个不同的无关用例偶发失败（登录、编辑默认值等），单独重跑均过；blind-pool与platform连跑5次全过。四个旧测试按新规则改断言，platform新增下架/关盲评/作废/清除/作者限制回归。api-contract、README、admin文案同步。Gallery真实临时库浏览器验证见 Gallery HANDOFF。 [交付记录](docs/archive/2026-10-05-withdraw-voted-works-wsnxxxs.md)。
+
 ## 四仓发布后端门禁复核（2026-10-05，已验证，生产由父代理统一发布）
 
 - 用户授权整理现有改动、必要合并、提交和推送。main 原工作树干净，ec6af47 比 origin/main c1fe9a5 领先一个管理编辑提交；fetch 后无远端新提交，所有本地支线均已并入 main，无需合并。未改源码、生成物或其他 worktree。

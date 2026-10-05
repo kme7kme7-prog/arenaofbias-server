@@ -546,7 +546,7 @@ test('editorial validates weights, traffic aggregates, and arena switches remove
   assert.equal((await call('voter', 'POST', `/api/arena/matches/${match.data.id}/vote`, { choice: 'a' })).data.counted, true);
   assert.equal((await call('voter', 'GET', '/api/leaderboard?task=one')).data.totals.votes, 1);
   await call('root', 'POST', '/api/admin/works/one/a/face-settings', { show_arena: false });
-  assert.equal((await call('voter', 'GET', '/api/leaderboard?task=one')).data.totals.votes, 0);
+  assert.equal((await call('voter', 'GET', '/api/leaderboard?task=one')).data.totals.votes, 1, 'leaving the blind pool keeps the ballot');
   assert.equal((await call('voter', 'POST', '/api/arena/matches', { task: 'one' })).status, 409);
   await call('root', 'POST', '/api/admin/works/one/a/face-settings', { show_arena: true });
   assert.equal((await call('voter', 'GET', '/api/leaderboard?task=one')).data.totals.votes, 1);

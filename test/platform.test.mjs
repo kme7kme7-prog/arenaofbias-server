@@ -869,16 +869,40 @@ describe('platform lifecycle', () => {
     assert.equal((await call('guest', 'GET', '/api/works/a1/calibration')).status, 404, 'curated works use their own data package');
   });
 
-  test('only the author or an admin can delete an upload', async () => {
+  test('withdrawn works keep their ballots until staff void them; purge removes hosted files', async () => {
     assert.equal((await call('bob', 'DELETE', `/api/works/one/${upload.id}`)).status, 403);
-    assert.equal((await call('alice', 'DELETE', `/api/works/one/${upload.id}`)).status, 409, 'works with votes keep the match history; question them instead');
-    assert.equal((await fetchContent(upload.scene)).status, 200, 'the voted work stays online');
-    assert.equal((await call('root', 'DELETE', '/api/works/one/a1')).status, 409, 'package works with votes preserve match history');
-    const staged = await call('alice', 'POST', '/api/drafts?task=one&name=temp.html', '<!doctype html><html><head><title>Temp</title></head><body><p>Temp</p></body></html>', { raw: true });
-    const temp = await call('alice', 'POST', '/api/works', { draftId: staged.data.draft.id, confirmed: true, title: 'Temp', modelId: 'm-a', effort: 'Default', providerId: 'official', tool: 'CLI' });
+    const staged = await call('alice', 'POST', '/api/drafts?task=one&name=voted.html', '<!doctype html><html><head><title>Voted</title></head><body><p>Voted</p></body></html>', { raw: true });
+    const voted = (await call('alice', 'POST', '/api/works', { draftId: staged.data.draft.id, confirmed: true, title: 'Voted', modelId: 'm-a', effort: 'Low', providerId: 'official', tool: 'CLI', generationMode: 'single-turn', humanIntervention: 'none' })).data.work;
+    assert.equal((await call('root', 'POST', `/api/works/one/${voted.id}/review`, { status: 'verified', show_gallery: true, show_arena: true })).status, 200);
+    const before = (await call('bob', 'GET', '/api/leaderboard?task=one')).data.totals.votes;
+    for (let i = 0; i < 3; i++) {
+      const match = await call('bob', 'POST', '/api/arena/matches', { task: 'one' });
+      if (match.status !== 200) break;
+      await call('bob', 'POST', `/api/arena/matches/${match.data.id}/vote`, { choice: 'a' });
+    }
+    const counted = (await call('bob', 'GET', '/api/leaderboard?task=one')).data.totals.votes;
+    assert.ok(counted > before, 'the new work collected ballots');
+    const files = join(root, 'data', 'works', voted.id);
+    assert.equal((await call('root', 'POST', `/api/admin/works/one/${voted.id}/face-settings`, { show_arena: false })).status, 200);
+    assert.equal((await call('bob', 'GET', '/api/leaderboard?task=one')).data.totals.votes, counted, 'leaving the blind pool keeps the ballots');
+
+    assert.equal((await call('alice', 'DELETE', `/api/works/one/${voted.id}`, { void: true, reason: 'x' })).status, 403, 'authors cannot void ballots');
+    assert.equal((await call('alice', 'DELETE', `/api/works/one/${voted.id}`)).status, 200, 'authors may withdraw a voted work');
+    assert.equal((await call('bob', 'GET', '/api/leaderboard?task=one')).data.totals.votes, counted, 'withdrawal keeps the ballots');
+    assert.ok(!(await call('bob', 'GET', '/api/bootstrap')).data.works.some((work) => work.id === voted.id));
+    assert.ok(existsSync(files), 'voted files stay for history');
+
+    assert.equal((await call('root', 'DELETE', `/api/works/one/${voted.id}`, { void: true })).status, 400, 'voiding needs a reason');
+    assert.equal((await call('root', 'DELETE', `/api/works/one/${voted.id}`, { void: true, reason: '模型冒名' })).status, 200);
+    assert.equal((await call('bob', 'GET', '/api/leaderboard?task=one')).data.totals.votes, before, 'voided ballots drop out');
+    assert.equal((await call('root', 'DELETE', `/api/works/one/${voted.id}`, { purge: true })).status, 200);
+    assert.ok(!existsSync(files), 'purge removes hosted files');
+
+    const temp = await call('alice', 'POST', '/api/works', { draftId: (await call('alice', 'POST', '/api/drafts?task=one&name=temp.html', '<!doctype html><html><head><title>Temp</title></head><body><p>Temp</p></body></html>', { raw: true })).data.draft.id, confirmed: true, title: 'Temp', modelId: 'm-a', effort: 'Default', providerId: 'official', tool: 'CLI' });
     assert.equal(temp.status, 200);
     assert.equal((await call('bob', 'DELETE', `/api/works/one/${temp.data.work.id}`)).status, 403);
     assert.equal((await call('alice', 'DELETE', `/api/works/one/${temp.data.work.id}`)).status, 200, 'vote-free works delete freely');
+    assert.ok(!existsSync(join(root, 'data', 'works', temp.data.work.id)));
   });
 
   test('user administration is admin-only, guards self-demotion and writes audit', async () => {

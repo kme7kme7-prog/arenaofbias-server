@@ -213,16 +213,16 @@ async function loadInbox() {
 
 async function removeWork(w) {
   const ok = await confirmDialog({
-    title: '删除这件作品？',
-    message: `「${w.title}」会从公开目录删除。有投票记录的作品不能删除，请改用审核或门面开关调整。操作会记入审核记录。`,
-    confirm: '删除',
+    title: '下架这件作品？',
+    message: `「${w.title}」会从公开目录和盲评中下架。已计入的盲评票继续保留在榜单中，有票作品的文件保留；需要作废对局或清除文件请在 Gallery 作品管理中操作。操作会记入审核记录。`,
+    confirm: '下架',
     danger: true,
   });
   if (!ok) return false;
-  toast('正在删除作品…');
+  toast('正在下架作品…');
   try {
     await api(`works/${encodeURIComponent(w.task)}/${encodeURIComponent(w.id)}`, { method: 'DELETE' });
-    toast('作品已删除');
+    toast('作品已下架');
     return true;
   } catch (error) {
     toast(error.message);

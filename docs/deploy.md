@@ -401,8 +401,10 @@ ssh -NT -i /root/.ssh/arenaofbias-review-154.36.185.169 \
   -o BatchMode=yes -o StrictHostKeyChecking=yes \
   -o UserKnownHostsFile=/root/.ssh/arenaofbias-review-known-hosts \
   -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
-  -L 127.0.0.1:5280:127.0.0.1:5280 arena-review@154.36.185.169
+  -L 127.0.0.1:5280:127.0.0.1:5280 arena-review@154.36.178.229
 ```
+
+当前审查服务器地址为 `154.36.178.229`；私钥文件名中的旧 IP 仅为历史命名，继续使用原有密钥。地址变化时，先核对新地址的主机公钥、relay 健康状态与专用账号，再备份并更新 tunnel 的远端地址及 known-hosts，重启 tunnel 后验证本机 `/health`。
 
 SSH 使用独立 Ed25519 身份并固定主机公钥；远端授权公钥限制为 `restrict,port-forwarding,permitopen="127.0.0.1:5280"`，用户无登录 shell。上述两项新服务设为开机启动、失败后恢复，既有 Xray、443 监听及全局 Node 均不改动。
 

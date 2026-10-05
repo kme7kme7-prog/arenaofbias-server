@@ -1,5 +1,11 @@
 # HANDOFF.md · 当前状态
 
+## 审核服务器 IP 切换（2026-10-06，已上线，未推送）
+
+- 用户授权将审查服务器地址换为 154.36.178.229。新旧地址 SSH 主机公钥一致，新地址 relay 已运行；正式 tunnel 仅改远端目标，known-hosts 增加新地址，保留原私钥及专用账号。重启 tunnel 后 active/running、NRestarts0，正式后端未重启，数据库与作品未改。
+- loopback health 正常，使用正式后端运行环境中的 Key 验证 relay 认证通过；经隧道的空 input Responses 探测收到官方 400 missing_required_parameter，证明上游连通且认证通过，不产生作品审核决定。额外 models GET 一度返回非 JSON 403，不据此认定 Responses 不可用。未发送真实作品或完整付费审核请求。
+- docs/deploy.md 更新目标地址与换 IP 操作说明；check109/0、test318/318。配置回退备份 /root/aob-moderation-ip-20261006/；凭据不入库。仅运维及后端文档，无前端构建/目检。[交付记录](docs/archive/2026-10-06-moderation-ip-change-wsnxxxs.md)。
+
 ## 数据包作品改档位后旧票自动更正（2026-10-06，已推送、已上线）
 
 - c80161d：后台保存作品信息或审核时按当前归属更正该作品旧票（包作品按题目+ID，投稿要求同 digest），重新保存可补遗漏；新增 `npm run reconcile:attribution`（默认 dry-run）。check109/0、test318/318。

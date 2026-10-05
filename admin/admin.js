@@ -679,8 +679,13 @@ const auditList = (limit) => {
 
 function editDialog(w) {
   const models = state.data?.models ?? [];
+  // Only uploads (they carry `reviewed`) can move to another question; package works stay where the pack puts them.
+  const movable = Object.hasOwn(w, 'reviewed') && canDecide(w);
+  const homes = new Map([...(state.adminQuestions ?? []), ...(state.questions ?? [])].map((t) => [t.id, t.title]));
+  if (!homes.has(w.task)) homes.set(w.task, taskTitle(w.task));
   const sheet = openDialog({ title: `编辑信息 · ${w.title}`, body: `<form class="admin-editor">
-    <p class="fine">归属题目：${esc(taskTitle(w.task))}${canDecide(w) ? '' : ' · 自己发布的作品须由其他管理员处理审核与开关'}</p>
+    <label class="field"><span class="field-label">归属题目<small>${movable ? '改到其他题目后，盲评记录、评论和表情随作品一起迁移' : Object.hasOwn(w, 'reviewed') ? '自己发布的作品须由其他管理员调整' : '数据包作品的归属题目由数据仓库维护'}</small></span><select class="input" name="task"${movable ? '' : ' disabled'}>${[...homes].map(([id, title]) => `<option value="${esc(id)}"${id === w.task ? ' selected' : ''}>${esc(title)}</option>`).join('')}</select></label>
+    ${canDecide(w) ? '' : '<p class="fine">自己发布的作品须由其他管理员处理审核与开关</p>'}
     <label class="field"><span class="field-label">作品标题</span><input class="input" name="title" maxlength="40" value="${esc(w.title)}" required></label>
     <div class="field-row">
       <label class="field"><span class="field-label">模型名称</span><input class="input" name="modelName" maxlength="60" value="${esc(w.modelName)}" required></label>
@@ -694,6 +699,17 @@ function editDialog(w) {
     <label class="face-checks"><input type="checkbox" name="pool"${w.show_entertainment ? ' checked' : ''}${canDecide(w) ? '' : ' disabled'}> 娱乐盲测</label>
     <p class="form-error" role="alert"></p><button class="btn primary" type="submit">保存</button></form>` });
   const form = $('form', sheet.el);
+  // A registered model wins over the typed name on the server, so the name and the registration move together.
+  const defaultTitle = (name, effort) => [name.trim(), effort.trim()].filter(Boolean).join(' · ').slice(0, 40);
+  let autoTitle = form.title.value === defaultTitle(w.modelName ?? '', w.effort ?? '') ? form.title.value : null;
+  form.addEventListener('input', (e) => {
+    if (e.target.name === 'modelName') form.modelId.value = models.find((m) => m.name.toLowerCase() === e.target.value.trim().toLowerCase())?.id ?? '';
+    if (e.target.name === 'modelId' && e.target.value) form.modelName.value = models.find((m) => m.id === e.target.value)?.name ?? form.modelName.value;
+    // A title that was only the default name follows the model and effort.
+    if (['modelName', 'modelId', 'effort'].includes(e.target.name) && autoTitle !== null && form.title.value === autoTitle) {
+      autoTitle = form.title.value = defaultTitle(form.modelName.value, form.effort.value);
+    }
+  });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     let provenance;
@@ -701,10 +717,11 @@ function editDialog(w) {
     catch (error) { $('.form-error', form).textContent = error.message; return; }
     const done = busy($('button[type="submit"]', form), '正在保存…');
     const enter = form.enterGallery.checked;
-    const fields = { title: form.title.value, summary: form.summary.value, modelName: form.modelName.value, effort: form.effort.value, ...provenance, ...generationBody((name) => form.elements.namedItem(name)?.value, w) };
+    const fields = { title: form.title.value, summary: form.summary.value, modelName: form.modelName.value, effort: form.effort.value, ...provenance, ...generationBody((name) => form.elements.namedItem(name)?.value, w),
+      ...(movable && form.task.value !== w.task ? { task: form.task.value } : {}) };
     try {
-      await api(`admin/works/${workKey(w)}/meta`, { method: 'POST', body: { ...fields, modelId: form.modelId.value || null } });
-      if (canDecide(w)) await api(`admin/works/${workKey(w)}/face-settings`, { method: 'POST', body: { show_gallery: enter, show_arena: enter, show_entertainment: form.pool.checked } });
+      const { work } = await api(`admin/works/${workKey(w)}/meta`, { method: 'POST', body: { ...fields, modelId: form.modelId.value || null } });
+      if (canDecide(w)) await api(`admin/works/${workKey(work)}/face-settings`, { method: 'POST', body: { show_gallery: enter, show_arena: enter, show_entertainment: form.pool.checked } });
       sheet.close();
       toast('信息已更新');
       await reload();

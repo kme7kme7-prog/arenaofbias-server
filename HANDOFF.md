@@ -1,5 +1,10 @@
 # HANDOFF.md · 当前状态
 
+## 数据包 pin 更新：模型名统一（2026-10-05，已推送，未部署）
+
+- 数据仓 7fde837 统一模型名（MiniMax M3.1 → MiniMax M3.1 Flash Preview；中式建筑 Qwen3.8 Max 0902 作品归入 qwen3.8-max，0902 设 listed:false），CI 出包 640346405751b4f1a22e84bea356d35cacc14c35，本仓 datapack.json 改指向该包。无代码或迁移改动。
+- check108/0、test317/317。未部署；上线后需：0902 作品历史 arena 票逐侧 correct-vote 改归属 qwen3.8-max；投稿 up-esj2b4ji（自填 MiniMax M3.1Flash Preview）与 up-2xp5x707（自填 Doubao Seed 2.1 Pro）在管理后台改登记为 minimax-m3.1 / seed-2.1-pro（自动更正同内容票）。
+
 ## 有票作品下架与作废对局（2026-10-05，已提交推送，未部署）
 
 - 用户确认方案并接受排行变动：`DELETE /api/works/:task/:id` 不再对有票作品返回409。默认下架为软删除，作品退出展厅与盲评池，已有票继续计入；有票投稿保留托管文件，无票投稿照旧删文件。可选体 `void`+`reason`（管理员，作品转questioned、相关票退榜）、`purge`（高级管理员，清除投稿文件），两者可对已下架作品再调用，审计 `delete` / `delete-followup`。

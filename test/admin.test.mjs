@@ -688,6 +688,23 @@ test('admin upload attribution corrections move existing and in-flight ballots w
   assert.ok((await platform.arena.leaderboard({ task: 'two' })).rows.some((row) => row.key === 'ma|high' && row.games === 2));
 }));
 
+test('admin package attribution edits correct saved ballots and a re-save repairs missed sides', async () => withPlatform(async ({ platform, call }) => {
+  const voter = platform.db.prepare("SELECT * FROM users WHERE name = 'voter'").get();
+  const match = await platform.arena.createMatch(voter, 'one');
+  assert.equal(platform.arena.vote(voter, match.id, 'a').counted, true);
+  const original = platform.db.prepare('SELECT * FROM votes WHERE match_id = ?').get(match.id);
+  const side = original.a_work === 'a' ? 'a' : 'b';
+  assert.equal((await call('root', 'POST', '/api/admin/works/one/a/meta', { effort: 'High' })).status, 200);
+  const corrected = platform.db.prepare('SELECT * FROM votes WHERE id = ?').get(original.id);
+  assert.equal(corrected[`${side}_identity`], original[`${side}_identity`]);
+  assert.equal(JSON.parse(corrected[`${side}_correction`]).configKey, 'ma|high');
+  assert.ok((await platform.arena.leaderboard({ task: 'one' })).rows.some((row) => row.key === 'ma|high' && row.works === 1));
+  platform.db.prepare(`UPDATE votes SET ${side}_correction = NULL WHERE id = ?`).run(original.id);
+  assert.equal((await call('root', 'POST', '/api/admin/works/one/a/meta', { effort: 'High' })).status, 200);
+  assert.equal(JSON.parse(platform.db.prepare('SELECT * FROM votes WHERE id = ?').get(original.id)[`${side}_correction`]).configKey, 'ma|high');
+  assert.equal(platform.db.prepare("SELECT COUNT(*) AS n FROM audit WHERE action = 'vote-identity-correction' AND work_id = 'a'").get().n, 2);
+}));
+
 test('moderator routes enforce senior permissions and forbid decisions on own works', async () => withPlatform(async ({ platform, call }) => {
   const senior = platform.db.prepare("SELECT * FROM users WHERE name = 'root'").get();
   const staff = await platform.auth.register('staff', 'correct horse');

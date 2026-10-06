@@ -23,8 +23,8 @@
 
 ## 遗留物
 
-- 服务器 `/root/aob-alias-20261006/`：platform.db（部署前快照）、before-edit.db（停服改登记前快照）、code.tar.gz、server-version、datapack-current、board-before/after.json、edits.json、copy/ 演练副本、scan / edit / board 脚本；`/root/arenaofbias-deploy-27fa2f7…` 暂存目录与 `/root/server-27fa2f7….tar.gz`。回退：停服后还原 code.tar.gz、server-version 与 before-edit.db（或 platform.db）。
+- 服务器 `/root/aob-alias-20261006/`：platform.db（部署前快照）、before-edit.db（停服改登记前快照）、code.tar.gz、server-version、datapack-current、board-before/after.json、edits.json、stage-test.log 及 scan / edit / board / vacuum 脚本。演练副本 copy/、暂存目录 `/root/arenaofbias-deploy-27fa2f7…` 与上传包 `/root/server-27fa2f7….tar.gz` 已按用户要求删除。回退：停服后还原 code.tar.gz、server-version 与 before-edit.db（或 platform.db）。
 
 ## 下一步建议
 
-- 无。演练副本与暂存目录确认无用后可删除。
+- 无。

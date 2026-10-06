@@ -378,12 +378,14 @@ test('retired snapshot ballots never enter live vote or rating responses', () =>
         db.exec(`INSERT INTO works (${columns.join(', ')}) SELECT ${columns.map((name) => ({
           id: "'up-webw0003'", content_key: "'wwebthree'", digest: "'d-webw0003'",
         })[name] ?? name).join(', ')} FROM works WHERE id = 'up-cccc0003'`);
+        // No original file: the standard text wrapper page still yields the story.
+        mkdirSync(join(root, 'works', 'up-text0002'), { recursive: true });
+        writeFileSync(join(root, 'works', 'up-text0002', 'index.html'), '<!doctype html><html><head><title>文本作品</title></head><body><main><p>第一句。</p><p>第二句。</p></main></body></html>');
         const works = (await call(base, 'GET', '/api/works')).data.works;
         const a = works.find((work) => work.id === 'up-text0001');
         assert.deepEqual(JSON.parse(a.content), { kind: 'text', story: { paragraphs: ['1. 别看皮青硬实。', '2. 小个头，基本无籽。', '3. 先买两颗尝尝。'] } });
-        // No package file for this one: the roster falls back to the html entry.
         const b = works.find((work) => work.id === 'up-text0002');
-        assert.deepEqual(JSON.parse(b.content), { kind: 'html', src: 'https://wtexttwo.works.test/' });
+        assert.deepEqual(JSON.parse(b.content), { kind: 'text', story: { paragraphs: ['第一句。', '第二句。'] } });
         // Web tasks and snapshot works keep their existing shapes.
         const c = works.find((work) => work.id === 'up-webw0003');
         assert.equal(JSON.parse(c.content).kind, 'html');

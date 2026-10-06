@@ -215,12 +215,30 @@ export function registerShow1Compat(router, deps) {
   // Text uploads keep their original file inside the work package. The arena
   // renders text tasks natively, so the roster hands out the story shape the
   // frontend expects; anything unreadable falls back to the wrapped HTML page.
+  // Wrapper pages without an original file expose the same text in <main>.
+  const storyFromHtml = (html) => {
+    if (/<script/i.test(html)) return null;
+    const main = /<main[^>]*>([\s\S]*?)<\/main>/i.exec(html);
+    if (!main) return null;
+    const paragraphs = main[1]
+      .replace(/<br[^>]*>/gi, '\n')
+      .replace(/<\/(p|h[1-6]|li|blockquote)>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&')
+      .split(/\n+/).map((line) => line.trim()).filter(Boolean);
+    if (!paragraphs.length || paragraphs.length > 40 || paragraphs.some((line) => line.length > 800)) return null;
+    return { kind: 'text', story: { paragraphs } };
+  };
   const textStory = (row) => {
     if (!deps.config?.dataDir) return null;
+    const dir = join(deps.config.dataDir, 'works', row.id);
     try {
-      const raw = readFileSync(join(deps.config.dataDir, 'works', row.id, 'original.txt'), 'utf8');
+      const raw = readFileSync(join(dir, 'original.txt'), 'utf8');
       const paragraphs = raw.split(/\r?\n+/).map((line) => line.trim()).filter(Boolean);
       return paragraphs.length ? { kind: 'text', story: { paragraphs } } : null;
+    } catch { /* Not a text upload; try the wrapper page. */ }
+    try {
+      return storyFromHtml(readFileSync(join(dir, 'index.html'), 'utf8'));
     } catch { return null; }
   };
   const worksOf = () => {

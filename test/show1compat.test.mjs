@@ -64,13 +64,13 @@ function fixtureSnapshot(votes = { entertainment: [], formal: [] }) {
 
 // The same dispatch core as app.mjs's handleSite, so 201/204 retargeting and error
 // envelopes behave exactly like production wiring.
-function createFixture({ snapshot = fixtureSnapshot(), admins = ['root'], tasks = [], library } = {}) {
+function createFixture({ snapshot = fixtureSnapshot(), admins = ['root'], tasks = [], library, config: configOverrides = {} } = {}) {
   const db = openDatabase(':memory:');
   const auth = createAuth(db, { admins, secureCookies: false, sessionTtl: 60000 });
   const questions = createQuestions(db);
   questions.bindCatalog({ snapshot: () => ({ tasks: () => [], task: () => null, works: () => [] }) });
   const router = createRouter();
-  registerShow1Compat(router, { db, library, catalog: { tasks: () => [...tasks, ...questions.all()], model: (id) => ({ name: `Model ${id.at(-1).toUpperCase()}` }) }, snapshot, config: { contentTemplate: 'https://{token}.works.test' }, limit: {} });
+  registerShow1Compat(router, { db, library, catalog: { tasks: () => [...tasks, ...questions.all()], model: (id) => ({ name: `Model ${id.at(-1).toUpperCase()}` }) }, snapshot, config: { contentTemplate: 'https://{token}.works.test', ...configOverrides }, limit: {} });
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://test.invalid');
@@ -358,6 +358,42 @@ test('retired snapshot ballots never enter live vote or rating responses', () =>
     db.prepare("UPDATE works SET show_entertainment = 0 WHERE id = 'up-live0001'").run();
     assert.equal((await call(base, 'GET', '/api/works')).data.works.some((work) => work.id === live.id), false);
   }));
+
+  test('text task uploads hand out the original story instead of the html wrapper', () => {
+    const root = mkdtempSync(join(tmpdir(), 'compat-text-'));
+    mkdirSync(join(root, 'works', 'up-text0001'), { recursive: true });
+    writeFileSync(join(root, 'works', 'up-text0001', 'original.txt'), '1. 别看皮青硬实。\n2. 小个头，基本无籽。\n\n3. 先买两颗尝尝。\n');
+    return withServer({
+      tasks: [{ id: 'show1-001', arenaId: '001', kind: 'text', category: '文学', title: '深夜聊天', prompt: '回答一个问题', summary: '聊天' }],
+      config: { dataDir: root },
+    }, async ({ db, base }) => {
+      try {
+        seedWorks(db);
+        const columns = db.prepare('PRAGMA table_info(works)').all().map((column) => column.name);
+        for (const [id, key] of [['up-text0001', 'wtextone'], ['up-text0002', 'wtexttwo']]) {
+          db.exec(`INSERT INTO works (${columns.join(', ')}) SELECT ${columns.map((name) => ({
+            id: `'${id}'`, content_key: `'${key}'`, digest: `'d-${id}'`,
+          })[name] ?? name).join(', ')} FROM works WHERE id = 'up-aaaa0001'`);
+        }
+        db.exec(`INSERT INTO works (${columns.join(', ')}) SELECT ${columns.map((name) => ({
+          id: "'up-webw0003'", content_key: "'wwebthree'", digest: "'d-webw0003'",
+        })[name] ?? name).join(', ')} FROM works WHERE id = 'up-cccc0003'`);
+        const works = (await call(base, 'GET', '/api/works')).data.works;
+        const a = works.find((work) => work.id === 'up-text0001');
+        assert.deepEqual(JSON.parse(a.content), { kind: 'text', story: { paragraphs: ['1. 别看皮青硬实。', '2. 小个头，基本无籽。', '3. 先买两颗尝尝。'] } });
+        // No package file for this one: the roster falls back to the html entry.
+        const b = works.find((work) => work.id === 'up-text0002');
+        assert.deepEqual(JSON.parse(b.content), { kind: 'html', src: 'https://wtexttwo.works.test/' });
+        // Web tasks and snapshot works keep their existing shapes.
+        const c = works.find((work) => work.id === 'up-webw0003');
+        assert.equal(JSON.parse(c.content).kind, 'html');
+        const snapshotA = works.find((work) => work.id === '001-a');
+        assert.equal(JSON.parse(snapshotA.content).kind, 'text');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+  });
 
   test('shared questions preserve legacy IDs and expose prompt variants within one question', () => withServer({ tasks: [
     { id: 'chinese-architecture', arenaId: '004', kind: 'web', category: '建模', title: '古典建筑', prompt: '完整建筑提示词', summary: '建筑' },

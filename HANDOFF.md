@@ -1,5 +1,10 @@
 # HANDOFF.md · 当前状态
 
+## 自填模型名按注册表别名归入登记模型（2026-10-06，已推送、已上线）
+
+- 27fa2f7：自填模型名命中注册表 `name` / `aliases`（规则同 Gallery）时，`library.identity()` 改存登记 `modelId`，修复按模型榜「Kimi k3」「Doubao Seed 2.1 Pro」等与登记模型分行。check109/0、test318/318。
+- 已部署；停服备份后改登记 6 件已有自填投稿（Doubao Seed 2.1 Pro×2、Kimi k3、glm 5.3、glm 5.3 flash、Sensenova 6.8 Flash Lite），自动更正 75 侧。公网按模型榜 59→54 行，有效比较数不变，integrity ok、v40。备份在 `/root/aob-alias-20261006/`。[交付记录](docs/archive/2026-10-06-typed-model-alias-wsnxxxs.md)。
+
 ## 审核服务器 IP 切换（2026-10-06，已上线，未推送）
 
 - 用户授权将审查服务器地址换为 154.36.178.229。新旧地址 SSH 主机公钥一致，新地址 relay 已运行；正式 tunnel 仅改远端目标，known-hosts 增加新地址，保留原私钥及专用账号。重启 tunnel 后 active/running、NRestarts0，正式后端未重启，数据库与作品未改。

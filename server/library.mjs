@@ -435,6 +435,9 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     }
     const modelName = clip(body.modelName, 60);
     if (!modelName) fail(400, '请填写模型名称');
+    // A typed name that is a registered name or alias ranks with that model.
+    const named = catalog.modelNamed(modelName);
+    if (named) return { modelId: named.id, modelName: named.name, vendor: named.vendor };
     return { modelId: null, modelName, vendor: clip(body.vendor, 40) };
   }
 

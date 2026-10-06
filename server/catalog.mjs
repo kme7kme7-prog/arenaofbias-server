@@ -10,6 +10,8 @@ import { templatesOf } from './categories.mjs';
 export const effortKey = (effort) => String(effort ?? '').normalize('NFKC').trim().toLowerCase();
 export const modelKey = (work) => work.modelId ?? `x:${work.modelName.normalize('NFKC').trim().toLowerCase()}`;
 export const entityKey = (work, by = 'config') => (by === 'model' ? modelKey(work) : `${modelKey(work)}|${effortKey(work.effort)}`);
+// Matches the Gallery: registry names and aliases claim names typed with other case, spaces, - or _.
+export const modelNameKey = (name) => String(name ?? '').normalize('NFKC').toLowerCase().replace(/[\s_-]+/g, '');
 export const providerOf = (id, other = '') => id === 'official' ? 'official' : id || other ? 'unofficial' : null;
 
 function readSnapshot(root) {
@@ -28,6 +30,7 @@ function readSnapshot(root) {
   const commit = source?.source === 'github' ? source.commit : null;
   const version = commit ? `${root}|${commit}` : `${root}|dev:${catalogDigest}`;
   const models = new Map([...(data.modelPool ?? []), ...data.models].map((model) => [model.id, model]));
+  const modelsByName = new Map([...models.values()].flatMap((model) => [...(model.aliases ?? []), model.name].map((name) => [modelNameKey(name), model])));
   const harnesses = new Map((data.harnesses ?? []).map((item) => [item.id, item]));
   const providers = new Map([
     { id: 'official', name: '官方', listed: true },
@@ -77,6 +80,7 @@ function readSnapshot(root) {
     tasks() { return [...tasks.values()]; },
     tags() { return [...new Set(data.tasks.flatMap((task) => task.tags ?? []))]; },
     model(id) { return models.get(id) ?? null; },
+    modelNamed(name) { return modelsByName.get(modelNameKey(name)) ?? null; },
     models() { return data.models; },
     harness(id) { return harnesses.get(id) ?? null; },
     harnesses() { return [...harnesses.values()]; },
@@ -175,6 +179,7 @@ export function createCatalog(dist, questions = null) {
     tasks() { return questions ? questions.all().map((question) => ({ ...refresh().task(question.id), ...question, works: refresh().task(question.id)?.works ?? new Map() })) : refresh().tasks(); },
     tags() { return [...new Set([...refresh().tags(), ...(questions?.all() ?? []).flatMap((task) => task.tags ?? [])])]; },
     model(id) { return refresh().model(id); },
+    modelNamed(name) { return refresh().modelNamed(name); },
     models() { return refresh().models(); },
     harness(id) { return refresh().harness(id); },
     harnesses() { return refresh().harnesses(); },

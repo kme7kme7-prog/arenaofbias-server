@@ -196,7 +196,7 @@ API 域静态 `/data.json`（含等价编码路径）仅管理员登录后返回
 
 ### 2.3 模型（model）
 
-由数据包完整注册表 `modelPool` 和展示列表 `models` 定义：`{ id, name, vendor, logo, brandUrl, brandName }`。投稿时若给出 `modelId` 且命中模型表，服务端以表内 `name` / `vendor` 为准，忽略请求中的 `vendor`，数据库 `model_vendor` 存空串；未登记模型的自填 `modelName`（≤60 字）存为 `model_other`，`vendor`（trim 后≤40 字，可为空串）存为 `model_vendor` 并在作品视图返回，`modelId` 置 null（排行键退化为 `x:<小写模型名>`）。作者编辑或管理员审核时，省略 `vendor` 保留自定义厂商，显式空串或切换为登记模型会清空该列；自定义厂商参与内容审核。旧 `note` 中的「手填模型厂商：…」保留，不回填新列。
+由数据包完整注册表 `modelPool` 和展示列表 `models` 定义：`{ id, name, vendor, logo, brandUrl, brandName }`。投稿时若给出 `modelId` 且命中模型表，服务端以表内 `name` / `vendor` 为准，忽略请求中的 `vendor`，数据库 `model_vendor` 存空串；自填 `modelName` 若与模型表某项的 `name` 或 `aliases` 相同（忽略大小写、空格、`-`、`_`，与 Gallery 一致），按登记模型处理；未登记模型的自填 `modelName`（≤60 字）存为 `model_other`，`vendor`（trim 后≤40 字，可为空串）存为 `model_vendor` 并在作品视图返回，`modelId` 置 null（排行键退化为 `x:<小写模型名>`）。作者编辑或管理员审核时，省略 `vendor` 保留自定义厂商，显式空串或切换为登记模型会清空该列；自定义厂商参与内容审核。旧 `note` 中的「手填模型厂商：…」保留，不回填新列。
 
 ### 2.4 用户（user）
 

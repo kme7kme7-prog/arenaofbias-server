@@ -687,6 +687,10 @@ describe('platform lifecycle', () => {
     assert.equal(ignored.status, 200);
     assert.equal(ignored.data.work.vendor, 'VA');
     assert.equal(vendorRow(), '');
+    const typed = await call('alice', 'PATCH', path, { modelName: 'model_a', vendor: 'Typed vendor' });
+    assert.equal(typed.status, 200);
+    assert.deepEqual([typed.data.work.modelName, typed.data.work.vendor], ['Model A', 'VA']);
+    assert.equal(platform.db.prepare('SELECT model_id FROM works WHERE id = ?').get(upload.id).model_id, 'm-a');
     const custom = await call('alice', 'PATCH', path, { modelName: 'Model X', vendor: 'VX edited' });
     assert.equal(custom.status, 200);
     assert.equal(custom.data.work.vendor, 'VX edited');

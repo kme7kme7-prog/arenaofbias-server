@@ -1,5 +1,13 @@
 # HANDOFF.md · 当前状态
 
+## Dots3-Note-Preview 联合发布与正式改登记（2026-10-06，已上线）
+
+- e9f32826e495eecb0019c0ae746fec81a0439933已上线，消费产物bfaf4f3e6e13b82c25049cba02ad466c8c10076b（源d0fa56b）；Gallery发布源码dbea8e7、资产5ad2894c7118400476fe77ae。此前准备发布状态由本节覆盖。
+- 生产27fa2f7门禁与main归属确认后备份；新包2288文件逐Git blob匹配，4文件差异本地试应用/服务器整树SHA一致，固定后端Git archive上传SHA一致。旧包保留，无数据库迁移。
+- shadow直接通过library.setMeta将little-red-riding-hood/up-n2x66q0t登记为dots3-note，6侧同digest旧票自动更正；演练和正式有效比较4945→4945，首次编辑1件/更正6侧/新增7审计，重复运行三项均0。原5232票原始列、718件作品其他字段与原审计保留；integrity ok、外键0、v40、服务active/running、NRestarts0。
+- 本地及Linux check109/0、test318/318。公网bootstrap新版本/包正确，模型榜旧键消失，新行Dots3-Note-Preview/rednote hilab、6比较/1作品；Gallery完整SHA/文件集合、公网check:deployment与榜单浏览器目检通过。未执行生产登录、投稿、有效计票、全交互或真机验证。
+- 备份/root/aob-dots3-release-20261006/backup/；本地忽略证据在Gallery/output/dots3-release-20261006/。没有写入凭据或清理其他会话文件。[交付记录](docs/archive/2026-10-06-dots3-registration-release-wsnxxxs.md)。
+
 ## Dots3-Note-Preview 数据包 pin（2026-10-06，准备发布）
 
 - 用户已授权提交、推送、部署及线上改登记。消费 pin 更新为数据仓 dots3-note 显示名与厂商登记的新正式产物；通过认证 Git 已有不可变 tag 导出，关闭换行转换后 2288 文件逐 Git blob 匹配，并按本地来源安装、记录已核验的正式来源。

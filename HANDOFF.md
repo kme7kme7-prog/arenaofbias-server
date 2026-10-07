@@ -970,3 +970,42 @@
 - 只读线上bootstrap/prompts/works及game发布JS。二十四节气q-48c3b43eeb284f6d最新21件非演示、19模型（调查期间由18增长）；公开Gallery与Show1 works均有该题作品，但Show1 prompts25道均为旧编号，无此题。橘子题q-5ebd7c84dff7cd8f也有36件、26模型而无题目目录。
 - show1compat.promptCatalog无arenaId即continue；liveWorks允许数据库questions题并以q-*为round，导致目录/作品不一致。published依赖目录，不能只在前端造入口。线上题目解析器和本地Show1 lib/prompts.ts仅接受三位数字；随机池从目录选题，故十件门槛不是本次阻断原因。
 - 未修业务代码、写DB、修改源作品、提交/推送/部署；建议后续统一新题ID及目录、作品、投票契约，保留旧编号与十件跨模型门槛。之前未完成的娱乐视角校准验证保持待续。
+
+## 推理联合发布门禁暂停（2026-10-08，未推送、未部署）
+
+- 用户已授权推送、联调、部署及既定顺序的两题迁移；现场公网与版本文件均50259ad，已确认其为远端main，含d3b669a/50259ad两条Show1文本展示修复。本地用6446abb合并它们与a294567，推理工作区改动仍保留且未提交，未推送。没有覆盖现场独有逻辑。
+- 最新生产一致backup副本：6554票、866作品、208用户、7272matches、3201审计，v40、integrity ok、外键0。读取实际运行源码，正式包2289文件全部SHA匹配本地已验证缓存；没有改包或服务。备份/基线材料仅写/root/aob-reasoning-release-20261008/及本地忽略output/reasoning-release-20261008/，未改生产业务库、代码或题目分类。
+- **五项门禁失败，按约定暂停**：配置比较6321→6324，模型6212→6215，参与者均163；有效票集合新增3票，glm-5.3-flash|最高、deepseek-v4-pro|high、gpt-5.5|xhigh等未换归属配置games变化，模型分数发生联动。485侧字段变化仍全部同ID+同digest，143侧显式人工更正全部保持，没有模型/配置键归属迁移。完整失败与逐侧证据见comparison-win32.json和eligibility-differences.json；不能宣称门禁通过。
+- 新增3票均属于up-pswy2p66从miniature-railway-town移到chinese-architecture后的历史比较；旧代码只按votes.task_id找双方作品，找不到仍留原题的对手，故不计票；新代码按身份快照taskId回查，恢复这3票。对手是up-7pcx710r及deepseek-v4-pro-high。不是推理类别排除导致，也没有删票或修改旧票；新增恢复是否允许须用户确认，不擅自放宽“有效票一致”门禁或改动归属算法。
+- 合并后Windows check109/0、test323/323；Gallery check64/0、test29/29、build176件/68site、严格intake0错/8既有提示，跨仓integration通过。原integration.json的数据源pin过时，联调在忽略目录的固定Gallery源码副本中修正为缓存已验证来源，原本地配置未改；只在该副本统一datapack-client换行后字节对比通过。
+- 未执行Linux、推理生产迁移演练及实际迁移、源码推送、后端/Gallery部署、生产浏览器或全交互验收。等用户确认恢复3票的处理原则后再继续，不能直接跳过失败门禁。
+
+## 三票限定例外核验（2026-10-08，已核验，等待另行发布授权）
+
+- 用户仅接受up-pswy2p66换题回查恢复的三票为门禁例外，要求逐票资格核验及榜单前后对比；本轮撤回此前继续推送/部署授权，先汇报，等另行授权，不commit/push/部署/推理迁移。
+- **6446abb来源与范围**：完整SHA6446abbeec28d8aeb74ecad954be78d9298aa50e，第一父提交a294567（归属按当前信息），第二父提交50259ad（已确认是现场运行及origin/main）。第二父含d3b669a、50259ad两条Show1文本展示修复（原文读取及HTML wrapper提取，带对应测试）。相对a294567仅合入server/show1compat.mjs和test/show1compat.test.mjs，82行增加/7行删除；相对50259ad只带a294567归属计分及其记录。合并无冲突，无额外业务修改，不含推理改动；推理仍在工作区未提交。负责人wsnxxxs，英文简单句提交；未推送、未部署。
+- 核验仍使用上一节捕获的一致副本及实际50259ad源码；新归属代码从6446abb的固定Git archive加载，不使用未提交推理工作区代码。三票ID为208eee8c0dc7a2c4a4fbc199、9cdbd004df68f804ef9ae67c、5f94a4fa6fde49d6f3c72040，Brisbane投票时间分别2026-10-06 05:20:39.834、22:19:33.357、23:42:57.162。投票时双方快照、对局快照及pair_key均为miniature-railway-town；当前votes.task_id为chinese-architecture，是稍后审计2755在23:43:32.376迁移历史票/对局题号的结果，不能冒充投票时原题。
+- 三票均通过：已登录（匹配user_id）、邮箱验证时间早于票时间、与双方ownerId不同、同用户同pair_key/同一对作品此前无重复票、双方投票时同题、对局选择与时间一致。完整证据保存在忽略exception-audit.json；不公开邮箱或认证数据。
+- 限定例外后通过：config6321→6324、model6212→6215，参与者均163→163；新增有效票精确为这3张、无丢失票和其他新增。比较数仅对应三配置/模型+3/+1/+2，其余不变；内存排除这3票后，全部121配置/60模型的分数、名次、比较数、胜平负、区间、参与者与题目数均精确等于旧榜，证明所有计分联动仅来自例外。注册表展示更新继续允许，485侧同ID+digest且逐侧列原因、143人工更正保持、0归属键迁移。源一致副本SHA前后不变，不删改任何票。
+- [完整归档](docs/archive/2026-10-08-moved-work-three-vote-exception-wsnxxxs.md)列出逐票时间/题号/资格、所有34配置与13模型的比较数/分数/名次变化及理由、逐侧原因分组；私有逐侧485项在output/reasoning-release-20261008/exception-audit.json。核验脚本通过；文档diff检查通过。本轮只读和文档不重复业务check/test；上一轮check109/0、test323/323，不据此称为本轮重跑。
+- 未生产读写、未重新采集副本、未Linux/浏览器验证、未提交/推送/部署或两题迁移。未来授权部署时仍需重新采集当时最新一致副本，严格只允许以上3票例外；其他差异停止。顺序仍为归属计分→后端推理及迁移→Gallery。
+
+## 错题作品历史票排除（2026-10-08，门禁失败，暂停）
+
+- 用户撤销上述三票例外；本节取代上一节的例外放行条件。本轮不提交、推送、部署或迁移。6446abb来源与范围仍见上一节，现有推理改动保留。
+- 确认up-pswy2p66原先传错题：审计2755于Brisbane 2026-10-06 23:43:32.376记录miniature-railway-town→chinese-architecture；该审计未直接说明换题原因，但换题前内容审核1469已经记录“内容为正常的体素古建筑场景及操作说明。”，实际作品标题/正文为“暮色凌霄 · 体素古建筑群”及“中国古典建筑群”，符合体素中国古典建筑群题；原铁路题要求铁路/列车且明确不使用体素。结论来自审计、先前审核、作品内容及两题提示词联合核对。
+- 最小规则调整：server/vote-attribution.mjs共用votesBeforeTaskMove读取既有meta/inbox-assign换题审计，按投票身份快照原题和时间排除移出该题之前的票；server/arena.mjs及server/show1compat.mjs计票入口复用，保留其他当前信息归属解析优先级。移回原题也不恢复旧票，新题正常新票仍计分。没有改library.mjs、schema或实际业务数据，原票留库。
+- 新增一条test/admin.test.mjs回归覆盖正式票和Show1票、换题后新票、移回不恢复及原票保留；既有换题测试更新预期，原digest回查断言移到换题前保留覆盖。Windows Node24.16.0：npm run check 109文件/0错，npm test 324/324通过，git diff --check通过。
+- 最新一致副本采集于Brisbane 2026-10-08 01:20:30.222：6594票、868作品、209用户、7322对局、3205审计，v40、integrity ok、外键0；实际运行源码仍50259ad，运行文件哈希与上次基线一致。期间多40票并新增有效参与者，因此最新旧代码基线是6361/6252/164，不能继续使用6321/6212/163。
+- **五项门禁未通过**：旧→新配置比较6361→6360、模型6252→6251、参与者164→164；485侧变化全部同ID及digest并列原因，143侧人工更正保持，配置/模型归属键迁移0。但额外排除旧代码计入的第四票5890a7cbbe284cb2b1abd3dd（Brisbane 2026-10-06 01:59:37.333，投票双方快照miniature-railway-town，当前votes.task_id=chinese-architecture，up-pswy2p66对gpt-5.6-luna-max）。后者在两题都有同ID、不同digest的内置作品，旧代码误用新题同ID作品继续计分。新规则按要求排除此票，故未换归属配置比较数及模型榜也改变，不能宣称与旧代码完全一致。
+- glm-5.3-flash|最高：比较58→57、分数1030→1038；gpt-5.6-luna|max：247→246、909→906。原三票已排除，不再需要其例外；本次额外差异未获批准，已停止，不为凑旧统计豁免第四票。
+- [本轮归档](docs/archive/2026-10-08-moved-question-ballots-wsnxxxs.md)。忽略证据位于output/reasoning-release-20261008/：move-rule-metadata.json、move-rule-capture.db、move-rule-runtime.sha256、move-rule-comparison-win32.json、move-rule-extra-exclusions.json及move-rule-tests.log。远程只生成证据备份，未修改业务库、服务、源码或分类。
+- 未执行Linux测试、生产浏览器/全交互、部署、推理迁移及其前后totals/综合榜/写作榜实测。等待用户决定第四票造成的门禁差异；发布顺序仍是归属计分→后端推理及迁移→Gallery，所有发布动作须另行授权并重跑当时最新副本门禁。
+
+## 四票规则确认与错题票提交（2026-10-08）
+
+- 用户确认第四票5890a7cbbe284cb2b1abd3dd排除是纠正同ID不同digest误计，不是例外；三票例外已作废，旧归档文末追加勘误。门禁改为与旧代码相比只少按移出原题规则排除的票及其拟合影响。
+- 正式部署前重采当时最新生产一致副本，规则排除名单必须恰好为5890a7cbbe284cb2b1abd3dd、208eee8c0dc7a2c4a4fbc199、9cdbd004df68f804ef9ae67c、5f94a4fa6fde49d6f3c72040。后三票旧代码已不计入，因此有效集合净减一张，不是净减四张。其余门禁照旧：参与者一致；逐侧同ID/digest并列原因；除该规则影响外未换归属配置比较数不变；模型变化仅允许注册表/归属更新及该规则排除的拟合影响；143侧人工更正保持。任何其他差异停止。
+- 提交用非交互补丁分开暂存；第一条包含vote-attribution.mjs、arena.mjs、show1compat.mjs、admin.test.mjs中错题票规则部分、本轮归档、作废归档勘误及对应交接，推理改动不混入。用户授权本轮两条本地提交，不授权推送、部署或迁移。
+- 发布计划替代前文顺序：后端只部署一次，包含归属计分、错题票规则和推理代码；两题迁移及Gallery部署为后续单独步骤。部署前仍须重跑最新副本门禁。
+- 第一条提交前对仅含暂存内容的隔离源码副本运行npm run check：108文件/0错；npm test：322/322通过，无失败/取消/跳过；git diff --cached --check通过。日志output/reasoning-release-20261008/rule-commit-check.log及rule-commit-test.log。没有重连生产或重采门禁副本，本轮不将历史门禁改称为正式部署验收。

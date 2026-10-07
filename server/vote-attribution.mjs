@@ -1,5 +1,21 @@
 import { effortKey, entityKey, modelKey, providerOf } from './catalog.mjs';
 
+// Moving a work corrects its question, not the question its old comparisons judged.
+// Keep those ballots for audit, including if the work is later moved back.
+export function votesBeforeTaskMove(db) {
+  const moves = new Map();
+  for (const row of db.prepare("SELECT at, work_id, detail FROM audit WHERE action IN ('meta', 'inbox-assign') AND detail LIKE '%归属题目 % → %'").all()) {
+    const match = /归属题目 ([a-z0-9-]+) → ([a-z0-9-]+)/.exec(row.detail);
+    if (!match || match[1] === match[2]) continue;
+    if (!moves.has(row.work_id)) moves.set(row.work_id, []);
+    moves.get(row.work_id).push({ task: match[1], at: row.at });
+  }
+  return (row) => ['a', 'b'].some((side) => {
+    const task = JSON.parse(row[`${side}_identity`] ?? 'null')?.taskId ?? row.task_id;
+    return moves.get(row[`${side}_work`])?.some((move) => move.task === task && row.created_at < move.at);
+  });
+}
+
 // Only identical content follows current attribution, for packages and uploads alike.
 function currentAttribution(identity, work, digest = work?.digest) {
   if (!identity || !work || identity.id !== work.id || !identity.digest || identity.digest !== digest) return null;

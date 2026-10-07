@@ -488,6 +488,46 @@ test('calibrating a curated work preserves its arena approval and invalidates th
   assert.equal(invalidations, 1);
 }));
 
+test('moving a work excludes its former-question ballots without deleting them or reviving them on return', async () => withPlatform(async ({ platform, call }) => {
+  const upload = async (task, model, label) => {
+    const result = await call('root', 'POST', `/api/admin/works/upload?effort=High&providerId=official&task=${task}&generationMode=single-turn&humanIntervention=none&name=${label}.html&modelId=${model}`, html.replaceAll('作品', label), true);
+    assert.equal(result.status, 200);
+    const id = result.data.work.id;
+    assert.equal((await call('root', 'POST', `/api/works/${task}/${id}/review`, { status: 'verified', show_arena: true })).status, 200);
+    return id;
+  };
+  for (const id of ['a', 'b']) await call('root', 'POST', `/api/admin/works/one/${id}/face-settings`, { show_arena: false });
+  const moved = await upload('one', 'ma', 'Wrong-question');
+  await upload('one', 'mb', 'Original-opponent');
+  await upload('two', 'mb', 'New-opponent');
+  const voter = { ...platform.db.prepare("SELECT * FROM users WHERE name='voter'").get(), email: 'voter@example.test' };
+  const match = await platform.arena.createMatch(voter, 'one');
+  assert.equal(platform.arena.vote(voter, match.id, 'a').counted, true);
+  platform.db.exec(`INSERT INTO matches (id, user_id, task_id, a_work, b_work, a_token, b_token, created_at, expires_at)
+    SELECT 'compat-' || id, user_id, task_id, a_work, b_work, 'compat-' || a_token, 'compat-' || b_token, created_at, expires_at FROM matches WHERE id='${match.id}';
+    INSERT INTO votes (id, match_id, user_id, task_id, a_work, b_work, pair_key, choice, created_at, a_identity, b_identity, source)
+    SELECT 'compat-' || id, 'compat-' || match_id, user_id, task_id, a_work, b_work, 'compat-' || pair_key, choice, created_at, a_identity, b_identity, 'show1' FROM votes WHERE match_id='${match.id}'`);
+  const saved = platform.db.prepare('SELECT * FROM votes ORDER BY id').all();
+  assert.equal((await platform.arena.leaderboard()).totals.votes, 1);
+  assert.equal((await call('voter', 'GET', '/api/votes?scope=entertainment')).data.votes.length, 1);
+  assert.equal((await call('root', 'POST', `/api/admin/works/one/${moved}/meta`, { task: 'two' })).status, 200);
+  assert.equal((await platform.arena.leaderboard()).totals.votes, 0);
+  assert.equal((await call('voter', 'GET', '/api/votes?scope=entertainment')).data.votes.length, 0);
+  const fresh = await platform.arena.createMatch(voter, 'two');
+  assert.equal(platform.arena.vote(voter, fresh.id, 'tie').counted, true);
+  assert.equal((await platform.arena.leaderboard()).totals.votes, 1, 'new-question comparisons count');
+  assert.equal((await call('root', 'POST', `/api/admin/works/two/${moved}/meta`, { task: 'one' })).status, 200);
+  assert.equal((await platform.arena.leaderboard()).totals.votes, 0, 'returning does not revive either former-question ballot');
+  assert.equal((await call('voter', 'GET', '/api/votes?scope=entertainment')).data.votes.length, 0);
+  for (const row of saved) {
+    const current = platform.db.prepare('SELECT * FROM votes WHERE id=?').get(row.id);
+    const { task_id: beforeTask, ...before } = row;
+    const { task_id: afterTask, ...after } = current;
+    assert.deepEqual(after, before, 'only the existing task-id migration changes stored ballots');
+  }
+  assert.equal(platform.db.prepare('SELECT COUNT(*) AS n FROM votes').get().n, 3);
+}));
+
 test('admin batch face settings update curated and uploaded works atomically with one audit per work', async () => withPlatform(async ({ platform, call }) => {
   const upload = await call('root', 'POST', '/api/admin/works/upload?effort=Default&providerId=official&task=one&name=work.html&title=代传作品&modelName=模型丙', html, true);
   const id = upload.data.work.id;
@@ -686,14 +726,16 @@ test('admin upload attribution corrections move existing and in-flight ballots w
   assert.equal((await call('root', 'POST', `/api/works/two/${id}/review`, { status: 'verified', effort: 'High' })).status, 200);
   assert.equal(audits(), 0, 'review leaves ballot corrections untouched');
   assert.ok((await platform.arena.leaderboard({ task: 'two' })).rows.some((row) => row.key === 'ma|high' && row.games === 2));
-  assert.equal((await call('root', 'POST', `/api/admin/works/two/${id}/meta`, { task: 'one' })).status, 200);
-  assert.equal((await call('root', 'POST', `/api/admin/works/one/${id}/meta`, { modelId: 'mb', effort: 'Default' })).status, 200);
-  const movedBoard = await platform.arena.leaderboard({ task: 'one' });
-  assert.ok(movedBoard.rows.some((row) => row.key === 'mb|default' && row.games === 2));
-  assert.equal(movedBoard.totals.tasks, 1);
+  const digest = platform.db.prepare('SELECT digest FROM works WHERE id = ?').get(id).digest;
   platform.db.prepare('UPDATE works SET digest = ? WHERE id = ?').run('replacement-content', id);
   platform.arena.invalidate();
   assert.ok((await platform.arena.leaderboard()).rows.some((row) => row.modelName === 'GPT6.1' && row.games === 2), 'changed upload bytes retain the original attribution');
+  platform.db.prepare('UPDATE works SET digest = ? WHERE id = ?').run(digest, id);
+  assert.equal((await call('root', 'POST', `/api/admin/works/two/${id}/meta`, { task: 'one' })).status, 200);
+  assert.equal((await call('root', 'POST', `/api/admin/works/one/${id}/meta`, { modelId: 'mb', effort: 'Default' })).status, 200);
+  const movedBoard = await platform.arena.leaderboard({ task: 'one' });
+  assert.deepEqual(movedBoard.rows, [], 'votes from the former question stay stored but stop scoring');
+  assert.equal(movedBoard.totals.tasks, 0);
 
 }));
 

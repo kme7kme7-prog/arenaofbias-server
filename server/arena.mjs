@@ -17,7 +17,7 @@ import { rankEntries, rankWorks } from './ranking.mjs';
 import { generationOf } from './generation.mjs';
 import { isTextTask } from './categories.mjs';
 import { isStaff } from './roles.mjs';
-import { manualCorrections, voteAttribution } from './vote-attribution.mjs';
+import { manualCorrections, voteAttribution, votesBeforeTaskMove } from './vote-attribution.mjs';
 
 const MATCH = { tierWidth: 150, sameTierRate: 0.9, blowoutGap: 400, rerolls: 2, cooldownRounds: 6, cooldownMs: 15 * 60e3 };
 const ANONYMOUS_MATCH_MAX = 10000;
@@ -55,8 +55,8 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     insertVote: db.prepare("INSERT INTO votes (id, match_id, user_id, task_id, a_work, b_work, pair_key, choice, created_at, a_identity, b_identity, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'arena')"),
     votedPair: db.prepare('SELECT 1 FROM votes WHERE user_id = ? AND pair_key = ?'),
     votedPairs: db.prepare('SELECT pair_key, a_work, b_work FROM votes WHERE user_id = ? AND task_id = ?'),
-    votes: db.prepare("SELECT id, user_id, task_id, a_work, b_work, choice, a_identity, b_identity, a_correction, b_correction FROM votes WHERE source = 'arena' ORDER BY created_at"),
-    votesOfTask: db.prepare("SELECT id, user_id, task_id, a_work, b_work, choice, a_identity, b_identity, a_correction, b_correction FROM votes WHERE task_id = ? AND source = 'arena' ORDER BY created_at"),
+    votes: db.prepare("SELECT id, user_id, task_id, a_work, b_work, choice, created_at, a_identity, b_identity, a_correction, b_correction FROM votes WHERE source = 'arena' ORDER BY created_at"),
+    votesOfTask: db.prepare("SELECT id, user_id, task_id, a_work, b_work, choice, created_at, a_identity, b_identity, a_correction, b_correction FROM votes WHERE task_id = ? AND source = 'arena' ORDER BY created_at"),
     userVotes: db.prepare('SELECT COUNT(*) AS n FROM votes WHERE user_id = ?'),
     correctA: db.prepare('UPDATE votes SET a_correction = ? WHERE id = ?'),
     correctB: db.prepare('UPDATE votes SET b_correction = ? WHERE id = ?'),
@@ -97,10 +97,12 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       return works.get(key);
     };
     const manual = manualCorrections(db);
+    const moved = votesBeforeTaskMove(db);
     const votes = [];
     const rankedKeys = new Set();
     let scanned = 0;
     for (const row of taskId ? q.votesOfTask.all(taskId) : q.votes.all()) {
+      if (moved(row)) continue;
       if (!row.a_identity || !row.b_identity || (taskIds && !taskIds.has(row.task_id))) continue;
       const aIdentity = fromIdentity(row.a_identity), bIdentity = fromIdentity(row.b_identity);
       // A moved upload changes the ballot task; its opponent can remain in the old task.

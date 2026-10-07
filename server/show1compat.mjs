@@ -28,7 +28,7 @@ import { join } from 'node:path';
 import { transaction } from './db.mjs';
 import { fail, rateLimit, readJson } from './http.mjs';
 import { buildShow1Boards, replayShow1Ratings } from './show1-ranking.mjs';
-import { manualCorrections, voteAttribution } from './vote-attribution.mjs';
+import { manualCorrections, voteAttribution, votesBeforeTaskMove } from './vote-attribution.mjs';
 import { isTextTask } from './categories.mjs';
 
 const REACTION_EMOJI = { up: '👍', down: '👀', laugh: '🤯' };
@@ -200,7 +200,10 @@ export function registerShow1Compat(router, deps) {
   function currentVotes(scope) {
     const archive = deps.catalog.snapshot?.();
     const manual = manualCorrections(db);
-    return (scope === 'formal' ? q.liveFormal : q.liveEntertainment).all().map((row) => oldShape(row, archive, manual)).sort(byTimeThenId);
+    const moved = votesBeforeTaskMove(db);
+    return (scope === 'formal' ? q.liveFormal : q.liveEntertainment).all()
+      .filter((row) => !moved(row))
+      .map((row) => oldShape(row, archive, manual)).sort(byTimeThenId);
   }
 
   const scopeOf = (ctx) => {

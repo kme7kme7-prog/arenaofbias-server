@@ -23,6 +23,8 @@
 //     arena keys; migrated old-site votes keep source='legacy' and are excluded from
 //     these reads and scores. The reset command removes their old deduplication rows.
 import { createHash, randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { transaction } from './db.mjs';
 import { fail, rateLimit, readJson } from './http.mjs';
 import { buildShow1Boards, replayShow1Ratings } from './show1-ranking.mjs';
@@ -218,11 +220,46 @@ export function registerShow1Compat(router, deps) {
     const key = snapshot.workMap[row.id]?.key;
     return !!key && library.publicContent(library.byContentKey(key));
   });
-  const worksOf = () => [...snapshotWorks(), ...liveWorks().map((row) => ({
-    id: row.rid ?? row.id, promptId: row.round, modelId: row.model_id,
-    modelName: row.modelName, vendor: row.vendor, title: row.title, isDemo: 0,
-    content: JSON.stringify({ kind: 'html', src: `${deps.config.contentTemplate.replace('{token}', row.content_key)}/` }),
-  }))];
+  // Text uploads keep their original file inside the work package. The arena
+  // renders text tasks natively, so the roster hands out the story shape the
+  // frontend expects; anything unreadable falls back to the wrapped HTML page.
+  // Wrapper pages without an original file expose the same text in <main>.
+  const storyFromHtml = (html) => {
+    if (/<script/i.test(html)) return null;
+    const main = /<main[^>]*>([\s\S]*?)<\/main>/i.exec(html);
+    if (!main) return null;
+    const paragraphs = main[1]
+      .replace(/<br[^>]*>/gi, '\n')
+      .replace(/<\/(p|h[1-6]|li|blockquote)>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&')
+      .split(/\n+/).map((line) => line.trim()).filter(Boolean);
+    if (!paragraphs.length || paragraphs.length > 40 || paragraphs.some((line) => line.length > 800)) return null;
+    return { kind: 'text', story: { paragraphs } };
+  };
+  const textStory = (row) => {
+    if (!deps.config?.dataDir) return null;
+    const dir = join(deps.config.dataDir, 'works', row.id);
+    try {
+      const raw = readFileSync(join(dir, 'original.txt'), 'utf8');
+      const paragraphs = raw.split(/\r?\n+/).map((line) => line.trim()).filter(Boolean);
+      return paragraphs.length ? { kind: 'text', story: { paragraphs } } : null;
+    } catch { /* Not a text upload; try the wrapper page. */ }
+    try {
+      return storyFromHtml(readFileSync(join(dir, 'index.html'), 'utf8'));
+    } catch { return null; }
+  };
+  const worksOf = () => {
+    const kindByRound = new Map(promptCatalog().prompts.map((prompt) => [prompt.id, prompt.kind]));
+    return [...snapshotWorks(), ...liveWorks().map((row) => {
+      const story = kindByRound.get(row.round) === 'text' ? textStory(row) : null;
+      return {
+        id: row.rid ?? row.id, promptId: row.round, modelId: row.model_id,
+        modelName: row.modelName, vendor: row.vendor, title: row.title, isDemo: 0,
+        content: JSON.stringify(story ?? { kind: 'html', src: `${deps.config.contentTemplate.replace('{token}', row.content_key)}/` }),
+      };
+    })];
+  };
 
   // SQLite revisions cover writes through this connection and maintenance writes
   // through another connection. Catalog changes can rename live roster models.

@@ -17,7 +17,7 @@ import { rankEntries, rankWorks } from './ranking.mjs';
 import { generationOf } from './generation.mjs';
 import { isTextTask } from './categories.mjs';
 import { isStaff } from './roles.mjs';
-import { currentAttribution } from './vote-attribution.mjs';
+import { manualCorrections, voteAttribution } from './vote-attribution.mjs';
 
 const MATCH = { tierWidth: 150, sameTierRate: 0.9, blowoutGap: 400, rerolls: 2, cooldownRounds: 6, cooldownMs: 15 * 60e3 };
 const ANONYMOUS_MATCH_MAX = 10000;
@@ -76,13 +76,10 @@ export function createArena({ db, catalog, library, limits, random = Math.random
   let cache = new Map();
   const invalidate = () => { cache = new Map(); };
 
-  // Counting follows current moderation/catalog membership, not the blind pool: withdrawn
-  // and arena-off works keep their ballots; identity and score keys
-  // come from the vote's saved snapshot and never drift with later label edits.
-  // Votes without a snapshot (pre-snapshot test data) are not scored.
-  // A vote counts only when BOTH saved identities match the provenance filters.
-  // Historical provider ids normalize to the same categories as current works.
-  // Harness free text is not kept in snapshots and counts as 'unset'.
+  // Moderation controls which ballots count, including withdrawn / arena-off works.
+  // Content is pinned by ID + digest; attribution and provenance follow current works
+  // unless explicitly corrected by an admin. Missing digests retain saved identities.
+  // Both resolved sides must match provenance filters.
   const provenanceMatch = (filters, item) => ['harness', 'provider'].every((field) => {
     const want = filters[field];
     const id = field === 'provider' ? providerOf(item.providerId, item.providerOther || item.providerName) : item.harnessId ?? null;
@@ -99,17 +96,20 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       }
       return works.get(key);
     };
+    const manual = manualCorrections(db);
     const votes = [];
     const rankedKeys = new Set();
     let scanned = 0;
     for (const row of taskId ? q.votesOfTask.all(taskId) : q.votes.all()) {
       if (!row.a_identity || !row.b_identity || (taskIds && !taskIds.has(row.task_id))) continue;
-      const a = lookup(row.task_id, row.a_work);
-      const b = lookup(row.task_id, row.b_work);
+      const aIdentity = fromIdentity(row.a_identity), bIdentity = fromIdentity(row.b_identity);
+      // A moved upload changes the ballot task; its opponent can remain in the old task.
+      const a = lookup(row.task_id, row.a_work) ?? lookup(aIdentity.taskId, row.a_work);
+      const b = lookup(row.task_id, row.b_work) ?? lookup(bIdentity.taskId, row.b_work);
       if (a && b) {
         const vote = {
-          a: fromIdentity(row.a_correction) ?? fromIdentity(row.a_identity),
-          b: fromIdentity(row.b_correction) ?? fromIdentity(row.b_identity),
+          a: { ...voteAttribution(row, 'a', aIdentity, fromIdentity(row.a_correction), a, snapshot, manual), taskId: row.task_id },
+          b: { ...voteAttribution(row, 'b', bIdentity, fromIdentity(row.b_correction), b, snapshot, manual), taskId: row.task_id },
           choice: row.choice, userId: row.user_id ?? `vote:${row.id}`,
         };
         if (filters && !(provenanceMatch(filters, vote.a) && provenanceMatch(filters, vote.b))) continue;
@@ -192,6 +192,13 @@ export function createArena({ db, catalog, library, limits, random = Math.random
         if (!works.has(key)) works.set(key, { sample: work, count: 0 });
         works.get(key).count++;
       }
+      const latest = new Map();
+      for (const vote of votes) for (const work of [vote.a, vote.b]) latest.set(keyOf(work), work);
+      const describeRanked = (row) => {
+        const sample = works.get(row.key)?.sample ?? latest.get(row.key) ?? row.sample;
+        const model = archive.model(sample.modelId);
+        return describe(model ? { ...sample, modelName: model.name, vendor: model.vendor } : sample, by);
+      };
       const rankedKeys = new Set(ranked.map((row) => row.key));
       const result = {
         task,
@@ -204,7 +211,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
         rows: ranked.map((row, i) => ({
           rank: i + 1,
           key: row.key,
-          ...describe(row.sample, by),
+          ...describeRanked(row),
           score: row.score,
           interval: row.interval,
           games: row.games,
@@ -388,14 +395,6 @@ export function createArena({ db, catalog, library, limits, random = Math.random
         const voteId = randomBytes(12).toString('hex');
         q.insertVote.run(voteId, match.id, user.id, match.task_id, match.a_work, match.b_work, key, choice, Date.now(),
           match.a_identity, match.b_identity);
-        for (const [side, original, work] of [['a', aIdentity, a], ['b', bIdentity, b]]) {
-          const next = currentAttribution(original, work);
-          if (!next) continue;
-          (side === 'a' ? q.correctA : q.correctB).run(JSON.stringify(next), voteId);
-          q.audit.run(Date.now(), user.id, user.name, 'vote-identity-correction', match.task_id, work.id,
-            JSON.stringify({ voteId, side, previous: original, next, reason: '按作品已更正的模型归属或档位计票' }));
-          Object.assign(original, next);
-        }
         counted = true;
       });
       if (counted) invalidate();
@@ -430,8 +429,11 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       if (!row) fail(404, '投票不存在');
       const original = fromIdentity(row[`${side}_identity`]);
       if (!original || !row.a_identity || !row.b_identity) fail(409, '旧票没有完整的当时身份快照，不能推断更正');
-      const previous = fromIdentity(row[`${side}_correction`]) ?? original;
-      const next = identityOf({ ...previous, ...replacement, taskId: previous.taskId, id: previous.id, ownerId: previous.ownerId });
+      const archive = catalog.snapshot();
+      const work = library.ballotWork(row.task_id, row[`${side}_work`], archive)
+        ?? library.ballotWork(original.taskId, row[`${side}_work`], archive);
+      const previous = voteAttribution(row, side, original, fromIdentity(row[`${side}_correction`]), work, archive, manualCorrections(db));
+      const next = { ...identityOf({ ...previous, ...replacement, taskId: previous.taskId, id: previous.id, ownerId: previous.ownerId }), manual: true };
       transaction(db, () => {
         (side === 'a' ? q.correctA : q.correctB).run(JSON.stringify(next), voteId);
         q.audit.run(Date.now(), admin.id, admin.name, 'vote-identity-correction', row.task_id, row[`${side}_work`],

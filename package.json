@@ -10,7 +10,6 @@
     "start": "node server/index.mjs",
     "admin": "node server/cli.mjs",
     "correct:vote": "node scripts/correct-vote.mjs",
-    "reconcile:attribution": "node scripts/reconcile-vote-attribution.mjs",
     "reset:votes": "node scripts/reset-votes.mjs",
     "test": "node --test test/*.test.mjs"
   },

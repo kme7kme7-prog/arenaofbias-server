@@ -45,7 +45,7 @@ function fixture(entries = results(), textEntries = []) {
   const vote = (left, right, choice = 'a') => {
     const identity = (id) => {
       const item = library.work('one', id);
-      return JSON.stringify({ ...item, dir: undefined, configKey: entityKey(item), modelKey: modelKey(item) });
+      return JSON.stringify({ ...item, digest: item.curated ? catalog.snapshot().entryDigest(item) : item.digest, dir: undefined, configKey: entityKey(item), modelKey: modelKey(item) });
     };
     const id = `vote-${++n}`;
     db.prepare(`INSERT INTO votes (id, match_id, task_id, a_work, b_work, pair_key, choice, created_at, source, a_identity, b_identity)
@@ -424,4 +424,70 @@ test('match HTTP route forwards only a boolean avoidCooling flag', async () => {
     await platform?.close();
     f.close();
   }
+});
+
+
+test('same package content follows registration and provenance changes while other works stay put', async () => {
+  const f = fixture();
+  const admin = { id: 'reviewer', name: 'reviewer', role: 'admin' };
+  try {
+    f.enable();
+    f.vote('a1', 'b1');
+    f.vote('a2', 'b2');
+    const saved = f.db.prepare('SELECT * FROM votes ORDER BY id').all();
+    await f.arena.leaderboard();
+    f.data.models.push({ id: 'c', name: 'C current', vendor: 'Current vendor' });
+    f.data.tasks[0].results[0].model = 'c';
+    for (const id of ['a1', 'b1']) Object.assign(f.data.tasks[0].results.find((work) => work.id === id), { harness: 'new-harness', provider: 'official' });
+    f.save();
+    for (const by of ['config', 'model']) {
+      const board = await f.arena.leaderboard({ by });
+      assert.equal(board.rows.find((row) => row.model === 'c').games, 1);
+      assert.equal(board.rows.find((row) => row.model === 'a').games, 1, 'the other work keeps its original registration');
+      assert.equal(board.rows.find((row) => row.model === 'c').vendor, 'Current vendor');
+    }
+    assert.equal((await f.arena.leaderboard({ harness: 'new-harness', provider: 'official' })).totals.votes, 1);
+    assert.equal((await f.arena.leaderboard({ harness: 'unset' })).totals.votes, 1);
+    f.data.models.find((model) => model.id === 'c').vendor = 'Renamed vendor';
+    f.save();
+    assert.equal((await f.arena.leaderboard()).rows.find((row) => row.model === 'c').vendor, 'Renamed vendor');
+    f.library.remove(admin, 'one', 'a1');
+    f.arena.invalidate();
+    assert.equal((await f.arena.leaderboard()).rows.find((row) => row.model === 'c').games, 1, 'withdrawn content follows current attribution');
+    writeFileSync(join(f.dist, 'results/one/a1/index.html'), '<title>Replacement</title>');
+    f.data.title = 'Next package';
+    f.save();
+    assert.ok(!(await f.arena.leaderboard()).rows.some((row) => row.model === 'c'), 'changed entry digest keeps the old registration');
+    assert.deepEqual(f.db.prepare('SELECT * FROM votes ORDER BY id').all(), saved);
+  } finally { f.close(); }
+});
+
+test('manual corrections outrank current metadata and historical automatic corrections are ignored', async () => {
+  const f = fixture();
+  const admin = { id: 'reviewer', name: 'reviewer', role: 'admin' };
+  try {
+    f.enable();
+    f.vote('a1', 'b1');
+    const row = f.db.prepare('SELECT * FROM votes').get();
+    const automatic = { ...JSON.parse(row.a_identity), modelId: 'auto', modelName: 'Automatic', modelKey: 'auto', configKey: 'auto|high' };
+    f.db.prepare('UPDATE votes SET a_correction = ? WHERE id = ?').run(JSON.stringify(automatic), row.id);
+    f.db.prepare("INSERT INTO audit (at, actor_name, action, detail) VALUES (1, 'test', 'vote-identity-correction', ?)")
+      .run(JSON.stringify({ voteId: row.id, side: 'a', next: automatic, reason: '管理员更正同一上传作品的模型归属或档位' }));
+    f.arena.invalidate();
+    assert.ok(!(await f.arena.leaderboard()).rows.some((row) => row.model === 'auto'));
+    const manual = f.arena.correctVote(admin, row.id, 'a', { modelId: 'manual', modelName: 'Manual' }, 'Explicit correction');
+    assert.equal(manual.manual, true);
+    f.library.setMeta(admin, 'one', 'a1', { modelId: 'b', effort: 'Max' });
+    f.arena.invalidate();
+    assert.ok((await f.arena.leaderboard()).rows.some((row) => row.key === 'manual|high'));
+    delete manual.manual;
+    f.db.prepare('UPDATE votes SET a_correction = ? WHERE id = ?').run(JSON.stringify(manual), row.id);
+    f.arena.invalidate();
+    assert.ok((await f.arena.leaderboard()).rows.some((row) => row.key === 'manual|high'), 'pre-marker manual audit is recognized');
+    f.db.prepare('UPDATE votes SET a_correction = ? WHERE id = ?').run(JSON.stringify(automatic), row.id);
+    f.db.prepare("INSERT INTO audit (at, actor_name, action, detail) VALUES (1, 'test', 'vote-identity-correction', ?)")
+      .run(JSON.stringify({ voteId: row.id, side: 'a', next: automatic, reason: '管理员更正作品的模型归属或档位' }));
+    f.arena.invalidate();
+    assert.ok((await f.arena.leaderboard()).rows.some((row) => row.key === 'manual|high'), 'later automatic writes do not erase the explicit audit');
+  } finally { f.close(); }
 });

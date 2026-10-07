@@ -14,7 +14,6 @@ import { inspectUpload } from './inspect.mjs';
 import { isTextTask, templatesOf } from './categories.mjs';
 import { GENERATION_FIELDS, IGNORED_GENERATION_FIELDS, generationFrom, generationOf, generationAudit, generationAuditView } from './generation.mjs';
 import { readWorkPreview } from './work-previews.mjs';
-import { currentAttribution } from './vote-attribution.mjs';
 
 const token = (prefix) => `${prefix}${randomBytes(16).toString('hex')}`;
 const workId = () => `up-${[...randomBytes(8)].map((byte) => (byte % 36).toString(36)).join('')}`;
@@ -279,24 +278,6 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     q.audit.run(Date.now(), actor?.id ?? null, actor?.name ?? '系统', action, work?.taskId ?? null, work?.id ?? null, detail);
   }
 
-  const attributionVotes = db.prepare("SELECT * FROM votes WHERE source = 'arena' AND task_id = ? AND (a_work = ? OR b_work = ?) AND json_valid(a_identity) AND json_valid(b_identity)");
-  const setCorrection = ['a', 'b'].map((side) => db.prepare(`UPDATE votes SET ${side}_correction = ? WHERE id = ?`));
-  // After an admin edit, relabel every saved vote side of this work that still carries
-  // another model, vendor or effort. Saving again also repairs sides left from earlier edits.
-  function correctVoteAttribution(actor, work) {
-    if (!isStaff(actor) || !work) return;
-    for (const row of attributionVotes.all(work.taskId, work.id, work.id)) {
-      for (const [index, side] of ['a', 'b'].entries()) {
-        if (row[`${side}_work`] !== work.id) continue;
-        const before = JSON.parse(row[`${side}_correction`] ?? row[`${side}_identity`]);
-        const after = currentAttribution(before, work);
-        if (!after) continue;
-        setCorrection[index].run(JSON.stringify(after), row.id);
-        audit(actor, 'vote-identity-correction', work, JSON.stringify({ voteId: row.id, side, previous: before, next: after, reason: '管理员更正作品的模型归属或档位' }));
-      }
-    }
-  }
-
   function upload(taskId, id, archive = catalog) {
     const row = q.work.get(id);
     return row && row.task_id === taskId ? fromRow(row, archive) : null;
@@ -504,7 +485,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     const next = { ...work, status: row?.status ?? 'verified', reason: row?.reason ?? '',
       moderation: { status: 'approved', source: 'human' }, reviewedAt: row?.reviewed_at ?? null, reviewerName: row?.reviewer_name ?? null };
     for (const key of DISPLAY_KEYS) if (typeof patch[key] === 'string' || patch[key] === null) {
-      if (key === 'modelId') next.displayModelId = patch[key];
+      if (key === 'modelId') { next.displayModelId = patch[key]; next.modelId = patch[key]; }
       else next[key] = patch[key];
     }
     const flags = flagsOf(work, row ?? null);
@@ -964,7 +945,6 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
             ...generation, promptVariant, note: note ?? '' };
           q.setDisplay.run(taskId, id, JSON.stringify(patch), actor.id, Date.now());
           audit(actor, 'meta', work, `编辑信息${generationAudit(work, generation)}`);
-          correctVoteAttribution(actor, withDisplay(catalog.snapshot().work(taskId, id), true));
           return;
         }
         if (moved) {
@@ -979,7 +959,6 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
           ...GENERATION_FIELDS.map((key) => generation[key]), promptVariant, note, Date.now(), id);
         audit(actor, 'meta', work, `编辑信息${generationAudit(work, generation)}${moved ? `；归属题目 ${moved.from} → ${moved.to}` : ''}`);
         const next = upload(moved ? moved.to : taskId, id);
-        correctVoteAttribution(actor, next);
         if (author && !isStaff(actor) && config.moderation?.enabled && moderationText(work) !== moderationText(next)) q.moderation.run(JSON.stringify(pendingModeration()), id);
       };
       if (inTransaction) apply();
@@ -1091,7 +1070,6 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
           status === 'verified' && work.reviewedGalleryAt == null ? now : null,
           status === 'verified' && work.reviewedArenaAt == null ? now : null, now, id);
         const routeNote = inbox ? '送进收件箱' : publishAll ? '三面公开' : firstVerify ? '娱乐盲测随首次核验开启' : '';
-        correctVoteAttribution(admin, work.curated ? withDisplay(catalog.snapshot().work(taskId, id), true) : upload(taskId, id));
         audit(admin, status, work, [labels[status], reason, routeNote].filter(Boolean).join('：') + generationAudit(work, generation));
       };
       if (inTransaction) apply();

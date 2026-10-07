@@ -124,7 +124,7 @@ test('staff publishing waits for verification, preserves authorship and guards m
   } finally { db.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
-test('package metadata and review decisions apply everywhere while files and scoring identity remain intact', () => {
+test('package metadata and review decisions apply everywhere while files remain intact and attribution follows metadata', () => {
   const root = mkdtempSync(join(tmpdir(), 'package-work-'));
   const db = openDatabase(join(root, 'platform.db'));
   const dist = pack(root), catalog = createCatalog(dist);
@@ -136,7 +136,7 @@ test('package metadata and review decisions apply everywhere while files and sco
       harnessOther: 'Custom CLI', providerId: 'unofficial', generationMode: 'single-turn', humanIntervention: 'none', note: 'New note' });
     assert.deepEqual([edited.title, edited.summary, edited.model, edited.modelName, edited.effort, edited.harnessName, edited.provider, edited.note],
       ['Changed title', 'Changed summary', 'm-b', 'Model B', 'Max', 'Custom CLI', 'unofficial', 'New note']);
-    assert.equal(library.work('one', 'a1').modelId, 'm-a', 'package display corrections preserve the scoring model');
+    assert.equal(library.work('one', 'a1').modelId, 'm-b', 'package attribution follows current metadata');
     assert.equal(library.toPublic(library.eligible('one').find((item) => item.id === 'a1')).title, 'Changed title');
     assert.deepEqual(edited.author, { role: 'admin', name: null, avatar: null });
     for (const field of ['owner', 'ownerName', 'ownerAvatar', 'curated', 'community', 'source', 'curatedAs', 'nominatedAt',
@@ -475,7 +475,7 @@ test('submission, review, metadata and vote snapshots carry provenance', async (
     assert.equal((await board('provider=unset')).data.totals.votes, 1);
     // Old frozen platform IDs still belong in the unofficial board after the contract changes.
     const row = platform.db.prepare('SELECT a_identity, b_identity FROM votes WHERE id = ?').get(vote.id);
-    const frozen = Object.values(row).map((text) => JSON.stringify({ ...JSON.parse(text), providerId: 'openrouter' }));
+    const frozen = Object.values(row).map((text) => JSON.stringify({ ...JSON.parse(text), digest: null, providerId: 'openrouter' }));
     platform.db.prepare('UPDATE votes SET a_identity = ?, b_identity = ?, a_correction = NULL, b_correction = NULL WHERE id = ?')
       .run(...frozen, vote.id);
     platform.arena.invalidate();
@@ -495,7 +495,10 @@ test('submission, review, metadata and vote snapshots carry provenance', async (
     assert.deepEqual([current.modelName, current.vendor, current.tool], ['Renamed Model A', 'Renamed vendor', 'Renamed Codex']);
     assert.equal(platform.library.work('one', id, archive).modelName, 'Model A');
     assert.deepEqual(platform.db.prepare('SELECT a_identity, b_identity, a_correction, b_correction FROM votes ORDER BY id').all(), frozenVotes);
-    assert.deepEqual((await board('harness=codex&provider=official')).data.rows, codex.rows);
+    const renamed = (await board('harness=codex&provider=official')).data.rows;
+    assert.equal(renamed.find((row) => row.model === 'm-a').modelName, 'Renamed Model A');
+    assert.equal(renamed.find((row) => row.model === 'm-a').vendor, 'Renamed vendor');
+    assert.deepEqual(renamed.map((row) => row.score), codex.rows.map((row) => row.score));
   } finally {
     await new Promise((resolve) => site.close(resolve));
     await platform.close();

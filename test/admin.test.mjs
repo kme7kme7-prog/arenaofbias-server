@@ -669,7 +669,7 @@ test('admin upload attribution corrections move existing and in-flight ballots w
   assert.deepEqual([corrected.a_identity, corrected.b_identity, corrected.choice, corrected.source],
     [original.a_identity, original.b_identity, original.choice, original.source]);
   const side = corrected.a_work === id ? 'a' : 'b';
-  assert.equal(JSON.parse(corrected[`${side}_correction`]).configKey, 'ma|max');
+  assert.equal(corrected[`${side}_correction`], null);
   const board = await platform.arena.leaderboard({ task: 'two' });
   assert.ok(board.rows.some((row) => row.model === 'ma' && row.games === 1));
   assert.ok(!board.rows.some((row) => row.modelName === 'GPT6.1'));
@@ -677,18 +677,27 @@ test('admin upload attribution corrections move existing and in-flight ballots w
   const second = platform.db.prepare('SELECT * FROM votes WHERE match_id = ?').get(pending.id);
   const secondSide = second.a_work === id ? 'a' : 'b';
   assert.equal(JSON.parse(second[`${secondSide}_identity`]).modelName, 'GPT6.1');
-  assert.equal(JSON.parse(second[`${secondSide}_correction`]).modelId, 'ma');
+  assert.equal(second[`${secondSide}_correction`], null);
   assert.ok(!(await platform.arena.leaderboard({ task: 'two' })).rows.some((row) => row.modelName === 'GPT6.1'));
   const audits = () => platform.db.prepare("SELECT COUNT(*) AS n FROM audit WHERE action = 'vote-identity-correction' AND work_id = ?").get(id).n;
-  assert.equal(audits(), 2);
+  assert.equal(audits(), 0);
   assert.equal((await call('root', 'POST', `/api/admin/works/two/${id}/meta`, { title: 'Renamed title' })).status, 200);
-  assert.equal(audits(), 2, 'title changes do not change scoring attribution');
+  assert.equal(audits(), 0, 'edits do not write ballot corrections');
   assert.equal((await call('root', 'POST', `/api/works/two/${id}/review`, { status: 'verified', effort: 'High' })).status, 200);
-  assert.equal(audits(), 4, 'review corrections update both existing votes');
+  assert.equal(audits(), 0, 'review leaves ballot corrections untouched');
   assert.ok((await platform.arena.leaderboard({ task: 'two' })).rows.some((row) => row.key === 'ma|high' && row.games === 2));
+  assert.equal((await call('root', 'POST', `/api/admin/works/two/${id}/meta`, { task: 'one' })).status, 200);
+  assert.equal((await call('root', 'POST', `/api/admin/works/one/${id}/meta`, { modelId: 'mb', effort: 'Default' })).status, 200);
+  const movedBoard = await platform.arena.leaderboard({ task: 'one' });
+  assert.ok(movedBoard.rows.some((row) => row.key === 'mb|default' && row.games === 2));
+  assert.equal(movedBoard.totals.tasks, 1);
+  platform.db.prepare('UPDATE works SET digest = ? WHERE id = ?').run('replacement-content', id);
+  platform.arena.invalidate();
+  assert.ok((await platform.arena.leaderboard()).rows.some((row) => row.modelName === 'GPT6.1' && row.games === 2), 'changed upload bytes retain the original attribution');
+
 }));
 
-test('admin package attribution edits correct saved ballots and a re-save repairs missed sides', async () => withPlatform(async ({ platform, call }) => {
+test('admin package attribution edits resolve saved ballots without writing corrections', async () => withPlatform(async ({ platform, call }) => {
   const voter = platform.db.prepare("SELECT * FROM users WHERE name = 'voter'").get();
   const match = await platform.arena.createMatch(voter, 'one');
   assert.equal(platform.arena.vote(voter, match.id, 'a').counted, true);
@@ -697,12 +706,12 @@ test('admin package attribution edits correct saved ballots and a re-save repair
   assert.equal((await call('root', 'POST', '/api/admin/works/one/a/meta', { effort: 'High' })).status, 200);
   const corrected = platform.db.prepare('SELECT * FROM votes WHERE id = ?').get(original.id);
   assert.equal(corrected[`${side}_identity`], original[`${side}_identity`]);
-  assert.equal(JSON.parse(corrected[`${side}_correction`]).configKey, 'ma|high');
+  assert.equal(corrected[`${side}_correction`], null);
   assert.ok((await platform.arena.leaderboard({ task: 'one' })).rows.some((row) => row.key === 'ma|high' && row.works === 1));
   platform.db.prepare(`UPDATE votes SET ${side}_correction = NULL WHERE id = ?`).run(original.id);
   assert.equal((await call('root', 'POST', '/api/admin/works/one/a/meta', { effort: 'High' })).status, 200);
-  assert.equal(JSON.parse(platform.db.prepare('SELECT * FROM votes WHERE id = ?').get(original.id)[`${side}_correction`]).configKey, 'ma|high');
-  assert.equal(platform.db.prepare("SELECT COUNT(*) AS n FROM audit WHERE action = 'vote-identity-correction' AND work_id = 'a'").get().n, 2);
+  assert.equal(platform.db.prepare('SELECT * FROM votes WHERE id = ?').get(original.id)[`${side}_correction`], null);
+  assert.equal(platform.db.prepare("SELECT COUNT(*) AS n FROM audit WHERE action = 'vote-identity-correction' AND work_id = 'a'").get().n, 0);
 }));
 
 test('moderator routes enforce senior permissions and forbid decisions on own works', async () => withPlatform(async ({ platform, call }) => {

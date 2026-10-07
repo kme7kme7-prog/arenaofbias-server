@@ -26,6 +26,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { transaction } from './db.mjs';
 import { fail, rateLimit, readJson } from './http.mjs';
 import { buildShow1Boards, replayShow1Ratings } from './show1-ranking.mjs';
+import { manualCorrections, voteAttribution } from './vote-attribution.mjs';
 import { isTextTask } from './categories.mjs';
 
 const REACTION_EMOJI = { up: '👍', down: '👀', laugh: '🤯' };
@@ -157,10 +158,15 @@ export function registerShow1Compat(router, deps) {
 
   // A live compat vote back to the old vote shape (goldens: votes_*.json). Tie votes
   // report side a as the "winner" with outcome 'draw', exactly like the old server.
-  function oldShape(row) {
+  function oldShape(row, archive, manual) {
     const winnerIsA = row.choice !== 'b';
-    const aIdentity = JSON.parse(row.a_correction ?? row.a_identity);
-    const bIdentity = JSON.parse(row.b_correction ?? row.b_identity);
+    const resolve = (side) => {
+      const identity = JSON.parse(row[`${side}_identity`]);
+      const work = library?.ballotWork(row.task_id, row[`${side}_work`], archive)
+        ?? library?.ballotWork(identity.taskId, row[`${side}_work`], archive);
+      return voteAttribution(row, side, identity, JSON.parse(row[`${side}_correction`] ?? 'null'), work, archive, manual);
+    };
+    const aIdentity = resolve('a'), bIdentity = resolve('b');
     const winnerIdentity = winnerIsA ? aIdentity : bIdentity;
     const loserIdentity = winnerIsA ? bIdentity : aIdentity;
     const winnerWork = winnerIsA ? row.a_work : row.b_work;
@@ -190,7 +196,9 @@ export function registerShow1Compat(router, deps) {
   const byTimeThenId = (a, b) => (a.ts - b.ts) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
   function currentVotes(scope) {
-    return (scope === 'formal' ? q.liveFormal : q.liveEntertainment).all().map(oldShape).sort(byTimeThenId);
+    const archive = deps.catalog.snapshot?.();
+    const manual = manualCorrections(db);
+    return (scope === 'formal' ? q.liveFormal : q.liveEntertainment).all().map((row) => oldShape(row, archive, manual)).sort(byTimeThenId);
   }
 
   const scopeOf = (ctx) => {
@@ -310,11 +318,16 @@ export function registerShow1Compat(router, deps) {
     const now = Date.now();
     const editorial = q.arenaEditorial.get(taskId);
     const weights = editorial?.weights_json ? JSON.parse(editorial.weights_json) : promptOf(promptId)?.weights ?? null;
-    const identity = (entry) => JSON.stringify({
-      taskId, id: entry.up, curated: false, title: entry.title,
-      modelId: entry.mid, modelName: entry.modelName, vendor: entry.vendor ?? deps.catalog.model(entry.mid)?.vendor ?? '', effort: '',
-      effortKey: '', modelKey: entry.mid, configKey: entry.mid, ownerId: null,
-    });
+    const archive = deps.catalog.snapshot?.();
+    const identity = (entry) => {
+      const work = library?.ballotWork(taskId, entry.up, archive);
+      const digest = work?.curated ? archive?.entryDigest(work) : work?.digest;
+      return JSON.stringify({
+        taskId, id: entry.up, digest: digest ?? null, title: entry.title,
+        modelId: entry.mid, modelName: entry.modelName, vendor: entry.vendor ?? deps.catalog.model(entry.mid)?.vendor ?? '', effort: '',
+        effortKey: '', modelKey: entry.mid, configKey: entry.mid, ownerId: null,
+      });
+    };
     // Placeholder match in the migration's shape: decided at creation, immediately expired.
     const matchId = sha256(`show1:match:${id}`).slice(0, 16);
     try {

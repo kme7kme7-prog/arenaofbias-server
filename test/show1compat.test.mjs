@@ -203,7 +203,7 @@ test('countedVotes only feeds source=arena votes to Bradley–Terry', async () =
   const db = openDatabase(':memory:');
   try {
     const catalog = {
-      snapshot: () => ({ version: 1, commit: 'c', catalogDigest: 'd', root: '', task: () => null, tasks: () => [], entryDigest: () => null }),
+      snapshot: () => ({ version: 1, commit: 'c', catalogDigest: 'd', root: '', model: () => null, task: () => null, tasks: () => [], entryDigest: () => null }),
       task: () => null, tasks: () => [], at: () => null,
     };
     const library = {
@@ -526,7 +526,7 @@ test('retired snapshot ballots never enter live vote or rating responses', () =>
     assert.equal(row.a_work, 'up-aaaa0001');
     assert.equal(row.b_work, 'up-bbbb0002');
     const aIdentity = JSON.parse(row.a_identity);
-    assert.deepEqual(Object.keys(aIdentity).sort(), ['configKey', 'curated', 'effort', 'effortKey', 'id', 'modelId', 'modelKey', 'modelName', 'ownerId', 'taskId', 'title', 'vendor']);
+    assert.deepEqual(Object.keys(aIdentity).sort(), ['configKey', 'digest', 'effort', 'effortKey', 'id', 'modelId', 'modelKey', 'modelName', 'ownerId', 'taskId', 'title', 'vendor']);
     assert.equal(aIdentity.modelId, 'model-a');
     assert.equal(aIdentity.ownerId, null);
     const match = db.prepare('SELECT * FROM matches WHERE id = ?').get(row.match_id);
@@ -731,7 +731,7 @@ test('retired snapshot ballots never enter live vote or rating responses', () =>
     assert.equal((await call(base, 'GET', '/api/ratings?scope=entertainment')).data.ratings['model-a'], 1216);
     const original = db.prepare('SELECT a_identity FROM votes WHERE id = ?').get(id).a_identity;
     const identity = JSON.parse(original);
-    db.prepare('UPDATE votes SET a_correction = ? WHERE id = ?').run(JSON.stringify({ ...identity, modelId: 'model-e', modelName: 'Model E' }), id);
+    db.prepare('UPDATE votes SET a_correction = ? WHERE id = ?').run(JSON.stringify({ ...identity, manual: true, modelId: 'model-e', modelName: 'Model E' }), id);
     const corrected = (await call(base, 'GET', '/api/votes?scope=entertainment')).data.votes[0];
     assert.equal(corrected.winnerMid, 'model-e');
     const ratings = (await call(base, 'GET', '/api/ratings?scope=entertainment')).data;
@@ -740,7 +740,7 @@ test('retired snapshot ballots never enter live vote or rating responses', () =>
     const board = (await call(base, 'GET', '/api/show1/leaderboard?scope=entertainment')).data.board;
     assert.equal(board.rows[0].modelId, 'model-e');
     assert.equal(board.rows[0].name, 'Model E');
-    db.prepare('UPDATE votes SET a_correction = ? WHERE id = ?').run(JSON.stringify({ ...identity, modelId: 'model-b' }), id);
+    db.prepare('UPDATE votes SET a_correction = ? WHERE id = ?').run(JSON.stringify({ ...identity, manual: true, modelId: 'model-b' }), id);
     assert.deepEqual((await call(base, 'GET', '/api/ratings?scope=entertainment')).data, { ratings: {}, games: {} });
     assert.equal((await call(base, 'GET', '/api/show1/leaderboard?scope=entertainment')).data.board.totalVotes, 0);
     assert.equal(db.prepare('SELECT a_identity FROM votes WHERE id = ?').get(id).a_identity, original);

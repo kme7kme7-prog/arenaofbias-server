@@ -1,5 +1,26 @@
 # HANDOFF.md · 当前状态
 
+## 归属按当前信息提交复验（2026-10-08，仅本地提交）
+
+- 用户授权将 2026-10-06 归属改动及对应归档单独提交；负责人 wsnxxxs，使用 GitHub noreply 邮箱。提交前本机 check108/0、test320/320、git diff --check 通过，与原记录一致；本次没有重跑 Linux 或生产副本五项门禁。
+- 不 push、不部署。推理类别后续另轮实现，完成后不提交；上线必须先部署归属计分，再部署推理，部署前按下节重新采集最新生产一致副本并重跑五项门禁。此次提交授权不包含部署和题目类别迁移。
+
+## 内容摘要锁定、归属按当前信息（2026-10-06，本地完成，未提交/部署）
+
+- 用户已接受 Bradley–Terry 全榜分数联动；最终放行标准为：新旧有效票/参与者一致；逐侧变动同ID+同digest且列原因；未换归属配置games不变；模型榜只有注册表展示更新或归属变化造成的分数变化；既有生产人工更正保持。**未来实际部署前必须在当时最新生产一致副本上重跑这五项门禁，任何失败先停下报告。本轮结果不授权 commit、push 或部署。**
+- arena 计分采用人工更正 → 同ID+同digest当前作品 → 原始快照；数据包使用包内入口页digest，与上传一视同仁，不比较taskId。重新计算模型/配置/档位键，Harness/服务商筛选使用同一归属；下架/关盲评仍计票作品也现查。换题票读取增加快照taskId回查其未移动对手，计分题目统计用votes.task_id。
+- 新 correctVote 写manual:true；历史显式更正从vote-identity-correction审计恢复。排除三种自动原因：「管理员更正作品的模型归属或档位」「管理员更正同一上传作品的模型归属或档位」「按作品已更正的模型归属或档位计票」。早期旧审计已通过Git历史确认：第二种来自c1fe9a5早期上传自动逻辑，本轮最终复核补齐排除及回归。人工审计即使曾被自动correction覆盖仍优先；旧correction不重写。部分人工更正以已解析的当前归属为基础。
+- 删除library.correctVoteAttribution和编辑/review/投票时自动逐票写更正；包display override的modelId实际用于归属和pool。删除已废弃的scripts/reconcile-vote-attribution.mjs/npm reconcile:attribution，避免把现查归属永久人工锁定；correct:vote保留。不改schema，不删票/快照/correction列。
+- 榜单已登记modelId取注册表名称/厂商；未登记依次取当前pool同key、最新计分票归属、最早sample；unranked生成逻辑保留。HTTP setMeta、review/reviewWithMeta、assignInbox、setDisplay(委托setMeta)路由已有invalidate；数据包版本包含在arena缓存键中。Show1归属读取在show1compat统一，show1-ranking算法不改；新Show1票增加digest，历史缺digest票用快照，缓存已有SQLite变化/catalog.version失效依据。
+- 最终Windows Node24.16.0与WSL Ubuntu Node24.16.0均check108/0、test320/320，diff检查通过。新增2个必要包/人工归属用例，扩展既有真实HTTP上传测试覆盖换题再改模型及内容变化，改写逐票自动更正断言。注册表厂商、同配置其他作品隔离、Harness/服务商、下架与新旧人工优先级均有覆盖。未做浏览器目检，不称为全交互验收；本仓没有build/check:intake脚本。
+- **最新一致副本复核通过**：Brisbane 2026-10-06 23:32:29（UTC13:32:29）只读采集正式运行库，经SQLite backup复制到远程内存再输出SQL，没有远程临时库/停服/生产写入。5305票、732作品、185用户、5760matches、2751审计，v40、integrity ok、外键0。本地恢复SQL并恢复user_version、核对行数/integrity，然后只在隔离副本回放。
+- 生产旧代码23e389507124b06da86dd56bc69c97b84390039f实际文件已捕获；与Git HEAD逐文件比较仅换行不同。正式包bfaf4f3e6e13b82c25049cba02ad466c8c10076b的2288内容文件逐SHA256匹配本地已核验发布包，额外来源说明单独留证。没有切换或手改任何正式包/消费者pin。
+- 五项结果：config有效票5107→5107、model5017→5017，参与者均140→140，逐票集合一致；0模型键/配置键迁移，全部106配置games不变；485侧名称/厂商/Harness/服务商字段更新，逐侧同ID+同digest，分11组列明原因；143侧显式人工更正全部保持（137侧历史逐票补齐+滕王阁GPT-6.1 Sol Max6侧）。339次自动审计不作为人工锁定依据，旧票/更正/审计原值保留。
+- 全部榜单差异仅5条config/3条model展示行：qwen3.8-flash-next的High/XHigh及模型行、qwen-latest-series-invite-2609的Max及模型行，厂商Alibaba Cloud Qwen→Alibaba；minimax-m3.1的Default/Max及模型行，MiniMax M3.1→MiniMax M3.1 Flash Preview。所有分数/比较次数不变。字段来源变动（如ZCode、Codex、官方服务商）会按设计影响筛选，不改变综合计分键。
+- Windows和Linux对同一最新副本回放结果完全相同（榜单/逐侧变动/五项判定）。Linux挂载盘慢速尝试已中止，最终在Linux本地临时目录用完整相同材料通过。10-04副本结果仅作参考，不再作为放行依据。
+- 忽略证据与完整逐组说明：output/content-attribution-20261006/final-review/report.md、comparison-win32.json/comparison-linux.json、compare.mjs、capture/、production-consistent-capture.tar.gz、windows-check.log/windows-test.log、linux-final-check.log/linux-final-test.log；仅此忽略目录保存私有副本/数据包哈希。Linux临时回放目录/tmp/aob-content-attribution-iTckKk保留，不无差别清理。
+- 本轮未commit、push、部署、改生产业务数据、修改Gallery、登录/投票或重启生产。[完成归档](docs/archive/2026-10-06-current-vote-attribution-wsnxxxs.md)。后续部署必须另获授权并重新采集当时最新一致副本复核；有新代码/包/业务库变化不得沿用本次门禁。
+
 ## Dots3-Note-Preview 联合发布与正式改登记（2026-10-06，已上线）
 
 - e9f32826e495eecb0019c0ae746fec81a0439933已上线，消费产物bfaf4f3e6e13b82c25049cba02ad466c8c10076b（源d0fa56b）；Gallery发布源码dbea8e7、资产5ad2894c7118400476fe77ae。此前准备发布状态由本节覆盖。

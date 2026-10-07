@@ -29,7 +29,7 @@ import { transaction } from './db.mjs';
 import { fail, rateLimit, readJson } from './http.mjs';
 import { buildShow1Boards, replayShow1Ratings } from './show1-ranking.mjs';
 import { manualCorrections, voteAttribution, votesBeforeTaskMove } from './vote-attribution.mjs';
-import { isTextTask } from './categories.mjs';
+import { isTextTask, isAiJudgedTask } from './categories.mjs';
 
 const REACTION_EMOJI = { up: '👍', down: '👀', laugh: '🤯' };
 const EMOJI_KIND = { '👍': 'up', '👀': 'down', '🤯': 'laugh' };
@@ -107,7 +107,8 @@ export function registerShow1Compat(router, deps) {
         detail: previous?.detail ?? '同一提示词 · 不同模型的结果',
       });
     }
-    return { prompts: [...prompts.values()].sort((a, b) => a.id.localeCompare(b.id)), taskByRound, roundByTask };
+    return { prompts: [...prompts.values()].filter((prompt) => !isAiJudgedTask(deps.catalog.task?.(taskByRound[prompt.id]) ?? prompt))
+      .sort((a, b) => a.id.localeCompare(b.id)), taskByRound, roundByTask };
   }
   const taskOfRound = (round) => promptCatalog().taskByRound[round];
   const roundOfTask = (task) => promptCatalog().roundByTask[task];
@@ -125,6 +126,7 @@ export function registerShow1Compat(router, deps) {
     // Pending/deleted community questions and unassigned inbox items stay out.
     const uploads = q.liveWorks.all().filter((row) => row.entertainment_route !== 1 && !snapshot.upToRid[row.id]
       && roundByTask[row.task_id]
+      && !isAiJudgedTask(deps.catalog.task?.(row.task_id))
       && (!library || library.publicContent(library.byContentKey(row.content_key))))
       .map((row) => ({ ...row, round: roundByTask[row.task_id] ?? row.task_id,
         modelName: row.model_id ? (deps.catalog.model(row.model_id)?.name ?? row.model_id) : row.model_other,
@@ -134,7 +136,7 @@ export function registerShow1Compat(router, deps) {
     const archive = deps.catalog.snapshot?.();
     const datapack = !library || !archive ? [] : archive.tasks().flatMap((task) => {
       const round = roundByTask[task.id];
-      if (!round) return [];
+      if (!round || isAiJudgedTask(deps.catalog.task?.(task.id) ?? task)) return [];
       return [...task.works.values()].filter((work) => library.publicCuratedContent(work)).map((work) => ({
         id: work.id, rid: datapackRid(round, work.id), task_id: task.id, round,
         model_id: work.modelId ?? null, model_other: work.modelId ? '' : (work.modelName ?? ''), title: work.title,
@@ -202,7 +204,7 @@ export function registerShow1Compat(router, deps) {
     const manual = manualCorrections(db);
     const moved = votesBeforeTaskMove(db);
     return (scope === 'formal' ? q.liveFormal : q.liveEntertainment).all()
-      .filter((row) => !moved(row))
+      .filter((row) => !isAiJudgedTask(deps.catalog.task?.(row.task_id)) && !moved(row))
       .map((row) => oldShape(row, archive, manual)).sort(byTimeThenId);
   }
 
@@ -219,6 +221,7 @@ export function registerShow1Compat(router, deps) {
   // Historical HTML rows are indexes, not publication authority. Match the w-host
   // gate at read time so removed tasks / held works cannot enter the random pool.
   const snapshotWorks = () => snapshot.works.filter((row) => {
+    if (isAiJudgedTask(deps.catalog.task?.(taskOfRound(row.promptId)))) return false;
     if (!library || JSON.parse(row.content).kind !== 'html') return true;
     const key = snapshot.workMap[row.id]?.key;
     return !!key && library.publicContent(library.byContentKey(key));
@@ -305,6 +308,7 @@ export function registerShow1Compat(router, deps) {
     const id = String(body.id ?? '');
     if (!UUID4.test(id)) fail(400, '投票编号无效');
     const promptId = String(body.promptId ?? '');
+    if (isAiJudgedTask(deps.catalog.task?.(taskOfRound(promptId)))) fail(409, '这道题由 AI 评分，暂不接受投票', 'ai-judged');
     if (!published(promptId)) fail(400, '题目不存在');
     const winnerRid = trim64(body.winnerRid);
     const loserRid = trim64(body.loserRid);

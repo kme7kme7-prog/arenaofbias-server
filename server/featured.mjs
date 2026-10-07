@@ -1,5 +1,5 @@
 import { modelKey } from './catalog.mjs';
-import { isTextTask } from './categories.mjs';
+import { isTextTask, isAiJudgedTask } from './categories.mjs';
 import { transaction } from './db.mjs';
 
 const localDay = (now) => {
@@ -60,7 +60,7 @@ export function createFeatured({ db, catalog, library, arena, now = Date.now }) 
     if (closed || pending.has(taskId) || q.day.get(taskId)?.day === day) return;
     const job = new Promise((resolve) => setImmediate(resolve)).then(async () => {
       const scores = await arena.workScores(taskId);
-      if (isTextTask(catalog.task(taskId)) || !catalog.task(taskId)) return;
+      if (isAiJudgedTask(catalog.task(taskId)) || isTextTask(catalog.task(taskId)) || !catalog.task(taskId)) return;
       const picks = selectFeatured(library.eligible(taskId), scores, current(taskId));
       transaction(db, () => {
         q.clear.run(taskId);
@@ -77,7 +77,7 @@ export function createFeatured({ db, catalog, library, arena, now = Date.now }) 
       const result = {};
       const day = localDay(now());
       for (const task of catalog.tasks()) {
-        if (isTextTask(task)) continue;
+        if (isAiJudgedTask(task) || isTextTask(task)) continue;
         const picks = current(task.id);
         if (picks.length) result[task.id] = {
           cover: picks.find((pick) => pick.scope === 'cover')?.work_id ?? null,

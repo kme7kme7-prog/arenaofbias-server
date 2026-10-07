@@ -22,7 +22,7 @@ import { createAdmin } from './admin.mjs';
 import { createInbox } from './inbox.mjs';
 import { createQuestions } from './questions.mjs';
 import { createReferences } from './references.mjs';
-import { DOMAIN_GROUPS, DOMAINS, requireCategory, requireDomains } from './categories.mjs';
+import { DOMAIN_GROUPS, DOMAINS, AI_JUDGED, isAiJudgedTask, requireCategory, requireDomains } from './categories.mjs';
 import { createProfile } from './profile.mjs';
 import { registerShow1Compat } from './show1compat.mjs';
 import { registerShow1Guess } from './show1/guess.mjs';
@@ -169,7 +169,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       works: publicList(library.allWorks().filter((work) => library.visibleTo(work, 'show2')), user),
       questions: questions.all(user),
       reactions: library.reactionSummary(user),
-      arena: Object.fromEntries(catalog.tasks().map((task) => [task.id, arena.poolStats(task.id)])),
+      arena: Object.fromEntries(catalog.tasks().filter((task) => !isAiJudgedTask(task)).map((task) => [task.id, arena.poolStats(task.id)])),
       featured: featured.read(),
       totals: (await arena.leaderboard()).totals,
       me: user ? {
@@ -659,7 +659,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     const task = ctx.url.searchParams.get('task') || null;
     if (task && !catalog.task(task)) fail(404, '题目不存在');
     const category = ctx.url.searchParams.get('category') || null;
-    if (category && (task || !catalog.tasks().some((t) => t.category === category))) fail(400, '题型筛选无效', 'invalid_query');
+    if (category && (task || (!AI_JUDGED.has(category) && !catalog.tasks().some((t) => t.category === category)))) fail(400, '题型筛选无效', 'invalid_query');
     const domain = ctx.url.searchParams.get('domain') || null;
     if (domain && (task || !catalog.tasks().some((t) => t.domains?.includes(domain)))) fail(400, '领域筛选无效', 'invalid_query');
     const filters = Object.fromEntries(['harness', 'provider'].map((field) => {

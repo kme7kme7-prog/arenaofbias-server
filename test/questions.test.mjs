@@ -349,7 +349,8 @@ describe('question and sample review lifecycle', () => {
     assert.equal(expanded.status, 200, JSON.stringify(expanded.data));
     await moderate(expanded.data.question.id, 'approved');
     const expandedBoot = (await call('guest', 'GET', '/api/bootstrap')).data;
-    assert.equal(expandedBoot.domains.length, 25);
+    assert.equal(expandedBoot.domains.length, 26);
+    assert.ok(expandedBoot.domains.includes('哲学'));
     assert.deepEqual(expandedBoot.domainGroups.flatMap((group) => group.domains), expandedBoot.domains);
     assert.deepEqual(expandedBoot.questions.find((q) => q.id === expanded.data.question.id).domains, ['计算机技术', '教育学习']);
     assert.equal((await call('guest', 'GET', `/api/leaderboard?domain=${encodeURIComponent('计算机技术')}`)).status, 200);

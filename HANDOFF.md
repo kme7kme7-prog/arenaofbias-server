@@ -971,6 +971,16 @@
 - show1compat.promptCatalog无arenaId即continue；liveWorks允许数据库questions题并以q-*为round，导致目录/作品不一致。published依赖目录，不能只在前端造入口。线上题目解析器和本地Show1 lib/prompts.ts仅接受三位数字；随机池从目录选题，故十件门槛不是本次阻断原因。
 - 未修业务代码、写DB、修改源作品、提交/推送/部署；建议后续统一新题ID及目录、作品、投票契约，保留旧编号与十件跨模型门槛。之前未完成的娱乐视角校准验证保持待续。
 
+## 推理类别与 AI 计分预留（2026-10-08，本地完成，未提交）
+
+- 基于归属计分提交 a294567 实现；用户允许本轮必需的小改动，但不授权提交、推送、部署或业务数据迁移。categories 增加推理、哲学及 TEXT_CATEGORIES / AI_JUDGED / isAiJudgedTask；新推理题仅接受 text。后台文学显示写作，存储值文学不变。
+- arena 的配对、投票、池统计及计票入口排除当前分类为推理的题；推理配对/投票返回409、code=ai-judged。bootstrap 不返回推理 arena 池；综合/类别/领域榜、未计分作品及类别名次排除推理；推理类别和单题榜返回空榜。归属解析优先级保留，过滤在 worker 输入前，ranking-worker 不需修改。代表作按类别排除，包括已有网页作品的推理题；Show1 目录、作品随机池、两范围票读取/榜单及新投票同步排除。现有缓存失效路径沿用。
+- **统计预期**：bootstrap totals 使用综合配置榜的有效比较口径。排除后有效比较数=排除前有效比较数−推理题原本有效的比较数（不是原始票行数）；参与者数是剩余有效票参与者的去重数，仅只投过推理有效票的人退出。综合榜重拟合；从文学迁出的题也退出写作榜（category=文学），其他原类别/相关领域同理；保留条目的分数、名次可联动变化，条目/题目数可减少。未迁移题目类别时，没有推理有效票便不因本功能减少统计。**推理旧票/身份/人工更正均保留，不删票**；未来正式变化需在最新生产副本及实际迁移前后核对，不引用10-06旧统计作为此次预测。
+- **aiScore 约定**：未来 bootstrap 的 works[] 可带可选字段 `aiScore = { score:number, max:number, judge:string, rationale:string }`，Gallery 已能展示；本轮不建表、不写评分、不输出伪造评分。
+- 验证：Windows Node24.16.0，check109/0、最终test322/322、git diff --check通过。新建test/ai-judged.test.mjs，两项回归覆盖创建/格式/哲学、bootstrap池和totals、配对与已生成待投对局拒绝、综合/文学/领域/单题榜、Show1缓存更新及数据库原票不变；包含已有static作品的推理题。test/questions.test.mjs只更新领域总数断言并确认哲学。中间测试发现单题榜不应读取全目录的兼容问题，已修复；一次中间全量还遇既有moderation随机bad port，最终全量通过，不改无关逻辑。
+- 未执行Linux、浏览器/真机或全交互目检、生产五项门禁、部署、两题setMeta迁移、迁移审计与Gallery部署；本仓无build/check:intake脚本。仅测试临时库写入，无schema迁移或实际业务数据修改。归属计分必须先部署，推理后部署；发布前重新采集最新一致副本重跑五项门禁。用户另行授权后才可部署后端、把q-1479913673ca78cd和q-a028b56bafec3a10改为推理并核对有效比较/综合榜/写作榜和审计，最后部署Gallery。
+- 忽略日志output/ai-judged-20261008/test-final.log；[本轮归档](docs/archive/2026-10-08-ai-judged-reasoning-wsnxxxs.md)。不改library.mjs、vote-attribution.mjs或归属计分旧测试，不提交本轮。
+
 ## 推理联合发布门禁暂停（2026-10-08，未推送、未部署）
 
 - 用户已授权推送、联调、部署及既定顺序的两题迁移；现场公网与版本文件均50259ad，已确认其为远端main，含d3b669a/50259ad两条Show1文本展示修复。本地用6446abb合并它们与a294567，推理工作区改动仍保留且未提交，未推送。没有覆盖现场独有逻辑。
@@ -1009,3 +1019,9 @@
 - 提交用非交互补丁分开暂存；第一条包含vote-attribution.mjs、arena.mjs、show1compat.mjs、admin.test.mjs中错题票规则部分、本轮归档、作废归档勘误及对应交接，推理改动不混入。用户授权本轮两条本地提交，不授权推送、部署或迁移。
 - 发布计划替代前文顺序：后端只部署一次，包含归属计分、错题票规则和推理代码；两题迁移及Gallery部署为后续单独步骤。部署前仍须重跑最新副本门禁。
 - 第一条提交前对仅含暂存内容的隔离源码副本运行npm run check：108文件/0错；npm test：322/322通过，无失败/取消/跳过；git diff --cached --check通过。日志output/reasoning-release-20261008/rule-commit-check.log及rule-commit-test.log。没有重连生产或重采门禁副本，本轮不将历史门禁改称为正式部署验收。
+
+## 推理类别分轮提交（2026-10-08）
+
+- 第一条已本地提交8911689（Exclude ballots cast before a work leaves its question.），仅错题票规则。第二条在其基础上提交其余推理代码及独立测试、领域断言、本归档和推理交接；arena.mjs/show1compat.mjs改动块已用非交互补丁拆开，未混入第一条。不改library.mjs、schema或业务数据。
+- 后端一次部署约定及四票名单门禁见上一节；本轮只获两条本地提交授权，没有推送、部署或迁移授权。
+- 第二条提交前对仅含暂存内容的隔离源码副本运行npm run check：109文件/0错；npm test：324/324通过，无失败/取消/跳过；暂存diff检查通过。日志output/reasoning-release-20261008/reasoning-commit-check.log和reasoning-commit-test.log。两条提交均使用wsnxxxs及269096463+wsnxxxs@users.noreply.github.com；未执行Linux、浏览器、生产最新副本重采或部署前门禁。本轮未推送、部署、迁移，历史联调不冒充本轮重跑。

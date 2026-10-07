@@ -452,7 +452,7 @@ function systemWorksView() {
     </section>`;
 }
 
-const QUESTION_TYPES = { 文学: '文本', 静态网页: '设计', 建模: '三维' };
+const QUESTION_TYPES = { 文学: '写作', 推理: '推理', 静态网页: '设计', 建模: '三维' };
 const MAX_DOMAINS = 2;
 function questionTypeField(category = '静态网页') {
   return `<label class="field"><span class="field-label">题目类型</span><select class="input" name="category" required>${Object.entries(QUESTION_TYPES).map(([value, label]) => `<option value="${value}"${value === category ? ' selected' : ''}>${label}</option>`).join('')}</select></label>`;
@@ -563,7 +563,7 @@ function newQuestionDialog() {
     try {
       await api('admin/questions', { method: 'POST', body: {
         title: form.title.value, summary: form.summary.value, prompt: form.prompt.value, category,
-        domains: $$('[name="domains"]:checked', form).map((input) => input.value), templates: category === '文学' ? ['text'] : ['static'],
+        domains: $$('[name="domains"]:checked', form).map((input) => input.value), templates: ['文学', '推理'].includes(category) ? ['text'] : ['static'],
       } });
       sheet.close();
       toast('题目已创建，等待审核');

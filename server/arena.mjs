@@ -15,7 +15,7 @@ import { transaction } from './db.mjs';
 import { fail, HttpError } from './http.mjs';
 import { rankEntries, rankWorks } from './ranking.mjs';
 import { generationOf } from './generation.mjs';
-import { isTextTask } from './categories.mjs';
+import { isTextTask, isAiJudgedTask } from './categories.mjs';
 import { isStaff } from './roles.mjs';
 import { manualCorrections, voteAttribution, votesBeforeTaskMove } from './vote-attribution.mjs';
 
@@ -102,6 +102,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     const rankedKeys = new Set();
     let scanned = 0;
     for (const row of taskId ? q.votesOfTask.all(taskId) : q.votes.all()) {
+      if (isAiJudgedTask(catalog.task(row.task_id))) continue;
       if (moved(row)) continue;
       if (!row.a_identity || !row.b_identity || (taskIds && !taskIds.has(row.task_id))) continue;
       const aIdentity = fromIdentity(row.a_identity), bIdentity = fromIdentity(row.b_identity);
@@ -149,7 +150,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
   }
 
   function workScores(taskId, snapshot = catalog.snapshot()) {
-    if (isTextTask(catalog.task(taskId))) return Promise.resolve([]);
+    if (isAiJudgedTask(catalog.task(taskId)) || isTextTask(catalog.task(taskId))) return Promise.resolve([]);
     const cacheKey = `${snapshot.version}|${taskId}|work`;
     if (cache.has(cacheKey)) return cache.get(cacheKey);
     const activeCache = cache;
@@ -174,16 +175,17 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     const activeCache = cache;
     const pending = Promise.resolve().then(async () => {
       const keyOf = (work) => by === 'model' ? (work.modelKey ?? modelKey(work)) : (work.configKey ?? entityKey(work));
-      const scoped = category || domain ? catalog.tasks().filter((t) => (!category || t.category === category) && (!domain || t.domains?.includes(domain))) : null;
+      const rankedTasks = (task ? [catalog.task(task)].filter(Boolean) : catalog.tasks()).filter((t) => !isAiJudgedTask(t));
+      const scoped = category || domain ? rankedTasks.filter((t) => (!category || t.category === category) && (!domain || t.domains?.includes(domain))) : null;
       const { votes, rankedEntryCount } = await countedVotes(task, archive, keyOf, filters, scoped && new Set(scoped.map((t) => t.id)));
       const ranked = await rankOffThread(votes, by, rankedEntryCount);
       const scored = votes.filter((vote) => keyOf(vote.a) !== keyOf(vote.b));
-      const pool = (task ? library.eligible(task, archive) : (scoped ?? catalog.tasks()).flatMap((t) => library.eligible(t.id, archive)))
+      const pool = (task ? (isAiJudgedTask(catalog.task(task)) ? [] : library.eligible(task, archive)) : (scoped ?? rankedTasks).flatMap((t) => library.eligible(t.id, archive)))
         .filter((work) => !filters || provenanceMatch(filters, work));
       let standings;
       if (!task && !category && !domain) {
         standings = {};
-        for (const name of new Set(catalog.tasks().map((t) => t.category).filter(Boolean))) {
+        for (const name of new Set(rankedTasks.map((t) => t.category).filter(Boolean))) {
           const board = await leaderboard({ category: name, by, snapshot, harness, provider });
           if (board.rows.length) standings[name] = Object.fromEntries(board.rows.map((row) => [row.key, row.rank]));
         }
@@ -293,7 +295,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
   }
 
   function poolStats(taskId) {
-    const works = library.eligible(taskId);
+    const works = isAiJudgedTask(catalog.task(taskId)) ? [] : library.eligible(taskId);
     return { works: works.length, entries: new Set(works.map((work) => entityKey(work))).size };
   }
 
@@ -306,6 +308,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
 
     async createMatch(user, taskId, previousId, snapshot = catalog.snapshot(), avoidCooling = false) {
       if (!snapshot.task(taskId) && !catalog.task(taskId)) fail(404, '题目不存在');
+      if (isAiJudgedTask(catalog.task(taskId) ?? snapshot.task(taskId))) fail(409, '这道题由 AI 评分，暂不开放盲评', 'ai-judged');
       if (Date.now() - lastCleanup >= 60e3) cleanupExpiredMatches();
       const groups = new Map();
       for (const work of library.eligible(taskId, snapshot)) {
@@ -374,6 +377,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       if (!match || match.expires_at <= Date.now() || (match.user_id && match.user_id !== user?.id)
         || !match.a_identity || !match.b_identity) fail(404, '这一组已经失效，请开始新的一组');
       if (match.choice) fail(409, '这一组已经提交过了');
+      if (isAiJudgedTask(catalog.task(match.task_id))) fail(409, '这道题由 AI 评分，暂不接受投票', 'ai-judged');
       if (!['a', 'b', 'tie', 'skip'].includes(choice)) fail(400, '选择无效');
       if (choice === 'skip') {
         transaction(db, () => q.decide.run(choice, Date.now(), match.id));

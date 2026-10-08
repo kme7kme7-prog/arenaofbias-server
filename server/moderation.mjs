@@ -1,9 +1,7 @@
 // A persisted hold plus a small serial worker: slow Flex calls never hold up an
 // upload request. Only complete checks can release the hold; errors go to humans.
-// Static signals and periodic rechecks back up the model: a signal turns an approval into
-// a human review, and a public upload whose text or CDN content changed is checked again.
-import { createHash } from 'node:crypto';
-import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+// Static signals turn an automatic approval into a human review when needed.
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { extname, join } from 'node:path';
 
 const RULES = `你是作品投稿平台的内容审查员。按同一标准审查用户声明、页面文字和图片。
@@ -36,7 +34,6 @@ const INJECTION = [
   /(?:审核员|审查员|审核模型|审查模型|审核\s*AI)[^\n]{0,8}(?:必须|应该|务必|请|直接)[^\n]{0,8}(?:放行|通过|忽略|无视|绕过)|(?:请|务必|必须|直接|一律)[^\n]{0,6}(?:放行|判定为?通过|判为通过)/,
 ];
 
-const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 const SCANNED = new Set(['.html', '.htm', '.js', '.mjs', '.cjs', '.svg']);
 const SCAN_BYTES = 64 * 1024 * 1024;
 const SIGNALS = [
@@ -124,11 +121,6 @@ function withSignals(result, signals) {
     signals: signals.map((item) => item.id) };
 }
 
-// What a recheck compares: early page text with digits blurred, plus every CDN body hash.
-const fingerprint = (capture) => ({
-  text: sha256((capture.firstTexts ?? []).join('\n').replace(/\d/g, '0').replace(/\s+/g, ' ').trim()),
-  resources: capture.resources ?? {},
-});
 const complete = (capture) => Boolean(capture?.captures?.first && capture?.captures?.mobile &&
   capture?.late?.first && capture?.late?.mobile && capture.texts?.length === 4);
 
@@ -153,14 +145,8 @@ function inputFor(work, library, capture) {
 
 export function createModerator({ config, library, capturer, onChange = () => {} }) {
   const settings = config.moderation ?? {};
-  const recheckMs = (settings.recheckHours ?? 0) * 3600e3;
-  const baselineFile = (work) => join(library.mediaDir, work.id, 'baseline.json');
-  const readBaseline = (work) => { try { return JSON.parse(readFileSync(baselineFile(work), 'utf8')); } catch { return null; } };
-  const writeBaseline = (work, value) => { try { writeFileSync(baselineFile(work), JSON.stringify(value)); } catch { /* the next recheck reseeds it */ } };
   let closed = false;
   let running = null;
-  let rechecking = null;
-  let timer = null;
   let controller = null;
   const queue = [];
   const queued = new Set();
@@ -175,7 +161,6 @@ export function createModerator({ config, library, capturer, onChange = () => {}
     if (!settings.apiKey) throw new Error('api_key_missing');
     const capture = await capturer.enqueue(work);
     if (closed) return null;
-    if (complete(capture)) writeBaseline(work, { ...fingerprint(capture), checkedAt: Date.now() });
     return ruleRejection(work, capture) ?? withSignals(await review(work, capture), staticSignals(work.dir));
   }
 
@@ -234,38 +219,6 @@ export function createModerator({ config, library, capturer, onChange = () => {}
     }
   }
 
-  // One pass over public uploads whose last check is older than the interval. Uploads
-  // waiting for their first review go first. Unchanged works only refresh the timestamp;
-  // changed ones go back to the model and leave the public host unless approved again.
-  async function recheckPass() {
-    for (const listed of library.uploads()) {
-      if (closed) return;
-      if (listed.curatedAs || !library.publicContent(listed)) continue;
-      const base = readBaseline(listed);
-      if (base && Date.now() - base.checkedAt < recheckMs) continue;
-      await running;
-      const work = library.uploadById(listed.id);
-      if (closed || !work || !library.publicContent(work)) continue;
-      const capture = await capturer.enqueue(work, { prefix: 'recheck-', publish: false });
-      if (closed) return;
-      // An incomplete capture says nothing about the content; the next pass retries it.
-      if (!complete(capture)) continue;
-      const next = { ...fingerprint(capture), checkedAt: Date.now() };
-      if (!base) { writeBaseline(work, next); continue; }
-      const changed = Object.keys({ ...base.resources, ...next.resources }).filter((url) => base.resources?.[url] !== next.resources[url]);
-      const changes = [...(base.text !== next.text ? ['页面文字'] : []), ...(changed.length ? [`${changed.length} 个 CDN 资源`] : [])];
-      if (!changes.length) { writeBaseline(work, { ...base, checkedAt: next.checkedAt }); continue; }
-      let result;
-      try { result = ruleRejection(work, capture) ?? withSignals(await review(work, capture), []); }
-      catch (error) { result = failed(error); }
-      if (closed) return;
-      writeBaseline(work, next);
-      const detail = `定期复查发现内容变化：${changes.join('、')}`;
-      if (result.status === 'approved') library.audit(null, 'content-recheck', work, `${detail}；自动复审通过`);
-      else if (library.finishModeration(work, { ...result, source: 'recheck', reason: `${detail}；${result.reason}`.slice(0, 500) })) onChange();
-    }
-  }
-
   const service = {
     get enabled() { return Boolean(settings.enabled); },
     enqueue(work) {
@@ -275,20 +228,11 @@ export function createModerator({ config, library, capturer, onChange = () => {}
       if (!running) running = drain().finally(() => { running = null; });
     },
     async idle() { await running; },
-    recheck() {
-      if (!rechecking && !closed) {
-        rechecking = recheckPass().catch((error) => console.warn(`定期复查失败：${error.message}`))
-          .finally(() => { rechecking = null; });
-      }
-      return rechecking;
-    },
     async close() {
       closed = true;
-      clearInterval(timer);
       queue.length = 0;
       controller?.abort();
       await running;
-      await rechecking;
     },
   };
   // The listeners are started after createPlatform returns. Persisted pending
@@ -296,10 +240,5 @@ export function createModerator({ config, library, capturer, onChange = () => {}
   setImmediate(() => {
     if (!closed && settings.enabled) for (const work of library.uploads()) service.enqueue(work);
   }).unref();
-  // Rechecks run hourly over whatever has come due, starting an hour after launch.
-  if (settings.enabled && recheckMs > 0) {
-    timer = setInterval(() => service.recheck(), 3600e3);
-    timer.unref();
-  }
   return service;
 }

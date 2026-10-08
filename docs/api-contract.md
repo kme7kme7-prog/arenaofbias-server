@@ -950,7 +950,7 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 
 静态信号：结果返回后扫描作品内全部 `.html/.htm/.js/.mjs/.cjs/.svg`（合计上限 64MB，超出记为「部分脚本过大未扫描」）。命中密码输入框、`navigator.webdriver` / `HeadlessChrome`、以字面外部地址赋值 `location` / `location.assign|replace` / `window.open`、meta refresh，或可在审查后更换内容的 CDN 地址（jsdelivr / esm.sh 的 `gh/` 路径，jsdelivr `npm/`、unpkg、esm.sh 上不带精确 `x.y.z` 版本的包）时，approved 改为 review，`reason` 追加命中项，`categories` 追加 `signal:<id>`，管理员结果另含 `signals`。混淆代码可以绕过这些规则，它们只保证明显信号由人工确认。作品 CSP 的 jsdelivr 来源收紧为 `https://cdn.jsdelivr.net/npm/`，`gh/` 等其他路径一律不加载；上传检查把 `cdn.jsdelivr.net/gh` 列为会被拦截的外部资源。
 
-定期复查：`CONTENT_RECHECK_HOURS`（默认 24，0 关闭）在开启审查时生效，进程启动一小时后每小时检查一次到期作品。范围为已公开（见上）且未转数据包的投稿，在待审队列空闲时逐件重新截图（`recheck-*.jpg`，不更新 captures）。基线存于 `.data/media/<id>/baseline.json`：数字归一后的首屏文字摘要、全部 CDN 响应体的 SHA-256 及检查时间；自动审查截图完整时写入，没有基线的作品在首次复查时补建。截图不完整则跳过，下一轮重试。文字和 CDN 都未变时只更新检查时间。有变化时重新送审：通过则写 `content-recheck` audit 并保持公开；否则（含调用失败）以 `source: "recheck"`、理由前缀「定期复查发现内容变化：…」写入结果，作品立即撤下等待人工。缺密钥、截图不完整、超出材料限额、请求超过 15 分钟、429/其他错误、未完成/拒答/无效结构或未确认 Flex 均转 review，不自动重试或切换标准档。`CAPTURE=0` 无法完成自动审查。关闭开关不放行已有待审或被拒作品。
+已取消公开投稿的定期复查：没有按小时扫描或到期自动截图/送审，`CONTENT_RECHECK_HOURS` 不再生效，也不写入新的复查基线。新投稿自动审核、人工审核及显式审核重试仍保留，已有 `source: "recheck"` 结果和审计按原规则读取，不自动恢复此前被拒或待人工处理的作品。缺密钥、截图不完整、超出材料限额、请求超过15分钟、429/其他错误、未完成/拒答/无效结构或未确认 Flex 均转 review，不自动重试或切换标准档。`CAPTURE=0` 无法完成自动审查。关闭审核开关不放行已有待审或被拒作品。
 
 ### 3.25 盲评资格维护与代表作持久化（schema v26）
 

@@ -52,8 +52,6 @@ export const config = {
     apiKey: env.MODERATION_API_KEY || env.OPENAI_API_KEY || '',
     baseUrl: env.MODERATION_BASE_URL || 'https://api.openai.com/v1',
     model: env.MODERATION_MODEL || 'gpt-6-luna',
-    // Hours between rechecks of public uploads for changed text or CDN content; 0 turns them off.
-    recheckHours: int(env.CONTENT_RECHECK_HOURS, 24),
   },
   secureCookies: env.COOKIE_SECURE === '1',
   cookieSameSite: env.COOKIE_SAME_SITE || 'Lax',

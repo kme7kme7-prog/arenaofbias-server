@@ -473,7 +473,7 @@ WHERE status = 'unverified' AND deleted_at IS NULL
   AND json_extract(moderation, '$.source') IS NOT 'human';
 ```
 
-本轮不涉及数据库迁移。定期复查默认每 24 小时，可用 `CONTENT_RECHECK_HOURS` 调整，0 关闭；只有内容变化的作品会再次调用 Luna。
+不对已公开作品进行定期复查。新投稿仍截图并进行自动内容审核；人工处理和明确发起的审核重试照常保留。`CONTENT_RECHECK_HOURS` 已移除，遗留环境变量不再生效。不涉及数据库迁移，不清理既有基线、复查截图或审核历史。
 
 ### 7.5 DNS 与 Nginx
 

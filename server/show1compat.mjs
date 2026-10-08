@@ -57,6 +57,7 @@ export function registerShow1Compat(router, deps) {
     dataVersion: db.prepare('PRAGMA data_version'),
     worksStamp: db.prepare('SELECT COUNT(*) AS n FROM works'),
     questionAudit: db.prepare("SELECT COUNT(*) AS n, COALESCE(MAX(id), 0) AS m FROM audit WHERE action LIKE 'question%'"),
+    contentGates: db.prepare('SELECT task_id, status, moderation, curated_as, author_role, content_key FROM works WHERE deleted_at IS NULL AND content_key IS NOT NULL'),
     liveFormal: db.prepare("SELECT * FROM votes WHERE source = 'show1' AND compat_mode = 'formal' ORDER BY created_at, id"),
     liveEntertainment: db.prepare("SELECT * FROM votes WHERE source = 'show1' AND (compat_mode IS NULL OR compat_mode <> 'formal') ORDER BY created_at, id"),
     voteByPair: db.prepare('SELECT * FROM votes WHERE user_id = ? AND pair_key = ?'),
@@ -114,12 +115,22 @@ export function registerShow1Compat(router, deps) {
       });
     }
     return { prompts: [...prompts.values()].filter((prompt) => !isAiJudgedTask(deps.catalog.task?.(taskByRound[prompt.id]) ?? prompt))
-      .sort((a, b) => a.id.localeCompare(b.id)), taskByRound, roundByTask };
+      .sort((a, b) => a.id.localeCompare(b.id)), taskByRound, roundByTask,
+      aiRounds: new Set([...prompts.values()].filter((prompt) => isAiJudgedTask({ category: prompt.category })).map((prompt) => prompt.id)) };
   }
   let catalogCache = { signature: '', at: 0, value: null };
+  // Reading the catalog version stats the package directory, which costs real
+  // milliseconds on this host; signatures sample it at most every five seconds.
+  // A package switch is also announced through the catalog takeover callback.
+  let versionSample = { at: 0, value: '' };
+  const catalogVersion = () => {
+    const now = Date.now();
+    if (now - versionSample.at >= 5_000) versionSample = { at: now, value: deps.catalog.version ?? '' };
+    return versionSample.value;
+  };
   function promptCatalog() {
     const stamp = q.questionAudit.get();
-    const signature = `${stamp.n}|${stamp.m}|${deps.catalog.version ?? ''}`;
+    const signature = `${stamp.n}|${stamp.m}|${catalogVersion()}`;
     const now = Date.now();
     if (catalogCache.value && catalogCache.signature === signature && now - catalogCache.at < 60_000) return catalogCache.value;
     catalogCache = { signature, at: now, value: buildPromptCatalog() };
@@ -129,20 +140,30 @@ export function registerShow1Compat(router, deps) {
   const roundOfTask = (task) => promptCatalog().roundByTask[task];
   const promptOf = (id) => promptCatalog().prompts.find((prompt) => prompt.id === id) ?? null;
   const published = (round) => Object.hasOwn(promptCatalog().taskByRound, round);
+  // AI-judged questions sit out arena scoring. The merged catalog already carries
+  // every public question's category, so this stays on the cached catalog instead
+  // of one catalog.task() query per roster row.
+  const aiJudgedTaskId = (taskId) => promptCatalog().aiRounds.has(roundOfTask(taskId));
   // Datapack ids repeat across tasks (and old snapshot rids look like 004-grok-4.6), so a
   // datapack work's game id carries its round. Votes still store the work id with its task.
   const datapackRid = (round, id) => `dp-${round}-${id}`;
   const ridOf = (round, workId) => snapshot.upToRid[workId]
     ?? (/^(?:up-|legacy:)/.test(workId) ? workId : datapackRid(round, workId));
   // The roster sorted by rid once: every "first work of a mid/task" lookup is deterministic.
-  const liveWorks = () => {
-    const { roundByTask } = promptCatalog();
+  // The content gate runs against one batched row fetch: per-work byContentKey
+  // queries cost a users join and an audit subquery each, times ~900 works.
+  // Rows are read fresh on every call chain, so moderation flips keep applying.
+  const buildGates = () => !library ? null : new Map(q.contentGates.all().map((row) => [row.content_key,
+    { taskId: row.task_id, status: row.status, moderation: JSON.parse(row.moderation),
+      curatedAs: row.curated_as, authorRole: row.author_role, curated: false }]));
+  const liveWorks = (gates = buildGates()) => {
+    const { roundByTask, aiRounds } = promptCatalog();
     // A work must belong to the same public catalog used by prompts and ballots.
     // Pending/deleted community questions and unassigned inbox items stay out.
     const uploads = q.liveWorks.all().filter((row) => row.entertainment_route !== 1 && !snapshot.upToRid[row.id]
       && roundByTask[row.task_id]
-      && !isAiJudgedTask(deps.catalog.task?.(row.task_id))
-      && (!library || library.publicContent(library.byContentKey(row.content_key))))
+      && !aiRounds.has(row.task_id)
+      && (!gates || library.publicContent(gates.get(row.content_key))))
       .map((row) => ({ ...row, round: roundByTask[row.task_id] ?? row.task_id,
         modelName: row.model_id ? (deps.catalog.model(row.model_id)?.name ?? row.model_id) : row.model_other,
         vendor: row.model_id ? (deps.catalog.model(row.model_id)?.vendor ?? '') : row.model_vendor }));
@@ -151,7 +172,7 @@ export function registerShow1Compat(router, deps) {
     const archive = deps.catalog.snapshot?.();
     const datapack = !library || !archive ? [] : archive.tasks().flatMap((task) => {
       const round = roundByTask[task.id];
-      if (!round || isAiJudgedTask(deps.catalog.task?.(task.id) ?? task)) return [];
+      if (!round || aiRounds.has(round)) return [];
       return [...task.works.values()].filter((work) => library.publicCuratedContent(work)).map((work) => ({
         id: work.id, rid: datapackRid(round, work.id), task_id: task.id, round,
         model_id: work.modelId ?? null, model_other: work.modelId ? '' : (work.modelName ?? ''), title: work.title,
@@ -219,7 +240,7 @@ export function registerShow1Compat(router, deps) {
     const manual = manualCorrections(db);
     const moved = votesBeforeTaskMove(db);
     return (scope === 'formal' ? q.liveFormal : q.liveEntertainment).all()
-      .filter((row) => !isAiJudgedTask(deps.catalog.task?.(row.task_id)) && !moved(row))
+      .filter((row) => !aiJudgedTaskId(row.task_id) && !moved(row))
       .map((row) => oldShape(row, archive, manual)).sort(byTimeThenId);
   }
 
@@ -235,11 +256,11 @@ export function registerShow1Compat(router, deps) {
   });
   // Historical HTML rows are indexes, not publication authority. Match the w-host
   // gate at read time so removed tasks / held works cannot enter the random pool.
-  const snapshotWorks = () => snapshot.works.filter((row) => {
-    if (isAiJudgedTask(deps.catalog.task?.(taskOfRound(row.promptId)))) return false;
+  const snapshotWorks = (gates) => snapshot.works.filter((row) => {
+    if (promptCatalog().aiRounds.has(row.promptId)) return false;
     if (!library || JSON.parse(row.content).kind !== 'html') return true;
     const key = snapshot.workMap[row.id]?.key;
-    return !!key && library.publicContent(library.byContentKey(key));
+    return !!key && library.publicContent(gates.get(key));
   });
   // Text uploads keep their original file inside the work package. The arena
   // renders text tasks natively, so the roster hands out the story shape the
@@ -280,7 +301,7 @@ export function registerShow1Compat(router, deps) {
   // keep applying immediately.
   let storyCache = { signature: '', at: 0, stories: new Map() };
   const storiesSnapshot = () => {
-    const signature = `${q.worksStamp.get().n}|${deps.catalog.version ?? ''}`;
+    const signature = `${q.worksStamp.get().n}|${catalogVersion()}`;
     const now = Date.now();
     if (storyCache.signature !== signature || now - storyCache.at >= 60_000) {
       storyCache = { signature, at: now, stories: new Map() };
@@ -290,7 +311,8 @@ export function registerShow1Compat(router, deps) {
   const worksOf = () => {
     const kindByRound = new Map(promptCatalog().prompts.map((prompt) => [prompt.id, prompt.kind]));
     const stories = storiesSnapshot();
-    return [...snapshotWorks(), ...liveWorks().map((row) => {
+    const gates = buildGates();
+    return [...snapshotWorks(gates), ...liveWorks(gates).map((row) => {
       let story = null;
       if (kindByRound.get(row.round) === 'text') {
         if (!stories.has(row.id)) stories.set(row.id, textStory(row));

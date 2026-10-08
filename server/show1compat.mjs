@@ -55,6 +55,7 @@ export function registerShow1Compat(router, deps) {
   const q = {
     changes: db.prepare('SELECT total_changes() AS n'),
     dataVersion: db.prepare('PRAGMA data_version'),
+    worksStamp: db.prepare('SELECT COUNT(*) AS n FROM works'),
     liveFormal: db.prepare("SELECT * FROM votes WHERE source = 'show1' AND compat_mode = 'formal' ORDER BY created_at, id"),
     liveEntertainment: db.prepare("SELECT * FROM votes WHERE source = 'show1' AND (compat_mode IS NULL OR compat_mode <> 'formal') ORDER BY created_at, id"),
     voteByPair: db.prepare('SELECT * FROM votes WHERE user_id = ? AND pair_key = ?'),
@@ -256,27 +257,31 @@ export function registerShow1Compat(router, deps) {
     } catch { return null; }
   };
   // Reading every text work's files is the roster's real cost, so parsed stories
-  // are cached per work. The same revision signal the aggregates use retires the
-  // cache on any database or catalog change; a TTL floor also retires it after
-  // file-level fixes (story re-extraction) that never touch SQLite. Gates and
-  // row filters stay uncached so moderation flips keep applying immediately.
-  let storyCache = { revision: '', at: 0, stories: new Map() };
-  const storyOf = (row, kind) => {
-    if (kind !== 'text') return null;
-    const next = `${q.changes.get().n}|${q.dataVersion.get().data_version}|${deps.catalog.version ?? ''}`;
+  // are cached per work. Only the works row count (a work appeared or left) or a
+  // catalog switch retires the whole cache — unrelated writes (sessions, votes,
+  // captures, metadata edits) must not, or every request would rebuild it.
+  // Rows added or hidden are picked up by the live query and cache misses; a TTL
+  // floor also retires it after file-level fixes (story re-extraction) that
+  // never touch SQLite. Gates and row filters stay uncached so moderation flips
+  // keep applying immediately.
+  let storyCache = { signature: '', at: 0, stories: new Map() };
+  const storiesSnapshot = () => {
+    const signature = `${q.worksStamp.get().n}|${deps.catalog.version ?? ''}`;
     const now = Date.now();
-    if (storyCache.revision !== next || now - storyCache.at >= 60_000) {
-      storyCache = { revision: next, at: now, stories: new Map() };
+    if (storyCache.signature !== signature || now - storyCache.at >= 60_000) {
+      storyCache = { signature, at: now, stories: new Map() };
     }
-    if (!storyCache.stories.has(row.id)) {
-      storyCache.stories.set(row.id, textStory(row));
-    }
-    return storyCache.stories.get(row.id);
+    return storyCache.stories;
   };
   const worksOf = () => {
     const kindByRound = new Map(promptCatalog().prompts.map((prompt) => [prompt.id, prompt.kind]));
+    const stories = storiesSnapshot();
     return [...snapshotWorks(), ...liveWorks().map((row) => {
-      const story = storyOf(row, kindByRound.get(row.round));
+      let story = null;
+      if (kindByRound.get(row.round) === 'text') {
+        if (!stories.has(row.id)) stories.set(row.id, textStory(row));
+        story = stories.get(row.id);
+      }
       return {
         id: row.rid ?? row.id, promptId: row.round, modelId: row.model_id,
         modelName: row.modelName, vendor: row.vendor, title: row.title, isDemo: 0,

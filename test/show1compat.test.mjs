@@ -359,6 +359,32 @@ test('retired snapshot ballots never enter live vote or rating responses', () =>
     assert.equal((await call(base, 'GET', '/api/works')).data.works.some((work) => work.id === live.id), false);
   }));
 
+  test('the roster cache repeats answers and refreshes on database writes', () => withServer({}, async ({ db, base }) => {
+    seedWorks(db);
+    // Fresh IDs dodge the snapshot's migrated-rid list so the row goes live.
+    const columns = db.prepare('PRAGMA table_info(works)').all().map((column) => column.name);
+    db.exec(`INSERT INTO works (${columns.join(', ')}) SELECT ${columns.map((name) => ({
+      id: "'up-cach0001'", content_key: "'wcach'", digest: "'dcach'",
+    })[name] ?? name).join(', ')} FROM works WHERE id = 'up-cccc0003'`);
+    const before = (await call(base, 'GET', '/api/works')).data;
+    assert.equal(before.works.some((work) => work.id === 'up-cach0001'), true);
+    // A second read inside the story cache window returns the same roster.
+    assert.deepEqual((await call(base, 'GET', '/api/works')).data, before);
+    // Row-level changes are SQL reads and stay live; only file parsing is cached.
+    db.prepare("UPDATE works SET title = '改名之后' WHERE id = 'up-cach0001'").run();
+    const renamed = (await call(base, 'GET', '/api/works')).data.works.find((work) => work.id === 'up-cach0001');
+    assert.equal(renamed.title, '改名之后');
+    db.prepare("UPDATE works SET show_entertainment = 0 WHERE id = 'up-cach0001'").run();
+    assert.equal((await call(base, 'GET', '/api/works')).data.works.some((work) => work.id === 'up-cach0001'), false);
+    // New questions appear in the prompt list without delay.
+    db.prepare("INSERT INTO users (id, name, name_key, role, salt, hash, created_at) VALUES ('u-cache01', 'cache-admin', 'cache-admin', 'admin', 'x', 'y', 1)").run();
+    db.prepare(`INSERT INTO questions (id, owner_id, title, summary, prompt, tags, templates, created_at,
+      moderation, category, domains, author_role, accepts_uploads, reference_credit)
+      VALUES ('q-cache0001', 'u-cache01', '缓存题', '简述', '提示词', '[]', '["text"]', 2,
+      '{"status":"approved"}', '文学', '[]', 'admin', 1, '')`).run();
+    assert.equal((await call(base, 'GET', '/api/prompts')).data.prompts.some((prompt) => prompt.id === 'q-cache0001'), true);
+  }));
+
   test('text task uploads hand out the original story instead of the html wrapper', () => {
     const root = mkdtempSync(join(tmpdir(), 'compat-text-'));
     mkdirSync(join(root, 'works', 'up-text0001'), { recursive: true });

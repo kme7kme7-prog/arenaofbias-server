@@ -255,10 +255,28 @@ export function registerShow1Compat(router, deps) {
       return storyFromHtml(readFileSync(join(dir, 'index.html'), 'utf8'));
     } catch { return null; }
   };
+  // Reading every text work's files is the roster's real cost, so parsed stories
+  // are cached per work. The same revision signal the aggregates use retires the
+  // cache on any database or catalog change; a TTL floor also retires it after
+  // file-level fixes (story re-extraction) that never touch SQLite. Gates and
+  // row filters stay uncached so moderation flips keep applying immediately.
+  let storyCache = { revision: '', at: 0, stories: new Map() };
+  const storyOf = (row, kind) => {
+    if (kind !== 'text') return null;
+    const next = `${q.changes.get().n}|${q.dataVersion.get().data_version}|${deps.catalog.version ?? ''}`;
+    const now = Date.now();
+    if (storyCache.revision !== next || now - storyCache.at >= 60_000) {
+      storyCache = { revision: next, at: now, stories: new Map() };
+    }
+    if (!storyCache.stories.has(row.id)) {
+      storyCache.stories.set(row.id, textStory(row));
+    }
+    return storyCache.stories.get(row.id);
+  };
   const worksOf = () => {
     const kindByRound = new Map(promptCatalog().prompts.map((prompt) => [prompt.id, prompt.kind]));
     return [...snapshotWorks(), ...liveWorks().map((row) => {
-      const story = kindByRound.get(row.round) === 'text' ? textStory(row) : null;
+      const story = storyOf(row, kindByRound.get(row.round));
       return {
         id: row.rid ?? row.id, promptId: row.round, modelId: row.model_id,
         modelName: row.modelName, vendor: row.vendor, title: row.title, isDemo: 0,

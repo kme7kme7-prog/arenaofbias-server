@@ -1,5 +1,13 @@
 # HANDOFF.md · 当前状态
 
+## 模型名称去点与只读重复报告（2026-10-08，未提交、未推送、未部署）
+
+- `modelNameKey` 与 Gallery compact 对齐：NFKC、小写后 `replace(/[^\p{L}\d]+/gu, '')`，只保留字母/数字。修改前当前注册表含 modelPool 的262模型、442名称/全部别名，新规则303键、跨模型冲突0。旧 modelNameKey 仅用于内存名称索引，没有持久化键消费者；modelKey/entityKey 和读取榜单时的 x: 自填名保持，不做错字或版本号近似匹配。
+- 新增 `node scripts/report-model-duplicates.mjs --db <一致副本> [--dist <包目录>]`，只读连接+单一读事务，无服务启动/迁移/合并/清理。列出空 model_id、model_other 可精确匹配登记名称或别名的作品（含状态/下架信息），附题目、登记模型及当前 arena 有效票数（config/model 两种口径）；保留人工归属、排除已移题/AI题/不合格双方/同键比较。修正仍由用户逐件决定后走 library.setMeta。
+- 新增2个最小用例：gpt56 luna、GPT-5.6-Luna、全角写法及别名命中 GPT-5.6 Luna，5.7与错字不命中、x:键不变；真实CLI临时库列出1件未登记作品，配置2票/模型1票，排除无身份/待审/legacy票，源库字节不变。Windows和WSL Ubuntu Linux（Node24.16.0）最终check111/0、test327/327；Linux前两次全量及串行尝试在既有blind-pool厂商刷新断言失败，修改前HEAD也复现同失败，未改无关代码/测试，最后标准npm test全过。
+- 只读运行已有一致副本（2026-10-08 02:25:55 Brisbane，v40、874作品/6645票）：16件未登记、疑似重复匹配0件；数据库和WAL SHA不变。副本较旧，不代表当前生产数量；未连生产。详细报告/碰撞检查/日志位于忽略 output/model-name-duplicates-20261008/。
+- api-contract 已说明新匹配与报告口径；Gallery仅交接/归档，本地check68/0、test33/33，保留其既有未提交匹配改动。未改 schema、历史数据、另一前端或数据包，无后台build/intake脚本，也未做浏览器/真机/生产验收；无待拍板事项，前后端可任意顺序上线。[本轮归档](docs/archive/2026-10-08-model-name-duplicates-wsnxxxs.md)。
+
 ## Ultra 与 Ultracode 常用档位（2026-10-08，未提交、未推送、未部署）
 
 - `server/config.mjs` 的 EFFORTS 为 Low、Medium、High、XHigh、Max、Ultra、Ultracode；管理后台筛选与编辑/投稿共用候选同步补齐。`library.effortOf` 原有忽略大小写匹配无需改动；未发现其他硬编码的档位高低、代表作兜底或导出顺序。审核模型自身的 xhigh 参数保持。

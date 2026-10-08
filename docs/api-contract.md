@@ -196,7 +196,9 @@ API 域静态 `/data.json`（含等价编码路径）仅管理员登录后返回
 
 ### 2.3 模型（model）
 
-由数据包完整注册表 `modelPool` 和展示列表 `models` 定义：`{ id, name, vendor, logo, brandUrl, brandName }`。投稿时若给出 `modelId` 且命中模型表，服务端以表内 `name` / `vendor` 为准，忽略请求中的 `vendor`，数据库 `model_vendor` 存空串；自填 `modelName` 若与模型表某项的 `name` 或 `aliases` 相同（忽略大小写、空格、`-`、`_`，与 Gallery 一致），按登记模型处理；未登记模型的自填 `modelName`（≤60 字）存为 `model_other`，`vendor`（trim 后≤40 字，可为空串）存为 `model_vendor` 并在作品视图返回，`modelId` 置 null（排行键退化为 `x:<小写模型名>`）。作者编辑或管理员审核时，省略 `vendor` 保留自定义厂商，显式空串或切换为登记模型会清空该列；自定义厂商参与内容审核。旧 `note` 中的「手填模型厂商：…」保留，不回填新列。
+由数据包完整注册表 `modelPool` 和展示列表 `models` 定义：`{ id, name, vendor, logo, brandUrl, brandName }`。投稿时若给出 `modelId` 且命中模型表，服务端以表内 `name` / `vendor` 为准，忽略请求中的 `vendor`，数据库 `model_vendor` 存空串；自填 `modelName` 若与模型表某项的 `name` 或 `aliases` 相同（均先做 NFKC 和小写，再用 `replace(/[^\p{L}\d]+/gu, '')` 仅保留字母与数字；点、空格、`-`、`_` 等标点被忽略，与 Gallery compact 一致，不做错字或版本号近似匹配），按登记模型处理；未登记模型的自填 `modelName`（≤60 字）存为 `model_other`，`vendor`（trim 后≤40 字，可为空串）存为 `model_vendor` 并在作品视图返回，`modelId` 置 null（排行键退化为 `x:<小写模型名>`）。作者编辑或管理员审核时，省略 `vendor` 保留自定义厂商，显式空串或切换为登记模型会清空该列；自定义厂商参与内容审核。旧 `note` 中的「手填模型厂商：…」保留，不回填新列。
+
+只读排查命令：`node scripts/report-model-duplicates.mjs --db <一致副本.db> [--dist <数据包目录>]`。输出 JSON 的 `matches` 包含作品 ID、题目、自填名、精确匹配的登记模型及 `validVotes.config` / `validVotes.model`（当前 arena 配置榜/模型榜口径，不包含 legacy/Show1 票；同配置/同模型比较分别排除）。报告包括待审、存疑和下架作品，状态不合格时有效票为0；报告不自动合并、不改变 x: 计分归属、不启动服务或迁移。修正仍须逐件经管理员 meta / `library.setMeta` 决定。
 
 ### 2.4 用户（user）
 

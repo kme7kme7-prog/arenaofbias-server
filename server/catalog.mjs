@@ -10,8 +10,8 @@ import { templatesOf } from './categories.mjs';
 export const effortKey = (effort) => String(effort ?? '').normalize('NFKC').trim().toLowerCase();
 export const modelKey = (work) => work.modelId ?? `x:${work.modelName.normalize('NFKC').trim().toLowerCase()}`;
 export const entityKey = (work, by = 'config') => (by === 'model' ? modelKey(work) : `${modelKey(work)}|${effortKey(work.effort)}`);
-// Matches the Gallery: registry names and aliases claim names typed with other case, spaces, - or _.
-export const modelNameKey = (name) => String(name ?? '').normalize('NFKC').toLowerCase().replace(/[\s_-]+/g, '');
+// Matches the Gallery compact form: keep only letters and digits in registry names and aliases.
+export const modelNameKey = (name) => String(name ?? '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\d]+/gu, '');
 export const providerOf = (id, other = '') => id === 'official' ? 'official' : id || other ? 'unofficial' : null;
 
 function readSnapshot(root) {

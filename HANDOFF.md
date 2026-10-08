@@ -1025,3 +1025,34 @@
 - 第一条已本地提交8911689（Exclude ballots cast before a work leaves its question.），仅错题票规则。第二条在其基础上提交其余推理代码及独立测试、领域断言、本归档和推理交接；arena.mjs/show1compat.mjs改动块已用非交互补丁拆开，未混入第一条。不改library.mjs、schema或业务数据。
 - 后端一次部署约定及四票名单门禁见上一节；本轮只获两条本地提交授权，没有推送、部署或迁移授权。
 - 第二条提交前对仅含暂存内容的隔离源码副本运行npm run check：109文件/0错；npm test：324/324通过，无失败/取消/跳过；暂存diff检查通过。日志output/reasoning-release-20261008/reasoning-commit-check.log和reasoning-commit-test.log。两条提交均使用wsnxxxs及269096463+wsnxxxs@users.noreply.github.com；未执行Linux、浏览器、生产最新副本重采或部署前门禁。本轮未推送、部署、迁移，历史联调不冒充本轮重跑。
+
+## 后端推送与部署中止（2026-10-08，服务已停止，待用户决定）
+
+- 用户授权按顺序执行最新副本门禁、推送/备份/部署后端、逐题meta迁移；任一步失败立即停止，不自行回退后继续，Gallery交由另一边部署。
+- Brisbane 2026-10-08 02:12:27.751最新一致副本：6645票、873作品、211用户、7325对局、3224审计，v40，integrity ok、外键0，SHA256 a728efbc244afafc3887a368700efcc296208274aef119932a011ff593acc1a4f。现场旧源码50259ad，79项runtime文件精确匹配固定Git源码；数据包仍bfaf4f3e6e13b82c25049cba02ad466c8c10076b。
+- 五项门禁通过：移出原题规则排除名单恰好是208eee8c0dc7a2c4a4fbc199、9cdbd004df68f804ef9ae67c、5f94a4fa6fde49d6f3c72040、5890a7cbbe284cb2b1abd3dd。旧→新配置有效比较6407→6406，模型6296→6295，参与者164→164；有效票仅净减第四票，另三票旧代码已不计入。485侧同ID/digest且逐侧列原因，143人工更正保持（含滕王阁6侧）；0归属键迁移，其余配置比较数不变；从旧输入只排除四票后，两榜分数/名次/比较/胜平负/区间/参与者/题目数精确复现新榜，无额外数值差异，展示变化来自注册表。源副本哈希不变。
+- main已推送到add9352c34d253e05ed3c8b4329efd780a3e9fd5，fetch后确认origin/main同SHA。固定Git归档关闭autocrlf并校验269项；Linux Node22.23.2暂存源码check109/0、test324/324通过。最初本地默认Git归档产生CRLF，哈希比较识别后按部署文档关闭autocrlf重生成；没有安装该临时归档。
+- **部署失败并停止**：已保存代码/版本/数据包指针、热备一致库，随后停止服务并保存platform-stopped.db；Python部署脚本调用tar.extractall(filter='data')时现场Python不支持该参数，TypeError发生在代码解包开始前。未修改生产代码、版本或数据包，未自行重启/回退/重试，未执行两题迁移。脚本未预检Python解包参数兼容性，是本轮操作疏漏。
+- 失败后只读核对：service ActiveState=inactive、SubState=dead、ExecMainStatus=0；现场版本仍50259ad，79项runtime哈希全部不变；v40、integrity ok、外键0；6645张票与停服备份逐行完全相同，两题仍文学/text。**当前后端服务停止，未恢复公网服务；必须先由用户决定恢复旧服务还是修正解包步骤继续部署。**
+- 备份目录/root/aob-backend-release-20261008-add9352/predeploy/含code.tar.gz、server-version、datapack-current、platform.db及platform-stopped.db。本地忽略证据output/reasoning-release-20261008/release-latest/含gate-metadata.json、release-gate-win32.json、source-verification.json、linux-verification.json、deploy-result.json、failure-state.json。没有记录密码或认证令牌。
+- [本轮归档](docs/archive/2026-10-08-backend-release-stopped-wsnxxxs.md)。迁移前后bootstrap有效比较/参与者、综合榜/写作榜变化、迁移审计及无盲评池校验均未执行；未Gallery部署或生产浏览器验收。上述文档为本轮本地未提交记录，没有另提交或推送文档。
+
+## 恢复旧服务与部署再演练（2026-10-08，进行中）
+
+- 用户立即授权恢复未修改旧服务，恢复后演练修正流程、重采最新副本跑门禁，通过后继续后端部署和两题迁移。新规则：停服后发生任何失败，先恢复停服前确认的状态并核对服务重新可用，再汇报；不能停服等待，也不能恢复后自行推进失败步骤。其他失败先停止汇报。
+- 本次事故时间（UTC 2026-10-07）：服务inactive进入16:18:36，旧服务50259ad于16:23:44恢复active/running，16:24:01公网bootstrap验收通过；服务停服5分08秒，直到公网验收完成5分25秒。Brisbane对应2026-10-08 02:18:36、02:23:44、02:24:01。原因是未预检Python tarfile.filter兼容性，解包前失败；代码、版本和业务库未改变。启动瞬间首次请求502，应用就绪后正常，未以systemd active代替公网可用。
+- 恢复验证：旧版本50259ad，bootstrap有效比较6412、参与者164；原始votes6645不少于停服前，integrity ok、外键0。现场没有部署新代码或迁移分类。
+- 系统tar在线演练通过：归档成员相对路径、无..、只接受普通文件/目录；完整解包后269项文件清单和SHA精确匹配固定add9352归档；Node22.23.2、tar/npm及内置sqlite/crypto可用，零npm依赖；check109/0、test324/324，演练全程旧服务active。修正流程增加停服失败时先恢复旧代码、核对旧版本和服务就绪再报告的处理，不自动回退数据库丢弃新票。
+- 演练后最新一致副本采集于UTC 2026-10-07 16:25:55.067（Brisbane 2026-10-08 02:25:55.067）：6645票、874作品、211用户、7299对局、3245审计，v40、integrity ok、外键0；SHA256 9052ab0d1ae180009e18bfdf7e47a6bc8f3afbc48b6e92a628c20faaf39365e6。正在按恰好四票名单重新跑门禁，不复用前次放行。
+
+## 后端推理部署及两题迁移完成（2026-10-08）
+
+- 上节恢复/演练后重新门禁通过：规则排除名单恰好四票，配置6412→6411、模型6301→6300，参与者164不变；485侧同ID/digest并列原因，143人工更正保持，0归属键迁移，未受规则影响配置比较数不变，旧输入只排除四票精确复现新榜，无其他数值差异。完整新证据output/reasoning-release-20261008/release-retry/release-gate-win32.json；未复用前次门禁结果。
+- 后端一次部署成功：add9352c34d253e05ed3c8b4329efd780a3e9fd5，含归属计分、错题票规则和推理；origin/main同版本。UTC 2026-10-07 16:29:52.005726开始停服，16:29:52.262732完成重新启动，16:30:03.552447完成公网核验。停止到启动约0.26秒，停止到公网验证约11.55秒（不等于连续中断测量）。269项固定源码SHA一致，原数据包指针保持，服务active/running、ExecMainStatus=0、NRestarts=0；v40、integrity ok、外键0。停服前6646票逐行不变；门禁后新增一票及参与者，部署后实测有效比较6412/参与者165，不能与门禁时164强行比较。
+- 新备份/root/aob-backend-release-20261008-add9352/predeploy-retry/保存代码、版本、数据包指针及热备/停服一致库；旧失败备份保留。使用系统tar及已演练路径清单，不再调用不兼容filter参数；停服后异常会先恢复确认旧代码并启动/就绪验收，再报告，不恢复库丢新票。本次未触发恢复分支。
+- 两题通过管理员meta接口仅改category文学→推理，templates=text保持。以root运维授权使用既有kme7高级管理员，通过后端auth生成仅内存持有的短期会话，未创建账号、改变权限或密码；会话已撤销。数学题q-1479913673ca78cd审计3247，UTC16:30:37.775；BLUE q-a028b56bafec3a10审计3253，UTC16:34:54.697，action均question-edit，detail均记category from文学/to推理。
+- 迁移工具首轮在数学meta完成后的HTTP读取报fetch failed，异常清理又报database is locked，保存的初始错误未丢；暂停确认数学已改、BLUE未改，未重复数学写入。用户授权“有错先修复”后，修正工具：数据库连接读完即关闭，不跨HTTP持有；会话操作有busy_timeout并立即关闭；HTTP使用独立短连接；清理错误单独记录，不遮蔽主异常。先补全数学核验通过，再改BLUE；两次临时会话均撤销，未因工具失败回退业务改动。没有修改业务源码或schema。
+- 实际逐步统计：数学迁移前bootstrap/综合配置有效比较6412、参与者165，补核后6371/165（期间新增3票），写作569/79→525/79；综合条目123→122、题数51→50，写作条目75→73、题数10→9。BLUE前后6371/165、写作525/79均保持（它原本0票）。迁移最终采样6372/166，随后核验时6378/166，差异来自继续投票，完整时点分别记录，不能把实时净差当成类别移除效果。
+- 为隔离新增投票，使用只读post-migration一致副本6656票在两个独立临时库只恢复/保留两题类别重放（不写生产、不改审计）：综合6422/166→6378/166，写作569/79→525/79，恰好移出数学44有效比较；BLUE无计分影响，参与者均不因类别变更减少。综合115条、写作75条分数/名次/比较/参与者/题目数变化已逐项记录，包含写作2条退出；完整冻结输入前后榜单和差异在migration-frozen-replay.json，实际HTTP时点差异在migration-comparison.json。
+- 最终UTC16:36:34.107公网/服务/DB校验通过：add9352、active/running、NRestarts=0；原始votes6656，停服前6646逐行保持，后续迁移核验也无删改；v40、integrity ok、外键0、269源码SHA一致。两题bootstrap arena键均不存在，单题榜rows为空、有效比较0，审计存在，分类推理/text正确。没有删除旧票、迁移schema或写aiScore。
+- [完成归档](docs/archive/2026-10-08-backend-reasoning-release-wsnxxxs.md)。本轮本地只追加HANDOFF及归档/前轮状态勘误，未另提交或推送文档。未部署Gallery，未生产浏览器/真机及全交互验收；Gallery由另一边部署。根目录业务代码没有新增改动。

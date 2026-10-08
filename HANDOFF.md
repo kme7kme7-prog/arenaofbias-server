@@ -1,5 +1,12 @@
 # HANDOFF.md · 当前状态
 
+## 目录读取提速与媒体缓存头（2026-10-08，已推送 fd95151、已上线）
+
+- 兼容面两大缓存修复（/api/works 公网 6.2s→约 1.1s，/api/prompts 1.5s→95ms，均含 1027 件全量）：①合并题目录加缓存——taskOfRound 每行解析都会全量重建 promptCatalog（catalog.tasks 每题一轮 SQL），单次花名册读取要重建 264 次，是 4.9 秒的大头；题目任何变更必留 question-* audit 行，以 audit 戳+包版本做签名，60 秒 TTL 兜底直改库的场景。②文本作品解析缓存——per-work 缓存 original.txt/包装页提取结果，签名只认 works 行数+包版本（无关写库不清缓存），门禁与行过滤保持每请求实查。
+- 媒体缓存头：/media/pack-references 由 no-cache 改为 private, max-age=31536000, immutable（内容只随数据包变，Gallery 前端已带 ?v= 版本参数；private 因为题目可见性逐请求复检）；上传作品封面/截图由 no-store 改为 private, max-age=600（同名文件会被 re-bake 覆盖，10 分钟新鲜度折中），legacy 保持 public 300。
+- 测试：新增缓存行为测试（重复读取一致、行级修改即时可见、建题走真实 API 后即时入列、works 行数变化触发文件重读）；参考图 HTTP 契约更新为 immutable。全量 326/326。
+- 部署：合并 wsnxxxs 盲测钉模型四提交（含 v41 matches.pin 迁移，生产已应用），DB 备份 /root/pre-cache-v41-platform.db。遗留：liveWorks 单条 SQL 在服务进程约 750ms（同款语句新进程 12ms，原因未明，未再深挖）；Gallery 域下 /media/pack-references/ 相对路径疑 404（文件在 api 域，前端 references.js 未拼 api base——待 Gallery 侧确认）。
+
 ## 固定模型联合发布（2026-10-08，已推送、已上线）
 
 - 用户授权推送联调部署。既有5fc2fa5、d110623正常推送main，目标d1106234d120d530e8618e2d4490d9dcab834f03已上线，GitHub CI成功；Gallery连接恢复与固定模型同轮发布。此前固定模型「未推送、未部署」由本节覆盖。

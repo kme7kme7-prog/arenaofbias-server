@@ -364,7 +364,7 @@ test('retired snapshot ballots never enter live vote or rating responses', () =>
     mkdirSync(join(root, 'works', 'up-cach0001'), { recursive: true });
     writeFileSync(join(root, 'works', 'up-cach0001', 'original.txt'), '第一版故事。');
     try {
-      await withServer({ tasks: [{ id: 'show1-001', arenaId: '001', kind: 'text', category: '文学', title: '深夜聊天', prompt: '回答一个问题', summary: '聊天' }], config: { dataDir: root } }, async ({ db, base }) => {
+      await withServer({ tasks: [{ id: 'show1-001', arenaId: '001', kind: 'text', category: '文学', title: '深夜聊天', prompt: '回答一个问题', summary: '聊天' }], config: { dataDir: root } }, async ({ db, auth, questions, base }) => {
         seedWorks(db);
         const columns = db.prepare('PRAGMA table_info(works)').all().map((column) => column.name);
         db.exec(`INSERT INTO works (${columns.join(', ')}) SELECT ${columns.map((name) => ({
@@ -380,13 +380,14 @@ test('retired snapshot ballots never enter live vote or rating responses', () =>
         assert.equal(renamed.title, '改名之后');
         db.prepare("UPDATE works SET show_entertainment = 0 WHERE id = 'up-cach0001'").run();
         assert.equal((await call(base, 'GET', '/api/works')).data.works.some((work) => work.id === 'up-cach0001'), false);
-        // New questions appear in the prompt list without delay.
-        db.prepare("INSERT INTO users (id, name, name_key, role, salt, hash, created_at) VALUES ('u-cache01', 'cache-admin', 'cache-admin', 'admin', 'x', 'y', 1)").run();
-        db.prepare(`INSERT INTO questions (id, owner_id, title, summary, prompt, tags, templates, created_at,
-          moderation, category, domains, author_role, accepts_uploads, reference_credit)
-          VALUES ('q-cache0001', 'u-cache01', '缓存题', '简述', '提示词', '[]', '["text"]', 2,
-          '{"status":"approved"}', '文学', '[]', 'admin', 1, '')`).run();
-        assert.equal((await call(base, 'GET', '/api/prompts')).data.prompts.some((prompt) => prompt.id === 'q-cache0001'), true);
+        // New questions appear in the prompt list without delay. Going through the
+        // real API (not a bare INSERT) leaves the audit rows that key the catalog cache.
+        const admin = auth.createAdmin('root', 'correct horse');
+        const senior = { ...admin, role: 'admin' };
+        const created = questions.createByAdmin(senior, { title: '缓存题', summary: '简述', prompt: '提示词',
+          category: '文学', domains: ['文学艺术'], templates: ['text'] }, []);
+        questions.review(senior, created.id, { status: 'approved' });
+        assert.equal((await call(base, 'GET', '/api/prompts')).data.prompts.some((prompt) => prompt.name === '缓存题'), true);
       });
       // A works-row write retires the parsed stories: re-extracted files show up
       // on the next read without waiting for the TTL floor.

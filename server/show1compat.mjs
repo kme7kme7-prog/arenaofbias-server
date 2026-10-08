@@ -56,6 +56,7 @@ export function registerShow1Compat(router, deps) {
     changes: db.prepare('SELECT total_changes() AS n'),
     dataVersion: db.prepare('PRAGMA data_version'),
     worksStamp: db.prepare('SELECT COUNT(*) AS n FROM works'),
+    questionAudit: db.prepare("SELECT COUNT(*) AS n, COALESCE(MAX(id), 0) AS m FROM audit WHERE action LIKE 'question%'"),
     liveFormal: db.prepare("SELECT * FROM votes WHERE source = 'show1' AND compat_mode = 'formal' ORDER BY created_at, id"),
     liveEntertainment: db.prepare("SELECT * FROM votes WHERE source = 'show1' AND (compat_mode IS NULL OR compat_mode <> 'formal') ORDER BY created_at, id"),
     voteByPair: db.prepare('SELECT * FROM votes WHERE user_id = ? AND pair_key = ?'),
@@ -84,7 +85,11 @@ export function registerShow1Compat(router, deps) {
 
   // Keep legacy arena numbers; other public questions retain their canonical task ID.
   // catalog.tasks() is the public question catalog, including reviewed database questions.
-  function promptCatalog() {
+  // The merge runs one database round per catalog task, and taskOfRound resolves it for
+  // every roster row — without the cache one roster read rebuilt the catalog hundreds of
+  // times. Question changes always leave an audit row, which keys the cache together with
+  // the package version; the TTL floor is a backstop for direct database edits.
+  function buildPromptCatalog() {
     const taskByRound = { ...snapshot.taskByRound }, roundByTask = { ...snapshot.roundByTask };
     const prompts = new Map(snapshot.prompts.map((prompt) => [prompt.id, prompt]));
     for (const task of deps.catalog.tasks?.() ?? []) {
@@ -110,6 +115,15 @@ export function registerShow1Compat(router, deps) {
     }
     return { prompts: [...prompts.values()].filter((prompt) => !isAiJudgedTask(deps.catalog.task?.(taskByRound[prompt.id]) ?? prompt))
       .sort((a, b) => a.id.localeCompare(b.id)), taskByRound, roundByTask };
+  }
+  let catalogCache = { signature: '', at: 0, value: null };
+  function promptCatalog() {
+    const stamp = q.questionAudit.get();
+    const signature = `${stamp.n}|${stamp.m}|${deps.catalog.version ?? ''}`;
+    const now = Date.now();
+    if (catalogCache.value && catalogCache.signature === signature && now - catalogCache.at < 60_000) return catalogCache.value;
+    catalogCache = { signature, at: now, value: buildPromptCatalog() };
+    return catalogCache.value;
   }
   const taskOfRound = (round) => promptCatalog().taskByRound[round];
   const roundOfTask = (task) => promptCatalog().roundByTask[task];

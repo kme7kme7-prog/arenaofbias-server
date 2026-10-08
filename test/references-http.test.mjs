@@ -285,7 +285,9 @@ describe('reference image HTTP contract', () => {
     const image = await call('guest', 'GET', path);
     assert.equal(image.status, 200); assert.deepEqual(image.buffer, png);
     assert.equal(image.headers.get('content-type'), 'image/png');
-    assert.equal(image.headers.get('cache-control'), 'no-cache');
+    // Packaged references are immutable per data package; the gallery stamps the
+    // URL with a version. Private: question visibility is re-checked per request.
+    assert.equal(image.headers.get('cache-control'), 'private, max-age=31536000, immutable');
     assert.equal(image.headers.get('access-control-allow-origin'), galleryOrigin);
     assert.equal((await call('guest', 'HEAD', path)).status, 200);
     assert.equal((await call('guest', 'OPTIONS', path, undefined, { 'access-control-request-method': 'GET' })).status, 204);

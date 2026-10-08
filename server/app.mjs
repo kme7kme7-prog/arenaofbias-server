@@ -685,7 +685,11 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         && snapshot.task(taskId)?.references.find((ref) => ref.name === name);
       const found = image && resolveInside(snapshot.root, `/${image.src}`);
       if (!found) return sendJson(res, 404, { error: '文件不存在' });
-      return streamFile(req, res, found, { 'Cache-Control': 'no-cache', 'Vary': 'Origin, Cookie',
+      // Packaged references only change with the data package and the gallery
+      // version stamps the URL (?v=), so browsers may keep them indefinitely.
+      // Private: question visibility is re-checked per request, a shared cache
+      // must not answer for a viewer the gate would reject.
+      return streamFile(req, res, found, { 'Cache-Control': 'private, max-age=31536000, immutable', 'Vary': 'Origin, Cookie',
         'Content-Security-Policy': "default-src 'none'" });
     }
     const reference = /^\/media\/references\/([a-z0-9-]+)\.(png|jpg|webp)$/.exec(pathname);
@@ -708,7 +712,10 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       if (!library.canRead(work, auth.userFrom(req))) return sendJson(res, 404, { error: '文件不存在' });
       const found = media && resolveInside(library.mediaDir, `/${media[1]}/${media[2]}`);
       if (!found) return sendJson(res, 404, { error: '文件不存在' });
-      return streamFile(req, res, found, { 'Cache-Control': work.moderation.status === 'legacy' ? 'public, max-age=300' : 'no-store', 'Content-Security-Policy': "default-src 'none'" });
+      // Covers and screenshots keep their file names while re-bakes overwrite
+      // them, so published works get a short private cache instead of immutable;
+      // legacy media is frozen and stays shareable.
+      return streamFile(req, res, found, { 'Cache-Control': work.moderation.status === 'legacy' ? 'public, max-age=300' : 'private, max-age=600', 'Content-Security-Policy': "default-src 'none'" });
     }
     // Admin inbox previews stream straight from the staging directory; session-guarded
     // because these files are not published works yet.

@@ -359,6 +359,58 @@ test('retired snapshot ballots never enter live vote or rating responses', () =>
     assert.equal((await call(base, 'GET', '/api/works')).data.works.some((work) => work.id === live.id), false);
   }));
 
+  test('the roster cache repeats answers and refreshes on database writes', () => withServer({}, async ({ db, base }) => {
+    const root = mkdtempSync(join(tmpdir(), 'compat-cache-'));
+    mkdirSync(join(root, 'works', 'up-cach0001'), { recursive: true });
+    writeFileSync(join(root, 'works', 'up-cach0001', 'original.txt'), '第一版故事。');
+    try {
+      await withServer({ tasks: [{ id: 'show1-001', arenaId: '001', kind: 'text', category: '文学', title: '深夜聊天', prompt: '回答一个问题', summary: '聊天' }], config: { dataDir: root } }, async ({ db, auth, questions, base }) => {
+        seedWorks(db);
+        const columns = db.prepare('PRAGMA table_info(works)').all().map((column) => column.name);
+        db.exec(`INSERT INTO works (${columns.join(', ')}) SELECT ${columns.map((name) => ({
+          id: "'up-cach0001'", content_key: "'wcach'", digest: "'dcach'", task_id: "'show1-001'",
+        })[name] ?? name).join(', ')} FROM works WHERE id = 'up-bbbb0002'`);
+        const before = (await call(base, 'GET', '/api/works')).data;
+        assert.equal(before.works.some((work) => work.id === 'up-cach0001'), true);
+        // A second read inside the story cache window returns the same roster.
+        assert.deepEqual((await call(base, 'GET', '/api/works')).data, before);
+        // Row-level changes are SQL reads and stay live; only file parsing is cached.
+        db.prepare("UPDATE works SET title = '改名之后' WHERE id = 'up-cach0001'").run();
+        const renamed = (await call(base, 'GET', '/api/works')).data.works.find((work) => work.id === 'up-cach0001');
+        assert.equal(renamed.title, '改名之后');
+        db.prepare("UPDATE works SET show_entertainment = 0 WHERE id = 'up-cach0001'").run();
+        assert.equal((await call(base, 'GET', '/api/works')).data.works.some((work) => work.id === 'up-cach0001'), false);
+        // New questions appear in the prompt list without delay. Going through the
+        // real API (not a bare INSERT) leaves the audit rows that key the catalog cache.
+        const admin = auth.createAdmin('root', 'correct horse');
+        const senior = { ...admin, role: 'admin' };
+        const created = questions.createByAdmin(senior, { title: '缓存题', summary: '简述', prompt: '提示词',
+          category: '文学', domains: ['文学艺术'], templates: ['text'] }, []);
+        questions.review(senior, created.id, { status: 'approved' });
+        assert.equal((await call(base, 'GET', '/api/prompts')).data.prompts.some((prompt) => prompt.name === '缓存题'), true);
+      });
+      // A works-row write retires the parsed stories: re-extracted files show up
+      // on the next read without waiting for the TTL floor.
+      await withServer({ tasks: [{ id: 'show1-001', arenaId: '001', kind: 'text', category: '文学', title: '深夜聊天', prompt: '回答一个问题', summary: '聊天' }], config: { dataDir: root } }, async ({ db, base }) => {
+        seedWorks(db);
+        const columns = db.prepare('PRAGMA table_info(works)').all().map((column) => column.name);
+        db.exec(`INSERT INTO works (${columns.join(', ')}) SELECT ${columns.map((name) => ({
+          id: "'up-cach0001'", content_key: "'wcach'", digest: "'dcach'", task_id: "'show1-001'",
+        })[name] ?? name).join(', ')} FROM works WHERE id = 'up-bbbb0002'`);
+        const first = (await call(base, 'GET', '/api/works')).data.works.find((work) => work.id === 'up-cach0001');
+        assert.deepEqual(JSON.parse(first.content).story.paragraphs, ['第一版故事。']);
+        writeFileSync(join(root, 'works', 'up-cach0001', 'original.txt'), '第二版故事。');
+        db.exec(`INSERT INTO works (${columns.join(', ')}) SELECT ${columns.map((name) => ({
+          id: "'up-cach0002'", content_key: "'wcach2'", digest: "'dcach2'", task_id: "'show1-001'",
+        })[name] ?? name).join(', ')} FROM works WHERE id = 'up-bbbb0002'`);
+        const second = (await call(base, 'GET', '/api/works')).data.works.find((work) => work.id === 'up-cach0001');
+        assert.deepEqual(JSON.parse(second.content).story.paragraphs, ['第二版故事。']);
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }));
+
   test('text task uploads hand out the original story instead of the html wrapper', () => {
     const root = mkdtempSync(join(tmpdir(), 'compat-text-'));
     mkdirSync(join(root, 'works', 'up-text0001'), { recursive: true });

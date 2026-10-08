@@ -1,5 +1,11 @@
 # HANDOFF.md · 当前状态
 
+## 本轮联合发布准备（2026-10-08）
+
+- 用户授权推送并部署 Gallery 与配套后台。远端 main 已有 c4583e4 目录提速及媒体缓存改动，正常合并保留；仅 HANDOFF 顶部追加段落发生冲突，两侧记录均保留，无功能冲突、强推或业务数据修改。
+- 合并后 Windows check111/0、test328/328；合并前第一次全量随机端口触发 Undici bad port，重跑327/327，未改测试。准备以固定已推送提交上线，先核对生产源码来源、最新一致副本新旧榜单及行保留，Linux验证通过后备份发布。
+- 现场 marker 与公网 bootstrap 均 c4583e4；暂未部署。最终部署、Linux验证、备份与目检结果由 Gallery 同轮 HANDOFF 和归档记录覆盖。本仓无 build/intake，不做生产投稿、投票、审核或改登记。
+- [本轮准备归档](docs/archive/2026-10-08-model-suggest-release-preparation-wsnxxxs.md)。
 ## 模型名称去点与只读重复报告（2026-10-08，未提交、未推送、未部署）
 
 - `modelNameKey` 与 Gallery compact 对齐：NFKC、小写后 `replace(/[^\p{L}\d]+/gu, '')`，只保留字母/数字。修改前当前注册表含 modelPool 的262模型、442名称/全部别名，新规则303键、跨模型冲突0。旧 modelNameKey 仅用于内存名称索引，没有持久化键消费者；modelKey/entityKey 和读取榜单时的 x: 自填名保持，不做错字或版本号近似匹配。
@@ -21,6 +27,18 @@
 - 用户要求取消公开作品定期复查，保留新投稿审核。已删除扫描/定时器/基线比较与写入/recheck入口及CONTENT_RECHECK_HOURS配置；遗留环境变量不生效。投稿初审、失败转人工、持久化pending恢复和明确人工审核/审核重试保留，历史审核/审计/媒体不改。
 - Windows与Linux隔离源码check109/0、test324/324；删2个旧复查测试，新增1个48小时不重新截图公开作品的回归，初审与重启恢复等既有测试保留。最新生产一致副本6931票/925作品/v41，新旧模型/配置榜64/130行、6538/6653有效比较/173参与者逐字段一致，全部旧表逐行保留、integrity ok、外键0。
 - 本轮一条英文源码提交、不push。生产发布由当前Gallery工作区完成，只安装moderation/config两个运行文件，停服最新备份后再跑门禁；实际部署结果见Gallery本轮交接/归档。没有后端build/intake脚本，无页面或数据包变化，不做生产付费审核或浏览器交互。[源码交付记录](docs/archive/2026-10-08-remove-periodic-review-wsnxxxs.md)。
+## 目录读取二次提速：批量门禁与版本采样（2026-10-08，已推送 c4583e4、已上线）
+
+- CPU profile（inspector）定位剩余 600ms 的三个来源并全部修掉，/api/works 本地 1.1s→0.64s、公网稳定约 0.75s（对比最初的 6.2s）：①每行 roster 都对 catalog.task() 发一次 SQL（AI 判定与门禁）——合并目录缓存新增 aiRounds 集合，判定改走缓存；②每件作品一次 byContentKey（users JOIN + audit 关联子查询 ×900）——改为一次批量 SELECT 取门禁所需字段，行仍每请求现取，moderation 翻转即时生效的语义不变，publicContent 判定仍走 library；③签名里的 catalog.version 每次触发的 realpath+stat 在本机要几十毫秒——5 秒采样（包切换另有 takeover 回调通知）。
+- 附带发现（给 Gallery/反爬侧的参考，未改）：nginx aob_read_catalog 限流 30r/m+burst15 是接口 6 秒时代定的，现在前端一次页面加载就打 4 个 catalog 请求（works/prompts/ratings×2），连续浏览会耗干桶出现秒级排队；后端已提到亚秒，可考虑放宽。node 侧 readGuard 的 catalog 预算（30/60s）同量级。
+- 测试 326/326；生产部署含 v41；探针与 profile 脚本已全部清理。
+
+## 目录读取提速与媒体缓存头（2026-10-08，已推送 fd95151、已上线）
+
+- 兼容面两大缓存修复（/api/works 公网 6.2s→约 1.1s，/api/prompts 1.5s→95ms，均含 1027 件全量）：①合并题目录加缓存——taskOfRound 每行解析都会全量重建 promptCatalog（catalog.tasks 每题一轮 SQL），单次花名册读取要重建 264 次，是 4.9 秒的大头；题目任何变更必留 question-* audit 行，以 audit 戳+包版本做签名，60 秒 TTL 兜底直改库的场景。②文本作品解析缓存——per-work 缓存 original.txt/包装页提取结果，签名只认 works 行数+包版本（无关写库不清缓存），门禁与行过滤保持每请求实查。
+- 媒体缓存头：/media/pack-references 由 no-cache 改为 private, max-age=31536000, immutable（内容只随数据包变，Gallery 前端已带 ?v= 版本参数；private 因为题目可见性逐请求复检）；上传作品封面/截图由 no-store 改为 private, max-age=600（同名文件会被 re-bake 覆盖，10 分钟新鲜度折中），legacy 保持 public 300。
+- 测试：新增缓存行为测试（重复读取一致、行级修改即时可见、建题走真实 API 后即时入列、works 行数变化触发文件重读）；参考图 HTTP 契约更新为 immutable。全量 326/326。
+- 部署：合并 wsnxxxs 盲测钉模型四提交（含 v41 matches.pin 迁移，生产已应用），DB 备份 /root/pre-cache-v41-platform.db。遗留：liveWorks 单条 SQL 在服务进程约 750ms（同款语句新进程 12ms，原因未明，未再深挖）；Gallery 域下 /media/pack-references/ 相对路径疑 404（文件在 api 域，前端 references.js 未拼 api base——待 Gallery 侧确认）。
 
 ## 固定模型联合发布（2026-10-08，已推送、已上线）
 

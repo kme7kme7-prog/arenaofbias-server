@@ -1,5 +1,11 @@
 # HANDOFF.md · 当前状态
 
+## 盲评固定模型（2026-10-08，本地提交，未推送、未部署）
+
+- 高级管理员可在盲评中固定一个模型（含全部档位）：`createMatch` 的 `pin` 只出含该模型的组合，左右随机，对手优先比较次数多的配置；冷却/回避上一组只作用于对手；非高级管理员403，无可配对作品409 `pinned-absent`。票照常计入公开榜单，对局新列 `pin` 留痕；vote 返回 `pinned` 侧；高级管理员 bootstrap 增加 `arenaModels`。
+- **新增迁移 matches.pin（v41）**，上线前按规程备份并在最新一致副本跑门禁；先部署后台再部署 Gallery。
+- check109/0、test325/325；Gallery真实后台临时库端到端通过。[本轮归档](docs/archive/2026-10-08-arena-pinned-model-wsnxxxs.md)。
+
 ## 归属按当前信息提交复验（2026-10-08，仅本地提交）
 
 - 用户授权将 2026-10-06 归属改动及对应归档单独提交；负责人 wsnxxxs，使用 GitHub noreply 邮箱。提交前本机 check108/0、test320/320、git diff --check 通过，与原记录一致；本次没有重跑 Linux 或生产副本五项门禁。

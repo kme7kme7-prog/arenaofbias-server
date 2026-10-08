@@ -9,7 +9,7 @@ import { MIGRATIONS, openDatabase } from '../server/db.mjs';
 test('the last-seen migration backfills account activity from live sessions', () => {
   const root = mkdtempSync(join(tmpdir(), 'last-seen-migration-'));
   const file = join(root, 'platform.db');
-  const version = MIGRATIONS.length - 1;
+  const version = MIGRATIONS.findLastIndex((migration) => String(migration).includes('users ADD COLUMN last_seen_at'));
   let db = new DatabaseSync(file);
   try {
     for (const migration of MIGRATIONS.slice(0, version)) typeof migration === 'function' ? migration(db) : db.exec(migration);

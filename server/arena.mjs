@@ -8,6 +8,8 @@
 // of each, so an entry with many works is not shown more often. Pairs are weighted towards
 // entries with few comparisons, prefer entries of similar strength, and avoid the previous
 // round's works, ordinary voters' own uploads and pairs the voter has already judged.
+// A senior admin may pin a model: every pair then holds one of its works, on a random side, against
+// an established entry of another model, and the ballot counts as usual.
 import { randomBytes } from 'node:crypto';
 import { Worker } from 'node:worker_threads';
 import { effortKey, entityKey, modelKey, providerOf } from './catalog.mjs';
@@ -16,7 +18,7 @@ import { fail, HttpError } from './http.mjs';
 import { rankEntries, rankWorks } from './ranking.mjs';
 import { generationOf } from './generation.mjs';
 import { isTextTask, isAiJudgedTask } from './categories.mjs';
-import { isStaff } from './roles.mjs';
+import { isSenior, isStaff } from './roles.mjs';
 import { manualCorrections, voteAttribution, votesBeforeTaskMove } from './vote-attribution.mjs';
 
 const MATCH = { tierWidth: 150, sameTierRate: 0.9, blowoutGap: 400, rerolls: 2, cooldownRounds: 6, cooldownMs: 15 * 60e3 };
@@ -44,7 +46,7 @@ const fromIdentity = (text) => {
 
 export function createArena({ db, catalog, library, limits, random = Math.random }) {
   const q = {
-    insertMatch: db.prepare('INSERT INTO matches (id, user_id, task_id, a_work, b_work, a_token, b_token, created_at, expires_at, datapack_root, datapack_version, a_identity, b_identity) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+    insertMatch: db.prepare('INSERT INTO matches (id, user_id, task_id, a_work, b_work, a_token, b_token, created_at, expires_at, datapack_root, datapack_version, a_identity, b_identity, pin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
     match: db.prepare('SELECT * FROM matches WHERE id = ?'),
     lastMatch: db.prepare('SELECT * FROM matches WHERE user_id = ? AND task_id = ? ORDER BY created_at DESC LIMIT 1'),
     recentReveals: db.prepare("SELECT task_id, a_work, b_work, decided_at FROM matches WHERE user_id = ? AND choice IN ('a', 'b', 'tie') ORDER BY created_at DESC LIMIT ?"),
@@ -240,7 +242,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     return pending;
   }
 
-  function candidatesFor(groups, votedRows, avoid) {
+  function candidatesFor(groups, votedRows, avoid, pin = null) {
     const entries = [...groups].map(([key, works]) => [key, works.filter((work) => !avoid.has(work.id))]);
     const groupOf = new Map();
     for (let i = 0; i < entries.length; i++) for (const work of entries[i][1]) groupOf.set(work.id, i);
@@ -256,6 +258,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       for (let j = i + 1; j < entries.length; j++) {
         if (!entries[i][1].length || !entries[j][1].length ||
           (entries[i][1][0].promptVariant ?? '') !== (entries[j][1][0].promptVariant ?? '')) continue;
+        if (pin && (modelKey(entries[i][1][0]) === pin) === (modelKey(entries[j][1][0]) === pin)) continue;
         const available = entries[i][1].length * entries[j][1].length - (unavailable.get(`${i}:${j}`) ?? 0);
         if (available > 0) candidates.push({ keys: [entityKey(entries[i][1][0]), entityKey(entries[j][1][0])], left: entries[i][1], right: entries[j][1], available });
       }
@@ -273,13 +276,16 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     throw new Error('Candidate count changed while sampling');
   }
 
-  function pick(candidates, board) {
+  function pick(candidates, board, pin = null) {
     const rating = new Map(board.rows.map((row) => [row.key, row.score]));
     const games = new Map(board.rows.map((row) => [row.key, row.games]));
     const score = (key) => rating.get(key) ?? 1000;
     const tier = (key) => Math.floor(score(key) / MATCH.tierWidth);
     // Cold start first (arenaofbias 109): the fewer comparisons the rarer entry has, the likelier.
-    const weight = ({ keys }) => 1 / (1 + Math.min(games.get(keys[0]) ?? 0, games.get(keys[1]) ?? 0));
+    // A pinned model is the newcomer; its opponent should be the settled one, so the weight turns over.
+    const opponent = ({ keys, left }) => modelKey(left[0]) === pin ? keys[1] : keys[0];
+    const weight = pin ? (candidate) => 1 + Math.min(games.get(opponent(candidate)) ?? 0, 20)
+      : ({ keys }) => 1 / (1 + Math.min(games.get(keys[0]) ?? 0, games.get(keys[1]) ?? 0));
     const roulette = (list) => {
       let ticket = random() * list.reduce((sum, candidate) => sum + weight(candidate), 0);
       for (const candidate of list) if ((ticket -= weight(candidate)) <= 0) return candidate;
@@ -299,14 +305,32 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     return { works: works.length, entries: new Set(works.map((work) => entityKey(work))).size };
   }
 
+  // Models in the blind pool and the tasks holding their works, for a senior admin to pin.
+  function poolModels() {
+    const archive = catalog.snapshot();
+    const models = new Map();
+    for (const task of catalog.tasks()) {
+      if (isAiJudgedTask(task)) continue;
+      for (const work of library.eligible(task.id)) {
+        const key = modelKey(work);
+        if (!models.has(key)) models.set(key, { key, name: (work.modelId && archive.model(work.modelId)?.name) || work.modelName, tasks: [] });
+        const { tasks } = models.get(key);
+        if (tasks.at(-1) !== task.id) tasks.push(task.id);
+      }
+    }
+    return [...models.values()].sort((a, b) => a.name.localeCompare(b.name, 'en', { numeric: true }));
+  }
+
   return {
     invalidate,
     cleanupExpiredMatches,
     leaderboard,
     workScores,
     poolStats,
+    poolModels,
 
-    async createMatch(user, taskId, previousId, snapshot = catalog.snapshot(), avoidCooling = false) {
+    async createMatch(user, taskId, previousId, snapshot = catalog.snapshot(), avoidCooling = false, pin = null) {
+      if (pin && !isSenior(user)) fail(403, '仅高级管理员可以固定模型');
       if (!snapshot.task(taskId) && !catalog.task(taskId)) fail(404, '题目不存在');
       if (isAiJudgedTask(catalog.task(taskId) ?? snapshot.task(taskId))) fail(409, '这道题由 AI 评分，暂不开放盲评', 'ai-judged');
       if (Date.now() - lastCleanup >= 60e3) cleanupExpiredMatches();
@@ -319,29 +343,35 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       }
       if (new Set([...groups.values()].map((works) => entityKey(works[0]))).size < 2)
         fail(409, '这道题还没有两个不同模型配置的已验证作品', 'insufficient');
+      // The pinned model's works appear in every pair, so neither the last round nor cooling avoids them.
+      const pinned = new Set();
+      if (pin) {
+        for (const works of groups.values()) if (modelKey(works[0]) === pin) for (const work of works) pinned.add(work.id);
+        if (!pinned.size || [...groups.values()].every((works) => modelKey(works[0]) === pin))
+          fail(409, '这道题没有该模型可配对的作品', 'pinned-absent');
+      }
       const votedRows = user ? q.votedPairs.all(user.id, taskId).filter((row) => row.pair_key.startsWith(`${taskId}:`)) : [];
       const voted = new Set(votedRows.map((row) => row.pair_key));
       const previous = previousId ? q.match.get(String(previousId)) : user ? q.lastMatch.get(user.id, taskId) : null;
-      const previousWorks = new Set(previous?.task_id === taskId ? [previous.a_work, previous.b_work] : []);
+      const previousWorks = new Set((previous?.task_id === taskId ? [previous.a_work, previous.b_work] : []).filter((id) => !pinned.has(id)));
       const cooling = new Set();
       const cutoff = Date.now() - MATCH.cooldownMs;
       for (const row of user ? q.recentReveals.all(user.id, MATCH.cooldownRounds) : []) {
         if (row.task_id === taskId && row.decided_at > cutoff) {
-          cooling.add(row.a_work);
-          cooling.add(row.b_work);
+          for (const id of [row.a_work, row.b_work]) if (!pinned.has(id)) cooling.add(id);
         }
       }
-      let candidates = candidatesFor(groups, votedRows, new Set([...previousWorks, ...cooling]));
-      if (!candidates.length && previousWorks.size) candidates = candidatesFor(groups, votedRows, cooling);
-      if (!candidates.length && avoidCooling && candidatesFor(groups, votedRows, new Set()).length)
+      let candidates = candidatesFor(groups, votedRows, new Set([...previousWorks, ...cooling]), pin);
+      if (!candidates.length && previousWorks.size) candidates = candidatesFor(groups, votedRows, cooling, pin);
+      if (!candidates.length && avoidCooling && candidatesFor(groups, votedRows, new Set(), pin).length)
         fail(409, '这道题剩下的组合都有刚揭晓过的作品', 'cooling');
       if (!candidates.length && !avoidCooling) {
-        if (previousWorks.size) candidates = candidatesFor(groups, votedRows, previousWorks);
-        if (!candidates.length) candidates = candidatesFor(groups, votedRows, new Set());
+        if (previousWorks.size) candidates = candidatesFor(groups, votedRows, previousWorks, pin);
+        if (!candidates.length) candidates = candidatesFor(groups, votedRows, new Set(), pin);
       }
       if (!candidates.length) fail(409, '这道题的组合你都已经评过了，换一道题试试', 'exhausted');
 
-      const chosen = pick(candidates, await leaderboard({ task: taskId, snapshot }));
+      const chosen = pick(candidates, await leaderboard({ task: taskId, snapshot }), pin);
       const [first, second] = pickWorks(taskId, chosen, voted, random);
       const [a, b] = random() < 0.5 ? [first, second] : [second, first];
       const id = randomBytes(12).toString('hex');
@@ -356,7 +386,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       }
       q.insertMatch.run(id, user?.id ?? null, taskId, a.id, b.id, tokens[0], tokens[1], now, now + limits.matchTtl,
         snapshot.root, snapshot.version, JSON.stringify(identityOf(a, a.curated ? snapshot.entryDigest(a) : a.digest)),
-        JSON.stringify(identityOf(b, b.curated ? snapshot.entryDigest(b) : b.digest)));
+        JSON.stringify(identityOf(b, b.curated ? snapshot.entryDigest(b) : b.digest)), pin);
       return {
         id,
         task: taskId,
@@ -408,7 +438,9 @@ export function createArena({ db, catalog, library, limits, random = Math.random
         ...library.toPublic(work, user),
         title: identity.title, model: identity.modelId, modelName: identity.modelName, vendor: identity.vendor, effort: identity.effort,
       } : null;
-      return { choice, counted, reason, a: reveal(a, aIdentity), b: reveal(b, bIdentity) };
+      // A pinned round says which side held the pinned model, for the admin's running tally.
+      const pinned = match.pin ? (aIdentity.modelKey === match.pin ? 'a' : bIdentity.modelKey === match.pin ? 'b' : null) : undefined;
+      return { choice, counted, reason, a: reveal(a, aIdentity), b: reveal(b, bIdentity), ...(pinned !== undefined ? { pinned } : {}) };
     },
 
     // The work behind a match token, for the content server.

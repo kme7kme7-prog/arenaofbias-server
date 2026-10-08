@@ -551,6 +551,11 @@ const MIGRATIONS = [
     if (!columns.has('last_seen_at')) db.exec('ALTER TABLE users ADD COLUMN last_seen_at INTEGER');
     db.exec('UPDATE users SET last_seen_at = (SELECT MAX(last_seen_at) FROM sessions WHERE user_id = users.id) WHERE last_seen_at IS NULL');
   },
+  // A senior admin's pinned rounds keep the model they fixed, so those ballots can be told apart later.
+  (db) => {
+    const columns = new Set(db.prepare('PRAGMA table_info(matches)').all().map((column) => column.name));
+    if (columns.size && !columns.has('pin')) db.exec('ALTER TABLE matches ADD COLUMN pin TEXT');
+  },
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

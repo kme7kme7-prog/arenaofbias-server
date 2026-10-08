@@ -398,6 +398,34 @@ test('cleanup retains expired login decisions without counted votes, including s
   } finally { f.close(); }
 });
 
+test('a senior admin pin keeps its model in every counted pair despite cooling, until its pairs run out', async () => {
+  const f = fixture([work('a1'), work('a2'), work('b1', 'b'), work('c1', 'c')]);
+  const admin = { id: 'senior', name: 'senior', role: 'admin', email: 'senior@example.test' };
+  try {
+    f.enable();
+    f.db.prepare(`INSERT INTO users (id, name, name_key, role, salt, hash, created_at, email)
+      VALUES (?, ?, ?, 'admin', '', '', 1, ?)`).run(admin.id, admin.name, admin.name, admin.email);
+    assert.deepEqual(f.arena.poolModels().find((model) => model.key === 'c').tasks, ['one']);
+    await assert.rejects(() => f.arena.createMatch({ ...admin, role: 'moderator' }, 'one', undefined, undefined, false, 'c'), (error) => error.status === 403);
+    await assert.rejects(() => f.arena.createMatch(admin, 'one', undefined, undefined, false, 'missing'), (error) => error.code === 'pinned-absent');
+    const opponents = [];
+    let previous;
+    for (let i = 0; i < 3; i++) {
+      const match = await f.arena.createMatch(admin, 'one', previous, undefined, true, 'c');
+      const row = f.db.prepare('SELECT a_work, b_work, pin FROM matches WHERE id = ?').get(match.id);
+      assert.equal(row.pin, 'c');
+      assert.ok([row.a_work, row.b_work].includes('c1'));
+      opponents.push([row.a_work, row.b_work].find((id) => id !== 'c1'));
+      const result = f.arena.vote(admin, match.id, 'a');
+      assert.deepEqual([result.counted, result.pinned], [true, row.a_work === 'c1' ? 'a' : 'b']);
+      previous = match.id;
+    }
+    assert.deepEqual(opponents.sort(), ['a1', 'a2', 'b1']);
+    assert.equal((await f.arena.leaderboard({ task: 'one' })).totals.votes, 3);
+    await assert.rejects(() => f.arena.createMatch(admin, 'one', previous, undefined, false, 'c'), (error) => error.code === 'exhausted');
+  } finally { f.close(); }
+});
+
 test('match HTTP route forwards only a boolean avoidCooling flag', async () => {
   const f = coolingFixture([work('a1'), work('b1', 'b')]);
   let platform, server;

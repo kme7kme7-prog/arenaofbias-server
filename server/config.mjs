@@ -83,7 +83,7 @@ export const limits = {
 };
 
 // Effort levels offered on the upload form; curated works keep their own labels.
-export const EFFORTS = ['Low', 'Medium', 'High', 'XHigh', 'Max'];
+export const EFFORTS = ['Low', 'Medium', 'High', 'XHigh', 'Max', 'Ultra', 'Ultracode'];
 // Gallery reaction sticker ids; each frontend ships the art. Show1's legacy 👍/👀/🤯 votes share
 // the reactions table but are not in this list, so Gallery neither accepts nor counts them.
 export const EMOJIS = ['lick', 'lol', 'press', 'luck', 'yes', 'drool', 'knock', 'stare', 'no'];

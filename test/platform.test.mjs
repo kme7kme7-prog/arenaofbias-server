@@ -1244,4 +1244,21 @@ describe('platform lifecycle', () => {
     assert.equal(staticBoard.status, 200);
     assert.ok(![...staticBoard.data.rows, ...staticBoard.data.unranked].some(row => row.key === 'm-b|high'));
   });
+
+  test('bootstrap offers Ultra and Ultracode and submissions store the canonical effort', async () => {
+    const boot = await call('guest', 'GET', '/api/bootstrap');
+    assert.equal(boot.status, 200);
+    assert.deepEqual(boot.data.site.efforts, ['Low', 'Medium', 'High', 'XHigh', 'Max', 'Ultra', 'Ultracode']);
+    await verifiedUser(platform.auth, 'effort-tester');
+    assert.equal((await call('effort-tester', 'POST', '/api/auth/login', { name: 'effort-tester', password: 'correct horse' })).status, 200);
+    const staged = await call('effort-tester', 'POST', '/api/drafts?task=one&name=ultracode.html', '<!doctype html><title>Ultracode</title><h1>Ultracode</h1>', { raw: true });
+    assert.equal(staged.status, 200);
+    const submitted = await call('effort-tester', 'POST', '/api/works', {
+      draftId: staged.data.draft.id, confirmed: true, title: 'Ultracode', modelId: 'm-a', effort: 'ultracode',
+      providerId: 'official', tool: 'CLI', generationMode: 'single-turn', humanIntervention: 'none',
+    });
+    assert.equal(submitted.status, 200, JSON.stringify(submitted.data));
+    assert.equal(submitted.data.work.effort, 'Ultracode');
+    assert.equal(platform.db.prepare('SELECT effort FROM works WHERE id = ?').get(submitted.data.work.id).effort, 'Ultracode');
+  });
 });

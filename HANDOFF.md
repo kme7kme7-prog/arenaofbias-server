@@ -1,5 +1,13 @@
 # HANDOFF.md · 当前状态
 
+## Ultra 与 Ultracode 常用档位（2026-10-08，未提交、未推送、未部署）
+
+- `server/config.mjs` 的 EFFORTS 为 Low、Medium、High、XHigh、Max、Ultra、Ultracode；管理后台筛选与编辑/投稿共用候选同步补齐。`library.effortOf` 原有忽略大小写匹配无需改动；未发现其他硬编码的档位高低、代表作兜底或导出顺序。审核模型自身的 xhigh 参数保持。
+- 新增1个真实 HTTP/临时 SQLite 回归：bootstrap 全列表与顺序、提交 `effort: 'ultracode'` 后响应和数据库均为 Ultracode。Windows/Linux（WSL Ubuntu，Node24.16.0）check109/0、test325/325；临时库额外确认 ultra→Ultra、ULTRACODE→Ultracode。首轮新用例因测试管理员未绑邮箱返回403，改用既有已验证账号夹具后两平台全过。
+- 临时库管理后台目检编辑弹窗，DOM 核对筛选与 datalist 均按 Default、Low、Medium、High、XHigh、Max、Ultra、Ultracode 展示；未保存真实业务作品、未做生产/真机/全交互验收。没有 build/check:intake 脚本。
+- 只读检查本地 `.data/platform.db`（旧本地 v13）works 中忽略大小写及首尾空格匹配 ultra/ultracode 均为0件；该库不能代表生产，生产数量未核查。未改数据库结构、历史档位或数据包；前后端可任意顺序上线。
+- 用户未授权 commit/push/部署，均未执行。忽略证据 output/ultra-efforts-20261008/，Linux 隔离目录见其中 linux-workspace.txt；临时管理库保留于本机临时目录。Gallery 仅更新交接与归档、未改前端源码。[本轮记录](docs/archive/2026-10-08-ultra-ultracode-wsnxxxs.md)。
+
 ## 取消定期内容复查（2026-10-08，源码交付）
 
 - 用户要求取消公开作品定期复查，保留新投稿审核。已删除扫描/定时器/基线比较与写入/recheck入口及CONTENT_RECHECK_HOURS配置；遗留环境变量不生效。投稿初审、失败转人工、持久化pending恢复和明确人工审核/审核重试保留，历史审核/审计/媒体不改。

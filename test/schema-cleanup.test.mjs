@@ -58,7 +58,7 @@ test('v18 preserves v16/v17 metadata, audit actors and frozen vote identities on
         });
       }
       assert.deepEqual(db.prepare('SELECT * FROM votes ORDER BY id').all().map((row) => ({ ...row })), originalVotes);
-      assert.deepEqual(db.prepare('SELECT * FROM matches ORDER BY id').all(), originalMatches);
+      assert.deepEqual(db.prepare('SELECT * FROM matches ORDER BY id').all().map((row) => ({ ...row })), originalMatches.map((row) => ({ ...row, pin: null })));
       const audits = db.prepare('SELECT work_id, action, actor_id, at FROM audit ORDER BY work_id, action').all();
       assert.deepEqual(audits.map((row) => [row.work_id, row.action, row.actor_id, row.at]), [
         ['audited', 'unverified', 'admin', 50], ['manual', 'delete', 'admin', 60],

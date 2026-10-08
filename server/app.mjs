@@ -170,6 +170,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       questions: questions.all(user),
       reactions: library.reactionSummary(user),
       arena: Object.fromEntries(catalog.tasks().filter((task) => !isAiJudgedTask(task)).map((task) => [task.id, arena.poolStats(task.id)])),
+      ...(isSenior(user) ? { arenaModels: arena.poolModels() } : {}),
       featured: featured.read(),
       totals: (await arena.leaderboard()).totals,
       me: user ? {
@@ -648,7 +649,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     const body = await readJson(ctx.req);
     const task = String(body.task ?? '');
     const snapshot = checkDatapack(ctx, task);
-    return arena.createMatch(ctx.user, task, body.previous, snapshot, body.avoidCooling === true);
+    return arena.createMatch(ctx.user, task, body.previous, snapshot, body.avoidCooling === true, body.pin ? String(body.pin) : null);
   });
   router.on('POST', '/api/arena/matches/:id/vote', async (ctx) => {
     limit.write(ctx.user?.id ?? ctx.ip);

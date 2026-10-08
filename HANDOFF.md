@@ -1,5 +1,11 @@
 # HANDOFF.md · 当前状态
 
+## 目录读取二次提速：批量门禁与版本采样（2026-10-08，已推送 c4583e4、已上线）
+
+- CPU profile（inspector）定位剩余 600ms 的三个来源并全部修掉，/api/works 本地 1.1s→0.64s、公网稳定约 0.75s（对比最初的 6.2s）：①每行 roster 都对 catalog.task() 发一次 SQL（AI 判定与门禁）——合并目录缓存新增 aiRounds 集合，判定改走缓存；②每件作品一次 byContentKey（users JOIN + audit 关联子查询 ×900）——改为一次批量 SELECT 取门禁所需字段，行仍每请求现取，moderation 翻转即时生效的语义不变，publicContent 判定仍走 library；③签名里的 catalog.version 每次触发的 realpath+stat 在本机要几十毫秒——5 秒采样（包切换另有 takeover 回调通知）。
+- 附带发现（给 Gallery/反爬侧的参考，未改）：nginx aob_read_catalog 限流 30r/m+burst15 是接口 6 秒时代定的，现在前端一次页面加载就打 4 个 catalog 请求（works/prompts/ratings×2），连续浏览会耗干桶出现秒级排队；后端已提到亚秒，可考虑放宽。node 侧 readGuard 的 catalog 预算（30/60s）同量级。
+- 测试 326/326；生产部署含 v41；探针与 profile 脚本已全部清理。
+
 ## 目录读取提速与媒体缓存头（2026-10-08，已推送 fd95151、已上线）
 
 - 兼容面两大缓存修复（/api/works 公网 6.2s→约 1.1s，/api/prompts 1.5s→95ms，均含 1027 件全量）：①合并题目录加缓存——taskOfRound 每行解析都会全量重建 promptCatalog（catalog.tasks 每题一轮 SQL），单次花名册读取要重建 264 次，是 4.9 秒的大头；题目任何变更必留 question-* audit 行，以 audit 戳+包版本做签名，60 秒 TTL 兜底直改库的场景。②文本作品解析缓存——per-work 缓存 original.txt/包装页提取结果，签名只认 works 行数+包版本（无关写库不清缓存），门禁与行过滤保持每请求实查。

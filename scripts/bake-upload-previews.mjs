@@ -45,6 +45,9 @@ const jobs = ids.map((id) => {
     throw new Error(`Refusing non-public work content origin for ${id}`);
   }
   const adaptation = adaptations[`${work.task}/${id}`] ?? {};
+  if (adaptation.previewMode === 'screenshot') {
+    throw new Error(`${id}: the approved recipe uses screenshot mode; run bake-upload-media.mjs with its real capture-dir.`);
+  }
   const cardArchitecture = taskById.get(work.task)?.sceneProfile === 'architecture';
   return { task: work.task, id, scene: scene.href, bytes: work.files === 1 ? work.bytes : null, model: work.modelName, effort: work.effort,
     architecture: adaptation.architecture ?? cardArchitecture, cardArchitecture, adaptation };
@@ -109,12 +112,23 @@ function rootsFor(scenes, job) {
 }
 function applyMeshAdaptations(scenes,job){
   const spec=window.__UPLOAD_PREVIEW_ADAPTATIONS[job.task+'/'+job.id]??{};
-  if(!spec.fallbackMaterials&&!spec.fallbackMaterialNames&&!spec.fallbackSurfaces&&!spec.excludedNames&&!spec.excludeChildIndices)return;
+  if(!spec.fallbackMaterials&&!spec.fallbackMaterialNames&&!spec.fallbackSurfaces&&!spec.materialOverrides&&!spec.excludedNames&&!spec.excludeChildIndices)return;
   for(const scene of scenes){
     for(const index of spec.excludeChildIndices??[])if(scene.children[index])scene.children[index].visible=false;
     scene.traverse(mesh=>{
     if(spec.excludedNames?.includes(mesh.name)){mesh.visible=false;return}
     if(!mesh.isMesh)return;
+    if(spec.materialOverrides){
+      const originals=Array.isArray(mesh.material)?mesh.material:[mesh.material];
+      const updated=originals.map(material=>{
+        const rule=spec.materialOverrides.find(rule=>(!rule.geometryType||mesh.geometry.type===rule.geometryType)&&(!rule.materialType||material.type===rule.materialType)&&(rule.color===undefined||material.color?.getHex()===rule.color)&&(rule.hasMap===undefined||Boolean(material.map)===rule.hasMap));
+        if(!rule)return material;
+        const copy=material.clone();
+        for(const property of ['opacity','transparent','depthWrite','alphaTest'])if(rule[property]!==undefined)copy[property]=rule[property];
+        return copy;
+      });
+      mesh.material=Array.isArray(mesh.material)?updated:updated[0];
+    }
     const source=Array.isArray(mesh.material)?mesh.material[0]:mesh.material;
     let fallback=spec.fallbackMaterials?.[mesh.name]??spec.fallbackMaterialNames?.[source.name];
     if(!fallback&&spec.fallbackSurfaces&&(source.isNodeMaterial||source.isShaderMaterial)){
@@ -123,7 +137,7 @@ function applyMeshAdaptations(scenes,job){
     }
     if(!fallback)return;
     if(fallback.stripVertexColors){mesh.geometry=mesh.geometry.clone();for(const name of ['color','aCol','vcol','vox'])mesh.geometry.deleteAttribute(name)}
-    mesh.material=new THREE.MeshStandardMaterial({color:fallback.color,side:source.side,transparent:source.transparent,opacity:source.opacity,roughness:0.55,metalness:0.05});
+    mesh.material=new THREE.MeshStandardMaterial({color:fallback.color,side:source.side,transparent:fallback.transparent??source.transparent,opacity:fallback.opacity??source.opacity,depthWrite:fallback.depthWrite??source.depthWrite,roughness:fallback.roughness??0.55,metalness:fallback.metalness??0.05});
     });
   }
 }

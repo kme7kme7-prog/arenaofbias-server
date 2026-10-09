@@ -1,5 +1,15 @@
 # HANDOFF.md · 当前状态
 
+
+## 投稿小模型与截图封面对齐（2026-10-09，已上线）
+
+- 用户授权适配并提交；三名GPT-6 Luna Max分题复审324件，Gallery父agent完成其他371件和安装。新增267模型/426截图共693件，旧11预览不覆盖，2件无可信默认画面未安装。
+- scripts/bake-upload-captures.mjs 显式读取公开已验证源入口与JPEG，输出完整等比720/q0.86 preview.jpg及schemaVersion1/sourceDigest/captureSha，不运行原作。模型工具支持外部adaptations、子节点诊断，修正多文件总字节误作入口字节；统一数据仓提取器/当前Gallery海报。取景表保留旧11项并新增64项。
+- work-previews.mjs 对POSIX静止至少1秒文件按ino/size/mtimeNs/ctimeNs复用SHA，最多4096项；Windows ctime为创建时间及新写时间戳窗口不复用/不填缓存。同长度改写并恢复mtime的真实回归通过，仍绑定原源/媒体SHA与既有权限。
+- Windows Node24.16.0、隔离WSL Linux Node24.19.0 check113/0、test330/330；Linux用虚构commit的本地配置，未接私有包。生产693项读取基准旧暖1813ms、新暖41.5ms，首次新读1875ms；完整bootstrap仍有慢请求波动，同Origin暖2.24秒≈旧2.27秒，不宣称整页同倍提速。
+- 生产部署本轮4个工具/运行文件、媒体清单最后原子替换；全部已跟踪运行源码SHA匹配。服务active/running、NRestarts0，DB v41/integrity ok/外键0；Gallery公网693 DTO/媒体抽检通过，原始源码和首屏/手机截图保持，未迁移、投稿、投票、审核或改作品元数据。Gallery/data配置字节不变。
+- 忽略证据output/preview-align-20261009/；备份/root/aob-preview-align-20261009/backup/。两个未适配ID为up-lrfhzyum、up-9z4ypk7d。版本标记收工随本轮提交同步，本轮一条英文提交、不推送。详见[归档](docs/archive/2026-10-09-preview-alignment-wsnxxxs.md)。
+
 ## 本轮联合发布准备（2026-10-08）
 
 - 用户授权推送并部署 Gallery 与配套后台。远端 main 已有 c4583e4 目录提速及媒体缓存改动，正常合并保留；仅 HANDOFF 顶部追加段落发生冲突，两侧记录均保留，无功能冲突、强推或业务数据修改。

@@ -4,6 +4,7 @@ import { resolve, sep } from 'node:path';
 
 const HASH = /^[a-f0-9]{64}$/;
 const FILES = { model: 'preview.sbox', poster: 'preview.webp', capture: 'preview.jpg' };
+const fileHashes = new Map();
 
 function fileInside(directory, name) {
   if (typeof name !== 'string' || !name) return null;
@@ -13,8 +14,21 @@ function fileInside(directory, name) {
 
 function sha256(file) {
   try {
-    if (!statSync(file).isFile()) return null;
-    return createHash('sha256').update(readFileSync(file)).digest('hex');
+    const stat = statSync(file, { bigint: true });
+    if (!stat.isFile()) return null;
+    // Windows ctime is creation time. Recent POSIX writes can share one
+    // timestamp tick, so cache only files that have been quiet for a second.
+    const signature = `${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+    const cached = fileHashes.get(file);
+    const cacheable = process.platform !== 'win32' && BigInt(Date.now()) * 1_000_000n - stat.ctimeNs >= 1_000_000_000n;
+    if (cacheable && cached?.signature === signature) return cached.digest;
+    if (!cacheable) fileHashes.delete(file);
+    const digest = createHash('sha256').update(readFileSync(file)).digest('hex');
+    if (cacheable) {
+      fileHashes.set(file, { signature, digest });
+      if (fileHashes.size > 4096) fileHashes.delete(fileHashes.keys().next().value);
+    }
+    return digest;
   } catch {
     return null;
   }

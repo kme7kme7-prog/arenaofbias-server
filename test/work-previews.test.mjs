@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readWorkPreview } from '../server/work-previews.mjs';
@@ -51,6 +51,39 @@ test('returns a model preview only when source and both preview files match the 
   assert.equal(readWorkPreview(mediaDir, work), null, 'altered preview bytes do not match their recorded hash');
   rmSync(join(previewDir, 'preview.sbox'));
   assert.equal(readWorkPreview(mediaDir, work), null, 'missing model files are not exposed');
+});
+
+test('rechecks same-size media rewrites when mtime is restored', (t) => {
+  const { work, mediaDir, previewDir, entry } = fixture(t);
+  const model = Buffer.from('packed mesh');
+  const poster = Buffer.from('webp poster');
+  const changedPoster = Buffer.from('faux poster');
+  assert.equal(changedPoster.length, poster.length);
+  const posterPath = join(previewDir, 'preview.webp');
+  const manifestPath = join(previewDir, 'preview.json');
+  const manifest = {
+    schemaVersion: 1, sourceDigest: hash(entry), mode: 'model',
+    model: 'preview.sbox', modelSha: hash(model), poster: 'preview.webp', posterSha: hash(poster),
+  };
+  writeFileSync(join(previewDir, 'preview.sbox'), model);
+  writeFileSync(posterPath, poster);
+  writeFileSync(manifestPath, JSON.stringify(manifest));
+
+  assert.equal(readWorkPreview(mediaDir, work)?.previewMode, 'model');
+  const fixedTime = new Date('2026-01-02T03:04:05.000Z');
+  utimesSync(posterPath, fixedTime, fixedTime);
+  const originalStat = statSync(posterPath, { bigint: true });
+  writeFileSync(posterPath, changedPoster);
+  utimesSync(posterPath, fixedTime, fixedTime);
+  const changedStat = statSync(posterPath, { bigint: true });
+  assert.equal(changedStat.size, originalStat.size);
+  assert.equal(changedStat.mtimeNs, originalStat.mtimeNs);
+  assert.equal(readWorkPreview(mediaDir, work), null, 'same-size changed bytes must invalidate the cached digest');
+
+  writeFileSync(posterPath, poster);
+  utimesSync(posterPath, fixedTime, fixedTime);
+  writeFileSync(manifestPath, JSON.stringify(manifest));
+  assert.equal(readWorkPreview(mediaDir, work)?.previewMode, 'model', 'restored bytes and manifest validate again');
 });
 
 test('returns an independent screenshot capture without replacing the upload cover', (t) => {

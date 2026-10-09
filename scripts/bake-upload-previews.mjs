@@ -20,6 +20,9 @@ const bootstrapPath = resolve(arg('bootstrap') ?? '');
 const sourceRoot = resolve(arg('source-dir') ?? '');
 const outputRoot = resolve(arg('output-dir') ?? join(root, 'output/page-adaptation-20261004'));
 const ids = (arg('id') ?? '').split(',').filter(Boolean);
+const adaptations = arg('adaptations')
+  ? { ...uploadPreviewAdaptations, ...JSON.parse(readFileSync(resolve(arg('adaptations')), 'utf8')) }
+  : uploadPreviewAdaptations;
 if (!process.env.DATAPACK_SOURCE_DIR || !process.env.GALLERY_DIR || !arg('bootstrap') || !arg('source-dir') || !ids.length) {
   throw new Error('Set DATAPACK_SOURCE_DIR to the local arenaofbias-data checkout and GALLERY_DIR; pass --bootstrap=<json> --source-dir=<dir> --id=<up-id>[,<up-id>...]');
 }
@@ -41,9 +44,9 @@ const jobs = ids.map((id) => {
   if (scene.protocol !== 'https:' || !/^w[0-9a-f]{32}\.w\.arenaofbias\.icu$/i.test(scene.hostname)) {
     throw new Error(`Refusing non-public work content origin for ${id}`);
   }
-  const adaptation = uploadPreviewAdaptations[`${work.task}/${id}`] ?? {};
+  const adaptation = adaptations[`${work.task}/${id}`] ?? {};
   const cardArchitecture = taskById.get(work.task)?.sceneProfile === 'architecture';
-  return { task: work.task, id, scene: scene.href, bytes: work.bytes, model: work.modelName, effort: work.effort,
+  return { task: work.task, id, scene: scene.href, bytes: work.files === 1 ? work.bytes : null, model: work.modelName, effort: work.effort,
     architecture: adaptation.architecture ?? cardArchitecture, cardArchitecture, adaptation };
 });
 mkdirSync(outputRoot, { recursive: true });
@@ -92,6 +95,7 @@ const appHtml = `<!doctype html><meta charset="utf-8"><title>Upload preview bake
 <script type="importmap">{"imports":{"three":"/vendor/three.module.js","three/addons/controls/OrbitControls.js":"/vendor/OrbitControls.js","three/addons/utils/BufferGeometryUtils.js":"/vendor/BufferGeometryUtils.js"}}</script>
 <script>window.__UPLOAD_PREVIEW_ADAPTATIONS=${JSON.stringify(Object.fromEntries(jobs.map((job) => [`${job.task}/${job.id}`, job.adaptation])))};</script>
 <script type="module">
+import * as THREE from 'three';
 import { importArchitecture, disposeObject } from '/__bake/import-architecture.js';
 import { packPreview } from '/__bake/pack-preview.js';
 import { selectPreviewRoots } from '/__bake/preview-subjects.js';
@@ -105,8 +109,9 @@ function rootsFor(scenes, job) {
 }
 function waitForScene(frame,job){return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{cleanup();reject(new Error('No stable exportable scene within 60 seconds'))},60000);const onMessage=e=>{if(e.origin!==location.origin||e.source!==frame.contentWindow||e.data?.type!=='gallery-scene-ready')return;cleanup();resolve(frame.contentWindow.__galleryScenes)};function cleanup(){clearTimeout(timer);removeEventListener('message',onMessage)}addEventListener('message',onMessage);frame.src='/work/'+job.id+'/index.html?sandtable=1'})}
 async function save(url,body){const r=await fetch(url,{method:'POST',body});if(!r.ok)throw new Error(await r.text())}
+function describeScenes(scenes){return scenes.map(scene=>({name:scene.name,children:scene.children.slice(0,40).map(child=>{let meshes=0;child.traverse(o=>{if(o.isMesh)meshes++});const b=new THREE.Box3().setFromObject(child);return {name:child.name,type:child.type,meshes,bounds:b.isEmpty()?null:[b.min.toArray(),b.max.toArray()]}})}))}
 for(const job of jobs){const row=document.createElement('li');row.dataset.id=job.id;row.textContent=job.task+'/'+job.id+' · extracting';list.append(row);let frame,imported,rendered,renderer;
- try{window.__UPLOAD_PREVIEW_ACTIVE_ID=job.id;frame=document.createElement('iframe');document.body.append(frame);const scenes=await waitForScene(frame,job);const selected=rootsFor(scenes,job);imported=await importArchitecture(selected,job.id,{architecture:job.architecture,railwayPreview:false,task:job.task});const packed=await packPreview(imported,job.architecture);await save('/__bake/save/'+job.id+'/preview.sbox',packed);row.textContent=job.task+'/'+job.id+' · rendering Gallery poster';
+ try{window.__UPLOAD_PREVIEW_ACTIVE_ID=job.id;frame=document.createElement('iframe');document.body.append(frame);const scenes=await waitForScene(frame,job);await save('/__bake/save/'+job.id+'/scene.json',JSON.stringify(describeScenes(scenes)));const selected=rootsFor(scenes,job);imported=await importArchitecture(selected,job.id,{architecture:job.architecture,railwayPreview:false,task:job.task});const packed=await packPreview(imported,job.architecture);await save('/__bake/save/'+job.id+'/preview.sbox',packed);row.textContent=job.task+'/'+job.id+' · rendering Gallery poster';
   const blob=new Blob([packed],{type:'application/octet-stream'}),modelUrl=URL.createObjectURL(blob);const previews=await import('/result-previews.js');const {readModel}=await import('/preview-model.js');const {disposeObject:disposePreview}=await import('/scene-resources.js');rendered=await readModel(modelUrl);URL.revokeObjectURL(modelUrl);const card=previews.buildPreviewScene(rendered,job.cardArchitecture,job.cardArchitecture&&rendered.clip);const camera=previews.createPreviewCamera(),aspect=previews.previewAspect(camera,card.bounds);const width=Math.round(aspect>=1?720:720*aspect),height=Math.round(aspect>=1?720/aspect:720);renderer=previews.createPreviewRenderer(1);renderer.setSize(width,height,false);previews.fitPreviewCamera(camera,card.bounds,width/height);renderer.render(card.scene,camera);const poster=await new Promise((resolve,reject)=>renderer.domElement.toBlob(v=>v?resolve(v):reject(new Error('Gallery poster render returned no image')),'image/webp',0.86));await save('/__bake/save/'+job.id+'/preview.webp',poster);disposePreview(card.scene);row.dataset.success='true';row.textContent=job.task+'/'+job.id+' · preview ready';
  }catch(error){row.textContent=job.task+'/'+job.id+' · '+error.message;row.className='error';console.error('UPLOAD_PREVIEW_FAILED',job.id,error)}finally{frame?.remove();if(imported)disposeObject(imported.group);if(rendered)disposeObject(rendered.group);if(renderer){renderer.dispose();renderer.forceContextLoss()}}}
 document.body.dataset.done='true';
@@ -134,11 +139,11 @@ const server = createServer(async (request, response) => {
     if (pathname === '/__bake/') { response.setHeader('Content-Type','text/html; charset=utf-8'); response.end(appHtml); return; }
     if (pathname === '/__bake/import-architecture.js') { response.setHeader('Content-Type','text/javascript; charset=utf-8'); response.end(modifiedImporter()); return; }
     if (pathname === '/__bake/sandtable-bridge.js') { response.setHeader('Content-Type','text/javascript; charset=utf-8'); response.end(readFileSync(join(dataRoot,'scripts/datapack-bridge.js'),'utf8')); return; }
-    const saveMatch=/^\/__bake\/save\/(up-[a-z0-9]{8})\/(preview\.sbox|preview\.webp)$/.exec(pathname);
+    const saveMatch=/^\/__bake\/save\/(up-[a-z0-9]{8})\/(preview\.sbox|preview\.webp|scene\.json)$/.exec(pathname);
     if(saveMatch&&request.method==='POST'){
       const [,id,file]=saveMatch;if(!jobById.has(id)){response.writeHead(404);response.end();return}
       const chunks=[];for await(const chunk of request)chunks.push(chunk);const body=Buffer.concat(chunks);
-      const target=join(outputRoot,'media',id,file);mkdirSync(dirname(target),{recursive:true});writeFileSync(target,body);
+      const target=file==='scene.json'?join(outputRoot,'diagnostics',id+'.json'):join(outputRoot,'media',id,file);mkdirSync(dirname(target),{recursive:true});writeFileSync(target,body);
       response.setHeader('Content-Type','application/json');response.end(JSON.stringify({bytes:body.length,sha256:sha256(body)}));return;
     }
     if (pathname.startsWith('/__bake/')) {

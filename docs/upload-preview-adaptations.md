@@ -18,6 +18,8 @@ To install a reviewed preview, copy only that upload's manifest and media files 
 - Model preview: `preview.json`, `preview.sbox`, and `preview.webp`.
 - Screenshot preview: `preview.json` and `preview.jpg`.
 
+A model manifest can additionally declare `capture: "preview.jpg"` and its `captureSha` for screenshot mode. Generate that image with the capture baker from a matching source snapshot; merge those two fields into the reviewed model manifest and install the JPEG alongside it. The reader verifies this optional capture independently. A stale capture is omitted while the valid model remains available; changed source bytes invalidate both modes. The submitted `first.jpg` remains untouched.
+
 Before copying, resolve the current upload record's `root` and `entry` beneath `DATA_DIR/works/<upload-id>/` and compare the SHA-256 of those exact, unmodified HTML bytes with `sourceDigest` in the manifest. For example, PowerShell can calculate it with `Get-FileHash -Algorithm SHA256 -LiteralPath <entry-path>`. Stop if the values differ; regenerate from the current entry instead of editing or reusing the digest. The backend exposes a preview only when this digest and the manifest's media hashes match.
 
 Do not copy the generated `extract/` files into backend media. They are temporary local preview-baking copies, not the submitted work source.
@@ -44,3 +46,11 @@ node scripts/bake-upload-captures.mjs `
 Inputs are `<source-dir>/<id>/index.html` (or `source.html` / `<id>.html`) and `<capture-dir>/<id>/first.jpg`. Outputs are `preview.jpg`, `preview.json`, and a summary binding the original frame hash and dimensions. Install only the declared media for the reviewed mode, replacing `preview.json` last. Preserve the submitted sources and `first.jpg`/`mobile.jpg`.
 
 The reader still checks the source and declared media SHA-256 before exposing a preview. On POSIX, quiet files reuse a bounded digest cache keyed by inode, size, mtime and ctime; newly written files are rehashed until they have been quiet for one second. Windows always rehashes because ctime is creation time there. A process restart clears the cache. This reduces repeated verification work without bypassing the manifest or public-read checks; it does not measure total page or bootstrap latency.
+
+## Extraction-only material and timing fixes
+
+Some originals build their subject across multiple animation frames. Set `captureWaitMs` for the specific upload when the default 1800 ms pause interrupts that build; review a naturally loaded default screenshot alongside the extracted subject. This wait changes only the served extraction bridge, not the submitted source or shared data tools.
+
+Use `excludedNames` or `excludeChildIndices` for explicitly inspected sky or particle layers. `fallbackMaterials` matches exact mesh names; `fallbackMaterialNames` matches exact source material names. `fallbackSurfaces` applies only to Node/Shader materials with the declared `geometryType`, minimum horizontal span and maximum height. Each fallback specifies a static `color`; `stripVertexColors` removes incompatible source color attributes from a geometry copy. Record whether that color comes from the original palette or a sampled default frame. These static previews preserve authored geometry but do not reproduce animated GPU shading.
+
+For sailboats retaining cropped source water, set `authoredSea:true` to skip the importer's additional sea plane. Two coincident sea planes cause stripes and should not be accepted as a finished preview. Derive `previewYaw` from the original boat's forward axis and world transform; inspect complete hull, sails, rigging and surrounding water at both card sizes. Tune `focusedBounds` and `crop` to remove distant scenery while retaining the subject. Prefer this bounded crop to a smaller export that loses buildings or islands. Remove obsolete model adapters when their approved replacement is a screenshot.

@@ -54,6 +54,9 @@ export function readWorkPreview(mediaDir, work) {
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
     const sourceDigest = sha256(entry);
     if (manifest.schemaVersion !== 1 || !HASH.test(manifest.sourceDigest ?? '') || manifest.sourceDigest !== sourceDigest) return null;
+    const capture = manifest.capture === FILES.capture && matchesHash(fileInside(directory, FILES.capture), manifest.captureSha)
+      ? { previewCapture: mediaUrl(work.id, FILES.capture, `${sourceDigest.slice(0, 12)}-${manifest.captureSha.slice(0, 12)}`) }
+      : null;
 
     if (manifest.mode === 'model' && manifest.model === FILES.model && manifest.poster === FILES.poster) {
       const model = fileInside(directory, FILES.model), poster = fileInside(directory, FILES.poster);
@@ -63,14 +66,12 @@ export function readWorkPreview(mediaDir, work) {
         previewMode: 'model',
         previewModel: mediaUrl(work.id, FILES.model, version),
         previewPoster: mediaUrl(work.id, FILES.poster, version),
+        ...capture,
       };
     }
 
-    if (manifest.mode === 'screenshot' && manifest.capture === FILES.capture) {
-      const capture = fileInside(directory, FILES.capture);
-      if (!matchesHash(capture, manifest.captureSha)) return null;
-      const version = `${sourceDigest.slice(0, 12)}-${manifest.captureSha.slice(0, 12)}`;
-      return { previewMode: 'screenshot', previewCapture: mediaUrl(work.id, FILES.capture, version) };
+    if (manifest.mode === 'screenshot' && capture) {
+      return { previewMode: 'screenshot', ...capture };
     }
   } catch {
     return null;

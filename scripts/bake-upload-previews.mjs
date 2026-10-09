@@ -60,7 +60,7 @@ for (const job of jobs) {
   const bytes = readFileSync(sourcePath);
   if (job.bytes && bytes.length !== job.bytes) throw new Error(`${job.id}: source HTML length ${bytes.length} does not match bootstrap bytes ${job.bytes}; use the original local entry file.`);
   const source = bytes.toString('utf8');
-  const patched = instrumentExtractionCopy(source);
+  const patched = instrumentExtractionCopy(source, job.adaptation);
   const copyDir = join(outputRoot, 'extract', job.id);
   mkdirSync(copyDir, { recursive: true });
   writeFileSync(join(copyDir, 'source.original.html'), bytes);
@@ -68,14 +68,14 @@ for (const job of jobs) {
   extractions.set(job.id, { sourcePath, origin: new URL(job.scene), digest: sha256(bytes), htmlPath: join(copyDir, 'index.html') });
 }
 
-function instrumentExtractionCopy(source) {
+function instrumentExtractionCopy(source, adaptation) {
   let patched = source.replace(/this\.isScene\s*=\s*(?:!0|true)\b/g, (match) => {
     return `${match},window.__galleryCaptureScene?.(this)`;
   });
   if (!patched.includes('window.__galleryCaptureScene?.(this)') && !patched.includes('window.__galleryCaptureScene?.(')) patched = patched.replace(/\bnew\s+(?:[A-Za-z_$][\w$]*\.)?Scene\s*\(\s*\)/g, (match) => {
     return `((s)=>(s?.isScene&&window.__galleryCaptureScene?.(s),s))(${match})`;
   });
-  const prelude = `<script>(()=>{const prior=Object.getOwnPropertyDescriptor(Object.prototype,'isScene');if(prior)return;Object.defineProperty(Object.prototype,'isScene',{configurable:true,set(value){Object.defineProperty(this,'isScene',{value,writable:true,configurable:true,enumerable:true});if(value===true)queueMicrotask(()=>{if(this.isScene&&this.type==='Scene')window.__galleryCaptureScene?.(this)})}})})();</script><script src="/__bake/sandtable-bridge.js"></script>`;
+  const prelude = `<script>window.__UPLOAD_PREVIEW_CAPTURE_WAIT_MS=${JSON.stringify(adaptation.captureWaitMs ?? 1800)};(()=>{const prior=Object.getOwnPropertyDescriptor(Object.prototype,'isScene');if(prior)return;Object.defineProperty(Object.prototype,'isScene',{configurable:true,set(value){Object.defineProperty(this,'isScene',{value,writable:true,configurable:true,enumerable:true});if(value===true)queueMicrotask(()=>{if(this.isScene&&this.type==='Scene')window.__galleryCaptureScene?.(this)})}})})();</script><script src="/__bake/sandtable-bridge.js"></script>`;
   return /<head\b[^>]*>/i.test(patched)
     ? patched.replace(/<head\b[^>]*>/i, (head) => `${head}${prelude}`)
     : patched.replace(/^\s*(?:<!doctype[^>]*>)?/i, (doctype) => `${doctype}${prelude}`);
@@ -107,11 +107,31 @@ function rootsFor(scenes, job) {
   if(Number.isInteger(spec.groupIndex)){const scene=scenes.find(s=>s.isScene&&s.children.filter(c=>c.isGroup).length>spec.groupIndex);const group=scene?.children.filter(c=>c.isGroup)[spec.groupIndex];if(!group)throw new Error('Configured subject group not found: '+spec.groupIndex);return [group]}
   return selectPreviewRoots(scenes,job.task,job.id);
 }
+function applyMeshAdaptations(scenes,job){
+  const spec=window.__UPLOAD_PREVIEW_ADAPTATIONS[job.task+'/'+job.id]??{};
+  if(!spec.fallbackMaterials&&!spec.fallbackMaterialNames&&!spec.fallbackSurfaces&&!spec.excludedNames&&!spec.excludeChildIndices)return;
+  for(const scene of scenes){
+    for(const index of spec.excludeChildIndices??[])if(scene.children[index])scene.children[index].visible=false;
+    scene.traverse(mesh=>{
+    if(spec.excludedNames?.includes(mesh.name)){mesh.visible=false;return}
+    if(!mesh.isMesh)return;
+    const source=Array.isArray(mesh.material)?mesh.material[0]:mesh.material;
+    let fallback=spec.fallbackMaterials?.[mesh.name]??spec.fallbackMaterialNames?.[source.name];
+    if(!fallback&&spec.fallbackSurfaces&&(source.isNodeMaterial||source.isShaderMaterial)){
+      const size=new THREE.Box3().setFromObject(mesh).getSize(new THREE.Vector3());
+      fallback=spec.fallbackSurfaces.find(rule=>(!rule.geometryType||mesh.geometry.type===rule.geometryType)&&Math.max(size.x,size.z)>=rule.minSpan&&size.y<=rule.maxHeight);
+    }
+    if(!fallback)return;
+    if(fallback.stripVertexColors){mesh.geometry=mesh.geometry.clone();for(const name of ['color','aCol','vcol','vox'])mesh.geometry.deleteAttribute(name)}
+    mesh.material=new THREE.MeshStandardMaterial({color:fallback.color,side:source.side,transparent:source.transparent,opacity:source.opacity,roughness:0.55,metalness:0.05});
+    });
+  }
+}
 function waitForScene(frame,job){return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{cleanup();reject(new Error('No stable exportable scene within 60 seconds'))},60000);const onMessage=e=>{if(e.origin!==location.origin||e.source!==frame.contentWindow||e.data?.type!=='gallery-scene-ready')return;cleanup();resolve(frame.contentWindow.__galleryScenes)};function cleanup(){clearTimeout(timer);removeEventListener('message',onMessage)}addEventListener('message',onMessage);frame.src='/work/'+job.id+'/index.html?sandtable=1'})}
 async function save(url,body){const r=await fetch(url,{method:'POST',body});if(!r.ok)throw new Error(await r.text())}
 function describeScenes(scenes){return scenes.map(scene=>({name:scene.name,children:scene.children.slice(0,40).map(child=>{let meshes=0;child.traverse(o=>{if(o.isMesh)meshes++});const b=new THREE.Box3().setFromObject(child);return {name:child.name,type:child.type,meshes,bounds:b.isEmpty()?null:[b.min.toArray(),b.max.toArray()]}})}))}
 for(const job of jobs){const row=document.createElement('li');row.dataset.id=job.id;row.textContent=job.task+'/'+job.id+' · extracting';list.append(row);let frame,imported,rendered,renderer;
- try{window.__UPLOAD_PREVIEW_ACTIVE_ID=job.id;frame=document.createElement('iframe');document.body.append(frame);const scenes=await waitForScene(frame,job);await save('/__bake/save/'+job.id+'/scene.json',JSON.stringify(describeScenes(scenes)));const selected=rootsFor(scenes,job);imported=await importArchitecture(selected,job.id,{architecture:job.architecture,railwayPreview:false,task:job.task});const packed=await packPreview(imported,job.architecture);await save('/__bake/save/'+job.id+'/preview.sbox',packed);row.textContent=job.task+'/'+job.id+' · rendering Gallery poster';
+ try{window.__UPLOAD_PREVIEW_ACTIVE_ID=job.id;frame=document.createElement('iframe');document.body.append(frame);const scenes=await waitForScene(frame,job);await save('/__bake/save/'+job.id+'/scene.json',JSON.stringify(describeScenes(scenes)));applyMeshAdaptations(scenes,job);const selected=rootsFor(scenes,job);imported=await importArchitecture(selected,job.id,{architecture:job.architecture,railwayPreview:false,task:job.task});const packed=await packPreview(imported,job.architecture);await save('/__bake/save/'+job.id+'/preview.sbox',packed);row.textContent=job.task+'/'+job.id+' · rendering Gallery poster';
   const blob=new Blob([packed],{type:'application/octet-stream'}),modelUrl=URL.createObjectURL(blob);const previews=await import('/result-previews.js');const {readModel}=await import('/preview-model.js');const {disposeObject:disposePreview}=await import('/scene-resources.js');rendered=await readModel(modelUrl);URL.revokeObjectURL(modelUrl);const card=previews.buildPreviewScene(rendered,job.cardArchitecture,job.cardArchitecture&&rendered.clip);const camera=previews.createPreviewCamera(),aspect=previews.previewAspect(camera,card.bounds);const width=Math.round(aspect>=1?720:720*aspect),height=Math.round(aspect>=1?720/aspect:720);renderer=previews.createPreviewRenderer(1);renderer.setSize(width,height,false);previews.fitPreviewCamera(camera,card.bounds,width/height);renderer.render(card.scene,camera);const poster=await new Promise((resolve,reject)=>renderer.domElement.toBlob(v=>v?resolve(v):reject(new Error('Gallery poster render returned no image')),'image/webp',0.86));await save('/__bake/save/'+job.id+'/preview.webp',poster);disposePreview(card.scene);row.dataset.success='true';row.textContent=job.task+'/'+job.id+' · preview ready';
  }catch(error){row.textContent=job.task+'/'+job.id+' · '+error.message;row.className='error';console.error('UPLOAD_PREVIEW_FAILED',job.id,error)}finally{frame?.remove();if(imported)disposeObject(imported.group);if(rendered)disposeObject(rendered.group);if(renderer){renderer.dispose();renderer.forceContextLoss()}}}
 document.body.dataset.done='true';
@@ -122,6 +142,7 @@ function modifiedImporter() {
   const signature = "export async function importArchitecture(scenes, id, { architecture = true, railwayPreview = false, task = '' } = {}) {";
   if (!source.includes(signature)) throw new Error('Unexpected data importer signature; refusing an unsafe adaptation patch.');
   source = source.replace(signature, `${signature}\n  const adaptation = globalThis.__UPLOAD_PREVIEW_ADAPTATIONS?.[\`${'${task}/${id}'}\`] ?? {};`);
+  source = replaceOnce(source, "if (task === 'sailboat') {", "if (task === 'sailboat' && !adaptation.authoredSea) {");
   source = replaceOnce(source, 'const previewFocus = focusedBounds || campFocus || launchFocus || rocketFocus ||', 'const previewFocus = adaptation.focusedBounds || focusedBounds || campFocus || launchFocus || rocketFocus ||');
   source = replaceOnce(source, 'const compoundBounds = focusedBounds || (architecture && (', 'const compoundBounds = adaptation.focusedBounds || focusedBounds || (architecture && (');
   source = replaceOnce(source, '  const previewYaw = task ===', '  const nativePreviewYaw = task ===');
@@ -138,7 +159,7 @@ const server = createServer(async (request, response) => {
     const pathname = decodeURIComponent(url.pathname);
     if (pathname === '/__bake/') { response.setHeader('Content-Type','text/html; charset=utf-8'); response.end(appHtml); return; }
     if (pathname === '/__bake/import-architecture.js') { response.setHeader('Content-Type','text/javascript; charset=utf-8'); response.end(modifiedImporter()); return; }
-    if (pathname === '/__bake/sandtable-bridge.js') { response.setHeader('Content-Type','text/javascript; charset=utf-8'); response.end(readFileSync(join(dataRoot,'scripts/datapack-bridge.js'),'utf8')); return; }
+    if (pathname === '/__bake/sandtable-bridge.js') { response.setHeader('Content-Type','text/javascript; charset=utf-8'); response.end(replaceOnce(readFileSync(join(dataRoot,'scripts/datapack-bridge.js'),'utf8'), 'performance.now() - started > 1800', 'performance.now() - started > (window.__UPLOAD_PREVIEW_CAPTURE_WAIT_MS || 1800)')); return; }
     const saveMatch=/^\/__bake\/save\/(up-[a-z0-9]{8})\/(preview\.sbox|preview\.webp|scene\.json)$/.exec(pathname);
     if(saveMatch&&request.method==='POST'){
       const [,id,file]=saveMatch;if(!jobById.has(id)){response.writeHead(404);response.end();return}

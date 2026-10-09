@@ -102,6 +102,25 @@ test('returns an independent screenshot capture without replacing the upload cov
   assert.equal(readWorkPreview(mediaDir, { ...work, curated: true }), null);
 });
 
+test('a model can supply a separately verified screenshot for switching modes', (t) => {
+  const { work, mediaDir, previewDir, entry } = fixture(t);
+  const model = Buffer.from('packed mesh'), poster = Buffer.from('webp poster'), capture = Buffer.from('default screenshot');
+  const manifest = { schemaVersion: 1, sourceDigest: hash(entry), mode: 'model',
+    model: 'preview.sbox', modelSha: hash(model), poster: 'preview.webp', posterSha: hash(poster),
+    capture: 'preview.jpg', captureSha: hash(capture) };
+  for (const [name, bytes] of [['preview.sbox', model], ['preview.webp', poster], ['preview.jpg', capture]]) writeFileSync(join(previewDir, name), bytes);
+  writeFileSync(join(previewDir, 'preview.json'), JSON.stringify(manifest));
+  const preview = readWorkPreview(mediaDir, work);
+  assert.equal(preview.previewMode, 'model');
+  assert.match(preview.previewCapture, /^media\/up-abcdefgh\/preview\.jpg\?v=/);
+  writeFileSync(join(previewDir, 'preview.jpg'), 'changed screenshot');
+  const changed = readWorkPreview(mediaDir, work);
+  assert.equal(changed.previewModel, preview.previewModel);
+  assert.equal(changed.previewCapture, undefined, 'a stale optional screenshot falls back without replacing a valid model');
+  writeFileSync(join(work.dir, 'index.html'), 'changed source');
+  assert.equal(readWorkPreview(mediaDir, work), null, 'both modes remain bound to the original source');
+});
+
 test('toPublic adds adapted previews to readable uploads only', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'work-preview-dto-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));

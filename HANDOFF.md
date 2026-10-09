@@ -1,5 +1,12 @@
 # HANDOFF.md · 当前状态
 
+## 连接恢复修复已上线（2026-10-10）
+
+- 用户追加授权立即部署；7c5ce10已上线，仅替换app/arena/library三文件，其余现场运行文件SHA保持。配置、作品、数据包、schema v41均不变，下节“未部署”由本节覆盖。
+- Linux check111/0、test330/330。最新一致副本新旧配置榜/模型榜全字段一致（除生成时间）：8159/8022有效票、211参与者、144/66条目；作品清单相同，新totals与旧榜totals一致。停服另备份最新库1054作品/8495票；上线前后integrity ok、外键0。
+- 服务active/running、NRestarts0；公网bootstrap60题/928作品，Gallery配置/CORS/数据包兼容验证通过。单次loopback bootstrap1.928s、重叠auth/me34ms、空闲2ms，公网auth/me200/206ms。未生产登录、审核、投稿、投票或全交互验收。
+- 备份/root/aob-connectivity-20261010/backup/，旧Gallery/www/wwwroot/gallery.connectivity-before-20261010；[发布归档](docs/archive/2026-10-10-connectivity-release-kme7kme7-prog.md)。
+
 ## Gallery 首屏阻塞修复（2026-10-10）
 
 - 用户授权修复后以 kme7kme7-prog 的 Git 身份 commit/push，不添加联合署名；本轮未授权覆盖 VPS，未部署。修改前 main 与 origin/main 均 f492d80。

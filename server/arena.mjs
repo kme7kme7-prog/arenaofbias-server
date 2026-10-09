@@ -25,8 +25,8 @@ const MATCH = { tierWidth: 150, sameTierRate: 0.9, blowoutGap: 400, rerolls: 2, 
 const ANONYMOUS_MATCH_MAX = 10000;
 // The dense solver grows roughly cubically with entry count: 40 entries took
 // 112–128 ms locally, while 1000 blocked the main thread for 2.45 s. Use a
-// conservative 200-entry cutoff so small boards avoid worker startup overhead.
-const RANK_WORKER_ENTRY_THRESHOLD = 200;
+// 40-entry cutoff so ordinary multi-model boards cannot block session requests.
+const RANK_WORKER_ENTRY_THRESHOLD = 40;
 export const pairKey = (taskId, a, b) => `${taskId}:${[a, b].sort().join('+')}`;
 const token = () => `m${randomBytes(16).toString('hex')}`;
 // `digest` pins the exact content: the packaged entry page or the uploaded file digest.
@@ -90,6 +90,11 @@ export function createArena({ db, catalog, library, limits, random = Math.random
 
   async function countedVotes(taskId, snapshot, keyOf, filters = null, taskIds = null) {
     const works = new Map();
+    const tasks = new Map();
+    const aiJudged = (id) => {
+      if (!tasks.has(id)) tasks.set(id, isAiJudgedTask(catalog.task(id)));
+      return tasks.get(id);
+    };
     const lookup = (task, id) => {
       const key = `${task}/${id}`;
       if (!works.has(key)) {
@@ -104,7 +109,10 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     const rankedKeys = new Set();
     let scanned = 0;
     for (const row of taskId ? q.votesOfTask.all(taskId) : q.votes.all()) {
-      if (isAiJudgedTask(catalog.task(row.task_id))) continue;
+      // Yield even for small boards and rejected ballots; catalog size is unrelated
+      // to vote volume. The task lookup is shared only within this calculation.
+      if (++scanned % 100 === 0) await new Promise((resolve) => setImmediate(resolve));
+      if (aiJudged(row.task_id)) continue;
       if (moved(row)) continue;
       if (!row.a_identity || !row.b_identity || (taskIds && !taskIds.has(row.task_id))) continue;
       const aIdentity = fromIdentity(row.a_identity), bIdentity = fromIdentity(row.b_identity);
@@ -125,8 +133,6 @@ export function createArena({ db, catalog, library, limits, random = Math.random
           rankedKeys.add(right);
         }
       }
-      if (++scanned % 100 === 0 && rankedKeys.size > RANK_WORKER_ENTRY_THRESHOLD)
-        await new Promise((resolve) => setImmediate(resolve));
     }
     return { votes, rankedEntryCount: rankedKeys.size };
   }
@@ -137,6 +143,36 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     vendor: work.vendor,
     effort: by === 'model' ? '' : work.effort,
   });
+
+  function voteTotals(votes, keyOf) {
+    const voters = new Set(), entries = new Set(), tasks = new Set();
+    let count = 0;
+    for (const vote of votes) {
+      const a = keyOf(vote.a), b = keyOf(vote.b);
+      if (a === b) continue;
+      count++;
+      voters.add(vote.userId);
+      entries.add(a); entries.add(b);
+      tasks.add(vote.a.taskId);
+    }
+    return { votes: count, voters: voters.size, entries: entries.size, tasks: tasks.size };
+  }
+
+  // Bootstrap needs counts, not a fit or every category's standings. Keep the
+  // exact same ballot validation and invalidation as the leaderboard.
+  function totals(snapshot = catalog.snapshot()) {
+    const cacheKey = `${snapshot.version}|totals`;
+    if (cache.has(cacheKey)) return cache.get(cacheKey);
+    const activeCache = cache;
+    const keyOf = (work) => work.configKey ?? entityKey(work);
+    const pending = Promise.resolve().then(async () => {
+      const { votes } = await countedVotes(null, snapshot, keyOf);
+      return voteTotals(votes, keyOf);
+    });
+    activeCache.set(cacheKey, pending);
+    void pending.catch(() => { if (activeCache.get(cacheKey) === pending) activeCache.delete(cacheKey); });
+    return pending;
+  }
 
   function rankOffThread(votes, by, rankedEntryCount) {
     if (by === 'work' && rankedEntryCount <= RANK_WORKER_ENTRY_THRESHOLD)
@@ -181,7 +217,6 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       const scoped = category || domain ? rankedTasks.filter((t) => (!category || t.category === category) && (!domain || t.domains?.includes(domain))) : null;
       const { votes, rankedEntryCount } = await countedVotes(task, archive, keyOf, filters, scoped && new Set(scoped.map((t) => t.id)));
       const ranked = await rankOffThread(votes, by, rankedEntryCount);
-      const scored = votes.filter((vote) => keyOf(vote.a) !== keyOf(vote.b));
       const pool = (task ? (isAiJudgedTask(catalog.task(task)) ? [] : library.eligible(task, archive)) : (scoped ?? rankedTasks).flatMap((t) => library.eligible(t.id, archive)))
         .filter((work) => !filters || provenanceMatch(filters, work));
       let standings;
@@ -213,7 +248,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
         by,
         ...(standings ? { standings } : {}),
         ...(filters ? { filters } : {}),
-        totals: { votes: scored.length, voters: new Set(scored.map((vote) => vote.userId)).size, entries: ranked.length, tasks: new Set(scored.map((vote) => vote.a.taskId)).size },
+        totals: voteTotals(votes, keyOf),
         rows: ranked.map((row, i) => ({
           rank: i + 1,
           key: row.key,
@@ -300,18 +335,18 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     return chosen;
   }
 
-  function poolStats(taskId) {
-    const works = isAiJudgedTask(catalog.task(taskId)) ? [] : library.eligible(taskId);
+  function poolStats(taskId, pool = null) {
+    const works = isAiJudgedTask(catalog.task(taskId)) ? [] : pool ?? library.eligible(taskId);
     return { works: works.length, entries: new Set(works.map((work) => entityKey(work))).size };
   }
 
   // Models in the blind pool and the tasks holding their works, for a senior admin to pin.
-  function poolModels() {
+  function poolModels(pools = null) {
     const archive = catalog.snapshot();
     const models = new Map();
     for (const task of catalog.tasks()) {
       if (isAiJudgedTask(task)) continue;
-      for (const work of library.eligible(task.id)) {
+      for (const work of pools?.get(task.id) ?? library.eligible(task.id)) {
         const key = modelKey(work);
         if (!models.has(key)) models.set(key, { key, name: (work.modelId && archive.model(work.modelId)?.name) || work.modelName, tasks: [] });
         const { tasks } = models.get(key);
@@ -325,6 +360,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     invalidate,
     cleanupExpiredMatches,
     leaderboard,
+    totals,
     workScores,
     poolStats,
     poolModels,

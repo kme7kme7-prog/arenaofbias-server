@@ -2,6 +2,7 @@
 import { extname, join, relative, resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { setImmediate as yieldToRequests } from 'node:timers/promises';
 import { createArena } from './arena.mjs';
 import { createFeatured } from './featured.mjs';
 import { avatarOf, createAuth } from './auth.mjs';
@@ -145,6 +146,23 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   async function bootstrap(user) {
     const snapshot = catalog.snapshot();
     const uploads = library.uploads();
+    await yieldToRequests();
+    const allWorks = library.allWorks({ uploads, snapshot });
+    const works = [];
+    for (let i = 0; i < allWorks.length; i++) {
+      const work = allWorks[i];
+      if (library.visibleTo(work, 'show2')) works.push(library.toPublic(work, user));
+      if (i % 32 === 31) await yieldToRequests();
+    }
+    const pools = new Map();
+    const arenaStats = {};
+    for (const task of catalog.tasks()) {
+      if (isAiJudgedTask(task)) continue;
+      const pool = library.eligible(task.id, snapshot);
+      pools.set(task.id, pool);
+      arenaStats[task.id] = arena.poolStats(task.id, pool);
+      await yieldToRequests();
+    }
     return {
       datapack: snapshot.commit,
       catalogDigest: snapshot.catalogDigest,
@@ -166,13 +184,13 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         limits: { uploadBytes: limits.uploadBytes, coverBytes: limits.coverBytes, referenceCount: limits.referenceCount,
           referenceBytes: limits.referenceBytes, pendingPerUser: limits.pendingPerUser, provisionalGames: limits.provisionalGames },
       },
-      works: publicList(library.allWorks().filter((work) => library.visibleTo(work, 'show2')), user),
+      works,
       questions: questions.all(user),
       reactions: library.reactionSummary(user),
-      arena: Object.fromEntries(catalog.tasks().filter((task) => !isAiJudgedTask(task)).map((task) => [task.id, arena.poolStats(task.id)])),
-      ...(isSenior(user) ? { arenaModels: arena.poolModels() } : {}),
+      arena: arenaStats,
+      ...(isSenior(user) ? { arenaModels: arena.poolModels(pools) } : {}),
       featured: featured.read(),
-      totals: (await arena.leaderboard()).totals,
+      totals: await arena.totals(snapshot),
       me: user ? {
         votes: arena.votesBy(user.id), pending: library.pendingCount(user.id),
         questionEligibility: questionEligibility(user),

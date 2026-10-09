@@ -280,6 +280,60 @@ test('board totals count only comparisons the fit scored', async () => {
     for (const by of ['config', 'model']) {
       assert.deepEqual((await f.arena.leaderboard({ by })).totals, { votes: 1, voters: 1, entries: 2, tasks: 1 }, by);
     }
+    assert.deepEqual(await f.arena.totals(), (await f.arena.leaderboard()).totals);
+    f.vote('a2', 'b2', 'tie');
+    assert.deepEqual(await f.arena.totals(), (await f.arena.leaderboard()).totals, 'new ballots invalidate counts too');
+    f.data.tasks[0].results.find((item) => item.id === 'b1').humanIntervention = 'code-edited';
+    f.save();
+    assert.deepEqual(await f.arena.totals(), { votes: 1, voters: 1, entries: 2, tasks: 1 }, 'a new datapack revalidates counted ballots');
+    assert.deepEqual(await f.arena.totals(), (await f.arena.leaderboard()).totals);
+  } finally { f.close(); }
+});
+
+test('bootstrap yields while serializing a large public catalog', async () => {
+  const f = fixture(Array.from({ length: 96 }, (_, i) => work(`work-${i}`, i % 2 ? 'a' : 'b')));
+  let platform, server;
+  try {
+    for (const item of f.data.tasks[0].results) f.library.setFaceSettings({ id: 'root', name: 'root', role: 'admin' }, 'one', item.id, { show_gallery: true });
+    platform = createPlatform({ config: f.config, limits });
+    const toPublic = platform.library.toPublic.bind(platform.library);
+    let serialized = 0, yielded = false, continuedAfterYield = false;
+    platform.library.toPublic = (...args) => {
+      if (++serialized === 1) setImmediate(() => { yielded = true; });
+      if (serialized > 32 && yielded) continuedAfterYield = true;
+      return toPublic(...args);
+    };
+    server = createServer(platform.handleSite).listen(0, '127.0.0.1');
+    await new Promise((resolve) => server.once('listening', resolve));
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/bootstrap`);
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).works.length, 96);
+    assert.equal(continuedAfterYield, true, 'catalog serialization lets pending I/O run before it finishes');
+  } finally {
+    if (server) await new Promise((resolve) => server.close(resolve));
+    await platform?.close();
+    f.close();
+  }
+});
+
+test('bootstrap totals share pending reads, yield to other requests and resolve each ballot task once', async () => {
+  const f = fixture();
+  try {
+    f.enable();
+    for (let i = 0; i < 300; i++) f.vote('a1', 'b1');
+    const task = f.catalog.task.bind(f.catalog);
+    let taskReads = 0, yielded = false;
+    f.catalog.task = (...args) => { taskReads++; return task(...args); };
+    f.library.eligible = () => { throw new Error('Totals must not rebuild all blind pools'); };
+    setImmediate(() => { yielded = true; });
+    const pending = f.arena.totals();
+    assert.strictEqual(f.arena.totals(), pending);
+    assert.deepEqual(await pending, { votes: 300, voters: 300, entries: 2, tasks: 1 });
+    assert.equal(yielded, true, 'even two-entry boards yield while scanning a long vote history');
+    assert.ok(taskReads < 20, `${taskReads} task reads should scale with works, not 300 votes`);
+    const reads = taskReads;
+    await f.arena.totals();
+    assert.equal(taskReads, reads, 'settled reads reuse the current validated totals');
   } finally { f.close(); }
 });
 

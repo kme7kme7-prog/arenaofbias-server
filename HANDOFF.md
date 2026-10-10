@@ -1,5 +1,12 @@
 # HANDOFF.md · 当前状态
 
+## GLM 5.3 Flash X 数据包消费与投稿登记（2026-10-11，已上线）
+
+- 用户要求新增可选模型并更正同类自填投稿；消费已验证私有新包。后台仅消费pin变化，无运行功能/schema修改，线上代码7c5ce104保持。
+- 当前library.setMeta登记up-imkun6wp/up-l1uqw5tv/up-oj8lodzg为glm-5.3-flash-x，保持Max及2 verified/1 unverified；3 meta审计，重跑0/0。原票9569及非目标行保持；模型榜9079有效比较/242参与者保持，正式行10比较/2公开作品。v41/integrity ok/外键0。
+- Windows check115/0、test332/332。最终包2288文件SHA/Git blob通过，2287资源与旧生产字节相同；公网包兼容/CORS、2DTO和榜单通过；服务active/running/NRestarts0。未跑Linux全量、未生产登录投稿或投票。Gallery完整2353文件仅目录变化，桌面/390目视通过。
+- 最终包链接已纠正并复验，初次脚本替换错误变量名的日志不能作为最终成功证据。备份/root/aob-glm-flash-x-20261011/backup/before-registration.db；详细运维及浏览器结果见Gallery同轮归档。本轮一条英文提交，不push。[记录](docs/archive/2026-10-11-glm-flash-x-wsnxxxs.md)。
+
 ## API上传空闲等待调整（2026-10-10，已上线）
 
 - 用户要求取消投稿60秒断开，并由Gallery添加小字提醒。新增deploy/nginx/upload-timeout.conf，API HTTPS server包含该文件，client_body_timeout=1d（24小时）；该定时器没有0关闭语义。仅调整API请求体空闲等待，运行模块、版本7c5ce104、数据包和数据库未改。

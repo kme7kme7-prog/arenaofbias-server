@@ -1,5 +1,13 @@
 # HANDOFF.md · 当前状态
 
+## Gemini exp-a 消费撤回（2026-10-11，已完成）
+
+- 用户要求删除刚新增的Gemini 4.x（灰度） - exp-a；移除gemini-4.x-exp-a及两个别名，保留原gemini-4.x。私有源码和README恢复新增前注册状态（132模型）；本轮生产只读复核无作品引用该ID，无业务数据库写入。
+- 线上使用新增前已验证的固定包，不重建作品、不发布新的包。2288包文件SHA通过，2287资源与撤回前逐字节一致；完整2353个Gallery文件仅data.json变化。运行代码、配置、媒体和后台版本保持，无停服，service active/running/NRestarts0。
+- 数据check33/0、test9/9、严格intake176件/0错/8既有提示；Gallery check68/0、test33/33、build176件/70site、CI intake0错/8既有提示；后台check115/0、test332/332。未重复完整build:data或Linux全套单测，注册表直接恢复此前已验证状态。
+- 公网目录与本次构建字节一致，bootstrap包及check:deployment兼容/CORS通过；后台新名称/两个别名均无登记、原灰度名保持原ID。共用表单确认新选项不存在、旧选项存在；桌面/390宽无横溢，手机目视与控制台0错误/警告通过。未生产登录/保存投稿/投票。
+- 本轮各涉及仓一条英文提交，不push源码；忽略证据Gallery/output/remove-gemini-exp-a-20261011/及output/playwright/remove-gemini-exp-a-*。服务器/root/aob-remove-gemini-exp-a-20261011/backup/保留撤回前pin/包路径/目录，既有包与前轮归档保留。[完成记录](docs/archive/2026-10-11-remove-gemini-exp-a-wsnxxxs.md)。
+
 ## Gemini 4.x（灰度） - exp-a 数据包消费（2026-10-11，已上线）
 
 - 用户要求新增独立可选模型，后台datapack.json消费新固定包；无运行模块/schema变化，运行版本保持a86b24ca。新ID gemini-4.x-exp-a及正式名称/两个别名解析通过，原gemini-4.x保持。

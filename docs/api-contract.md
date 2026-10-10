@@ -124,14 +124,14 @@ API 域静态 `/data.json`（含等价编码路径）仅管理员登录后返回
 
 对外只有一套作品，以 `task/id` 标识；数据包中的作品 ID 可以跨题重复。文件保存在数据包目录或 SQLite 作品对应的上传目录，存储分流仅在后端内部。数据包条目默认已通过核验，数据库新作品默认 `unverified`。两者共用展示开关、盲评资格、文字编辑、核验与删除操作。历史 `curated_as` 非空的数据库作品继续排除，防止同一件作品重复显示。
 
-统一发布者形状：
+统一发布者形状（以下为没有个人发布者的数据包条目）：
 
 ```json
 { "author": { "role": "admin", "name": null, "avatar": null }, "mine": false }
 ```
 
 - `author.role` 为创建时角色，持久化于 `author_role`，不随账号后来升降权变化，可取 `admin` / `moderator` / `user`。数据包题目与作品固定为 `admin`。
-- 公开与作者接口（bootstrap、me、作品列表、对局揭晓）中，`admin` / `moderator` 的姓名与头像恒为 null，前端显示站点名；普通用户返回昵称和头像，已注销作者姓名为 null。管理员视图另行返回可追溯的真实账号昵称。
+- 所有账号在公开、作者与管理员接口（bootstrap、me、作品列表、对局揭晓）中均返回个人昵称和头像，与角色权限无关。数据包题目与作品没有个人发布者，姓名和头像为 null；已注销作者姓名也为 null。
 - `mine` 根据当前会话与作者账号计算。DTO 删除 `owner`、`ownerName`、`ownerAvatar`、`curated`、`community`、`source`、`curatedAs`、`nominatedAt`；内容审核对象内的 `moderation.source` 仍表示审核方式。
 
 作品公开视图示例：

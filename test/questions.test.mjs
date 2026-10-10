@@ -423,7 +423,7 @@ describe('question and sample review lifecycle', () => {
     assert.equal((await call('root', 'POST', '/api/questions', questionBody)).status, 200);
     const mine = (await call('root', 'GET', '/api/me')).data.questions.filter(q => q.moderation.status === 'pending');
     assert.equal(mine.length, 4);
-    assert.ok(mine.every(q => q.author.role === 'admin' && q.author.name === null && q.mine));
+    assert.ok(mine.every(q => q.author.role === 'admin' && q.author.name === 'root' && q.mine));
   });
 
   test('question and sample appear privately, admin previews work, and approval gates public surfaces', async () => {
@@ -618,9 +618,9 @@ test('package and database questions share overrides, visibility, counts and del
       VALUES ('upload', 'pack', 'moderator', 'Upload', 'Model', 'upload-key', 'file.html', '', 'index.html', 1, 1, 'digest', '[]', 1, 1)`).run();
     const body = { title: 'New', summary: 'Summary', prompt: 'Prompt', category: '静态网页', domains: ['数学'], templates: ['static'] };
     const created = questions.createByAdmin(admin, body);
-    assert.equal(created.moderation.status, 'pending'); assert.deepEqual(created.author, { role: 'admin', name: null, avatar: null }); assert.equal(created.mine, true);
+    assert.equal(created.moderation.status, 'pending'); assert.equal(created.author.role, 'admin'); assert.equal(created.author.name, 'Operator'); assert.ok(created.author.avatar); assert.equal(created.mine, true);
     const byModerator = questions.create(moderator, body);
-    assert.equal(byModerator.moderation.status, 'pending'); assert.equal(byModerator.author.role, 'moderator'); assert.equal(byModerator.author.name, null);
+    assert.equal(byModerator.moderation.status, 'pending'); assert.equal(byModerator.author.role, 'moderator'); assert.equal(byModerator.author.name, 'Moderator');
     assert.deepEqual(questions.all().map(item => item.id), ['pack', 'other']);
     assert.equal(questions.get('other').acceptsUploads, false);
     assert.equal(questions.adminAll(admin).find(item => item.id === 'pack').works, 2);

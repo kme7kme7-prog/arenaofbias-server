@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import { createPlatform } from '../server/app.mjs';
 import { verifiedUser } from './helpers/email.mjs';
 import { createCatalog } from '../server/catalog.mjs';
-import { createAuth } from '../server/auth.mjs';
+import { avatarOf, createAuth } from '../server/auth.mjs';
 import { createLibrary } from '../server/library.mjs';
 import { limits } from '../server/config.mjs';
 import { MIGRATIONS, openDatabase } from '../server/db.mjs';
@@ -98,7 +98,7 @@ test('staff publishing waits for verification, preserves authorship and guards m
     assert.equal(library.publicContent(work), false);
     assert.equal(library.visibleTo(work), false);
     assert.ok(library.reviewQueue().some((item) => item.id === work.id));
-    assert.deepEqual(library.authorWorks(moderator)[0].author, { role: 'moderator', name: null, avatar: null });
+    assert.deepEqual(library.authorWorks(moderator)[0].author, { role: 'moderator', name: 'Mod nickname', avatar: avatarOf(moderator) });
     assert.equal(library.authorWorks(moderator)[0].mine, true);
     assert.equal(library.adminWork(work, moderator).author.name, 'Mod nickname');
     assert.equal(library.adminWork(work, moderator).mine, true);
@@ -117,7 +117,7 @@ test('staff publishing waits for verification, preserves authorship and guards m
     assert.equal(library.visibleTo(library.work('one', work.id)), true);
     db.prepare("UPDATE users SET role = 'user' WHERE id = ?").run(moderator.id);
     assert.equal(library.toPublic(library.work('one', work.id)).author.role, 'moderator', 'authorship keeps the creation role');
-    assert.equal(library.toPublic(library.work('one', work.id)).author.name, null);
+    assert.equal(library.toPublic(library.work('one', work.id)).author.name, 'Mod nickname');
     const adminDraft = library.createDraft(senior, 'one', 'admin.html', Buffer.from(PAGE));
     const own = library.submit(senior, { draftId: adminDraft.id, confirmed: true, title: 'Admin work', modelId: 'm-b', effort: 'High', providerId: 'official' });
     assert.equal(library.review(senior, 'one', own.id, { status: 'verified' }).status, 'verified', 'senior staff may verify their own work');

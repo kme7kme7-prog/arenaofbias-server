@@ -773,7 +773,7 @@ test('moderator routes enforce senior permissions and forbid decisions on own wo
   assert.equal(submitted.data.work.status, 'unverified');
   assert.equal(submitted.data.work.moderation.status, 'approved');
   assert.equal(submitted.data.work.author.role, 'moderator');
-  assert.equal(submitted.data.work.author.name, null, 'public publication response hides staff name');
+  assert.equal(submitted.data.work.author.name, 'staff', 'staff publish under their own name');
   const denied = [
     ['GET', '/api/admin/questions'], ['POST', '/api/admin/questions', {}],
     ['POST', '/api/questions/one/moderation', { status: 'approved' }],
@@ -816,7 +816,11 @@ test('moderator routes enforce senior permissions and forbid decisions on own wo
   assert.equal(packReview.status, 200, JSON.stringify(packReview.data));
   assert.equal((await call('root', 'POST', `/api/works/one/${id}/review`, { status: 'verified' })).status, 200);
   const visible = (await call('root', 'GET', '/api/bootstrap')).data.works.find((work) => work.id === id);
-  assert.deepEqual(visible.author, { role: 'moderator', name: null, avatar: null }, 'even senior public reads hide staff identities');
+  assert.equal(visible.author.role, 'moderator');
+  assert.equal(visible.author.name, 'staff');
+  assert.ok(visible.author.avatar, 'public staff authors keep their avatar');
+  const anonymous = (await call('anonymous', 'GET', '/api/bootstrap')).data.works.find((work) => work.id === id);
+  assert.deepEqual(anonymous.author, visible.author);
   assert.deepEqual((await call('staff', 'GET', '/api/me')).data.works.find((work) => work.id === id).author, visible.author);
 }));
 
@@ -842,6 +846,7 @@ test('bootstrap v2 unifies questions and works with package overrides and resour
   assert.deepEqual(question.author, { role: 'admin', name: null, avatar: null });
   assert.equal(question.mine, false);
   assert.deepEqual(bootstrap.questions.find((item) => item.id === questionId).author.role, 'user');
+  assert.equal(bootstrap.questions.find((item) => item.id === adminCreated.data.question.id).author.name, 'root');
   assert.ok(Object.values(bootstrap.arena).every((stats) => !Object.hasOwn(stats, 'uploads')));
   for (const work of bootstrap.works) {
     for (const field of ['owner', 'ownerName', 'ownerAvatar', 'source', 'curated', 'community', 'curatedAs', 'nominatedAt', 'scene', 'captures', 'cover', 'files', 'bytes', 'checks', 'trial', 'sourceName', 'root', 'entry']) assert.equal(Object.hasOwn(work, field), false, field);

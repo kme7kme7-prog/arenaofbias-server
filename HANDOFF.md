@@ -1,5 +1,11 @@
 # HANDOFF.md · 当前状态
 
+## API上传空闲等待调整（2026-10-10，已上线）
+
+- 用户要求取消投稿60秒断开，并由Gallery添加小字提醒。新增deploy/nginx/upload-timeout.conf，API HTTPS server包含该文件，client_body_timeout=1d（24小时）；该定时器没有0关闭语义。仅调整API请求体空闲等待，运行模块、版本7c5ce104、数据包和数据库未改。
+- check115/0、test332/332；nginx -t与reload成功。HTTP/1.1及HTTP/2分别暂停70秒后恢复，均正常返回匿名401和Gallery跨域头；后台active/NRestarts0、Nginx active。未验实际登录投稿，不把合成暂停测试称为完整上传通过。
+- Gallery已上线12.5px灰色提醒，完整2353文件仅三项变化；保留已有连接修复和媒体，数据/配置字节不变。备份/root/aob-upload-patience-20261010T063751Z/backup，切换1.907秒；本轮一条英文提交，不push。详见[实现记录](docs/archive/2026-10-10-upload-patience-wsnxxxs.md)。
+
 ## 预览复查后的修复（2026-10-09，已上线）
 
 - 用户批准修复892件复查清单；69项最终42修复、18未见明显问题、8待原作/环境/语义核实、1原作键帽缺失。保留后9项真实状态，不改原作或canonical first/mobile。

@@ -39,6 +39,8 @@ cp -a "$conf" "$conf.bak-$(date -u +%Y%m%dT%H%M%SZ)"
 
 旧 `/www/wwwroot/arenaofbias` 目录和 PM2 的 `arena` 进程已经退役，不能再使用旧 Show1 `deploy:vps` 路径。画廊现用 JS/CSS/JSON/HTML `Cache-Control: no-cache`；图片和字体 `expires 1d`。旧画廊配置只匹配 JS/CSS/WebP/PNG/JPG/SVG/WOFF2 并设 `immutable`，`index.html` 从未设为 `immutable`；修改前的备份在同目录 `gallery.arenaofbias.icu.conf.bak-<时间戳>`。**不带内容哈希的文件不能设置 `immutable`**。画廊构建为全部主站模块与样式生成版本 URL，页面仅包含一个合并 Three.js 映射的 import map；须整体发布该次 HTML 和资产，才能绕开旧的无版本 URL 缓存。
 
+API HTTPS `server` 块包含 `include /www/wwwroot/arenaofbias-server/deploy/nginx/upload-timeout.conf;`，将上传请求体的空闲等待设为24小时，取消默认60秒断开。该时间按相邻两次读取计算，不是上传总时长；`0` 不是关闭开关。更改后备份、`nginx -t`、reload，并验证暂停超过60秒后仍可继续发送。文件大小上限及其他站点的超时保持原配置。
+
 ## 公开读取与反爬配置
 
 2026-09-30 已记录在四个正式 HTTPS vhost 安装并验收本节规则，详见 [gallery-protection-deploy 归档](archive/2026-09-30-gallery-protection-deploy-wsnxxxs.md)。提交配置文件本身不代表部署；后续操作仍先完成第 0 节现场核对，再备份 Nginx 主配置与四个 vhost。

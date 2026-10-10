@@ -1,5 +1,12 @@
 # HANDOFF.md · 当前状态
 
+## Gallery 公开目录缓存（2026-10-11，本地完成，未推送、未部署）
+
+- 用户要求完成加载修复，GPT-6.1 Sol/high 后端代理实现并复查前端。新增catalog/session/activity分离公开目录、轻量身份与统计；旧bootstrap保持。纯公开序列化缓存、ETag/304/HEAD、CORS/Server-Timing；匿名目录不读写会话，身份内容no-store。
+- 包快照、目录/覆盖/公开作者资料变化与外部SQLite提交失效；冷请求合并，构建后复核修订，防止并发撤下回写旧目录。仅文件预览元信息30秒兜底；实际访问始终实时门禁。使用TEMP修订触发器，无持久schema迁移。对齐已部署的相关批次让步、池统计复用及总计优化，保留个人署名和预览修复。
+- check117/0、test337/337；Gallery check69/0、test39/39、build/intake、11项浏览器、真实跨域后端及integration smoke通过。本地1200件合成HTTP中位：旧聚合2817.81ms、冷目录1369.14ms、热目录1.97ms、304为0.56ms；无投稿/历史票，不作线上承诺。
+- 两仓各一条英文提交，不push；未部署、新版公网检查或Linux全套，生产业务未写。先发兼容后端再发Gallery，保留线上数据配置。[完成记录](docs/archive/2026-10-11-public-catalog-loading-wsnxxxs.md)。忽略证据output/loading-fix-20261011/保留。
+
 ## Gemini exp-a 消费撤回（2026-10-11，已完成）
 
 - 用户要求删除刚新增的Gemini 4.x（灰度） - exp-a；移除gemini-4.x-exp-a及两个别名，保留原gemini-4.x。私有源码和README恢复新增前注册状态（132模型）；本轮生产只读复核无作品引用该ID，无业务数据库写入。

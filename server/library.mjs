@@ -571,12 +571,18 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       const archive = snapshot ?? catalog.snapshot();
       return [...archive.works(taskId).map(withDisplay), ...q.worksOfTask.all(taskId).map((row) => fromRow(row, archive))].filter(isEligible);
     },
-    allWorks() {
-      return [...catalog.snapshot().tasks().flatMap((task) => [...task.works.values()].map(withDisplay)), ...this.uploads()]
-        .filter((work) => work && !work.curatedAs && catalog.task(work.taskId, { role: 'admin' }));
+    allWorks({ uploads = this.uploads(), snapshot = catalog.snapshot() } = {}) {
+      const tasks = new Map();
+      return [...snapshot.tasks().flatMap((task) => [...task.works.values()].map(withDisplay)), ...uploads]
+        .filter((work) => {
+          if (!work || work.curatedAs) return false;
+          if (!tasks.has(work.taskId)) tasks.set(work.taskId, catalog.task(work.taskId, { role: 'admin' }));
+          return Boolean(tasks.get(work.taskId));
+        });
     },
     uploads() {
-      return q.works.all().map((row) => fromRow(row)).filter((work) => !work.curatedAs);
+      const snapshot = catalog.snapshot();
+      return q.works.all().map((row) => fromRow(row, snapshot)).filter((work) => !work.curatedAs);
     },
     published(site) {
       return q.works.all().map((row) => fromRow(row)).filter((work) => !work.curatedAs && work.status === 'verified' && visibleTo(work, site));
@@ -603,6 +609,12 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       if (samples.length < 5) return { medianHours: null };
       const middle = Math.floor(samples.length / 2);
       return { medianHours: samples.length % 2 ? samples[middle] : (samples[middle - 1] + samples[middle]) / 2 };
+    },
+
+    access(work, viewer) {
+      work = withDisplay(work);
+      return { task: work.taskId, id: work.id, mine: Boolean(viewer && viewer.id === work.ownerId),
+        ...(!work.curated && viewer && (viewer.id === work.ownerId || isStaff(viewer)) ? { arena: arenaState(work) } : {}) };
     },
 
     toPublic(work, viewer, { admin = false } = {}) {

@@ -247,11 +247,27 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
 
 约定：除注明外，请求体均为 JSON（`Content-Type: application/json`），响应均为 JSON 且 `Cache-Control: no-store`。GET 路由同时接受 HEAD。认证列中的「登录」指有效会话 Cookie；「管理员」指 `role === 'admin'`。
 
-### 3.1 `GET /api/bootstrap` —— 首屏聚合
+### 3.0 Gallery 独立加载接口
 
-**认证**：无（匿名返回阉割版）。**限流**：无。
+三个接口均返回 `apiVersion`、`datapack`、`catalogDigest`、`serverVersion`，沿用受信任前端 CORS、API 读取限流与 GET / HEAD 约定，不接受分页参数。公开目录与账号并行读取，统计不属于公开页面就绪条件。
 
-首屏一次取齐当前用户、站点配置、全部公开题目与作品、表情汇总、各题对战池规模、排行总计、我的计数和工作人员待审数。apiVersion 为 2，Gallery 须与后端同版本发布；旧版 Gallery 遇到 2 降级为静态存档。Show1 兼容层输出保持原形状。
+| 接口 | 内容 | 缓存与认证 |
+| --- | --- | --- |
+| `GET /api/catalog` | `site`、`providers`、`domains`、`domainGroups`、公开 `questions` / `works` | `public, no-cache`、ETag；不解析会话，不触碰 session，不包含 mine、用户或管理权限；登录与匿名字节相同 |
+| `GET /api/session` | `user`（含 emailBound）与 `me`；匿名均为 null | `no-store`；可选会话，轻量 SQL 计数 |
+| `GET /api/activity` | `arena`、`featured`、`totals`、`reactions`、`workAccess`、`review`，特权用户可含 `arenaModels` | `no-store`；可选会话；匿名 workAccess 为空，登录后仅补充本人及允许的权限信息 |
+
+`workAccess` 项以 `task` / `id` 标识作品，含 `mine` 与允许返回的 `arena`，不替代写接口的服务端权限校验。其他字段语义与下方 bootstrap 相同。
+
+目录缓存保存进程内公开序列化字节，相同版本的冷请求合并构建，每批序列化让出事件循环。包快照、题目/作品/覆盖/参考图变化和公开作者资料变化使缓存失效；外部 SQLite 连接提交通过 data_version 检测。构建完成后再次检查版本，避免并发撤下后发布旧快照。临时修订触发器不修改持久数据库 schema；会话续期不使目录失效。仅文件预览元信息的变化以最多30秒缓存周期补充检查，作品与媒体访问仍经过实时门禁。
+
+客户端每次复用都须重新验证，不设置允许脱离服务端确认的 max-age 或 stale-while-revalidate。支持 If-None-Match / 304 和 HEAD，304 前也检查当前目录版本；CORS 允许 If-None-Match，并暴露 ETag、Server-Timing。服务端用 Server-Timing 标记目录缓存命中及处理耗时。
+
+### 3.1 `GET /api/bootstrap` —— 兼容首屏聚合
+
+**认证**：可选会话（匿名返回公开内容）。**限流**：沿用 API 读取限流。
+
+一次取齐当前用户、站点配置、全部公开题目与作品、表情汇总、各题对战池规模、排行总计、我的计数和工作人员待审数。apiVersion 为 2，新 Gallery 优先使用上述三个接口，仅在旧后端缺少 catalog 时请求兼容 bootstrap；临时故障不回退旧包。Show1 兼容层输出保持原形状。该聚合响应继续 no-store。
 
 `domains` 返回题目可选的完整领域词表，目前 25 项；`domainGroups` 返回 `{title, domains}` 四组（理工与健康、人文与社会、空间与产品、生活与娱乐），只用于表单排布，展开后与词表一致。每题仍可选 1–2 项。后台新建与编辑都使用这份分组和同一套复选控件，选满后可取消并更换。`category` 的存储值继续为文学 / 静态网页 / 建模，界面统一显示文本 / 设计 / 三维；设计的 Gallery 投稿格式仍为单个 HTML 文件。词表扩充不迁移已有题目，不改历史投票与排行分组。
 

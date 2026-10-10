@@ -2,6 +2,7 @@
 import { extname, join, relative, resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { setImmediate as yieldToRequests } from 'node:timers/promises';
 import { createArena } from './arena.mjs';
 import { createFeatured } from './featured.mjs';
 import { avatarOf, createAuth } from './auth.mjs';
@@ -10,6 +11,7 @@ import { createLoginSecurity } from './login-security.mjs';
 import { createCapturer } from './capture.mjs';
 import { createModerator } from './moderation.mjs';
 import { createCatalog } from './catalog.mjs';
+import { createCatalogResponse } from './catalog-response.mjs';
 import { createComments } from './comments.mjs';
 import { AVATARS, EFFORTS, EMOJIS } from './config.mjs';
 import { createContentHandler } from './content.mjs';
@@ -142,43 +144,52 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     return snapshot;
   };
 
-  async function bootstrap(user) {
-    const snapshot = catalog.snapshot();
-    const uploads = library.uploads();
+  const versionInfo = (snapshot = catalog.snapshot()) => ({
+    datapack: snapshot.commit, catalogDigest: snapshot.catalogDigest, apiVersion: 2,
+  });
+  const siteInfo = () => ({
+    content: config.contentTemplate,
+    cdn: config.cdn,
+    capture: capturer.available,
+    contentModeration: moderator.enabled,
+    autoModeration: moderator.enabled && Boolean(config.moderation?.apiKey) && capturer.available,
+    efforts: EFFORTS,
+    emojis: EMOJIS,
+    avatars: AVATARS,
+    limits: { uploadBytes: limits.uploadBytes, coverBytes: limits.coverBytes, referenceCount: limits.referenceCount,
+      referenceBytes: limits.referenceBytes, pendingPerUser: limits.pendingPerUser, provisionalGames: limits.provisionalGames },
+  });
+  const galleryWorks = () => library.allWorks().filter((work) => library.visibleTo(work, 'show2'));
+  async function galleryList(user, snapshot = catalog.snapshot()) {
+    await yieldToRequests();
+    const allWorks = library.allWorks({ snapshot });
+    const works = [];
+    for (let i = 0; i < allWorks.length; i++) {
+      const work = allWorks[i];
+      if (library.visibleTo(work, 'show2')) works.push(library.toPublic(work, user));
+      if (i % 32 === 31) await yieldToRequests();
+    }
+    return works;
+  }
+  const withoutMine = ({ mine, ...item }) => item;
+  const publicCatalog = createCatalogResponse(db, catalog, async (snapshot) => ({
+    ...versionInfo(snapshot), serverVersion, providers: snapshot.providers(), domains: DOMAINS, domainGroups: DOMAIN_GROUPS,
+    site: siteInfo(), works: (await galleryList(null, snapshot)).map(withoutMine), questions: questions.all().map(withoutMine),
+  }));
+  function session(user) {
     return {
-      datapack: snapshot.commit,
-      catalogDigest: snapshot.catalogDigest,
-      apiVersion: 2,
-      serverVersion,
-      providers: snapshot.providers(),
-      domains: DOMAINS,
-      domainGroups: DOMAIN_GROUPS,
+      ...versionInfo(),
       user: user ? { ...auth.public(user), emailBound: Boolean(user.email) } : null,
-      site: {
-        content: config.contentTemplate,
-        cdn: config.cdn,
-        capture: capturer.available,
-        contentModeration: moderator.enabled,
-        autoModeration: moderator.enabled && Boolean(config.moderation?.apiKey) && capturer.available,
-        efforts: EFFORTS,
-        emojis: EMOJIS,
-        avatars: AVATARS,
-        limits: { uploadBytes: limits.uploadBytes, coverBytes: limits.coverBytes, referenceCount: limits.referenceCount,
-          referenceBytes: limits.referenceBytes, pendingPerUser: limits.pendingPerUser, provisionalGames: limits.provisionalGames },
-      },
-      works: publicList(library.allWorks().filter((work) => library.visibleTo(work, 'show2')), user),
-      questions: questions.all(user),
-      reactions: library.reactionSummary(user),
-      arena: Object.fromEntries(catalog.tasks().filter((task) => !isAiJudgedTask(task)).map((task) => [task.id, arena.poolStats(task.id)])),
-      ...(isSenior(user) ? { arenaModels: arena.poolModels() } : {}),
-      featured: featured.read(),
-      totals: (await arena.leaderboard()).totals,
       me: user ? {
         votes: arena.votesBy(user.id), pending: library.pendingCount(user.id),
         questionEligibility: questionEligibility(user),
         pendingLimit: library.pendingLimit(user), updates: library.updatesCount(user.id),
       } : null,
-      review: isStaff(user) ? {
+    };
+  }
+  function review(user) {
+    const uploads = isStaff(user) ? library.uploads() : [];
+    return isStaff(user) ? {
         // Same queue as the Gallery review page: released content on a public question that the
         // gallery has not decided yet, which includes uploads already verified for the arena.
         unverified: library.reviewQueue().length,
@@ -186,8 +197,33 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         autoRejected: uploads.filter((work) => work.moderation.status === 'rejected' && work.moderation.source !== 'human').length,
         injected: uploads.filter((work) => work.moderation.categories?.includes('prompt-injection')).length,
         questions: isSenior(user) ? questions.pendingCount() : 0,
-      } : null,
+      } : null;
+  }
+  async function activity(user) {
+    const snapshot = catalog.snapshot();
+    const pools = new Map();
+    const arenaStats = {};
+    for (const task of catalog.tasks()) {
+      if (isAiJudgedTask(task)) continue;
+      const pool = library.eligible(task.id, snapshot);
+      pools.set(task.id, pool);
+      arenaStats[task.id] = arena.poolStats(task.id, pool);
+      await yieldToRequests();
+    }
+    return {
+      ...versionInfo(snapshot), reactions: library.reactionSummary(user),
+      arena: arenaStats,
+      ...(isSenior(user) ? { arenaModels: arena.poolModels(pools) } : {}),
+      featured: featured.read(), totals: await arena.totals(snapshot),
+      workAccess: user ? galleryWorks().map((work) => library.access(work, user)) : [],
+      review: review(user),
     };
+  }
+  async function bootstrap(user) {
+    const snapshot = catalog.snapshot();
+    const { workAccess, ...live } = await activity(user);
+    return { ...versionInfo(snapshot), serverVersion, providers: snapshot.providers(), domains: DOMAINS, domainGroups: DOMAIN_GROUPS,
+      site: siteInfo(), works: await galleryList(user, snapshot), questions: questions.all(user), ...session(user), ...live };
   }
 
   const router = createRouter();
@@ -197,6 +233,9 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     res.end(req.method === 'HEAD' ? undefined : foldScript);
   });
   router.on('GET', '/api/bootstrap', (ctx) => bootstrap(ctx.user));
+  router.on('GET', '/api/catalog', ({ req, res }) => publicCatalog(req, res));
+  router.on('GET', '/api/session', (ctx) => session(ctx.user));
+  router.on('GET', '/api/activity', (ctx) => activity(ctx.user));
   router.on('GET', '/api/show1/works', (ctx) => ({
     works: publicList(library.published('show1'), ctx.user),
     reactions: library.reactionSummary(ctx.user, 'show1'),
@@ -767,7 +806,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         if (isTrustedOrigin(req, config)) {
           res.setHeader('Access-Control-Allow-Origin', req.headers.origin);
           res.setHeader('Access-Control-Allow-Credentials', 'true');
-          res.setHeader('Access-Control-Expose-Headers', 'X-Datapack-Stale');
+          res.setHeader('Access-Control-Expose-Headers', url.pathname === '/api/catalog' ? 'X-Datapack-Stale, ETag, Server-Timing' : 'X-Datapack-Stale');
         }
       }
       const referenceMedia = url.pathname.startsWith('/media/references/') || url.pathname.startsWith('/media/pack-references/');
@@ -779,10 +818,10 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         if (!route) fail(404, '接口不存在');
         if (route.methodNotAllowed) fail(405, '不支持这个操作');
         const headers = String(req.headers['access-control-request-headers'] ?? '').toLowerCase().split(',').map((header) => header.trim()).filter(Boolean);
-        if (headers.some((header) => !['content-type', 'x-datapack-version'].includes(header))) fail(403, '请求头无效');
+        if (headers.some((header) => !['content-type', 'x-datapack-version', 'if-none-match'].includes(header))) fail(403, '请求头无效');
         res.writeHead(204, {
           'Access-Control-Allow-Methods': method,
-          'Access-Control-Allow-Headers': 'Content-Type, X-Datapack-Version',
+          'Access-Control-Allow-Headers': 'Content-Type, X-Datapack-Version, If-None-Match',
           'Access-Control-Max-Age': '600',
         });
         return res.end();
@@ -793,13 +832,14 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       }
       if (req.method === 'GET' || req.method === 'HEAD') readGuard.api(req, url.pathname);
       if (['GET', 'HEAD'].includes(req.method)
-        && ['/api/bootstrap', '/api/show1/works', '/api/works', '/api/prompts', '/api/votes', '/api/ratings'].includes(url.pathname)
+        && ['/api/bootstrap', '/api/catalog', '/api/show1/works', '/api/works', '/api/prompts', '/api/votes', '/api/ratings'].includes(url.pathname)
         && ['limit', 'offset', 'page'].some((key) => url.searchParams.has(key))) fail(400, '此接口返回完整目录，不支持分页参数', 'unsupported_pagination');
       const route = router.match(req.method, url.pathname);
       if (!route) fail(404, '接口不存在');
       if (route.methodNotAllowed) fail(405, '不支持这个操作');
       if (req.method !== 'GET' && req.method !== 'HEAD') assertSameOrigin(req, config);
-      const ctx = { req, res, url, params: route.params, ip: clientIp(req, config.trustProxy), user: auth.userFrom(req) };
+      const ctx = { req, res, url, params: route.params, ip: clientIp(req, config.trustProxy),
+        user: url.pathname === '/api/catalog' ? null : auth.userFrom(req) };
       const result = await route.handler(ctx);
       if (!res.headersSent) return sendJson(res, 200, result ?? { ok: true });
     } catch (error) {

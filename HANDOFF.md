@@ -1,5 +1,14 @@
 # HANDOFF.md · 当前状态
 
+## Gallery独立加载发布（2026-10-11，已上线）
+
+- 用户授权提交、推送、部署并要求联调。加载功能3629a9e已安装，仅app/library/read-guard及新catalog-response四运行文件；Gallery仅七个发布文件改变，其余2353目录数据/配置/媒体保持。当前运行标记3629a9ed；各仓合并远端历史并正常推送main。
+- Linux候选check117/0、test337/337；实际65题/1259件生产DB副本验证公开字节身份无关、权限独立、旧聚合口径、撤下立即失效。最终切换DBv41/integrity ok/外键0，306用户/1381作品/60数据库题/9681票保持。服务active/running/NRestarts0。
+- 公网代理继承全局proxy_cache抑制条件头，已仅在API根proxy包含api-proxy.conf关闭继承、gzip6；媒体缓存保留，nginx -t/reload通过。公开重验证与浏览器确认304，跨域预检204、session no-store；传输236702→208325B，最后200/304采样3366/337ms、304零正文。
+- 前端check69/0、test39/39、build/intake通过；桌面/390题库和榜单全65题、pageerror/console错误警告0、无bootstrap/业务POST。最终手机首读7533ms、整页刷新3985ms，不作任意网络速度保证。最终成功切换不可用1.727秒；早期部署校验两次自动回滚另有短暂重启，累计未计时。
+- 推送前发现上游260ae05，已保留其playground源码/记录并检查119/0、337/337。本轮未安装它的content/show1compat及三个新运行文件；不能把合并HEAD称为现场全量源码。之后发布playground须保留本轮四文件及API include。
+- 备份/root/aob-loading-release-20261011/backup保留，本轮1.3GB隔离数据副本已定点移除；Gallery/output/loading-release-20261011/与output/playwright/loading-release-20261011/保留证据。[记录](docs/archive/2026-10-11-loading-release-wsnxxxs.md)。未生产登录/投稿/审核/投票或改变数据源。
+
 ## Gallery 公开目录缓存（2026-10-11，本地完成，未推送、未部署）
 
 - 用户要求完成加载修复，GPT-6.1 Sol/high 后端代理实现并复查前端。新增catalog/session/activity分离公开目录、轻量身份与统计；旧bootstrap保持。纯公开序列化缓存、ETag/304/HEAD、CORS/Server-Timing；匿名目录不读写会话，身份内容no-store。
@@ -1185,3 +1194,38 @@
 - 为隔离新增投票，使用只读post-migration一致副本6656票在两个独立临时库只恢复/保留两题类别重放（不写生产、不改审计）：综合6422/166→6378/166，写作569/79→525/79，恰好移出数学44有效比较；BLUE无计分影响，参与者均不因类别变更减少。综合115条、写作75条分数/名次/比较/参与者/题目数变化已逐项记录，包含写作2条退出；完整冻结输入前后榜单和差异在migration-frozen-replay.json，实际HTTP时点差异在migration-comparison.json。
 - 最终UTC16:36:34.107公网/服务/DB校验通过：add9352、active/running、NRestarts=0；原始votes6656，停服前6646逐行保持，后续迁移核验也无删改；v40、integrity ok、外键0、269源码SHA一致。两题bootstrap arena键均不存在，单题榜rows为空、有效比较0，审计存在，分类推理/text正确。没有删除旧票、迁移schema或写aiScore。
 - [完成归档](docs/archive/2026-10-08-backend-reasoning-release-wsnxxxs.md)。本轮本地只追加HANDOFF及归档/前轮状态勘误，未另提交或推送文档。未部署Gallery，未生产浏览器/真机及全交互验收；Gallery由另一边部署。根目录业务代码没有新增改动。
+
+## 连接恢复修复已上线（2026-10-10）
+
+- 用户追加授权立即部署；7c5ce10已上线，仅替换app/arena/library三文件，其余现场运行文件SHA保持。配置、作品、数据包、schema v41均不变，下节“未部署”由本节覆盖。
+- Linux check111/0、test330/330。最新一致副本新旧配置榜/模型榜全字段一致（除生成时间）：8159/8022有效票、211参与者、144/66条目；作品清单相同，新totals与旧榜totals一致。停服另备份最新库1054作品/8495票；上线前后integrity ok、外键0。
+- 服务active/running、NRestarts0；公网bootstrap60题/928作品，Gallery配置/CORS/数据包兼容验证通过。单次loopback bootstrap1.928s、重叠auth/me34ms、空闲2ms，公网auth/me200/206ms。未生产登录、审核、投稿、投票或全交互验收。
+- 备份/root/aob-connectivity-20261010/backup/，旧Gallery/www/wwwroot/gallery.connectivity-before-20261010；[发布归档](docs/archive/2026-10-10-connectivity-release-kme7kme7-prog.md)。
+
+
+## Gallery 首屏阻塞修复（2026-10-10）
+
+- 用户授权修复后以 kme7kme7-prog 的 Git 身份 commit/push，不添加联合署名；本轮未授权覆盖 VPS，未部署。修改前 main 与 origin/main 均 f492d80。
+- bootstrap 改用与配置榜同口径的独立有效票 totals，避免全局榜及分类榜拟合；缓存失效沿用 arena.invalidate / 数据包版本。逐票题目查找改为本次计算内复用，扫描每100票让出事件循环，排名超过40配置进入现有 worker。
+- 首屏逐32作品序列化、逐题构建盲池时让出事件循环；管理员模型列表复用本次盲池。allWorks 复用上传列表及题目查询，uploads 使用一次注册表快照。公开门禁、票归属、审核与私看键规则未修改，无迁移、作品文件改写或新增依赖。
+- Windows `npm run check` 111/0、`npm test` 330/330；新增计数一致性/失效、共享请求、扫描让出和首屏序列化让出测试。API 合同同步说明。
+- 本地合成20题/960作品/8300票对照（每日代表作后台任务从两边排除）：首屏11000→2529ms，并发auth/me等待10881→175ms；双方960公开作品、8300有效票/8300投票者/108配置/20题一致。非线上压测、非延迟保证；证据在相邻Show1忽略目录 `.local/gallery-connectivity-20261010/benchmark-3.log`。
+- 线上 marker c0ad02c 未在已获取历史中找到，已核对 app/arena/library/catalog 四文件与本轮基线一致。将来部署仍须核对其余现场文件及固定提交来源，不覆盖未知补丁。无生产数据库、配置、nginx、作品或服务重启操作。
+- [本轮归档](docs/archive/2026-10-10-bootstrap-responsiveness-kme7kme7-prog.md)。
+
+## Show1随心玩发布授权与增量准备（2026-10-11）
+
+- 用户在Show1轮次明确授权修复菜单/返回后commit/push/deploy。配套后台只读端点与opt-in桥接验证已完成，本轮提交准备与固定main归档发布；无schema迁移/依赖/数据库业务写入。
+- 现场a86b24ca包含本地上游没有的个人署名和预览修复，今天另有目录加载优化安装迹象；不得用本地旧运行文件覆盖。运行文件差异、版本与备份正在核实，已请求用户确认增量保留策略；当前记录不是上线完成。
+- 后端需先于Show1。最终部署只安装content/show1compat及3个新playground文件，其他现场模块、配置/数据包、媒体与数据库保持；组合版需完整哈希记录，不能把保留的现场补丁冒充本提交源码。发布结果在Show1 `.local/playground-release/`。
+
+
+
+## Show1「随心玩」配套接入（2026-10-11，未提交、未推送、未部署）
+
+- 用户在Show1授权接入已认可的文字/3D新玩法并改名；本轮仅添加其必要的共享后端支持，未获线上发布授权。前端统一入口 `/playground.html` 与3D `/objects.html`，原主页、正式盲评和历史榜单继续保留。
+- 新增只读 `GET /api/playground/works`，复用原公开花名册及内容源门禁；六份013题小红帽HTML仅在公开源和入口SHA256同时成立时投影为原文文本。未知/变化源返回原内容。作品ID、模型身份、原文件、历史票不改；没有数据库/schema变更或npm依赖。
+- 内容页显式 `aob=playground&parent=<允许Origin>` 启用 `server/playground-bridge.js`，在实际绘制、加载浮层消失及镜头稳定后报告就绪。合法父站页面替换独立旧探针，非法父站不注入；草稿、正式m、普通/Gallery规则保留。父子消息验证Origin与窗口，Canvas/WebGL/WebGPU/SVG保持原作实际渲染，资源仍先走内容访问门禁。
+- 沿用已认可娱乐镜头/折叠与固定版本纸色背景；`playground-surface.mjs`仅对既定台灯bundle的SHA256延展桌面，防止景窗放大后出现桌面边缘。所有变换在响应时执行，不落盘改原资产或共享相机。新玩法选择只在本地揭晓，未开启旧投票/反应/评论写入或新偏好存储。
+- 最终Windows `npm run check` 113文件/0错误，`npm test` 330/330；端点公开/下架门禁、响应形状、合法/非法父站桥接、正式探针保持有回归。Show1实际本地主站构建预演46项、常速文字过场300项通过；键盘/台灯及FIELD68真实加载就绪成功。FIELD68无通用相机复位API，前端明确禁用；未逐件重新实载全部作品或真机FPS验收。
+- 发布须先更新本服务的新端点与内容桥接，再更新Show1入口；新JSON/JS/MJS文件也须进入发布包，不能仅更新content/show1compat。API合同已同步。未连生产数据库、改配置、投稿/投票/审核、生产服务重启或deploy。预演使用内存SQLite与缓存原资产，证据位于Show1 `.local/playground-backend-final.log` 和 `output/playground/main-integration/`。

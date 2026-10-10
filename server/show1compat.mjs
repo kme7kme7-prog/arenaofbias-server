@@ -31,6 +31,7 @@ import { buildShow1Boards, replayShow1Ratings } from './show1-ranking.mjs';
 import { manualCorrections, voteAttribution, votesBeforeTaskMove } from './vote-attribution.mjs';
 import { isTextTask, isAiJudgedTask } from './categories.mjs';
 
+const forestTexts = JSON.parse(readFileSync(new URL('./playground-forest-texts.json', import.meta.url), 'utf8'));
 const REACTION_EMOJI = { up: '👍', down: '👀', laugh: '🤯' };
 const EMOJI_KIND = { '👍': 'up', '👀': 'down', '🤯': 'laugh' };
 const MAPPED_EMOJIS = Object.keys(EMOJI_KIND);
@@ -345,6 +346,20 @@ export function registerShow1Compat(router, deps) {
 
   router.on('GET', '/api/prompts', () => ({ prompts: promptsOf() }));
   router.on('GET', '/api/works', () => ({ works: worksOf() }));
+  // A native-reader projection of the same gated public roster. Original endpoints
+  // and files stay intact; known legacy HTML is used only while its SHA matches.
+  router.on('GET', '/api/playground/works', () => ({ works: worksOf().map(row => {
+    const extracted = row.promptId === '013' && forestTexts[row.id];
+    if (!extracted || !library) return row;
+    const key = snapshot.workMap[row.id]?.key;
+    const work = key && library.byContentKey(key);
+    if (!work || !library.publicContent(work)) return row;
+    try {
+      const source = readFileSync(join(work.dir, work.entry ?? 'index.html'));
+      if (sha256(source) === extracted.sha256) return { ...row, content: JSON.stringify({ kind: 'text', story: extracted.story }) };
+    } catch { /* Unavailable or changed HTML retains the public renderer. */ }
+    return row;
+  }) }));
 
   router.on('GET', '/api/votes', (ctx) => ({ votes: currentVotes(scopeOf(ctx)) }));
 

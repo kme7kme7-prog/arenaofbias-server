@@ -249,7 +249,7 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
 
 ### 3.0 Gallery 独立加载接口
 
-三个接口均返回 `apiVersion`、`datapack`、`catalogDigest`、`serverVersion`，沿用受信任前端 CORS、API 读取限流与 GET / HEAD 约定，不接受分页参数。公开目录与账号并行读取，统计不属于公开页面就绪条件。
+三个接口均返回 `apiVersion`、`datapack`、`catalogDigest`；`catalog` 另返回 `serverVersion`。沿用受信任前端 CORS、API 读取限流与 GET / HEAD 约定，不接受分页参数。公开目录与账号并行读取，统计不属于公开页面就绪条件。
 
 | 接口 | 内容 | 缓存与认证 |
 | --- | --- | --- |
@@ -262,6 +262,8 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
 目录缓存保存进程内公开序列化字节，相同版本的冷请求合并构建，每批序列化让出事件循环。包快照、题目/作品/覆盖/参考图变化和公开作者资料变化使缓存失效；外部 SQLite 连接提交通过 data_version 检测。构建完成后再次检查版本，避免并发撤下后发布旧快照。临时修订触发器不修改持久数据库 schema；会话续期不使目录失效。仅文件预览元信息的变化以最多30秒缓存周期补充检查，作品与媒体访问仍经过实时门禁。
 
 客户端每次复用都须重新验证，不设置允许脱离服务端确认的 max-age 或 stale-while-revalidate。支持 If-None-Match / 304 和 HEAD，304 前也检查当前目录版本；CORS 允许 If-None-Match，并暴露 ETag、Server-Timing。服务端用 Server-Timing 标记目录缓存命中及处理耗时。
+
+Nginx 的动态 API 代理 location 必须包含 `deploy/nginx/api-proxy.conf`，显式关闭继承的 proxy_cache。否则即使响应为 no-cache，代理仍可能清除传给应用的条件请求头，导致同一 ETag 重复返回完整200。公开目录缓存由应用维护，媒体 location 的既有缓存策略独立保留。API 使用gzip第6级减小首次目录传输。
 
 ### 3.1 `GET /api/bootstrap` —— 兼容首屏聚合
 
@@ -308,6 +310,7 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
 - `datapack` 只在已加载数据包带有有效 GitHub 来源文件时返回真实 SHA；无来源元数据或标为 `local` 的本地包返回 `null`。`catalogDigest` 是实际加载的 `data.json` 原始字节的 SHA-256，本地开发前后端在 `datapack=null` 时可据此比较是否使用同一目录数据版本。`serverVersion` 在进程启动时优先读取 `SERVER_VERSION`，其次读取部署目录 Git HEAD；非 Git 部署读取 `.server-version`，均不可用时为 `dev`。它标识服务代码，不是数据包版本；数据包以 `datapack` 字段判读，部署后分别核对两者。
 - `works` 为两种存储中当前对 Gallery 公开的作品，统一 author DTO，覆盖字段与状态已生效；不在列表中的数据包作品前端不得公开。
 - `arena[题目]` 只保留 poolStats：`works` 为对战池作品数，`entries` 为模型配置数；删除 uploads，投稿开关读取 questions[].acceptsUploads。
+- `totals` 与未筛选的配置排行榜计数口径一致：只统计审核、归属与生成方式校验后、两侧配置不同的有效比较。首屏只计算这些计数，不触发完整排名和分类拟合；计数复用排行榜相同的失效机制，不缓存用户权限或公开作品列表。
 - `featured`：按题目返回已当选的封面 `cover`（作品 ID 或 null）及各模型跨档位的代表作 `models`。只列已有当选记录的题目和模型；空结果为 `{}`，缺少封面时为 null。模型键使用 `catalog.modelKey(work)`：有 `modelId` 时用该 ID，否则用 `x:` 加上模型名的 NFKC、首尾去空白、小写结果。数据包和投稿均用作品 `id`，无需来源前缀。
 - 代表作与封面只选当前盲评合格且至少 5 场比较的作品，以作品分的 `score - interval` 最大者当选；同模型代表作跨推理档位选择。每日重算时按当前票重新评估候选与旧当选者的保守分，新候选至少高出 40 分才替换。每题按服务器时区自然日最多重算一次，包括没有达标作品的日子；结果与重算日期保存在 SQLite，重启不重排。bootstrap 懒触发后台计算并先返回旧结果；已撤出、存疑、删除或其他不合格的当选作品在读取时立即移除，剩余结果仍等次日重算。文字题跳过，前端自行兜底。
 - 匿名：`user`、`me` 为 `null`，`reactions.mine` 为 `{}`。工作人员的 `review` 返回 `unverified`、`content`、`autoRejected`、`injected`、`questions`；普通管理员的 questions 固定为 0。`unverified` 与统一核验队列一致：题目已公开、内容已放行、未存疑；数据包作品须 status=unverified，数据库作品须尚无展览馆面决定（reviewed.gallery 为 null，可包含竞技场已核验的作品），历史 curated_as 条目排除。待审题目的示例待题目通过后计入。其余内容计数仍取未删除数据库作品，排除所属题目已删除的作品：content 为 moderation.status=review，autoRejected 为 rejected 且 source 不为 human（包括 automatic、recheck 和缺省 source），injected 为 categories 含 prompt-injection，后两者可重叠。questions 为未删除 pending 题目数。pending 仍在自动队列、rejected 已有决定，均不计入 content。
@@ -339,6 +342,10 @@ APEX-65 当前打包版本使用独立 SHA256 固定的相机适配：仅竞技�
 内容服务按上述版本匹配为本地脚本附加 `aob=entertainment-camera`，仍先经过原内容访问门禁，再动态接入相机桥接。源文件不落盘改写，外部脚本地址不改。娱乐镜头包含 position/target；个别透视作品可另存受限的 fov（20–100），不扩展共享相机 API 格式。桥接在绘制前保持娱乐保存镜头，关闭娱乐预览的自动绕转；直接 canvas 拖动/滚轮后释放镜头保持，窗口调整保留当前视角。未带娱乐标记的桥接仍沿用既有行为。
 
 娱乐 `arena-fold` 的非正式文档使用独立就绪探针：DOM 可用后每 80ms 检查，连续两次满足条件才上报 `aob:work-ready`；`arena-scene` 还要求 Canvas 实际绘制且已识别的大加载浮层消失。它不依赖 `window load` 或不可见 iframe 的帧回调，也不使用 8 秒强制成功。普通/Gallery 与正式 `m` 探针保持原策略。Show1 娱乐前端场景文档就绪预算为 30 秒，静态为 10 秒、导航为 20 秒；失败最多刷新换组一次，刷新期间废弃旧 iframe 的就绪信号。加载浮层识别是启发式判断，不保证识别 Canvas 内或任意自定义加载页。
+
+Show1「随心玩」3D展台另行 opt-in `aob=playground&parent=<父站Origin>`，与 `arena-fold`、`arena-scene`、相机参数并用。仅非草稿、非正式 `m` 内容且 `parent` 属于服务允许的 `siteOrigins` 时，HTML注入 `/__playground.js` 和明确的父站Origin；新桥接负责真实Canvas/WebGL/WebGPU/SVG绘制、加载浮层及相机稳定就绪，替代该文档单独的旧就绪探针。父子控制消息只认实际父窗口和该Origin；没有通用相机API的作品保留原交互，不宣称支持复位。正式盲评、草稿以及未带合法父站的页面保留既有探针策略。桥接资源仍先经过原内容门禁，不扩大作品公开范围。
+
+此展台沿用版本固定的娱乐镜头；纸色背景仅作用于已核验的八份键盘/台灯版本，台灯桌面延展仅作用于 `playground-surface.mjs` 固定SHA256的模块。动态变换不改存储文件或数据库相机值，源版本变化时不强行套用。
 
 ### 3.2 `POST /api/auth/register` —— 注册
 
@@ -901,6 +908,7 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 | --- | --- |
 | `GET /api/prompts` | `{ prompts: [...] }`；合并历史快照、数据包题目与已审核公开的数据库题目。已有 `arenaId` 保留三位编号，其他题目沿用 canonical task ID（如 `q-48c3b43eeb284f6d`），无需另行登记竞技场编号；竞技场 editorial 覆盖对应题目的 `commentary`、`weights`。 |
 | `GET /api/works` | `{ works: [...] }`；快照作品加符合条件的 live 投稿与公开收录。快照 HTML 和 live 投稿还须通过内容源当前的 `publicContent` 门禁；任务缺失、撤下或不可公开的源不进入清单，快照非 HTML 内容保留。历史身份映射、票与题目定义不删除。 |
+| `GET /api/playground/works` | 「随心玩」只读作品投影，形状和公开范围与 `/api/works` 相同。小红帽013题六份已登记HTML仅在内容源仍公开且入口SHA256匹配 `playground-forest-texts.json` 时返回原生文本；作品/模型ID与原文段落保留，未知或版本变化的HTML返回原内容。无写库、计票或迁移行为，原 `/api/works` 不受影响。 |
 | `GET /api/votes?scope=entertainment\|formal` | `{ votes: [...] }`；只读库内 `source=show1` 的票，按时间和 ID 排序，不合入旧快照。scope 必填，非法或缺失为 400。 |
 | `POST /api/votes` | 登录必需；提交 `id`、`promptId`、`winnerRid/Mid`、`loserRid/Mid`、`mode`、`outcome`。未绑定邮箱时有效请求返回 `200 { counted: false, reason: 'unbound' }`，不写入对局或票；已绑定时成功 `201 { vote }`，同 ID 同票幂等重放，已投同一对返回 `409 pair`；`formal` 仅管理员。新 `blind` / `party` 票要求该题当前公开娱乐作品至少 10 件（非演示、按 id 去重），不足返回 `409 { code: "pool", error: "作品收集中（数量/10），暂未开放娱乐盲测" }`；已存票幂等重放及历史榜单保留，正式范围不套此门槛。 |
 | `GET /api/ratings?scope=entertainment\|formal` | `{ ratings: { [modelId]: number }, games: { [modelId]: number } }`；按库内票回放未取整 Elo，供配对，复用聚合缓存。scope 必填。 |
@@ -916,6 +924,8 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 新增题目及其已验证、开启竞技场展示的投稿会保留在公开清单中；娱乐盲测须至少有 10 件不同 id 的非演示公开娱乐作品且有跨模型组合，未达门槛仍可浏览，降到门槛以下关闭新对局。长短提示词使用同一个 task ID 与编号，以 `promptVariants: [{id, label, prompt}]` 返回两份原文，由前端按钮切换；作品可通过 `promptVariant` 标明使用的版本，同一模型的两版展示在一起。既有快照题目保留编号、名称及权重，正式提示词由数据包提供；未进入数据包的历史题目仍保留。不新增数据库迁移，不改变展览馆审核、作品展示开关或正式盲测接口。Show1 前端须同步支持 canonical ID 后再对外发布此兼容层改动。
 
 旧分享卡端点已移除，访问返回 `404`。兼容层的详细字段可参考 `test/fixtures/show1-golden/` 中的固定响应。
+
+「随心玩」前端选择只在本页揭晓作者，不调用旧 `POST /api/votes`、评论或反应写接口，也不进入历史娱乐榜。此产品行为不删除旧票或改变已有接口；新作品端点及内容桥接须先于依赖它们的Show1入口发布。
 
 主站榜单响应：`{ scope, category, board, allBoard, radar, scopedPromptCount }`。`board`、`allBoard` 为 `{ rows, totalVotes, modelCount, promptCount }`，后者固定综合赛道，供页头统计；`scopedPromptCount` 是当前赛道实际投过票的题数。每行包含 `modelId`、`name`、`sigil`、`retired`、`rating`、`games`、`wins`、`losses`、`draws`、`winrate`、`topics`、`trial`。`radar` 为 `{ profiles: { [modelId]: [六维分] }, average: [六维均值] }`。空榜为零票、空 rows/profiles、画像均值六个 50；不返回逐票数据。
 

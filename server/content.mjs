@@ -9,7 +9,12 @@ import { createReadGuard } from './read-guard.mjs';
 import { bridgeTags, probeTag, rewriteImportmap, serveBridgeVirtual, validCamera } from './bridge.mjs';
 import { APEX_ASSET, APEX_CAMERA_PATH, adaptApexCamera, apexDocument, adaptApexDocument } from './apex-camera.mjs';
 import { TESSERA_ASSET, TESSERA_CAMERA_PATH, adaptTesseraCamera, tesseraDocument, adaptTesseraDocument } from './tessera-camera.mjs';
-import { entertainmentMatches, entertainmentOptions, entertainmentCamera, entertainmentDocument, entertainmentModule } from './entertainment-calibration.mjs';
+import { entertainmentMatches, entertainmentOptions, entertainmentCamera, entertainmentDocument, entertainmentModule, entertainmentProfile } from './entertainment-calibration.mjs';
+
+import { extendStageTable } from './playground-surface.mjs';
+
+const stageBridge = readFileSync(new URL('./playground-bridge.js', import.meta.url));
+const stageRender = body => Buffer.from(body.toString('latin1').replace(/(window\.__AOB__\?\.prepareCamera\?\.\([\w$.]+\),)([\w$.]+)\.render\(\s*([\w$.]+)\s*,\s*([\w$.]+)\s*\)/g, '$1window.__objectStageRender($2,$3,$4)').replaceAll('aob=entertainment-camera', 'aob=entertainment-camera&aob=playground'), 'latin1');
 
 // Scripts the content server adds to a page: the trial-load probe for drafts, the panel
 // fold for blind-comparison frames and public pages that opt in with ?aob=fold.
@@ -95,12 +100,18 @@ export function createContentHandler({ config, library, arena, siteOrigins, read
 
     const url = new URL(req.url, 'http://content.invalid');
     const { pathname } = url;
+    const playground = !target.draft && key[0] !== 'm' && url.searchParams.getAll('aob').includes('playground');
+    const stageParent = playground && siteOrigins.includes(url.searchParams.get('parent')) ? url.searchParams.get('parent') : null;
     const headers = {
       'Content-Security-Policy': policy,
       'Referrer-Policy': 'no-referrer',
       'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=()',
       'Cache-Control': target.draft || target.private || key[0] === 'm' ? 'no-store' : 'private, max-age=600',
     };
+    if (pathname === '/__playground.js' && !target.draft) {
+      res.writeHead(200, { ...headers, 'Content-Type': 'text/javascript; charset=utf-8', 'Content-Length': stageBridge.length });
+      return res.end(req.method === 'HEAD' ? undefined : stageBridge);
+    }
     const fold = key[0] === 'm' || (!target.draft && url.searchParams.getAll('aob').includes('fold'));
     const arenaFold = !target.draft && url.searchParams.getAll('aob').includes('arena-fold');
     const inject = pathname === SCRIPTS.arena.path ? SCRIPTS.arena : pathname === SCRIPTS.match.path ? SCRIPTS.match : target.draft ? SCRIPTS.draft : null;
@@ -133,7 +144,11 @@ export function createContentHandler({ config, library, arena, siteOrigins, read
     const found = resolveInside(target.dir, pathname === '/' ? `/${target.entry}` : pathname);
     if (!found) return errorPage(res, 404, '找不到文件', pathname.slice(0, 120));
     if (!target.draft && key[0] !== 'm' && url.searchParams.getAll('aob').includes('entertainment-camera') && /\.m?js$/i.test(found.file)) {
-      const body = entertainmentModule(readFileSync(found.file), work, pathname);
+      let body = entertainmentModule(readFileSync(found.file), work, pathname);
+      if (body && playground) {
+        const source = extendStageTable(body.toString('latin1'), { workId: work.taskId === 'desk-lamp' ? `dp-021-${work.id}` : work.id, modules: entertainmentProfile(work)?.modules }, pathname);
+        body = stageRender(Buffer.from(source, 'latin1'));
+      }
       if (body) {
         res.writeHead(200, { ...headers, 'Cache-Control': 'no-store', 'Content-Type': 'text/javascript; charset=utf-8', 'Content-Length': body.length });
         return res.end(req.method === 'HEAD' ? undefined : body);
@@ -145,7 +160,7 @@ export function createContentHandler({ config, library, arena, siteOrigins, read
       // for aob:work-ready); the camera bridge restores or captures per bridgePlan.
       const head = [];
       // Start the readiness clock before any parser-blocking injected script.
-      if (key[0] === 'm' || key[0] === 'c' || url.searchParams.getAll('aob').includes('prev')) {
+      if (!stageParent && (key[0] === 'm' || key[0] === 'c' || url.searchParams.getAll('aob').includes('prev'))) {
         head.push(arenaFold && key[0] !== 'm'
           ? entertainmentProbeTag(url.searchParams.getAll('aob').includes('arena-scene')) : probeTag());
       }
@@ -181,6 +196,12 @@ export function createContentHandler({ config, library, arena, siteOrigins, read
       if (bridge) {
         body = rewriteImportmap(body, pathname);
         head.push(...bridge);
+      }
+      if (stageParent) {
+        if (arenaCamera && entertainmentCurrent) body = stageRender(body);
+        const paperWorks = { 'mechanical-keyboard': ['gpt-6-sol-high', 'mimo-v2.6-pro', 'gpt-6-astra-high', 'gpt-5.6-sol-max'], 'desk-lamp': ['gpt-6-sol-high', 'gpt-6-astra-high', 'gpt-6-sol-max', 'gpt-6-astra-max'] };
+        const paper = entertainmentCurrent && !!paperWorks[work.taskId]?.includes(work.id);
+        head.unshift('<script>window.__PLAYGROUND_ORIGIN__=' + JSON.stringify(stageParent) + ';window.__OBJECT_STAGE_CAMERA__=' + JSON.stringify(entertainmentCamera(work, readFileSync(found.file))) + ';window.__OBJECT_STAGE_PAPER__=' + JSON.stringify(paper) + '</script><script src="/__playground.js"></script>');
       }
       if (head.length) body = withHeadTags(body, head.join(''));
       res.writeHead(200, { ...headers, 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': body.length, 'X-Content-Type-Options': 'nosniff' });

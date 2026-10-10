@@ -237,6 +237,7 @@ describe('show1 compat endpoints', () => {
         id: "'up-unmapped'", content_key: "'wunmapped'", digest: "'dunmapped'", show_entertainment: '1',
       })[name] ?? name).join(', ')} FROM works WHERE id = 'up-cccc0003'`);
       const hidden = (await call(base, 'GET', '/api/works')).data.works;
+      assert.deepEqual((await call(base, 'GET', '/api/playground/works')).data.works, hidden, 'the new reader cannot expose hidden HTML or uploads');
       assert.equal(hidden.filter(row => row.promptId === '001').length, 0);
       assert.equal(hidden.filter(row => row.promptId === '004').length, 10);
       assert.equal(hidden.some(row => row.id === 'up-unmapped'), false, 'SQL-visible uploads still require the content gate');
@@ -244,6 +245,7 @@ describe('show1 compat endpoints', () => {
       assert.equal((await call(base, 'GET', '/api/works')).data.works.length, 21);
       published = false;
       assert.equal((await call(base, 'GET', '/api/works')).data.works.length, 10, 'gate changes apply without restarting');
+      assert.equal((await call(base, 'GET', '/api/playground/works')).data.works.length, 10, 'playground visibility changes apply without restarting too');
     });
   });
   test('entertainment pools open at ten public works and close below ten without deleting votes', async () => {
@@ -303,6 +305,8 @@ describe('show1 compat endpoints', () => {
     assert.equal(prompts.data.prompts.length, 2);
     assert.deepEqual(prompts.data.prompts[0].weights, [0.3, 0, 0.6, 0, 0, 0.1]);
     const works = await call(base, 'GET', '/api/works');
+    const playground = await call(base, 'GET', '/api/playground/works');
+    assert.deepEqual(playground.data, works.data, 'the playground inherits the same public roster when no legacy forest adaptation applies');
     assert.equal(works.data.works.length, 20);
     assert.equal(works.data.works[0].id, '001-a');
   }));

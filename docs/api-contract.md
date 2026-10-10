@@ -325,6 +325,10 @@ APEX-65 当前打包版本使用独立 SHA256 固定的相机适配：仅竞技�
 
 娱乐 `arena-fold` 的非正式文档使用独立就绪探针：DOM 可用后每 80ms 检查，连续两次满足条件才上报 `aob:work-ready`；`arena-scene` 还要求 Canvas 实际绘制且已识别的大加载浮层消失。它不依赖 `window load` 或不可见 iframe 的帧回调，也不使用 8 秒强制成功。普通/Gallery 与正式 `m` 探针保持原策略。Show1 娱乐前端场景文档就绪预算为 30 秒，静态为 10 秒、导航为 20 秒；失败最多刷新换组一次，刷新期间废弃旧 iframe 的就绪信号。加载浮层识别是启发式判断，不保证识别 Canvas 内或任意自定义加载页。
 
+Show1「随心玩」3D展台另行 opt-in `aob=playground&parent=<父站Origin>`，与 `arena-fold`、`arena-scene`、相机参数并用。仅非草稿、非正式 `m` 内容且 `parent` 属于服务允许的 `siteOrigins` 时，HTML注入 `/__playground.js` 和明确的父站Origin；新桥接负责真实Canvas/WebGL/WebGPU/SVG绘制、加载浮层及相机稳定就绪，替代该文档单独的旧就绪探针。父子控制消息只认实际父窗口和该Origin；没有通用相机API的作品保留原交互，不宣称支持复位。正式盲评、草稿以及未带合法父站的页面保留既有探针策略。桥接资源仍先经过原内容门禁，不扩大作品公开范围。
+
+此展台沿用版本固定的娱乐镜头；纸色背景仅作用于已核验的八份键盘/台灯版本，台灯桌面延展仅作用于 `playground-surface.mjs` 固定SHA256的模块。动态变换不改存储文件或数据库相机值，源版本变化时不强行套用。
+
 ### 3.2 `POST /api/auth/register` —— 注册
 
 **认证**：无。**限流**：auth 桶（10 次/分钟/IP）。
@@ -886,6 +890,7 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 | --- | --- |
 | `GET /api/prompts` | `{ prompts: [...] }`；合并历史快照、数据包题目与已审核公开的数据库题目。已有 `arenaId` 保留三位编号，其他题目沿用 canonical task ID（如 `q-48c3b43eeb284f6d`），无需另行登记竞技场编号；竞技场 editorial 覆盖对应题目的 `commentary`、`weights`。 |
 | `GET /api/works` | `{ works: [...] }`；快照作品加符合条件的 live 投稿与公开收录。快照 HTML 和 live 投稿还须通过内容源当前的 `publicContent` 门禁；任务缺失、撤下或不可公开的源不进入清单，快照非 HTML 内容保留。历史身份映射、票与题目定义不删除。 |
+| `GET /api/playground/works` | 「随心玩」只读作品投影，形状和公开范围与 `/api/works` 相同。小红帽013题六份已登记HTML仅在内容源仍公开且入口SHA256匹配 `playground-forest-texts.json` 时返回原生文本；作品/模型ID与原文段落保留，未知或版本变化的HTML返回原内容。无写库、计票或迁移行为，原 `/api/works` 不受影响。 |
 | `GET /api/votes?scope=entertainment\|formal` | `{ votes: [...] }`；只读库内 `source=show1` 的票，按时间和 ID 排序，不合入旧快照。scope 必填，非法或缺失为 400。 |
 | `POST /api/votes` | 登录必需；提交 `id`、`promptId`、`winnerRid/Mid`、`loserRid/Mid`、`mode`、`outcome`。未绑定邮箱时有效请求返回 `200 { counted: false, reason: 'unbound' }`，不写入对局或票；已绑定时成功 `201 { vote }`，同 ID 同票幂等重放，已投同一对返回 `409 pair`；`formal` 仅管理员。新 `blind` / `party` 票要求该题当前公开娱乐作品至少 10 件（非演示、按 id 去重），不足返回 `409 { code: "pool", error: "作品收集中（数量/10），暂未开放娱乐盲测" }`；已存票幂等重放及历史榜单保留，正式范围不套此门槛。 |
 | `GET /api/ratings?scope=entertainment\|formal` | `{ ratings: { [modelId]: number }, games: { [modelId]: number } }`；按库内票回放未取整 Elo，供配对，复用聚合缓存。scope 必填。 |
@@ -901,6 +906,8 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 新增题目及其已验证、开启竞技场展示的投稿会保留在公开清单中；娱乐盲测须至少有 10 件不同 id 的非演示公开娱乐作品且有跨模型组合，未达门槛仍可浏览，降到门槛以下关闭新对局。长短提示词使用同一个 task ID 与编号，以 `promptVariants: [{id, label, prompt}]` 返回两份原文，由前端按钮切换；作品可通过 `promptVariant` 标明使用的版本，同一模型的两版展示在一起。既有快照题目保留编号、名称及权重，正式提示词由数据包提供；未进入数据包的历史题目仍保留。不新增数据库迁移，不改变展览馆审核、作品展示开关或正式盲测接口。Show1 前端须同步支持 canonical ID 后再对外发布此兼容层改动。
 
 旧分享卡端点已移除，访问返回 `404`。兼容层的详细字段可参考 `test/fixtures/show1-golden/` 中的固定响应。
+
+「随心玩」前端选择只在本页揭晓作者，不调用旧 `POST /api/votes`、评论或反应写接口，也不进入历史娱乐榜。此产品行为不删除旧票或改变已有接口；新作品端点及内容桥接须先于依赖它们的Show1入口发布。
 
 主站榜单响应：`{ scope, category, board, allBoard, radar, scopedPromptCount }`。`board`、`allBoard` 为 `{ rows, totalVotes, modelCount, promptCount }`，后者固定综合赛道，供页头统计；`scopedPromptCount` 是当前赛道实际投过票的题数。每行包含 `modelId`、`name`、`sigil`、`retired`、`rating`、`games`、`wins`、`losses`、`draws`、`winrate`、`topics`、`trial`。`radar` 为 `{ profiles: { [modelId]: [六维分] }, average: [六维均值] }`。空榜为零票、空 rows/profiles、画像均值六个 50；不返回逐票数据。
 

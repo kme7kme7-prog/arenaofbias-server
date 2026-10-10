@@ -1,4 +1,19 @@
+## Show1随心玩发布授权与增量准备（2026-10-11）
+
+- 用户在Show1轮次明确授权修复菜单/返回后commit/push/deploy。配套后台只读端点与opt-in桥接验证已完成，本轮提交准备与固定main归档发布；无schema迁移/依赖/数据库业务写入。
+- 现场a86b24ca包含本地上游没有的个人署名和预览修复，今天另有目录加载优化安装迹象；不得用本地旧运行文件覆盖。运行文件差异、版本与备份正在核实，已请求用户确认增量保留策略；当前记录不是上线完成。
+- 后端需先于Show1。最终部署只安装content/show1compat及3个新playground文件，其他现场模块、配置/数据包、媒体与数据库保持；组合版需完整哈希记录，不能把保留的现场补丁冒充本提交源码。发布结果在Show1 `.local/playground-release/`。
+
 # HANDOFF.md · 当前状态
+
+## Show1「随心玩」配套接入（2026-10-11，未提交、未推送、未部署）
+
+- 用户在Show1授权接入已认可的文字/3D新玩法并改名；本轮仅添加其必要的共享后端支持，未获线上发布授权。前端统一入口 `/playground.html` 与3D `/objects.html`，原主页、正式盲评和历史榜单继续保留。
+- 新增只读 `GET /api/playground/works`，复用原公开花名册及内容源门禁；六份013题小红帽HTML仅在公开源和入口SHA256同时成立时投影为原文文本。未知/变化源返回原内容。作品ID、模型身份、原文件、历史票不改；没有数据库/schema变更或npm依赖。
+- 内容页显式 `aob=playground&parent=<允许Origin>` 启用 `server/playground-bridge.js`，在实际绘制、加载浮层消失及镜头稳定后报告就绪。合法父站页面替换独立旧探针，非法父站不注入；草稿、正式m、普通/Gallery规则保留。父子消息验证Origin与窗口，Canvas/WebGL/WebGPU/SVG保持原作实际渲染，资源仍先走内容访问门禁。
+- 沿用已认可娱乐镜头/折叠与固定版本纸色背景；`playground-surface.mjs`仅对既定台灯bundle的SHA256延展桌面，防止景窗放大后出现桌面边缘。所有变换在响应时执行，不落盘改原资产或共享相机。新玩法选择只在本地揭晓，未开启旧投票/反应/评论写入或新偏好存储。
+- 最终Windows `npm run check` 113文件/0错误，`npm test` 330/330；端点公开/下架门禁、响应形状、合法/非法父站桥接、正式探针保持有回归。Show1实际本地主站构建预演46项、常速文字过场300项通过；键盘/台灯及FIELD68真实加载就绪成功。FIELD68无通用相机复位API，前端明确禁用；未逐件重新实载全部作品或真机FPS验收。
+- 发布须先更新本服务的新端点与内容桥接，再更新Show1入口；新JSON/JS/MJS文件也须进入发布包，不能仅更新content/show1compat。API合同已同步。未连生产数据库、改配置、投稿/投票/审核、生产服务重启或deploy。预演使用内存SQLite与缓存原资产，证据位于Show1 `.local/playground-backend-final.log` 和 `output/playground/main-integration/`。
 
 ## 连接恢复修复已上线（2026-10-10）
 

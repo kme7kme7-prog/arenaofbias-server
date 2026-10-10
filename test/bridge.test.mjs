@@ -139,6 +139,19 @@ test('content server injects per key type', async () => {
     const plainPublic = await request(base, `${key('w', 1)}.w.example`);
     assert.equal(plainPublic.body, plainDoc, 'uncalibrated public work stays byte-identical');
 
+    const stage = await request(base, `${key('w', 1)}.w.example`, '/?aob=playground&aob=prev&aob=arena-fold&parent=https%3A%2F%2Fgame.example');
+    assert.ok(stage.body.includes('/__playground.js'), 'approved playground gets its real-draw readiness owner');
+    assert.ok(stage.body.includes('window.__PLAYGROUND_ORIGIN__="https://game.example"'), 'stage messages target the configured parent');
+    assert.ok(!stage.body.includes('data-aob-probe'), 'readiness owners do not overlap');
+    assert.ok(stage.body.includes('/__aob_fold.js'), 'the existing scene control fold remains');
+    const stageScript = await request(base, `${key('w', 1)}.w.example`, '/__playground.js');
+    assert.equal(stageScript.status, 200);
+    assert.ok(stageScript.body.includes('GPUQueue') && stageScript.body.includes('hasLoadingOverlay'), 'GPU and real overlay checks survive production serving');
+    const badParent = await request(base, `${key('w', 1)}.w.example`, '/?aob=playground&aob=prev&parent=https%3A%2F%2Foutside.example');
+    assert.ok(!badParent.body.includes('/__playground.js'), 'an unconfigured parent cannot activate the stage bridge');
+    const stageMatch = await request(base, `${key('m', 9)}.w.example`, '/?aob=playground&parent=https%3A%2F%2Fgame.example');
+    assert.ok(!stageMatch.body.includes('/__playground.js') && stageMatch.body.includes('data-aob-probe'), 'formal match readiness stays unchanged');
+
     const folded = await request(base, `${key('w', 1)}.w.example`, '/?aob=fold&face=gallery&custom=keep');
     assert.ok(folded.body.includes('<script src="/__sp_fold.js"></script>'), 'public viewers can opt into the fold');
     assert.ok(!folded.body.includes('data-aob-probe'), 'public fold does not add the match ready probe');

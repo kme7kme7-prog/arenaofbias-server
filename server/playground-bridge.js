@@ -28,7 +28,7 @@
   function settleReadiness() {
     if (workReady) return;
     stable = domReady && rendered && !hasLoadingOverlay() ? stable + 1 : 0;
-    if (stable >= 2) { workReady = true; parent.postMessage('aob:work-ready', host); return; }
+    if (stable >= 2) { workReady = true; parent.postMessage('aob:work-ready', host); send('work-ready'); return; }
     readinessTimer = setTimeout(settleReadiness, 80);
   }
   // Observe real draws for uncalibrated/inline works too. Camera support is a

@@ -1,3 +1,9 @@
+## 2026-10-12 · 野榜放大器最终就绪信号
+
+- 用户在Show1授权野榜入口接入、推送和部署。本轮从最新origin/main f20e7dc隔离checkout实施，只增加playground最终{stage:'work-ready'}信号，保留旧字符串消息和所有原内容门禁。
+- check119/0、test337/337通过；前端接入96项通过，包含原作早期探针不能提前打开加载层。无schema变更、npm依赖、业务写入或原作改写。
+- 发布仅增量安装server/playground-bridge.js，其他线上运行文件、数据库、配置和数据包保留。部署前后哈希、SQLite一致备份、版本组合和公网实际场景验收在Show1 .local/tier-release-20261012记录。
+
 # HANDOFF.md · 当前状态
 
 ## Gallery独立加载发布（2026-10-11，已上线）

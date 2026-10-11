@@ -147,6 +147,7 @@ test('content server injects per key type', async () => {
     const stageScript = await request(base, `${key('w', 1)}.w.example`, '/__playground.js');
     assert.equal(stageScript.status, 200);
     assert.ok(stageScript.body.includes('GPUQueue') && stageScript.body.includes('hasLoadingOverlay'), 'GPU and real overlay checks survive production serving');
+    assert.ok(stageScript.body.includes("send('work-ready')"), 'stage readiness has a distinct signal from historical work probes');
     const badParent = await request(base, `${key('w', 1)}.w.example`, '/?aob=playground&aob=prev&parent=https%3A%2F%2Foutside.example');
     assert.ok(!badParent.body.includes('/__playground.js'), 'an unconfigured parent cannot activate the stage bridge');
     const stageMatch = await request(base, `${key('m', 9)}.w.example`, '/?aob=playground&parent=https%3A%2F%2Fgame.example');

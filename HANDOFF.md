@@ -1,3 +1,12 @@
+## 后台主线同步与旧工作树归档（2026-10-12）
+
+- 用户要求四仓全部处理干净并授权提交推送；执行者 wsnxxxs，无子代理。main 从 f20e7dc 快进至 origin/main 1760466，保留远端新增的独立 work-ready 信号及测试。
+- 三处 Temp 空壳 worktree 与 output/coordinated-release-20261004/review 旧审核副本在校验完整 ZIP、逐文件 SHA、Git index 和 staged/unstaged 二进制补丁后移除；所有旧 HEAD 已在主线历史。
+- 旧审核副本30项 Git 状态含22项已有文件/新增文件的暂存或修改及8项未跟踪，完整226文件/2792617字节保存在 C:/Users/Ryan/.codex/backups/arena-cleanup-20261012/server-review；未覆盖最新源码，也未将私有本地配置提交。
+- check119/0。首轮 test336/337，show1compat 临时监听端口被 Node fetch 的 bad port 限制拒绝；未改测试或应用，完整重跑337/337通过。日志在同一本机备份目录。
+- 本轮仅同步既有远端源码、归档旧工作树并记录交接；不部署、不重启、不改生产数据库或消费 pin。本轮一个英文文档提交，推送目标 origin/main。
+- [本轮归档](docs/archive/2026-10-12-repository-cleanup-wsnxxxs.md)。
+
 ## 2026-10-12 · 野榜放大器最终就绪信号
 
 - 用户在Show1授权野榜入口接入、推送和部署。本轮从最新origin/main f20e7dc隔离checkout实施，只增加playground最终{stage:'work-ready'}信号，保留旧字符串消息和所有原内容门禁。

@@ -1059,3 +1059,37 @@ v26 仅追加幂等建表 `featured_picks(task_id, scope, model_key, work_id, co
 6. 本文档中标有「**待拍板**」的条目为与代码现状有出入或尚未决策之处，逐条拍板后更新文档并消除标记。
 
 野榜放大器沿用公开作品门禁。playground 桥接最终就绪同时发送 {stage:'work-ready'}，区别于原作自带的早期字符串探针；真实绘制、文档就绪和加载浮层消失后才发送，父页核对来源窗口和Origin并同时等待rendered/camera-ready。原有字符串消息保持兼容。
+
+
+### Show1 双人好友房（2026-10-14，本地实现待发布）
+
+独立于单人 `/api/guess/check`，全部端点要求现有 HttpOnly 会话。房间码为 8 位密码学随机、32 字符字母表的邀请（40 bit），不是认证凭据；不提供公开房间枚举。读取/推送只允许已有且未离开的座位，第三人即使知道房间码也不能读取，加入仅允许等待中空位。
+
+| 方法/路径 | 请求与响应 |
+| --- | --- |
+| `GET /api/guess/friends/current` | `{room: Room|null}`，恢复本账号的当前房间；其次最近未离开的已结束房间 |
+| `GET /api/guess/friends/catalog` | `{models, attributes}`，模型公开字段，不含答案标记 |
+| `POST /api/guess/friends/create` | `{difficulty:1..4}` → `{room}`；已有进行中房间则返回原房间 |
+| `POST /api/guess/friends/join` | `{code}` → `{room}`；只允许第二位登录用户占空位，同一账号重复加入幂等 |
+| `GET /api/guess/friends/:code/state` | `{room}`，校验成员并更新在线状态 |
+| `GET /api/guess/friends/:code/events` | SSE `event: room`，data 为该成员的 `Room`；会话每次推送重新校验，5 秒在线心跳，退出/过期撤销连接；HEAD 405 |
+| `POST /api/guess/friends/:code/ready` | `{ready:boolean}` → `{room}`，双人准备后倒数 3 秒 |
+| `POST /api/guess/friends/:code/guess` | `{round,guessId,requestId}` → `{room}`；requestId 16–80 位字母/数字/下划线/连字符，按座位和轮次去重；不得带 final/score/userId 等额外字段 |
+| `POST /api/guess/friends/:code/leave` | `{}` → `{ok:true}`；等待中释放客人/关闭房主房间，对局中判该成员整场负，已离开成员不可再读 |
+
+`Room` 包含 code/version/status/self/difficulty/round/roundEndsAt/nextAt/expiresAt/serverNow/rules/result/answer/players。status 为 waiting/starting/playing/round_over/finished/closed；self 为 0 或 1。players 只公开 seat/name/ready/score/connected/reconnectUntil/left/guesses，不传账户 ID、会话或内部 target/requests。进行中 answer 为 null；本人的 guesses 有 model 与七属性反馈，对手只含 `{state,arrow:null}` 的七色反馈及 won，本轮结束后才补 model 与 answer。
+
+规则由服务端控制：8 次/人/轮、120 秒绝对截止、先猜中加 1、先得 2 获胜；双方用尽/超时为平局，6 秒间隔自动新题。断线 30 秒判负，双方都超时为无胜者结束。等待房最长 15 分钟、对局最长 1 小时、结果保留 1 小时。状态保存在追加迁移 v43 的 guess_friend_rooms；重建服务不会丢进度，但已过去的时间/离线宽限照常计算，不重置截止。联机不写单人 guess_results。
+
+安全与容量：POST 仅 JSON，1 KiB 上限，来源沿用精确 Origin 白名单并拒收未知字段；GET/SSE 的浏览器 Origin 同样校验。创建每账号 6/10 分钟、IP 20/10 分钟；加入尝试每账号 12/分钟、IP 40/分钟（失败也计数）；命令每账号 60/分钟、IP 180/分钟；读取每账号 90/分钟，并叠加平台公共读限流。活动房上限 200、含结果总量 2000、SSE 总量 512 且每账号 2 条；慢连接队列超过 64 KiB 关闭。所有响应 no-store，SSE X-Accel-Buffering:no；无需更改 nginx/CSP。单实例服务下运行，不引入外部消息队列。
+
+错误：401 未登录；403 来源无效；404 房间不存在/无权读取/加入不可用（统一提示）；409 已在其他房间/旧轮次/重复猜测/次数用尽/阶段不符；413 请求过大；429 限频；503 房间容量或题池不可用。前端使用 12 秒请求截止、唯一 requestId 和版本递增保护，不自动重发猜测；SSE 不可用时每 3 秒最多一次同步。新端点须后端先发布，旧 Express 不支持。
+
+### 变更要求
+
+1. 本文档与 `server/` 代码同库维护；**凡契约变更（端点、字段、状态码、限制、数据包结构）必须先改文档、走 PR，经两个前端负责方过目后方可合并**。
+2. **字段只增不减**：已发布响应中的字段不得删除、不得改名、不得改变语义；新增字段默认缺省 / 可空，前端对未知字段一律忽略。破坏性格式变更通过新增端点或显式版本化进行，不原地修改。
+3. 数据库表结构变更只允许在 `server/db.mjs` 的 `MIGRATIONS` 末尾追加幂等迁移（PRAGMA `user_version` 驱动），不改写已发布迁移。
+4. 错误 `error` 文案面向用户、可随时调整，**不构成契约**；契约只承诺状态码与 `code` 字段。
+5. 限流额度为运营参数，调整不视为契约变更，但应在本文档 1.6 节同步更新。
+6. 本文档中标有「**待拍板**」的条目为与代码现状有出入或尚未决策之处，逐条拍板后更新文档并消除标记。

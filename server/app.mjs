@@ -28,6 +28,7 @@ import { DOMAIN_GROUPS, DOMAINS, AI_JUDGED, isAiJudgedTask, requireCategory, req
 import { createProfile } from './profile.mjs';
 import { registerShow1Compat } from './show1compat.mjs';
 import { registerShow1Guess } from './show1/guess.mjs';
+import { registerGuessRooms } from './show1/guess-room-http.mjs';
 import { turnstileEnabled, turnstileSiteKey, verifyTurnstile } from './turnstile.mjs';
 import { createReadGuard } from './read-guard.mjs';
 import { isSenior, isStaff } from './roles.mjs';
@@ -712,6 +713,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
 
   registerShow1Compat(router, { db, catalog, library, snapshot: show1Snapshot, config, limit });
   registerShow1Guess(router, { db, limit });
+  const guessRooms = registerGuessRooms(router, { db, auth, config });
 
   function serveSite(req, res, pathname) {
     readGuard.file(req);
@@ -864,6 +866,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     handleSite,
     handleContent: createContentHandler({ config, library, arena, siteOrigins: config.siteOrigins, readGuard }),
     async close() {
+      guessRooms.close();
       clearInterval(matchCleanup);
       clearInterval(referenceCleanup);
       await emailAuth.drain();

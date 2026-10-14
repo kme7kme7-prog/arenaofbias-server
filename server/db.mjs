@@ -556,6 +556,24 @@ const MIGRATIONS = [
     const columns = new Set(db.prepare('PRAGMA table_info(matches)').all().map((column) => column.name));
     if (columns.size && !columns.has('pin')) db.exec('ALTER TABLE matches ADD COLUMN pin TEXT');
   },
+  // Community questions carry the same prompt version list packaged tasks use.
+  (db) => {
+    const columns = new Set(db.prepare('PRAGMA table_info(questions)').all().map((column) => column.name));
+    if (!columns.has('prompt_variants')) db.exec("ALTER TABLE questions ADD COLUMN prompt_variants TEXT NOT NULL DEFAULT '[]'");
+  },
+  // Private, server-authoritative Guess friend matches. No single-player scores are changed.
+  (db) => db.exec(`CREATE TABLE IF NOT EXISTS guess_friend_rooms (
+    code TEXT PRIMARY KEY,
+    host_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    guest_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+    status TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(json_valid(state)),
+    expires_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS guess_friend_host ON guess_friend_rooms(host_id, status);
+  CREATE INDEX IF NOT EXISTS guess_friend_guest ON guess_friend_rooms(guest_id, status);
+  CREATE INDEX IF NOT EXISTS guess_friend_expiry ON guess_friend_rooms(expires_at);`),
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

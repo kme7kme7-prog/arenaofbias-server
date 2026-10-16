@@ -30,6 +30,32 @@ function fixture(t) {
 }
 const status = expected => error => error.status === expected;
 
+test('room catalogue and feedback survive source edits and service reconstruction', t => {
+  const { db, clock, rooms, a, b, start, raw } = fixture(t);
+  const code = start();
+  const state = raw(code);
+  const target = GUESS_MODELS.find(m => m.id === state.target);
+  const saved = structuredClone(target);
+  target.contextK = 1;
+  target.priceTier = 5;
+  target.difficulty = 4;
+  target.answerEligible = false;
+  target.dailyEligible = false;
+  t.after(() => Object.assign(target, saved));
+  const restored = createGuessRooms({ db, clock });
+  const snapshot = restored.catalog(a).models.find(m => m.id === target.id);
+  assert.equal(snapshot.contextK, saved.contextK);
+  assert.equal(snapshot.priceTier, saved.priceTier);
+  assert.equal(snapshot.difficulty, saved.difficulty);
+  assert.equal(snapshot.answerEligible, saved.answerEligible);
+  assert.equal(snapshot.dailyEligible, saved.dailyEligible);
+  const view = restored.guess(a, code, { round: state.round, guessId: target.id, requestId:'frozen_catalog_test_request' });
+  assert.equal(view.players[0].score, 1);
+  assert.equal(view.answer.contextK, saved.contextK);
+  assert.equal(view.players[0].guesses[0].model.contextK, saved.contextK);
+  assert.equal(rooms.read(b, code).answer.priceTier, saved.priceTier);
+});
+
 test('friend migration is append-only and idempotent', t => {
   const { db } = fixture(t);
   MIGRATIONS.at(-1)(db);

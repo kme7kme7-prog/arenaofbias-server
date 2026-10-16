@@ -712,7 +712,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   });
 
   registerShow1Compat(router, { db, catalog, library, snapshot: show1Snapshot, config, limit });
-  registerShow1Guess(router, { db, limit });
+  registerShow1Guess(router, { db, limit, config, adminOnly });
   const guessRooms = registerGuessRooms(router, { db, auth, config });
 
   function serveSite(req, res, pathname) {

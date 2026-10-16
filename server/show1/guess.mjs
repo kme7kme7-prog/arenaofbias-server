@@ -1,15 +1,17 @@
 // Show1「模一把」兼容端点 —— 与旧 Express 服务端（Show1 server/index.js）同路径、
 // 同形状、同判定口径。判定核心在 ./guess-logic.mjs（从 lib/guess-logic.ts 移植）。
 // 差异说明：
-//   - 不加载 data/guess-models-extra.json（新部署无增量模型文件，数据集冻结）；
+//   - 通过 guess-admin.mjs 加载 config.dataDir 下的增量模型文件并提供追加接口；
 //   - 204 响应直接写 ctx.res（handleSite 对返回值统一 sendJson 200，无 204 通路：
 //     写完后再 sendJson 会抛 headers-sent，被 handleSite 的 catch 静默吞掉，
 //     响应已完整送达，代价只是该连接的 keep-alive 被 destroy 收掉）。
 // guess_results 表由独立迁移创建（v8，见 DESIGN.md），这里假定已存在。
 import { createHash, randomBytes, randomInt } from 'node:crypto';
 import { fail, readJson, rateLimit } from '../http.mjs';
+import { registerGuessAdmin } from './guess-admin.mjs';
 import {
   ATTRIBUTE_KEYS,
+  catalogRevision,
   GUESS_DIFFICULTIES,
   GUESS_EPOCH,
   GUESS_MODELS,
@@ -37,9 +39,13 @@ const publicGuessModel = (m) => ({
   priceOut: m.priceOut,
   priceTier: m.priceTier,
   difficulty: m.difficulty,
+  aliases: m.aliases,
+  answerEligible: m.answerEligible,
+  dailyEligible: m.dailyEligible,
 });
 
-export function registerShow1Guess(router, { db, limit }) {
+export function registerShow1Guess(router, { db, limit, config, adminOnly }) {
+  registerGuessAdmin(router, { db, limit, config, adminOnly });
   // 旧服务端对 check/practice/result 用高频 guess 组限流；映射到共享后端用
   // matches 组（60/分）兜底 write 组。limit.guess 若日后配置则优先。
   const limiter = limit?.guess ?? limit?.matches ?? limit?.write ?? (() => {});
@@ -70,6 +76,7 @@ export function registerShow1Guess(router, { db, limit }) {
   router.on('GET', '/api/guess/today', () => ({
     dayKey: guessDayKey(),
     dayNumber: dayNumber(),
+    catalogVersion: catalogRevision(),
     attributes: ATTRIBUTE_KEYS,
     models: GUESS_MODELS.map(publicGuessModel),
   }));
@@ -79,6 +86,8 @@ export function registerShow1Guess(router, { db, limit }) {
   router.on('POST', '/api/guess/check', async (ctx) => {
     throttle(ctx);
     const body = await readJson(ctx.req);
+    if (body?.catalogVersion !== undefined && body.catalogVersion !== catalogRevision())
+      fail(409, '模型资料已更新，请重新载入题库。', 'catalog-changed');
     const guessId = typeof body?.guessId === 'string' ? body.guessId : '';
     const final = body?.final === true;
     const guess = modelById.get(guessId) ?? resolveGuess(guessId);
@@ -92,6 +101,8 @@ export function registerShow1Guess(router, { db, limit }) {
       if (!game) fail(404, '这局练习已过期，开一把新的吧', 'game-expired');
       answer = game.answer;
     } else {
+      if (body?.dayKey !== undefined && body.dayKey !== guessDayKey())
+        fail(409, '每日题已经更新，请重新载入。', 'daily-changed');
       answer = answerForDate(new Date(), dailyPool(GUESS_MODELS));
     }
     const feedback = judge(guess, answer);

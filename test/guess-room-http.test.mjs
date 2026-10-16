@@ -35,6 +35,29 @@ async function fixture(t) {
   return { call, platform, cookies, base };
 }
 
+test('friend catalogue HTTP returns the members room snapshot without affecting other players', async t => {
+  const { call, platform } = await fixture(t);
+  const { room } = await (await call('alice', 'create', { difficulty: 2 })).json();
+  await call('bob', 'join', { code: room.code });
+  await call('alice', `${room.code}/ready`, { ready: true });
+  await call('bob', `${room.code}/ready`, { ready: true });
+  const state = JSON.parse(platform.db.prepare('SELECT state FROM guess_friend_rooms WHERE code=?').get(room.code).state);
+  assert.ok(state.catalog.length > 0);
+  const id = state.catalog[0].id;
+  state.catalog[0].name = 'Frozen room catalogue model';
+  platform.db.prepare('UPDATE guess_friend_rooms SET state=? WHERE code=?').run(JSON.stringify(state), room.code);
+  for (const user of ['alice', 'bob']) {
+    const response = await call(user, 'catalog');
+    assert.equal(response.status, 200);
+    const data = await response.json();
+    assert.equal(data.models.find(m => m.id === id).name, 'Frozen room catalogue model');
+    assert.equal('answer' in data, false);
+    assert.equal('target' in data, false);
+  }
+  const outsider = await (await call('charlie', 'catalog')).json();
+  assert.notEqual(outsider.models.find(m => m.id === id).name, 'Frozen room catalogue model');
+});
+
 test('friend HTTP requires session, trusted origin, bounded payload and server-owned identity', async t => {
   const { call, base, cookies } = await fixture(t);
   for (const path of ['current', 'catalog']) assert.equal((await call(null, path)).status, 401);

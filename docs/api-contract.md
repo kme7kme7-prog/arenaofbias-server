@@ -1093,3 +1093,12 @@ v26 仅追加幂等建表 `featured_picks(task_id, scope, model_key, work_id, co
 4. 错误 `error` 文案面向用户、可随时调整，**不构成契约**；契约只承诺状态码与 `code` 字段。
 5. 限流额度为运营参数，调整不视为契约变更，但应在本文档 1.6 节同步更新。
 6. 本文档中标有「**待拍板**」的条目为与代码现状有出入或尚未决策之处，逐条拍板后更新文档并消除标记。
+
+### 模一把题库修订（2026-10-16）
+
+- `/api/guess/today` 增加 `catalogVersion`。公开模型增加可选 `aliases`、`answerEligible` 和 `dailyEligible`；价格档范围 0–5，第六档为 ≥$50/M 的“顶档”。只有 `answerEligible !== false` 的模型能被练习/好友房抽中；每日还须 `difficulty ≤ 2` 且 `dailyEligible === true`。主目录缺上下文或价格档的条目仅供搜索；后台新增的同线索等价型号不重复占答案槽，仍可猜中代表。旧好友房沿用既有快照。后台追加支持布尔 `dailyEligible`（默认 false），true 仅允许完整线索的简单/普通型号，追加次日之后首个完整周期纳入。
+- `/api/guess/check` 接受 `dayKey` 和 `catalogVersion`。每日日期不符返回 409 `daily-changed`，版本不符返回 409 `catalog-changed`；客户端必须重取目录，不混用旧反馈。缺省版本保留旧调用兼容。七条实际属性相同也判赢，null 仅等于 null。
+- 每日派生按稳定 ID 的完整槽位周期，不再乘法取模；增量/变体按 `sinceDay` 从下一周期生效。本轮授权重排历史答案，不删除统计。
+- 好友房首轮保存 `rulesVersion:2`、完整 catalog 与 catalogVersion 至现有房间 JSON；整场的后续轮次及重启都使用快照。Room 仅公开版本；`friends/catalog` 向成员返回其当前房间的公开目录，不泄露答案标记。无快照旧房间以 `catalog_changed` 中性结束。
+- 新增高级管理员接口：GET `/api/admin/guess/stats`，GET/POST `/api/admin/guess/models`。POST 校验同源、8 KiB 正文、字段白名单、唯一 ID/名称、日期/枚举/数值、厂商地区；先验证后原子写入 `config.dataDir/guess-models-extra.json`（最多 2000 条），即时生效，启动重载。只追加，不覆盖已有条目。
+- 前端核心是唯一源，经 Show1 `scripts/sync-guess-core.mjs` 生成后端核心与目录。无新数据库迁移、无展览馆审核改动。发布需协调前后端并刷新旧页面；旧客户端不识别第六价格档。

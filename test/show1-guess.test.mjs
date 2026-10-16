@@ -219,85 +219,28 @@ test('guessDayKey / dayNumber：UTC+8 边界与 epoch 锚点', () => {
   if (guessDayKey() === GOLDEN.dayKey) assert.equal(dayNumber(), GOLDEN.dayNumber);
 });
 
-test('answerForDate：对数据文件独立重算逐日一致（含组内轮转）', () => {
-  // 独立重算实现：直接读原始 JSON、自行展开 variants/分槽/散列，
-  // 不复用 guess-logic.mjs 的任何函数（日期换算只取 dayNumber 这个历法事实）。
-  const raw = JSON.parse(
-    readFileSync(new URL('../server/show1/guess-models.json', import.meta.url), 'utf8'),
-  );
-  const regionOf = (org) => VENDOR_REGION[org] ?? '??';
-  const expand = [];
-  for (const entry of raw.models) {
-    const variants = entry.variants?.length ? entry.variants : [entry];
-    for (const v of variants) {
-      expand.push({
-        id: v.id,
-        difficulty: v.difficulty ?? entry.difficulty,
-        sinceDay: v.sinceDay ?? entry.sinceDay,
-        groupId: entry.variants?.length ? entry.id : undefined,
-        region: regionOf(v.org),
-      });
-    }
+test('daily catalogue covers every eligible slot once per cycle and rotates grouped variants', () => {
+  const pool = dailyPool(GUESS_MODELS).map(m => ({ ...m, sinceDay: undefined }));
+  const slots = new Set(pool.map(m => m.groupId ?? m.id));
+  const seen = new Set();
+  const models = new Set();
+  for (let day = 0; day < slots.size * 8; day++) {
+    const date = new Date(Date.UTC(2026, 8, 13 + day));
+    const answer = answerForDate(date, pool);
+    assert.equal(answerForDate(date, [...pool].reverse()).id, answer.id);
+    if (day < slots.size) seen.add(answer.groupId ?? answer.id);
+    models.add(answer.id);
   }
-  assert.equal(expand.length, GUESS_MODELS.length);
-  const pool = expand.filter((m) => m.difficulty <= 2);
-  const referenceAnswer = (n) => {
-    n = Math.max(0, n);
-    const slots = new Map();
-    for (const m of pool) {
-      const key = m.groupId ?? m.id;
-      if (slots.has(key)) slots.get(key).push(m);
-      else slots.set(key, [m]);
-    }
-    const base = [];
-    const extra = [];
-    for (const slot of slots.values())
-      (slot[0].sinceDay === undefined ? base : extra).push(slot);
-    const select = (d) => {
-      const h = (d * 2654435761) % 0xffffffff;
-      const eligible = extra.filter((s) => (s[0].sinceDay ?? 0) <= d);
-      const r = h % (base.length + eligible.length);
-      return r < base.length ? base[r] : eligible[r - base.length];
-    };
-    const slot = select(n);
-    if (slot.length === 1) return slot[0].id;
-    let hits = 0;
-    for (let d = 0; d < n; d++) if (select(d) === slot) hits++;
-    return slot[hits % slot.length].id;
-  };
-  // 覆盖 epoch 前（clamp）、epoch 当天、golden 日及前后共 60 个 dayNumber
-  for (let n = -3; n <= 56; n++) {
-    const date = new Date(Date.UTC(2026, 8, 13 + n, 0, 0, 0) - 8 * 3600 * 1000);
-    // 上面的构造保证 guessDayKey(date) = 2026-09-13 + n 天
-    assert.equal(dayNumber(date), n);
-    const expected = referenceAnswer(n);
-    const actual = answerForDate(date, dailyPool(GUESS_MODELS)).id;
-    assert.equal(actual, expected, `dayNumber ${n} 答案不一致`);
-  }
-  // golden 日（2026-09-28 = dayNumber 15）手工锚点：散列命中独立条目
-  assert.equal(referenceAnswer(15), 'hy4-preview');
-  assert.equal(answerForDate(new Date('2026-09-28T12:00:00+08:00'), dailyPool(GUESS_MODELS)).id, 'hy4-preview');
-  // 组内轮转确实发生：0..56 天里同一多版本槽被多次命中时实例化了不同版本
-  // （hy4-preview 所在槽是独立条目；找每日池里真实的多版本组验证轮转）
-  const versionsBySlot = new Map();
-  for (let n = 0; n <= 56; n++) {
-    const id = referenceAnswer(n);
-    const model = expand.find((m) => m.id === id);
-    const key = model.groupId ?? model.id;
-    if (!versionsBySlot.has(key)) versionsBySlot.set(key, new Set());
-    versionsBySlot.get(key).add(id);
-  }
-  const rotated = [...versionsBySlot.entries()].filter(([, v]) => v.size > 1);
-  assert.ok(rotated.length > 0, '多版本槽命中多次时应轮转实例化不同版本');
-  // 答案分散性下界（实测 57 天 18 个不同答案——散列聚簇是旧端同款行为）
-  assert.ok(new Set(Array.from({ length: 57 }, (_, n) => referenceAnswer(n))).size >= 15);
+  assert.equal(seen.size, slots.size);
+  assert.equal(models.size, pool.length);
 });
 
-test('poolForDifficulty 层叠：简单 ⊂ 普通 ⊂ 困难 ⊂ 地狱=全库；dailyPool = ≤2', () => {
+test('difficulty pools stack eligible models; daily is a curated subset of common', () => {
   const sizes = GUESS_DIFFICULTIES.map((d) => poolForDifficulty(GUESS_MODELS, d).length);
   assert.ok(sizes[0] > 0 && sizes[0] < sizes[1] && sizes[1] < sizes[2] && sizes[2] < sizes[3]);
-  assert.equal(sizes[3], GUESS_MODELS.length);
-  assert.deepEqual(dailyPool(GUESS_MODELS), poolForDifficulty(GUESS_MODELS, 2));
+  assert.equal(sizes[3], GUESS_MODELS.filter(m => m.answerEligible !== false).length);
+  assert.deepEqual(dailyPool(GUESS_MODELS), poolForDifficulty(GUESS_MODELS, 2).filter(m => m.dailyEligible));
+  assert.ok(dailyPool(GUESS_MODELS).length < sizes[1]);
 });
 
 test('resolveGuess：按 name 不区分大小写；id 不在此函数职责内', () => {
@@ -355,7 +298,7 @@ describe('guess endpoints', () => {
   test('GET /api/guess/today：形状与 golden 一致，答案不下发', async () => {
     const { status, body } = await get('/api/guess/today');
     assert.equal(status, 200);
-    assert.deepEqual(Object.keys(body), ['dayKey', 'dayNumber', 'attributes', 'models']);
+    assert.deepEqual(Object.keys(body), ['dayKey', 'dayNumber', 'catalogVersion', 'attributes', 'models']);
     assert.equal(body.dayKey, guessDayKey());
     assert.equal(body.dayNumber, dayNumber());
     assert.deepEqual(body.attributes, GOLDEN.attributes);
@@ -370,7 +313,7 @@ describe('guess endpoints', () => {
     }
     // 白名单字段集合（无 region/groupId/popularity/sinceDay 等内部字段）
     for (const m of body.models)
-      assert.deepEqual(Object.keys(m), ['id', 'name', 'vendor', 'released', 'openWeights', 'contextK', 'modalities', 'reasoning', 'priceOut', 'priceTier', 'difficulty']);
+      assert.deepEqual(Object.keys(m), ['id', 'name', 'vendor', 'released', 'openWeights', 'contextK', 'modalities', 'reasoning', 'priceOut', 'priceTier', 'difficulty', 'answerEligible', 'dailyEligible']);
   });
 
   test('POST /api/guess/check：每日路径——未中不给答案，final=true 揭晓', async () => {
@@ -386,7 +329,7 @@ describe('guess endpoints', () => {
     // 未中、final=true：附带公开答案
     const r2 = await post('/api/guess/check', { guessId: other.id, final: true });
     assert.equal(r2.body.answer.id, answer.id);
-    assert.deepEqual(Object.keys(r2.body.answer), ['id', 'name', 'vendor', 'released', 'openWeights', 'contextK', 'modalities', 'reasoning', 'priceOut', 'priceTier', 'difficulty']);
+    assert.deepEqual(Object.keys(r2.body.answer), ['id', 'name', 'vendor', 'released', 'openWeights', 'contextK', 'modalities', 'reasoning', 'priceOut', 'priceTier', 'difficulty', 'answerEligible', 'dailyEligible']);
     // 猜中：无论 final 都附带答案，feedback 与 judge() 逐位一致
     const r3 = await post('/api/guess/check', { guessId: answer.id });
     assert.equal(r3.body.feedback.won, true);

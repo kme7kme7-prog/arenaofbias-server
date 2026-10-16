@@ -2,13 +2,14 @@
 import { randomBytes, randomInt } from 'node:crypto';
 import { transaction } from '../db.mjs';
 import { fail } from '../http.mjs';
-import { ATTRIBUTE_KEYS, GUESS_MODELS, judge, modelById, poolForDifficulty } from './guess-logic.mjs';
+import { ATTRIBUTE_KEYS, GUESS_MODELS, catalogRevision, judge, modelById, poolForDifficulty } from './guess-logic.mjs';
 
 export const FRIEND_RULES = Object.freeze({ attempts: 8, roundMs: 120000, graceMs: 30000, wins: 2, intermissionMs: 6000 });
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const ACTIVE = new Set(['waiting', 'starting', 'playing', 'round_over']);
 const online = (player, now) => Boolean(player && !player.left && now - player.seenAt < 12000);
-const publicModel = (m) => m ? Object.fromEntries(['id', 'name', 'vendor', 'released', 'openWeights', 'contextK', 'modalities', 'reasoning', 'priceOut', 'priceTier', 'difficulty'].map(key => [key, m[key]])) : null;
+const publicModel = (m) => m ? Object.fromEntries(['id', 'name', 'vendor', 'released', 'openWeights', 'contextK', 'modalities', 'reasoning', 'priceOut', 'priceTier', 'difficulty', 'aliases', 'answerEligible', 'dailyEligible'].map(key => [key, m[key]])) : null;
+const roomModel = (room, id) => room.catalog ? room.catalog.find(m => m.id === id) : modelById.get(id);
 const unavailable = () => fail(404, '房间不可用，请检查房间码或让好友重新创建。', 'room_unavailable');
 const validCode = (code) => typeof code === 'string' && /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}$/.test(code);
 
@@ -45,9 +46,10 @@ export function createGuessRooms({ db, clock = Date.now }) {
     const complete = ['round_over', 'finished'].includes(room.status);
     return {
       code: room.code, version: room.version, status: room.status, self, difficulty: room.difficulty,
+      catalogVersion: room.catalogVersion ?? null,
       round: room.round, roundEndsAt: room.roundEndsAt, nextAt: room.nextAt, expiresAt: room.expiresAt,
       serverNow: clock(), rules: FRIEND_RULES, result: room.result,
-      answer: complete ? publicModel(modelById.get(room.target)) : null,
+      answer: complete ? publicModel(roomModel(room, room.target)) : null,
       players: room.players.map((p, seat) => p ? {
         seat, name: p.name, ready: p.ready, score: p.score, connected: online(p, clock()),
         reconnectUntil: p.seenAt + FRIEND_RULES.graceMs, left: p.left,
@@ -55,7 +57,7 @@ export function createGuessRooms({ db, clock = Date.now }) {
           attributes: seat === self || complete ? g.feedback.attributes
             : Object.fromEntries(ATTRIBUTE_KEYS.map(key => [key, { state: g.feedback.attributes[key].state, arrow: null }])),
           won: g.feedback.won,
-          ...(seat === self || complete ? { model: publicModel(modelById.get(g.id)) } : {}),
+          ...(seat === self || complete ? { model: publicModel(roomModel(room, g.id)) } : {}),
         })),
       } : null),
     };
@@ -80,7 +82,12 @@ export function createGuessRooms({ db, clock = Date.now }) {
   }
   function prepareRound(room) {
     // Use the same difficulty/group weighting as practice, but an independent secret draw.
-    const pool = poolForDifficulty(GUESS_MODELS, room.difficulty);
+    if (!room.catalog) {
+      room.catalog = structuredClone(GUESS_MODELS);
+      room.catalogVersion = catalogRevision(room.catalog);
+      room.rulesVersion = 2;
+    }
+    const pool = poolForDifficulty(room.catalog, room.difficulty);
     const unused = pool.filter(m => !room.previous.includes(m.id));
     const groups = new Map();
     for (const m of unused.length ? unused : pool) {
@@ -112,7 +119,7 @@ export function createGuessRooms({ db, clock = Date.now }) {
       }
       return;
     }
-    if (!modelById.has(room.target)) { finish(room, null, 'catalog_changed'); return; }
+    if (room.rulesVersion !== 2 || !roomModel(room, room.target)) { finish(room, null, 'catalog_changed'); return; }
     const gone = room.players.map(p => now - p.seenAt >= FRIEND_RULES.graceMs);
     if (gone.some(Boolean)) { finish(room, gone.every(Boolean) ? null : gone[0] ? 1 : 0, gone.every(Boolean) ? 'abandoned' : 'disconnect'); return; }
     if (room.status === 'starting' && now >= room.nextAt) {
@@ -220,11 +227,11 @@ export function createGuessRooms({ db, clock = Date.now }) {
         if (room.status !== 'playing') fail(409, '这一轮已经结束或还未开始。', 'stale_round');
         const p = room.players[seat];
         if (p.guesses.length >= FRIEND_RULES.attempts) fail(409, '本轮机会已用完，请等待对方。', 'attempts_exhausted');
-        const model = modelById.get(body.guessId);
+        const model = roomModel(room, body.guessId);
         if (!model) fail(400, '没有找到这个模型。');
         if (p.guesses.some(g => g.id === model.id)) fail(409, '这个模型已经猜过了。', 'duplicate_guess');
         if (clock() - p.lastGuessAt < 750) fail(429, '提交太快，请稍等一下。', 'guess_too_fast');
-        const feedback = judge(model, modelById.get(room.target));
+        const feedback = judge(model, roomModel(room, room.target));
         p.guesses.push({ id: model.id, feedback });
         p.lastGuessAt = clock();
         p.seenAt = clock();
@@ -251,6 +258,11 @@ export function createGuessRooms({ db, clock = Date.now }) {
       emit(code);
       return { ok: true };
     },
-    catalog: () => ({ models: GUESS_MODELS.map(publicModel), attributes: ATTRIBUTE_KEYS }),
+    catalog: user => {
+      const room = user ? q.mine.all(user.id, user.id, clock()).map(row => JSON.parse(row.state))
+        .find(r => seatOf(r, user.id) >= 0 && r.status !== 'closed') : null;
+      const models = room?.catalog ?? GUESS_MODELS;
+      return { models: models.map(publicModel), attributes: ATTRIBUTE_KEYS, catalogVersion: catalogRevision(models) };
+    },
   };
 }

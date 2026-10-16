@@ -28,7 +28,7 @@ export function registerGuessRooms(router, { db, auth, config }) {
     return { user, body };
   }
   router.on('GET', '/api/guess/friends/current', ctx => ({ room: rooms.current(readGate(ctx)) }));
-  router.on('GET', '/api/guess/friends/catalog', ctx => { readGate(ctx); return rooms.catalog(); });
+  router.on('GET', '/api/guess/friends/catalog', ctx => rooms.catalog(readGate(ctx)));
   router.on('GET', '/api/guess/friends/:code/state', ctx => ({ room: rooms.sync(readGate(ctx), ctx.params.code) }));
   router.on('POST', '/api/guess/friends/create', async ctx => {
     const { user, body } = await command(ctx, ['difficulty']);

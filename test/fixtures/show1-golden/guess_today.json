@@ -1,1 +1,3901 @@
-{"dayKey":"2026-09-28","dayNumber":15,"attributes":["vendor","released","openWeights","contextK","modalities","reasoning","priceTier"],"models":[{"id":"glm-5","name":"GLM-5","vendor":"Zhipu AI (Z.ai)","released":"2026-02","openWeights":true,"contextK":205,"modalities":["text"],"reasoning":true,"priceOut":3.2,"priceTier":2,"difficulty":1},{"id":"glm-5-1","name":"GLM-5.1","vendor":"Zhipu AI (Z.ai)","released":"2026-04","openWeights":true,"contextK":205,"modalities":["text"],"reasoning":true,"priceOut":4.4,"priceTier":2,"difficulty":1},{"id":"glm-5-2","name":"GLM-5.2","vendor":"Zhipu AI (Z.ai)","released":"2026-06","openWeights":true,"contextK":1049,"modalities":["text"],"reasoning":true,"priceOut":4.4,"priceTier":2,"difficulty":1},{"id":"deepseek-v4-flash","name":"DeepSeek V4 Flash","vendor":"DeepSeek","released":"2026-04","openWeights":true,"contextK":1311,"modalities":["text"],"reasoning":true,"priceOut":0.6,"priceTier":1,"difficulty":1},{"id":"deepseek-v4-pro","name":"DeepSeek V4 Pro","vendor":"DeepSeek","released":"2026-04","openWeights":true,"contextK":1050,"modalities":["text"],"reasoning":true,"priceOut":0.87,"priceTier":1,"difficulty":1},{"id":"kimi-k2-5","name":"Kimi K2.5","vendor":"Moonshot AI","released":"2026-01","openWeights":true,"contextK":262,"modalities":["text","image","video"],"reasoning":true,"priceOut":null,"priceTier":null,"difficulty":1},{"id":"kimi-k2-6","name":"Kimi K2.6","vendor":"Moonshot AI","released":"2026-04","openWeights":true,"contextK":262,"modalities":["text","image","video"],"reasoning":true,"priceOut":4,"priceTier":2,"difficulty":1},{"id":"kimi-k2-7-code","name":"Kimi K2.7 Code","vendor":"Moonshot AI","released":"2026-06","openWeights":true,"contextK":271,"modalities":["text","image","video"],"reasoning":true,"priceOut":4,"priceTier":2,"difficulty":1},{"id":"kimi-k3","name":"Kimi K3","vendor":"Moonshot AI","released":"2026-07","openWeights":true,"contextK":1049,"modalities":["text","image","video"],"reasoning":true,"priceOut":15,"priceTier":3,"difficulty":1},{"id":"gpt-oss-120b","name":"GPT OSS 120B","vendor":"OpenAI","released":"2025-08","openWeights":true,"contextK":131,"modalities":["text","image"],"reasoning":true,"priceOut":null,"priceTier":null,"difficulty":3},{"id":"gpt-oss-20b","name":"GPT OSS 20B","vendor":"OpenAI","released":"2025-08","openWeights":true,"contextK":131,"modalities":["text"],"reasoning":true,"priceOut":null,"priceTier":null,"difficulty":3},{"id":"glm-5-3-flash","name":"GLM-5.3-Flash","vendor":"Zhipu AI (Z.ai)","released":"2026-08","openWeights":true,"contextK":1311,"modalities":["text","image","video"],"reasoning":true,"priceOut":0.25,"priceTier":0,"difficulty":1},{"id":"glm-5-3","name":"GLM-5.3","vendor":"Zhipu AI (Z.ai)","released":"2026-08","openWeights":true,"contextK":1311,"modalities":["text"],"reasoning":true,"priceOut":4.4,"priceTier":2,"difficulty":1},{"id":"claude-sonnet-4-6","name":"Claude Sonnet 4.6","vendor":"Anthropic","released":"2026-02","openWeights":false,"contextK":1000,"modalities":["text","image"],"reasoning":true,"priceOut":15,"priceTier":3,"difficulty":1},{"id":"gpt-5-5","name":"GPT-5.5","vendor":"OpenAI","released":"2026-04","openWeights":false,"contextK":1050,"modalities":["text","image"],"reasoning":true,"priceOut":30,"priceTier":4,"difficulty":1},{"id":"minimax-m2","name":"MiniMax-M2","vendor":"MiniMax","released":"2025-10","openWeights":true,"contextK":1000,"modalities":["text"],"reasoning":true,"priceOut":1.2,"priceTier":1,"difficulty":1},{"id":"minimax-m2-1","name":"MiniMax-M2.1","vendor":"MiniMax","released":"2025-12","openWeights":true,"contextK":205,"modalities":["text"],"reasoning":true,"priceOut":1.2,"priceTier":1,"difficulty":1},{"id":"minimax-m2-5","name":"MiniMax-M2.5","vendor":"MiniMax","released":"2026-02","openWeights":true,"contextK":229,"modalities":["text","image"],"reasoning":true,"priceOut":1.2,"priceTier":1,"difficulty":1},{"id":"minimax-m2-7","name":"MiniMax-M2.7","vendor":"MiniMax","released":"2026-03","openWeights":true,"contextK":262,"modalities":["text"],"reasoning":true,"priceOut":1.2,"priceTier":1,"difficulty":1},{"id":"minimax-m2-7-highspeed","name":"MiniMax-M2.7 Highspeed","vendor":"MiniMax","released":"2026-03","openWeights":true,"contextK":205,"modalities":["text"],"reasoning":true,"priceOut":2.4,"priceTier":2,"difficulty":1},{"id":"minimax-m3","name":"MiniMax-M3","vendor":"MiniMax","released":"2026-06","openWeights":true,"contextK":1049,"modalities":["text","image","video"],"reasoning":true,"priceOut":1.2,"priceTier":1,"difficulty":1},{"id":"claude-opus-4-8","name":"Claude Opus 4.8","vendor":"Anthropic","released":"2026-05","openWeights":false,"contextK":1049,"modalities":["text","image"],"reasoning":true,"priceOut":25,"priceTier":4,"difficulty":1},{"id":"gpt-5-4","name":"GPT-5.4","vendor":"OpenAI","released":"2026-03","openWeights":false,"contextK":1050,"modalities":["text","image"],"reasoning":true,"priceOut":15,"priceTier":3,"difficulty":1},{"id":"claude-haiku-4-5","name":"Claude Haiku 4.5","vendor":"Anthropic","released":"2025-10","openWeights":false,"contextK":200,"modalities":["text","image"],"reasoning":true,"priceOut":5,"priceTier":2,"difficulty":1},{"id":"claude-opus-4-7","name":"Claude Opus 4.7","vendor":"Anthropic","released":"2026-04","openWeights":false,"contextK":1049,"modalities":["text","image"],"reasoning":true,"priceOut":25,"priceTier":4,"difficulty":1},{"id":"claude-opus-4-1","name":"Claude Opus 4.1","vendor":"Anthropic","released":"2025-08","openWeights":false,"contextK":200,"modalities":["text","image"],"reasoning":true,"priceOut":75,"priceTier":4,"difficulty":1},{"id":"claude-opus-4-5","name":"Claude Opus 4.5","vendor":"Anthropic","released":"2025-11","openWeights":false,"contextK":200,"modalities":["text","image"],"reasoning":true,"priceOut":25,"priceTier":4,"difficulty":1},{"id":"claude-opus-4-6","name":"Claude Opus 4.6","vendor":"Anthropic","released":"2026-02","openWeights":false,"contextK":1000,"modalities":["text","image"],"reasoning":true,"priceOut":25,"priceTier":4,"difficulty":1},{"id":"gpt-5-6-luna","name":"GPT-5.6 Luna","vendor":"OpenAI","released":"2026-07","openWeights":false,"contextK":1050,"modalities":["text","image"],"reasoning":true,"priceOut":1.2,"priceTier":1,"difficulty":1},{"id":"gpt-5-6-sol","name":"GPT-5.6 Sol","vendor":"OpenAI","released":"2026-07","openWeights":false,"contextK":1050,"modalities":["text","image"],"reasoning":true,"priceOut":20,"priceTier":3,"difficulty":1},{"id":"claude-fable-5","name":"Claude Fable 5","vendor":"Anthropic","released":"2026-06","openWeights":false,"contextK":1000,"modalities":["text","image"],"reasoning":true,"priceOut":50,"priceTier":4,"difficulty":1},{"id":"gpt-5-mini","name":"GPT-5 Mini","vendor":"OpenAI","released":"2025-08","openWeights":false,"contextK":400,"modalities":["text","image"],"reasoning":true,"priceOut":2,"priceTier":2,"difficulty":1},{"id":"gpt-5-4-mini","name":"GPT-5.4 Mini","vendor":"OpenAI","released":"2026-03","openWeights":false,"contextK":400,"modalities":["text","image"],"reasoning":true,"priceOut":4.5,"priceTier":2,"difficulty":1},{"id":"gpt-5-6-terra","name":"GPT-5.6 Terra","vendor":"OpenAI","released":"2026-07","openWeights":false,"contextK":1050,"modalities":["text","image"],"reasoning":true,"priceOut":12,"priceTier":3,"difficulty":1},{"id":"glm-4-5","name":"GLM-4.5","vendor":"Zhipu AI (Z.ai)","released":"2025-07","openWeights":true,"contextK":131,"modalities":["text"],"reasoning":true,"priceOut":2.2,"priceTier":2,"difficulty":2},{"id":"glm-4-6","name":"GLM-4.6","vendor":"Zhipu AI (Z.ai)","released":"2025-09","openWeights":true,"contextK":205,"modalities":["text"],"reasoning":true,"priceOut":2.2,"priceTier":2,"difficulty":2},{"id":"glm-4-7","name":"GLM-4.7","vendor":"Zhipu AI (Z.ai)","released":"2025-12","openWeights":true,"contextK":205,"modalities":["text"],"reasoning":true,"priceOut":2.2,"priceTier":2,"difficulty":2},{"id":"claude-sonnet-5","name":"Claude Sonnet 5","vendor":"Anthropic","released":"2026-06","openWeights":false,"contextK":1000,"modalities":["text","image"],"reasoning":true,"priceOut":10,"priceTier":3,"difficulty":1},{"id":"qwen3-max","name":"Qwen3 Max","vendor":"Alibaba","released":"2025-09","openWeights":false,"contextK":262,"modalities":["text"],"reasoning":true,"priceOut":6,"priceTier":2,"difficulty":1},{"id":"qwen3-7-max","name":"Qwen3.7 Max","vendor":"Alibaba","released":"2026-05","openWeights":false,"contextK":1064,"modalities":["text","image"],"reasoning":true,"priceOut":7.5,"priceTier":2,"difficulty":1},{"id":"qwen3-8-max","name":"Qwen3.8 Max","vendor":"Alibaba","released":"2026-08","openWeights":true,"contextK":1049,"modalities":["text","image","video"],"reasoning":true,"priceOut":6,"priceTier":2,"difficulty":1},{"id":"claude-sonnet-4-5","name":"Claude Sonnet 4.5","vendor":"Anthropic","released":"2025-09","openWeights":false,"contextK":1000,"modalities":["text","image"],"reasoning":true,"priceOut":15,"priceTier":3,"difficulty":1},{"id":"gemini-2-5-flash","name":"Gemini 2.5 Flash","vendor":"Google","released":"2025-06","openWeights":false,"contextK":1066,"modalities":["text","image","video"],"reasoning":true,"priceOut":2.5,"priceTier":2,"difficulty":1},{"id":"gemini-3-5-flash","name":"Gemini 3.5 Flash","vendor":"Google","released":"2026-05","openWeights":false,"contextK":1049,"modalities":["text","image","video"],"reasoning":true,"priceOut":9,"priceTier":3,"difficulty":1},{"id":"llama-3-3-70b","name":"Llama 3.3 70B","vendor":"Meta","released":"2024-11","openWeights":true,"contextK":131,"modalities":["text"],"reasoning":false,"priceOut":null,"priceTier":null,"difficulty":4},{"id":"claude-opus-5","name":"Claude Opus 5","vendor":"Anthropic","released":"2026-07","openWeights":false,"contextK":1000,"modalities":["text","image"],"reasoning":true,"priceOut":25,"priceTier":4,"difficulty":1},{"id":"deepseek-v3-2","name":"DeepSeek V3.2","vendor":"DeepSeek","released":"2025-12","openWeights":true,"contextK":164,"modalities":["text","image"],"reasoning":true,"priceOut":0.42,"priceTier":0,"difficulty":1},{"id":"gpt-5-nano","name":"GPT-5 Nano","vendor":"OpenAI","released":"2025-08","openWeights":false,"contextK":400,"modalities":["text","image"],"reasoning":true,"priceOut":0.4,"priceTier":0,"difficulty":2},{"id":"gpt-5-4-nano","name":"GPT-5.4 Nano","vendor":"OpenAI","released":"2026-03","openWeights":false,"contextK":1048,"modalities":["text","image"],"reasoning":true,"priceOut":1.25,"priceTier":1,"difficulty":2},{"id":"qwen3-5-397b-a17b","name":"Qwen3.5 397B A17B","vendor":"Alibaba","released":"2026-02","openWeights":true,"contextK":262,"modalities":["text","image","video"],"reasoning":true,"priceOut":3.6,"priceTier":2,"difficulty":3},{"id":"qwen3-5-plus","name":"Qwen3.5 Plus","vendor":"Alibaba","released":"2026-02","openWeights":false,"contextK":1000,"modalities":["text","image","video"],"reasoning":true,"priceOut":2.4,"priceTier":2,"difficulty":1},{"id":"qwen3-6-plus","name":"Qwen3.6 Plus","vendor":"Alibaba","released":"2026-04","openWeights":true,"contextK":1000,"modalities":["text","image","video"],"reasoning":true,"priceOut":3,"priceTier":2,"difficulty":1},{"id":"qwen3-7-plus","name":"Qwen3.7 Plus","vendor":"Alibaba","released":"2026-06","openWeights":false,"contextK":1064,"modalities":["text","image","video"],"reasoning":true,"priceOut":3,"priceTier":2,"difficulty":1},{"id":"qwen3-5-27b","name":"Qwen3.5 27B","vendor":"Alibaba","released":"2026-02","openWeights":true,"contextK":262,"modalities":["text","image","video"],"reasoning":true,"priceOut":2.4,"priceTier":2,"difficulty":2},{"id":"qwen3-6-27b","name":"Qwen3.6 27B","vendor":"Alibaba","released":"2026-04","openWeights":true,"contextK":262,"modalities":["text","image","video"],"reasoning":true,"priceOut":3.6,"priceTier":2,"difficulty":2},{"id":"qwen3-8-27b","name":"Qwen3.8 27B","vendor":"Alibaba","released":"2026-08","openWeights":true,"contextK":1131,"modalities":["text","image","video"],"reasoning":true,"priceOut":null,"priceTier":null,"difficulty":2},{"id":"gemini-2-5-pro","name":"Gemini 2.5 Pro","vendor":"Google","released":"2025-06","openWeights":false,"contextK":1066,"modalities":["text","image","video"],"reasoning":true,"priceOut":10,"priceTier":3,"difficulty":1},{"id":"gemini-3-1-pro-preview","name":"Gemini 3.1 Pro Preview","vendor":"Google","released":"2026-02","openWeights":false,"contextK":1049,"modalities":["text","image","video"],"reasoning":true,"priceOut":12,"priceTier":3,"difficulty":1},{"id":"gpt-5-1","name":"GPT-5.1","vendor":"OpenAI","released":"2025-11","openWeights":false,"contextK":400,"modalities":["text","image"],"reasoning":true,"priceOut":10,"priceTier":3,"difficulty":1},{"id":"gpt-5-2","name":"GPT-5.2","vendor":"OpenAI","released":"2025-12","openWeights":false,"contextK":400,"modalities":["text","image"],"reasoning":true,"priceOut":14,"priceTier":3,"difficulty":1},{"id":"gpt-5","name":"GPT-5","vendor":"OpenAI","released":"2025-08","openWeights":false,"contextK":400,"modalities":["text","image"],"reasoning":true,"priceOut":10,"priceTier":3,"difficulty":2},{"id":"gpt-5-1-codex","name":"GPT-5.1 Codex","vendor":"OpenAI","released":"2025-11","openWeights":false,"contextK":400,"modalities":["text","image"],"reasoning":true,"priceOut":10,"priceTier":3,"difficulty":2},{"id":"gpt-5-1-codex-mini","name":"GPT-5.1 Codex Mini","vendor":"OpenAI","released":"2025-11","openWeights":false,"contextK":400,"modalities":["text","image"],"reasoning":true,"priceOut":2,"priceTier":2,"difficulty":2},{"id":"gpt-5-2-codex","name":"GPT-5.2 Codex","vendor":"OpenAI","released":"2025-12","openWeights":false,"contextK":400,"modalities":["text","image"],"reasoning":true,"priceOut":null,"priceTier":null,"difficulty":2},{"id":"gpt-5-3-codex","name":"GPT-5.3 Codex","vendor":"OpenAI","released":"2026-02","openWeights":false,"contextK":400,"modalities":["text","image"],"reasoning":true,"priceOut":14,"priceTier":3,"difficulty":2},{"id":"grok-4-3","name":"Grok 4.3","vendor":"xAI","released":"2026-04","openWeights":false,"contextK":1000,"modalities":["text","image"],"reasoning":true,"priceOut":2.5,"priceTier":2,"difficulty":1},{"id":"grok-4-5","name":"Grok 4.5","vendor":"xAI","released":"2026-07","openWeights":false,"contextK":1000,"modalities":["text","image"],"reasoning":true,"priceOut":6,"priceTier":2,"difficulty":1},{"id":"grok-4-6","name":"Grok 4.6","vendor":"xAI","released":"2026-08","openWeights":false,"contextK":524,"modalities":["text","image"],"reasoning":true,"priceOut":6,"priceTier":2,"difficulty":1},{"id":"gemini-2-5-flash-lite","name":"Gemini 2.5 Flash-Lite","vendor":"Google","released":"2025-06","openWeights":false,"contextK":1049,"modalities":["text","image","video"],"reasoning":true,"priceOut":0.4,"priceTier":0,"difficulty":2},{"id":"gemini-3-1-flash-lite","name":"Gemini 3.1 Flash Lite","vendor":"Google","released":"2026-03","openWeights":false,"contextK":1050,"modalities":["text","image","video"],"reasoning":true,"priceOut":1.5,"priceTier":1,"difficulty":2},{"id":"gemini-3-5-flash-lite","name":"Gemini 3.5 Flash Lite","vendor":"Google","released":"2026-07","openWeights":false,"contextK":1049,"modalities":["text","image","video"],"reasoning":true,"priceOut":2.5,"priceTier":2,"difficulty":2},{"id":"gpt-4-1","name":"GPT-4.1","vendor":"OpenAI","released":"2025-04","openWeights":false,"contextK":1048,"modalities":["text","image"],"reasoning":false,"priceOut":8,"priceTier":3,"difficulty":2},{"id":"qwen3-5-35b-a3b","name":"Qwen3.5 35B A3B","vendor":"Alibaba","released":"2026-02","openWeights":true,"contextK":262,"modalities":["text","image","video"],"reasoning":true,"priceOut":2,"priceTier":2,"difficulty":2},{"id":"qwen3-6-35b-a3b","name":"Qwen3.6 35B A3B","vendor":"Alibaba","released":"2026-04","openWeights":true,"contextK":262,"modalities":["text","image","video"],"reasoning":true,"priceOut":1.485,"priceTier":1,"difficulty":2},{"id":"mimo-v2-5-pro","name":"MiMo-V2.5-Pro","vendor":"Xiaomi","released":"2026-04","openWeights":true,"contextK":1050,"modalities":["text"],"reasoning":true,"priceOut":0.87,"priceTier":1,"difficulty":2},{"id":"deepseek-r1","name":"DeepSeek R1","vendor":"DeepSeek","released":"2025-01","openWeights":true,"contextK":164,"modalities":["text"],"reasoning":true,"priceOut":2.19,"priceTier":2,"difficulty":1},{"id":"mimo-v2-5","name":"MiMo-V2.5","vendor":"Xiaomi","released":"2026-04","openWeights":true,"contextK":1050,"modalities":["text","image","video"],"reasoning":true,"priceOut":0.28,"priceTier":0,"difficulty":2},{"id":"claude-fable-5-1","name":"Claude Fable 5.1","vendor":"Anthropic","released":"2026-09","openWeights":false,"contextK":1000,"modalities":["text","image"],"reasoning":true,"priceOut":50,"priceTier":4,"difficulty":1},{"id":"gemini-3-6-flash","name":"Gemini 3.6 Flash","vendor":"Google","released":"2026-07","openWeights":false,"contextK":1049,"modalities":["text","image","video"],"reasoning":true,"priceOut":3.75,"priceTier":2,"difficulty":1},{"id":"gemini-3-7-flash","name":"Gemini 3.7 Flash","vendor":"Google","released":"2026-08","openWeights":false,"contextK":1049,"modalities":["text","image","video"],"reasoning":true,"priceOut":3.75,"priceTier":2,"difficulty":1},{"id":"gemini-3-flash-preview","name":"Gemini 3 Flash Preview","vendor":"Google","released":"2025-12","openWeights":false,"contextK":1049,"modalities":["text","image","video"],"reasoning":true,"priceOut":3,"priceTier":2,"difficulty":2},{"id":"gpt-4o","name":"GPT-4o","vendor":"OpenAI","released":"2024-05","openWeights":false,"contextK":128,"modalities":["text","image"],"reasoning":false,"priceOut":15,"priceTier":3,"difficulty":2},{"id":"gpt-4o-mini","name":"GPT-4o mini","vendor":"OpenAI","released":"2024-07","openWeights":false,"contextK":128,"modalities":["text","image"],"reasoning":false,"priceOut":0.6,"priceTier":1,"difficulty":2},{"id":"qwen3-6-flash","name":"Qwen3.6 Flash","vendor":"Alibaba","released":"2026-04","openWeights":false,"contextK":1000,"modalities":["text","image","video"],"reasoning":true,"priceOut":1.125,"priceTier":1,"difficulty":2},{"id":"qwen3-8-flash","name":"Qwen3.8 Flash","vendor":"Alibaba","released":"2026-08","openWeights":false,"contextK":1049,"modalities":["text","image","video"],"reasoning":true,"priceOut":0.47,"priceTier":0,"difficulty":2},{"id":"inkling","name":"Inkling","vendor":"Thinking Machines","released":"2026-07","openWeights":true,"contextK":1049,"modalities":["text","image","audio"],"reasoning":true,"priceOut":4.68,"priceTier":2,"difficulty":3},{"id":"kimi-k2-thinking","name":"Kimi K2 Thinking","vendor":"Moonshot AI","released":"2025-11","openWeights":true,"contextK":262,"modalities":["text"],"reasoning":true,"priceOut":2.5,"priceTier":2,"difficulty":2},{"id":"deepseek-v3-1","name":"DeepSeek V3.1","vendor":"DeepSeek","released":"2025-08","openWeights":true,"contextK":164,"modalities":["text"],"reasoning":true,"priceOut":1.68,"priceTier":1,"difficulty":2},{"id":"gpt-6-astra","name":"GPT-6 Astra","vendor":"OpenAI","released":"2026-09","openWeights":false,"contextK":1050,"modalities":["text","image"],"reasoning":true,"priceOut":50,"priceTier":4,"difficulty":1},{"id":"gemini-3-8-flash","name":"Gemini 3.8 Flash","vendor":"Google","released":"2026-09","openWeights":false,"contextK":1049,"modalities":["text","image","video"],"reasoning":true,"priceOut":3.75,"priceTier":2,"difficulty":2},{"id":"gpt-5-pro","name":"GPT-5 Pro","vendor":"OpenAI","released":"2025-10","openWeights":false,"contextK":400,"modalities":["text","image"],"reasoning":true,"priceOut":120,"priceTier":4,"difficulty":2},{"id":"gpt-5-4-pro","name":"GPT-5.4 Pro","vendor":"OpenAI","released":"2026-03","openWeights":false,"contextK":1050,"modalities":["text","image"],"reasoning":true,"priceOut":180,"priceTier":4,"difficulty":2},{"id":"gpt-5-5-pro","name":"GPT-5.5 Pro","vendor":"OpenAI","released":"2026-04","openWeights":false,"contextK":1050,"modalities":["text","image"],"reasoning":true,"priceOut":180,"priceTier":4,"difficulty":2},{"id":"grok-build-0-1","name":"Grok Build 0.1","vendor":"xAI","released":"2026-04","openWeights":false,"contextK":256,"modalities":["text","image"],"reasoning":true,"priceOut":2,"priceTier":2,"difficulty":3},{"id":"o4-mini","name":"o4-mini","vendor":"OpenAI","released":"2025-04","openWeights":false,"contextK":200,"modalities":["text","image"],"reasoning":true,"priceOut":4.4,"priceTier":2,"difficulty":3},{"id":"deepseek-v3","name":"DeepSeek V3","vendor":"DeepSeek","released":"2024-12","openWeights":true,"contextK":164,"modalities":["text"],"reasoning":false,"priceOut":1.1,"priceTier":1,"difficulty":2},{"id":"o3","name":"o3","vendor":"OpenAI","released":"2025-04","openWeights":false,"contextK":200,"modalities":["text","image"],"reasoning":true,"priceOut":8,"priceTier":3,"difficulty":2},{"id":"qwen3-5-122b-a10b","name":"Qwen3.5 122B A10B","vendor":"Alibaba","released":"2026-02","openWeights":true,"contextK":262,"modalities":["text","image","video"],"reasoning":true,"priceOut":3.2,"priceTier":2,"difficulty":3},{"id":"step-3-7-flash","name":"Step 3.7 Flash","vendor":"StepFun","released":"2026-05","openWeights":true,"contextK":262,"modalities":["text","image","video"],"reasoning":true,"priceOut":1.11,"priceTier":1,"difficulty":2},{"id":"glm-5v-turbo","name":"GLM-5V Turbo","vendor":"Zhipu AI (Z.ai)","released":"2026-04","openWeights":false,"contextK":203,"modalities":["text","image","video"],"reasoning":true,"priceOut":4,"priceTier":2,"difficulty":2},{"id":"hy3","name":"Hy3","vendor":"Tencent","released":"2026-07","openWeights":true,"contextK":262,"modalities":["text"],"reasoning":true,"priceOut":null,"priceTier":null,"difficulty":2},{"id":"qwen3-coder-plus","name":"Qwen3 Coder Plus","vendor":"Alibaba","released":"2025-07","openWeights":true,"contextK":1049,"modalities":["text"],"reasoning":false,"priceOut":5,"priceTier":2,"difficulty":3},{"id":"qwen3-vl-235b-a22b","name":"Qwen3 VL 235B A22B","vendor":"Alibaba","released":"2025-09","openWeights":true,"contextK":262,"modalities":["text","image","video"],"reasoning":false,"priceOut":2.8,"priceTier":2,"difficulty":3},{"id":"gpt-3","name":"GPT-3 175B","vendor":"OpenAI","released":"2020-06","openWeights":false,"contextK":2,"modalities":["text"],"reasoning":false,"priceOut":null,"priceTier":null,"difficulty":4},{"id":"gpt-4","name":"GPT-4","vendor":"OpenAI","released":"2023-03","openWeights":false,"contextK":8,"modalities":["text"],"reasoning":false,"priceOut":60,"priceTier":4,"difficulty":4},{"id":"gpt-4-turbo","name":"GPT-4 Turbo","vendor":"OpenAI","released":"2023-11","openWeights":false,"contextK":128,"modalities":["text","image"],"reasoning":false,"priceOut":30,"priceTier":4,"difficulty":4},{"id":"gpt-35-turbo","name":"GPT-3.5 Turbo","vendor":"OpenAI","released":"2022-11","openWeights":false,"contextK":4,"modalities":["text"],"reasoning":false,"priceOut":1.5,"priceTier":1,"difficulty":4},{"id":"o1","name":"o1","vendor":"OpenAI","released":"2024-09","openWeights":false,"contextK":128,"modalities":["text"],"reasoning":true,"priceOut":60,"priceTier":4,"difficulty":4},{"id":"claude-1","name":"Claude 1","vendor":"Anthropic","released":"2023-03","openWeights":false,"contextK":null,"modalities":["text"],"reasoning":false,"priceOut":null,"priceTier":null,"difficulty":4},{"id":"claude-2","name":"Claude 2","vendor":"Anthropic","released":"2023-07","openWeights":false,"contextK":100,"modalities":["text"],"reasoning":false,"priceOut":24,"priceTier":3,"difficulty":4},{"id":"claude-3-opus","name":"Claude 3 Opus","vendor":"Anthropic","released":"2024-02","openWeights":false,"contextK":200,"modalities":["text","image"],"reasoning":false,"priceOut":75,"priceTier":4,"difficulty":4},{"id":"claude-3-sonnet","name":"Claude 3 Sonnet","vendor":"Anthropic","released":"2024-02","openWeights":false,"contextK":200,"modalities":["text","image"],"reasoning":false,"priceOut":15,"priceTier":3,"difficulty":4},{"id":"claude-35-sonnet","name":"Claude 3.5 Sonnet","vendor":"Anthropic","released":"2024-06","openWeights":false,"contextK":200,"modalities":["text","image"],"reasoning":false,"priceOut":15,"priceTier":3,"difficulty":4},{"id":"claude-3-haiku","name":"Claude 3 Haiku","vendor":"Anthropic","released":"2024-03","openWeights":false,"contextK":200,"modalities":["text","image"],"reasoning":false,"priceOut":1.25,"priceTier":1,"difficulty":4},{"id":"claude-35-haiku","name":"Claude 3.5 Haiku","vendor":"Anthropic","released":"2024-11","openWeights":false,"contextK":200,"modalities":["text"],"reasoning":false,"priceOut":4,"priceTier":2,"difficulty":4},{"id":"gemini-1-0-pro","name":"Gemini 1.0 Pro","vendor":"Google","released":"2023-12","openWeights":false,"contextK":32,"modalities":["text","image"],"reasoning":false,"priceOut":0.5,"priceTier":1,"difficulty":4},{"id":"gemini-15-pro","name":"Gemini 1.5 Pro","vendor":"Google","released":"2024-02","openWeights":false,"contextK":1000,"modalities":["text","image"],"reasoning":false,"priceOut":5,"priceTier":2,"difficulty":4},{"id":"gemini-15-flash","name":"Gemini 1.5 Flash","vendor":"Google","released":"2024-05","openWeights":false,"contextK":1000,"modalities":["text","image"],"reasoning":false,"priceOut":0.3,"priceTier":0,"difficulty":4},{"id":"gemma","name":"Gemma 7B","vendor":"Google","released":"2024-02","openWeights":true,"contextK":8,"modalities":["text"],"reasoning":false,"priceOut":null,"priceTier":null,"difficulty":4},{"id":"llama-2","name":"Llama 2 70B","vendor":"Meta","released":"2023-07","openWeights":true,"contextK":4,"modalities":["text"],"reasoning":false,"priceOut":null,"priceTier":null,"difficulty":4},{"id":"llama-3","name":"Llama 3 70B","vendor":"Meta","released":"2024-04","openWeights":true,"contextK":8,"modalities":["text"],"reasoning":false,"priceOut":null,"priceTier":null,"difficulty":4},{"id":"code-llama","name":"Code Llama 34B","vendor":"Meta","released":"2023-08","openWeights":true,"contextK":16,"modalities":["text"],"reasoning":false,"priceOut":null,"priceTier":null,"difficulty":4},{"id":"mistral-7b","name":"Mistral 7B","vendor":"Mistral","released":"2023-09","openWeights":true,"contextK":8,"modalities":["text"],"reasoning":false,"priceOut":null,"priceTier":null,"difficulty":4},{"id":"mixtral-8x7b","name":"Mixtral 8x7B","vendor":"Mistral","released":"2023-12","openWeights":true,"contextK":32,"modalities":["text"],"reasoning":false,"priceOut":null,"priceTier":null,"difficulty":4},{"id":"vicuna","name":"Vicuna 13B","vendor":"LMSYS","released":"2023-03","openWeights":true,"contextK":2,"modalities":["text"],"reasoning":false,"priceOut":null,"priceTier":null,"difficulty":4},{"id":"alpaca","name":"Alpaca 7B","vendor":"Stanford","released":"2023-03","openWeights":true,"contextK":2,"modalities":["text"],"reasoning":false,"priceOut":null,"priceTier":null,"difficulty":4},{"id":"phi-3","name":"Phi-3","vendor":"Microsoft","released":"2024-04","openWeights":true,"contextK":4,"modalities":["text"],"reasoning":false,"priceOut":null,"priceTier":null,"difficulty":4},{"id":"qwen-15","name":"Qwen1.5 72B","vendor":"Alibaba","released":"2024-02","openWeights":true,"contextK":32,"modalities":["text"],"reasoning":false,"priceOut":null,"priceTier":null,"difficulty":4},{"id":"qwen2","name":"Qwen2 72B","vendor":"Alibaba","released":"2024-06","openWeights":true,"contextK":128,"modalities":["text"],"reasoning":false,"priceOut":null,"priceTier":null,"difficulty":4},{"id":"glm-4","name":"GLM-4","vendor":"Zhipu AI (Z.ai)","released":"2024-01","openWeights":false,"contextK":128,"modalities":["text"],"reasoning":false,"priceOut":null,"priceTier":null,"difficulty":4},{"id":"ernie-bot","name":"ERNIE Bot","vendor":"Baidu","released":"2023-03","openWeights":false,"contextK":null,"modalities":["text"],"reasoning":false,"priceOut":null,"priceTier":null,"difficulty":4},{"id":"doubao","name":"Doubao Pro","vendor":"ByteDance","released":"2024-05","openWeights":false,"contextK":32,"modalities":["text"],"reasoning":false,"priceOut":null,"priceTier":null,"difficulty":4},{"id":"yi","name":"Yi 34B","vendor":"01.AI","released":"2023-11","openWeights":true,"contextK":4,"modalities":["text"],"reasoning":false,"priceOut":null,"priceTier":null,"difficulty":4},{"id":"doubao-seed-1-8","name":"Doubao Seed 1.8","vendor":"ByteDance","released":"2025-12","openWeights":true,"contextK":null,"modalities":["text","image"],"reasoning":true,"priceOut":2.16,"priceTier":2,"difficulty":2},{"id":"doubao-seed-2-0-pro","name":"Doubao Seed 2.0 Pro","vendor":"ByteDance","released":"2026-02","openWeights":false,"contextK":null,"modalities":["text","image"],"reasoning":true,"priceOut":2.2,"priceTier":2,"difficulty":1},{"id":"doubao-seed-2-1-pro","name":"Doubao Seed 2.1 Pro","vendor":"ByteDance","released":"2026-06","openWeights":false,"contextK":null,"modalities":["text","image"],"reasoning":true,"priceOut":4.2,"priceTier":2,"difficulty":1},{"id":"hy4-preview","name":"Hy4 Preview","vendor":"Tencent","released":"2026-08","openWeights":true,"contextK":1024,"modalities":["text"],"reasoning":true,"priceOut":null,"priceTier":null,"difficulty":2},{"id":"muse-spark-1-3","name":"Muse Spark 1.3","vendor":"Meta","released":"2026-09","openWeights":false,"contextK":1024,"modalities":["text","image","video"],"reasoning":true,"priceOut":4.25,"priceTier":2,"difficulty":2},{"id":"nemotron-3-ultra-550b-a55b","name":"Nemotron 3 Ultra","vendor":"NVIDIA","released":"2026-06","openWeights":true,"contextK":256,"modalities":["text"],"reasoning":true,"priceOut":3.125,"priceTier":2,"difficulty":3},{"id":"laguna-s-2-1","name":"Laguna S 2.1","vendor":"Poolside","released":"2026-07","openWeights":false,"contextK":1024,"modalities":["text"],"reasoning":true,"priceOut":0.18,"priceTier":0,"difficulty":3},{"id":"gemma-4-31b-it","name":"Gemma 4 31B IT","vendor":"Google","released":"2026-04","openWeights":true,"contextK":262,"modalities":["text","image","video"],"reasoning":true,"priceOut":null,"priceTier":null,"difficulty":3},{"id":"nemotron-3-5-lightning","name":"Nemotron 3.5 Lightning","vendor":"NVIDIA","released":"2026-08","openWeights":true,"contextK":256,"modalities":["text"],"reasoning":true,"priceOut":0.2,"priceTier":0,"difficulty":3},{"id":"solar-pro4","name":"Solar Pro 4","vendor":"Upstage","released":"2026-08","openWeights":false,"contextK":512,"modalities":["text"],"reasoning":true,"priceOut":0.36,"priceTier":0,"difficulty":3},{"id":"ling-3-0-flash-fin","name":"Ling 3.0 Flash Fin","vendor":"inclusionAI","released":"2026-08","openWeights":false,"contextK":256,"modalities":["text"],"reasoning":true,"priceOut":0.18,"priceTier":0,"difficulty":3},{"id":"nemotron-3-super-120b-a12b","name":"Nemotron 3 Super","vendor":"NVIDIA","released":"2026-03","openWeights":true,"contextK":256,"modalities":["text"],"reasoning":true,"priceOut":0.45,"priceTier":0,"difficulty":3},{"id":"gpt-4-1-mini","name":"GPT-4.1 mini","vendor":"OpenAI","released":"2025-04","openWeights":false,"contextK":1048,"modalities":["text","image"],"reasoning":false,"priceOut":1.6,"priceTier":1,"difficulty":3},{"id":"deepseek-v4-1-flash","name":"DeepSeek V4.1 Flash","vendor":"DeepSeek","released":"2026-09","openWeights":true,"contextK":1050,"modalities":["text","image"],"reasoning":true,"priceOut":0.6,"priceTier":1,"difficulty":1},{"id":"qwen3-7-flash","name":"Qwen3.7 Flash","vendor":"Alibaba","released":"2026-07","openWeights":true,"contextK":977,"modalities":["text","image","video"],"reasoning":true,"priceOut":0.13,"priceTier":0,"difficulty":2},{"id":"glm-4-7-flash","name":"GLM-4.7 Flash","vendor":"Zhipu AI (Z.ai)","released":"2026-01","openWeights":true,"contextK":203,"modalities":["text"],"reasoning":true,"priceOut":0.4,"priceTier":0,"difficulty":2},{"id":"mistral-nemo","name":"Mistral Nemo","vendor":"Mistral","released":"2024-07","openWeights":false,"contextK":128,"modalities":["text"],"reasoning":false,"priceOut":0.03,"priceTier":0,"difficulty":3},{"id":"muse-spark-1-2-contributor","name":"Muse Spark 1.2 Contributor","vendor":"Meta","released":"2026-08","openWeights":false,"contextK":1024,"modalities":["text","image","audio","video"],"reasoning":true,"priceOut":0.2,"priceTier":0,"difficulty":2},{"id":"gpt-4-1-nano","name":"GPT-4.1 nano","vendor":"OpenAI","released":"2025-04","openWeights":false,"contextK":1048,"modalities":["text","image"],"reasoning":false,"priceOut":0.4,"priceTier":0,"difficulty":3},{"id":"qwen3-235b-a22b-instruct-2507","name":"Qwen3 235B A22B Instruct 2507","vendor":"Alibaba","released":"2025-07","openWeights":true,"contextK":262,"modalities":["text"],"reasoning":true,"priceOut":null,"priceTier":null,"difficulty":3},{"id":"qwen3-32b","name":"Qwen3 32B","vendor":"Alibaba","released":"2025-04","openWeights":true,"contextK":131,"modalities":["text"],"reasoning":true,"priceOut":2.8,"priceTier":2,"difficulty":3},{"id":"ling-3-0-flash","name":"Ling 3.0 Flash","vendor":"inclusionAI","released":"2026-07","openWeights":false,"contextK":256,"modalities":["text"],"reasoning":true,"priceOut":0.063,"priceTier":0,"difficulty":3},{"id":"laguna-xs-2-1","name":"Laguna XS 2.1","vendor":"Poolside","released":"2026-07","openWeights":false,"contextK":256,"modalities":["text"],"reasoning":true,"priceOut":0.12,"priceTier":0,"difficulty":3},{"id":"qwen3-5-9b","name":"Qwen3.5 9B","vendor":"Alibaba","released":"2026-02","openWeights":true,"contextK":262,"modalities":["text","image","video"],"reasoning":true,"priceOut":null,"priceTier":null,"difficulty":3},{"id":"qwen3-coder-30b-a3b","name":"Qwen3 Coder 30B A3B","vendor":"Alibaba","released":"2025-04","openWeights":true,"contextK":262,"modalities":["text"],"reasoning":true,"priceOut":2.25,"priceTier":2,"difficulty":3},{"id":"qwen3-next-80b-a3b-instruct","name":"Qwen3-Next 80B-A3B Instruct","vendor":"Alibaba","released":"2025-09","openWeights":true,"contextK":262,"modalities":["text","image"],"reasoning":true,"priceOut":2,"priceTier":2,"difficulty":3},{"id":"ling-3-0-flash-vl","name":"Ling 3.0 Flash VL","vendor":"inclusionAI","released":"2026-09","openWeights":false,"contextK":128,"modalities":["text","image","video"],"reasoning":true,"priceOut":0.18,"priceTier":0,"difficulty":3},{"id":"llama-3-1-8b-instruct","name":"Llama 3.1 8B Instruct","vendor":"Meta","released":"2024-07","openWeights":true,"contextK":128,"modalities":["text"],"reasoning":false,"priceOut":0.08,"priceTier":0,"difficulty":3},{"id":"muse-spark-1-2","name":"Muse Spark 1.2","vendor":"Meta","released":"2026-08","openWeights":false,"contextK":1024,"modalities":["text","image","audio","video"],"reasoning":true,"priceOut":4.25,"priceTier":2,"difficulty":2},{"id":"gemma-3-27b-it","name":"Gemma 3 27B","vendor":"Google","released":"2025-03","openWeights":true,"contextK":128,"modalities":["text","image"],"reasoning":false,"priceOut":0.45,"priceTier":0,"difficulty":3},{"id":"glm-5-turbo","name":"GLM-5 Turbo","vendor":"Zhipu AI (Z.ai)","released":"2026-03","openWeights":true,"contextK":203,"modalities":["text"],"reasoning":true,"priceOut":4,"priceTier":2,"difficulty":2},{"id":"gemma-4-26b-a4b-it","name":"Gemma 4 26B A4B IT","vendor":"Google","released":"2026-04","openWeights":true,"contextK":262,"modalities":["text","image","video"],"reasoning":true,"priceOut":null,"priceTier":null,"difficulty":3},{"id":"qwen3-coder-480b-a35b","name":"Qwen3 Coder 480B A35B","vendor":"Alibaba","released":"2025-04","openWeights":true,"contextK":262,"modalities":["text"],"reasoning":true,"priceOut":7.5,"priceTier":2,"difficulty":3},{"id":"qwen3-8-2-4t-a95b","name":"Qwen3.8 2.4T A95B","vendor":"Alibaba","released":"2026-08","openWeights":true,"contextK":1024,"modalities":["text"],"reasoning":true,"priceOut":6,"priceTier":2,"difficulty":3},{"id":"qwen3-30b-a3b-instruct-2507","name":"Qwen3 30B A3B Instruct 2507","vendor":"Alibaba","released":"2025-07","openWeights":true,"contextK":256,"modalities":["text"],"reasoning":false,"priceOut":0.193,"priceTier":0,"difficulty":3},{"id":"grok-4-20","name":"Grok 4.20","vendor":"xAI","released":"2026-03","openWeights":false,"contextK":1953,"modalities":["text","image"],"reasoning":true,"priceOut":2.5,"priceTier":2,"difficulty":3},{"id":"nova-micro-v1","name":"Nova Micro 1.0","vendor":"Amazon","released":"2024-12","openWeights":false,"contextK":125,"modalities":["text"],"reasoning":false,"priceOut":0.14,"priceTier":0,"difficulty":3},{"id":"muse-spark-1-1","name":"Muse Spark 1.1","vendor":"Meta","released":"2026-07","openWeights":false,"contextK":1024,"modalities":["text","image","audio","video"],"reasoning":true,"priceOut":4.25,"priceTier":2,"difficulty":2},{"id":"deepseek-v4-flash-vision-exp","name":"DeepSeek V4 Flash Vision Exp","vendor":"DeepSeek","released":"2026-09","openWeights":true,"contextK":1049,"modalities":["text","image"],"reasoning":true,"priceOut":0.6,"priceTier":1,"difficulty":3},{"id":"o3-mini","name":"o3-mini","vendor":"OpenAI","released":"2025-01","openWeights":false,"contextK":200,"modalities":["text","image"],"reasoning":true,"priceOut":4.4,"priceTier":2,"difficulty":3},{"id":"mistral-small-2603","name":"Mistral Small 4","vendor":"Mistral","released":"2026-03","openWeights":false,"contextK":256,"modalities":["text","image"],"reasoning":true,"priceOut":0.6,"priceTier":1,"difficulty":3},{"id":"qwen3-vl-32b-instruct","name":"Qwen3 VL 32B Instruct","vendor":"Alibaba","released":"2025-10","openWeights":true,"contextK":128,"modalities":["text","image"],"reasoning":false,"priceOut":0.416,"priceTier":0,"difficulty":3},{"id":"glm-4-5-air","name":"GLM-4.5 Air","vendor":"Zhipu AI (Z.ai)","released":"2025-07","openWeights":true,"contextK":131,"modalities":["text"],"reasoning":true,"priceOut":1.1,"priceTier":1,"difficulty":3},{"id":"qwen3-coder-next","name":"Qwen3 Coder Next","vendor":"Alibaba","released":"2026-02","openWeights":true,"contextK":262,"modalities":["text"],"reasoning":true,"priceOut":null,"priceTier":null,"difficulty":3},{"id":"muse-glimmer-30b","name":"Muse Glimmer 30B","vendor":"Meta","released":"2026-08","openWeights":true,"contextK":128,"modalities":["text","image"],"reasoning":true,"priceOut":1.5,"priceTier":1,"difficulty":3},{"id":"nemotron-3-nano-30b-a3b","name":"Nemotron 3 Nano 30B A3B","vendor":"NVIDIA","released":"2025-12","openWeights":true,"contextK":256,"modalities":["text"],"reasoning":true,"priceOut":0.2,"priceTier":0,"difficulty":3},{"id":"gemma-3-12b-it","name":"Gemma 3 12B","vendor":"Google","released":"2025-03","openWeights":true,"contextK":128,"modalities":["text","image"],"reasoning":false,"priceOut":0.15,"priceTier":0,"difficulty":3},{"id":"mercury-2-5","name":"Mercury 2.5","vendor":"Inception","released":"2026-09","openWeights":false,"contextK":254,"modalities":["text"],"reasoning":true,"priceOut":0.15,"priceTier":0,"difficulty":3},{"id":"qwen3-vl-8b-instruct","name":"Qwen3 VL 8B Instruct","vendor":"Alibaba","released":"2025-10","openWeights":true,"contextK":256,"modalities":["text","image"],"reasoning":false,"priceOut":0.455,"priceTier":0,"difficulty":3},{"id":"mistral-small-24b-instruct-2501","name":"Mistral Small 3","vendor":"Mistral","released":"2025-01","openWeights":false,"contextK":32,"modalities":["text"],"reasoning":false,"priceOut":0.08,"priceTier":0,"difficulty":3},{"id":"aion-3-0","name":"Aion-3.0","vendor":"Aion Labs","released":"2026-07","openWeights":false,"contextK":128,"modalities":["text"],"reasoning":true,"priceOut":6,"priceTier":2,"difficulty":3},{"id":"seed-2-0-mini","name":"Seed-2.0-Mini","vendor":"ByteDance","released":"2026-02","openWeights":true,"contextK":256,"modalities":["text","image","video"],"reasoning":true,"priceOut":0.4,"priceTier":0,"difficulty":3},{"id":"mistral-large-2512","name":"Mistral Large 3 2512","vendor":"Mistral","released":"2025-12","openWeights":false,"contextK":256,"modalities":["text","image"],"reasoning":false,"priceOut":1.5,"priceTier":1,"difficulty":3},{"id":"qwen3-vl-30b-a3b-instruct","name":"Qwen3 VL 30B A3B Instruct","vendor":"Alibaba","released":"2025-10","openWeights":true,"contextK":256,"modalities":["text","image"],"reasoning":false,"priceOut":0.6,"priceTier":1,"difficulty":3},{"id":"deepseek-r1-0528","name":"R1 0528","vendor":"DeepSeek","released":"2025-05","openWeights":true,"contextK":160,"modalities":["text"],"reasoning":true,"priceOut":2.15,"priceTier":2,"difficulty":3},{"id":"longcat-2-0","name":"LongCat 2.0","vendor":"Meituan","released":"2026-07","openWeights":false,"contextK":1024,"modalities":["text"],"reasoning":true,"priceOut":1.2,"priceTier":1,"difficulty":2},{"id":"ministral-8b-2512","name":"Ministral 3 8B 2512","vendor":"Mistral","released":"2025-12","openWeights":true,"contextK":256,"modalities":["text","image"],"reasoning":false,"priceOut":0.15,"priceTier":0,"difficulty":3},{"id":"qwen-2-5-7b-instruct","name":"Qwen2.5 7B Instruct","vendor":"Alibaba","released":"2024-10","openWeights":true,"contextK":32,"modalities":["text"],"reasoning":false,"priceOut":0.2,"priceTier":0,"difficulty":3},{"id":"l3-lunaris-8b","name":"Llama 3 8B Lunaris","vendor":"Sao10K","released":"2024-08","openWeights":false,"contextK":8,"modalities":["text"],"reasoning":false,"priceOut":0.05,"priceTier":0,"difficulty":3},{"id":"granite-4-0-h-micro","name":"Granite 4.0 Micro","vendor":"IBM","released":"2025-10","openWeights":true,"contextK":128,"modalities":["text"],"reasoning":false,"priceOut":0.112,"priceTier":0,"difficulty":3},{"id":"nova-lite-v1","name":"Nova Lite 1.0","vendor":"Amazon","released":"2024-12","openWeights":false,"contextK":293,"modalities":["text","image"],"reasoning":false,"priceOut":0.24,"priceTier":0,"difficulty":3},{"id":"llama-3-1-70b-instruct","name":"Llama 3.1 70B Instruct","vendor":"Meta","released":"2024-07","openWeights":true,"contextK":128,"modalities":["text"],"reasoning":false,"priceOut":0.4,"priceTier":0,"difficulty":3},{"id":"mercury-2","name":"Mercury 2","vendor":"Inception","released":"2026-03","openWeights":false,"contextK":125,"modalities":["text"],"reasoning":true,"priceOut":0.75,"priceTier":1,"difficulty":3},{"id":"seed-1-6-flash","name":"Seed 1.6 Flash","vendor":"ByteDance","released":"2025-12","openWeights":true,"contextK":256,"modalities":["text","image","video"],"reasoning":true,"priceOut":0.3,"priceTier":0,"difficulty":3},{"id":"ministral-14b-2512","name":"Ministral 3 14B 2512","vendor":"Mistral","released":"2025-12","openWeights":true,"contextK":256,"modalities":["text","image"],"reasoning":false,"priceOut":0.2,"priceTier":0,"difficulty":3},{"id":"ministral-3b-2512","name":"Ministral 3 3B 2512","vendor":"Mistral","released":"2025-12","openWeights":true,"contextK":128,"modalities":["text","image"],"reasoning":false,"priceOut":0.1,"priceTier":0,"difficulty":3},{"id":"qwen3-coder-flash","name":"Qwen3 Coder Flash","vendor":"Alibaba","released":"2025-09","openWeights":true,"contextK":977,"modalities":["text"],"reasoning":false,"priceOut":0.975,"priceTier":1,"difficulty":3},{"id":"mistral-medium-3-1","name":"Mistral Medium 3.1","vendor":"Mistral","released":"2025-08","openWeights":false,"contextK":128,"modalities":["text","image"],"reasoning":false,"priceOut":2,"priceTier":2,"difficulty":3},{"id":"qwen2-5-vl-72b-instruct","name":"Qwen2.5 VL 72B Instruct","vendor":"Alibaba","released":"2025-02","openWeights":true,"contextK":125,"modalities":["text","image"],"reasoning":false,"priceOut":1,"priceTier":1,"difficulty":3},{"id":"qwen-2-5-72b-instruct","name":"Qwen2.5 72B Instruct","vendor":"Alibaba","released":"2024-09","openWeights":true,"contextK":32,"modalities":["text"],"reasoning":false,"priceOut":0.4,"priceTier":0,"difficulty":3},{"id":"grok-4-20-multi-agent","name":"Grok 4.20 Multi-Agent","vendor":"xAI","released":"2026-03","openWeights":false,"contextK":1953,"modalities":["text","image"],"reasoning":true,"priceOut":2.5,"priceTier":2,"difficulty":3}]}
+{
+  "dayKey": "2026-09-28",
+  "dayNumber": 15,
+  "attributes": [
+    "vendor",
+    "released",
+    "openWeights",
+    "contextK",
+    "modalities",
+    "reasoning",
+    "priceTier"
+  ],
+  "models": [
+    {
+      "id": "glm-5",
+      "name": "GLM-5",
+      "vendor": "Zhipu AI (Z.ai)",
+      "released": "2026-02",
+      "openWeights": true,
+      "contextK": 205,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 3.2,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "glm-5-1",
+      "name": "GLM-5.1",
+      "vendor": "Zhipu AI (Z.ai)",
+      "released": "2026-04",
+      "openWeights": true,
+      "contextK": 205,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 4.4,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "glm-5-2",
+      "name": "GLM-5.2",
+      "vendor": "Zhipu AI (Z.ai)",
+      "released": "2026-06",
+      "openWeights": true,
+      "contextK": 1049,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 4.4,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "deepseek-v4-flash",
+      "name": "DeepSeek V4 Flash",
+      "vendor": "DeepSeek",
+      "released": "2026-04",
+      "openWeights": true,
+      "contextK": 1311,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 0.6,
+      "priceTier": 1,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "deepseek-v4-pro",
+      "name": "DeepSeek V4 Pro",
+      "vendor": "DeepSeek",
+      "released": "2026-04",
+      "openWeights": true,
+      "contextK": 1050,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 0.87,
+      "priceTier": 1,
+      "difficulty": 1,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "kimi-k2-5",
+      "name": "Kimi K2.5",
+      "vendor": "Moonshot AI",
+      "released": "2026-01",
+      "openWeights": true,
+      "contextK": 262,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 3,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "kimi-k2-6",
+      "name": "Kimi K2.6",
+      "vendor": "Moonshot AI",
+      "released": "2026-04",
+      "openWeights": true,
+      "contextK": 262,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 4,
+      "priceTier": 2,
+      "difficulty": 1,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "kimi-k2-7-code",
+      "name": "Kimi K2.7 Code",
+      "vendor": "Moonshot AI",
+      "released": "2026-06",
+      "openWeights": true,
+      "contextK": 271,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 4,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "kimi-k3",
+      "name": "Kimi K3",
+      "vendor": "Moonshot AI",
+      "released": "2026-07",
+      "openWeights": true,
+      "contextK": 1049,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 15,
+      "priceTier": 3,
+      "difficulty": 1,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "gpt-oss-120b",
+      "name": "GPT OSS 120B",
+      "vendor": "OpenAI",
+      "released": "2025-08",
+      "openWeights": true,
+      "contextK": 131,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 0.6,
+      "priceTier": 1,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "gpt-oss-20b",
+      "name": "GPT OSS 20B",
+      "vendor": "OpenAI",
+      "released": "2025-08",
+      "openWeights": true,
+      "contextK": 131,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 0.3,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "glm-5-3-flash",
+      "name": "GLM-5.3-Flash",
+      "vendor": "Zhipu AI (Z.ai)",
+      "released": "2026-08",
+      "openWeights": true,
+      "contextK": 1000,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 0.25,
+      "priceTier": 0,
+      "difficulty": 1,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "glm-5-3",
+      "name": "GLM-5.3",
+      "vendor": "Zhipu AI (Z.ai)",
+      "released": "2026-08",
+      "openWeights": true,
+      "contextK": 1000,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 4.4,
+      "priceTier": 2,
+      "difficulty": 1,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "claude-sonnet-4-6",
+      "name": "Claude Sonnet 4.6",
+      "vendor": "Anthropic",
+      "released": "2026-02",
+      "openWeights": false,
+      "contextK": 1000,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 15,
+      "priceTier": 3,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "gpt-5-5",
+      "name": "GPT-5.5",
+      "vendor": "OpenAI",
+      "released": "2026-04",
+      "openWeights": false,
+      "contextK": 1050,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 30,
+      "priceTier": 4,
+      "difficulty": 1,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "minimax-m2",
+      "name": "MiniMax-M2",
+      "vendor": "MiniMax",
+      "released": "2025-10",
+      "openWeights": true,
+      "contextK": 205,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 1.2,
+      "priceTier": 1,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "minimax-m2-1",
+      "name": "MiniMax-M2.1",
+      "vendor": "MiniMax",
+      "released": "2025-12",
+      "openWeights": true,
+      "contextK": 205,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 1.2,
+      "priceTier": 1,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "minimax-m2-5",
+      "name": "MiniMax-M2.5",
+      "vendor": "MiniMax",
+      "released": "2026-02",
+      "openWeights": true,
+      "contextK": 205,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 1.2,
+      "priceTier": 1,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "minimax-m2-7",
+      "name": "MiniMax-M2.7",
+      "vendor": "MiniMax",
+      "released": "2026-03",
+      "openWeights": true,
+      "contextK": 205,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 1.2,
+      "priceTier": 1,
+      "difficulty": 1,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "minimax-m2-7-highspeed",
+      "name": "MiniMax-M2.7 Highspeed",
+      "vendor": "MiniMax",
+      "released": "2026-03",
+      "openWeights": true,
+      "contextK": 205,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 2.4,
+      "priceTier": 2,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "minimax-m3",
+      "name": "MiniMax-M3",
+      "vendor": "MiniMax",
+      "released": "2026-06",
+      "openWeights": true,
+      "contextK": 1000,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 1.2,
+      "priceTier": 1,
+      "difficulty": 1,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "claude-opus-4-8",
+      "name": "Claude Opus 4.8",
+      "vendor": "Anthropic",
+      "released": "2026-05",
+      "openWeights": false,
+      "contextK": 1049,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 25,
+      "priceTier": 4,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "gpt-5-4",
+      "name": "GPT-5.4",
+      "vendor": "OpenAI",
+      "released": "2026-03",
+      "openWeights": false,
+      "contextK": 1050,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 15,
+      "priceTier": 3,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "claude-haiku-4-5",
+      "name": "Claude Haiku 4.5",
+      "vendor": "Anthropic",
+      "released": "2025-10",
+      "openWeights": false,
+      "contextK": 200,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 5,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "claude-opus-4-7",
+      "name": "Claude Opus 4.7",
+      "vendor": "Anthropic",
+      "released": "2026-04",
+      "openWeights": false,
+      "contextK": 1049,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 25,
+      "priceTier": 4,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "claude-opus-4-1",
+      "name": "Claude Opus 4.1",
+      "vendor": "Anthropic",
+      "released": "2025-08",
+      "openWeights": false,
+      "contextK": 200,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 75,
+      "priceTier": 5,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "claude-opus-4-5",
+      "name": "Claude Opus 4.5",
+      "vendor": "Anthropic",
+      "released": "2025-11",
+      "openWeights": false,
+      "contextK": 200,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 25,
+      "priceTier": 4,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "claude-opus-4-6",
+      "name": "Claude Opus 4.6",
+      "vendor": "Anthropic",
+      "released": "2026-02",
+      "openWeights": false,
+      "contextK": 1000,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 25,
+      "priceTier": 4,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "gpt-5-6-luna",
+      "name": "GPT-5.6 Luna",
+      "vendor": "OpenAI",
+      "released": "2026-07",
+      "openWeights": false,
+      "contextK": 1050,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 1.2,
+      "priceTier": 1,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "gpt-5-6-sol",
+      "name": "GPT-5.6 Sol",
+      "vendor": "OpenAI",
+      "released": "2026-07",
+      "openWeights": false,
+      "contextK": 1050,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 20,
+      "priceTier": 3,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "claude-fable-5",
+      "name": "Claude Fable 5",
+      "vendor": "Anthropic",
+      "released": "2026-06",
+      "openWeights": false,
+      "contextK": 1000,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 50,
+      "priceTier": 5,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "gpt-5-mini",
+      "name": "GPT-5 Mini",
+      "vendor": "OpenAI",
+      "released": "2025-08",
+      "openWeights": false,
+      "contextK": 400,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 2,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "gpt-5-4-mini",
+      "name": "GPT-5.4 Mini",
+      "vendor": "OpenAI",
+      "released": "2026-03",
+      "openWeights": false,
+      "contextK": 400,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 4.5,
+      "priceTier": 2,
+      "difficulty": 1,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "gpt-5-6-terra",
+      "name": "GPT-5.6 Terra",
+      "vendor": "OpenAI",
+      "released": "2026-07",
+      "openWeights": false,
+      "contextK": 1050,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 12,
+      "priceTier": 3,
+      "difficulty": 2,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "glm-4-5",
+      "name": "GLM-4.5",
+      "vendor": "Zhipu AI (Z.ai)",
+      "released": "2025-07",
+      "openWeights": true,
+      "contextK": 131,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 2.2,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "glm-4-6",
+      "name": "GLM-4.6",
+      "vendor": "Zhipu AI (Z.ai)",
+      "released": "2025-09",
+      "openWeights": true,
+      "contextK": 205,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 2.2,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "glm-4-7",
+      "name": "GLM-4.7",
+      "vendor": "Zhipu AI (Z.ai)",
+      "released": "2025-12",
+      "openWeights": true,
+      "contextK": 205,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 2.2,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "claude-sonnet-5",
+      "name": "Claude Sonnet 5",
+      "vendor": "Anthropic",
+      "released": "2026-06",
+      "openWeights": false,
+      "contextK": 1000,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 10,
+      "priceTier": 3,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "qwen3-max",
+      "name": "Qwen3 Max",
+      "vendor": "Alibaba",
+      "released": "2025-09",
+      "openWeights": false,
+      "contextK": 262,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 6,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "qwen3-7-max",
+      "name": "Qwen3.7 Max",
+      "vendor": "Alibaba",
+      "released": "2026-05",
+      "openWeights": false,
+      "contextK": 1064,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 7.5,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "qwen3-8-max",
+      "name": "Qwen3.8 Max",
+      "vendor": "Alibaba",
+      "released": "2026-08",
+      "openWeights": true,
+      "contextK": 1000,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 6,
+      "priceTier": 2,
+      "difficulty": 1,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "claude-sonnet-4-5",
+      "name": "Claude Sonnet 4.5",
+      "vendor": "Anthropic",
+      "released": "2025-09",
+      "openWeights": false,
+      "contextK": 1000,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 15,
+      "priceTier": 3,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "gemini-2-5-flash",
+      "name": "Gemini 2.5 Flash",
+      "vendor": "Google",
+      "released": "2025-06",
+      "openWeights": false,
+      "contextK": 1049,
+      "modalities": [
+        "text",
+        "image",
+        "audio",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 2.5,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "gemini-3-5-flash",
+      "name": "Gemini 3.5 Flash",
+      "vendor": "Google",
+      "released": "2026-05",
+      "openWeights": false,
+      "contextK": 1049,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 9,
+      "priceTier": 3,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "llama-3-3-70b",
+      "name": "Llama 3.3 70B",
+      "vendor": "Meta",
+      "released": "2024-12",
+      "openWeights": true,
+      "contextK": 131,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": 1.04,
+      "priceTier": 1,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "claude-opus-5",
+      "name": "Claude Opus 5",
+      "vendor": "Anthropic",
+      "released": "2026-07",
+      "openWeights": false,
+      "contextK": 1000,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 25,
+      "priceTier": 4,
+      "difficulty": 1,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "deepseek-v3-2",
+      "name": "DeepSeek V3.2",
+      "vendor": "DeepSeek",
+      "released": "2025-12",
+      "openWeights": true,
+      "contextK": 164,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 0.42,
+      "priceTier": 0,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "gpt-5-nano",
+      "name": "GPT-5 Nano",
+      "vendor": "OpenAI",
+      "released": "2025-08",
+      "openWeights": false,
+      "contextK": 400,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 0.4,
+      "priceTier": 0,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "gpt-5-4-nano",
+      "name": "GPT-5.4 Nano",
+      "vendor": "OpenAI",
+      "released": "2026-03",
+      "openWeights": false,
+      "contextK": 1048,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 1.25,
+      "priceTier": 1,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "qwen3-5-397b-a17b",
+      "name": "Qwen3.5 397B A17B",
+      "vendor": "Alibaba",
+      "released": "2026-02",
+      "openWeights": true,
+      "contextK": 262,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 3.6,
+      "priceTier": 2,
+      "difficulty": 3,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "qwen3-5-plus",
+      "name": "Qwen3.5 Plus",
+      "vendor": "Alibaba",
+      "released": "2026-02",
+      "openWeights": false,
+      "contextK": 1000,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 2.4,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "qwen3-6-plus",
+      "name": "Qwen3.6 Plus",
+      "vendor": "Alibaba",
+      "released": "2026-04",
+      "openWeights": true,
+      "contextK": 1000,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 3,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "qwen3-7-plus",
+      "name": "Qwen3.7 Plus",
+      "vendor": "Alibaba",
+      "released": "2026-06",
+      "openWeights": false,
+      "contextK": 1064,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 3,
+      "priceTier": 2,
+      "difficulty": 1,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "qwen3-5-27b",
+      "name": "Qwen3.5 27B",
+      "vendor": "Alibaba",
+      "released": "2026-02",
+      "openWeights": true,
+      "contextK": 262,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 2.4,
+      "priceTier": 2,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "qwen3-6-27b",
+      "name": "Qwen3.6 27B",
+      "vendor": "Alibaba",
+      "released": "2026-04",
+      "openWeights": true,
+      "contextK": 262,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 3.6,
+      "priceTier": 2,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "qwen3-8-27b",
+      "name": "Qwen3.8 27B",
+      "vendor": "Alibaba",
+      "released": "2026-08",
+      "openWeights": true,
+      "contextK": 1131,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 3,
+      "priceTier": 2,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "gemini-2-5-pro",
+      "name": "Gemini 2.5 Pro",
+      "vendor": "Google",
+      "released": "2025-06",
+      "openWeights": false,
+      "contextK": 1049,
+      "modalities": [
+        "text",
+        "image",
+        "audio",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 10,
+      "priceTier": 3,
+      "difficulty": 1,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "gemini-3-1-pro-preview",
+      "name": "Gemini 3.1 Pro Preview",
+      "vendor": "Google",
+      "released": "2026-02",
+      "openWeights": false,
+      "contextK": 1049,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 12,
+      "priceTier": 3,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "gpt-5-1",
+      "name": "GPT-5.1",
+      "vendor": "OpenAI",
+      "released": "2025-11",
+      "openWeights": false,
+      "contextK": 400,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 10,
+      "priceTier": 3,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "gpt-5-2",
+      "name": "GPT-5.2",
+      "vendor": "OpenAI",
+      "released": "2025-12",
+      "openWeights": false,
+      "contextK": 400,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 14,
+      "priceTier": 3,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "gpt-5",
+      "name": "GPT-5",
+      "vendor": "OpenAI",
+      "released": "2025-08",
+      "openWeights": false,
+      "contextK": 400,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 10,
+      "priceTier": 3,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "gpt-5-1-codex",
+      "name": "GPT-5.1 Codex",
+      "vendor": "OpenAI",
+      "released": "2025-11",
+      "openWeights": false,
+      "contextK": 400,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 10,
+      "priceTier": 3,
+      "difficulty": 2,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "gpt-5-1-codex-mini",
+      "name": "GPT-5.1 Codex Mini",
+      "vendor": "OpenAI",
+      "released": "2025-11",
+      "openWeights": false,
+      "contextK": 400,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 2,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "gpt-5-2-codex",
+      "name": "GPT-5.2 Codex",
+      "vendor": "OpenAI",
+      "released": "2025-12",
+      "openWeights": false,
+      "contextK": 400,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 14,
+      "priceTier": 3,
+      "difficulty": 2,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "gpt-5-3-codex",
+      "name": "GPT-5.3 Codex",
+      "vendor": "OpenAI",
+      "released": "2026-02",
+      "openWeights": false,
+      "contextK": 400,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 14,
+      "priceTier": 3,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "grok-4-3",
+      "name": "Grok 4.3",
+      "vendor": "xAI",
+      "released": "2026-04",
+      "openWeights": false,
+      "contextK": 1000,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 2.5,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "grok-4-5",
+      "name": "Grok 4.5",
+      "vendor": "xAI",
+      "released": "2026-07",
+      "openWeights": false,
+      "contextK": 500,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 6,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "grok-4-6",
+      "name": "Grok 4.6",
+      "vendor": "xAI",
+      "released": "2026-08",
+      "openWeights": false,
+      "contextK": 500,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 6,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "gemini-2-5-flash-lite",
+      "name": "Gemini 2.5 Flash-Lite",
+      "vendor": "Google",
+      "released": "2025-06",
+      "openWeights": false,
+      "contextK": 1049,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 0.4,
+      "priceTier": 0,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "gemini-3-1-flash-lite",
+      "name": "Gemini 3.1 Flash Lite",
+      "vendor": "Google",
+      "released": "2026-03",
+      "openWeights": false,
+      "contextK": 1050,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 1.5,
+      "priceTier": 1,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "gemini-3-5-flash-lite",
+      "name": "Gemini 3.5 Flash Lite",
+      "vendor": "Google",
+      "released": "2026-07",
+      "openWeights": false,
+      "contextK": 1049,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 2.5,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "gpt-4-1",
+      "name": "GPT-4.1",
+      "vendor": "OpenAI",
+      "released": "2025-04",
+      "openWeights": false,
+      "contextK": 1048,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": false,
+      "priceOut": 8,
+      "priceTier": 3,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "qwen3-5-35b-a3b",
+      "name": "Qwen3.5 35B A3B",
+      "vendor": "Alibaba",
+      "released": "2026-02",
+      "openWeights": true,
+      "contextK": 262,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 2,
+      "priceTier": 2,
+      "difficulty": 3,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "qwen3-6-35b-a3b",
+      "name": "Qwen3.6 35B A3B",
+      "vendor": "Alibaba",
+      "released": "2026-04",
+      "openWeights": true,
+      "contextK": 262,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 1.485,
+      "priceTier": 1,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "mimo-v2-5-pro",
+      "name": "MiMo-V2.5-Pro",
+      "vendor": "Xiaomi",
+      "released": "2026-04",
+      "openWeights": true,
+      "contextK": 1050,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 0.87,
+      "priceTier": 1,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "deepseek-r1",
+      "name": "DeepSeek R1",
+      "vendor": "DeepSeek",
+      "released": "2025-01",
+      "openWeights": true,
+      "contextK": 164,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 2.19,
+      "priceTier": 2,
+      "difficulty": 1,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "mimo-v2-5",
+      "name": "MiMo-V2.5",
+      "vendor": "Xiaomi",
+      "released": "2026-04",
+      "openWeights": true,
+      "contextK": 1050,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 0.28,
+      "priceTier": 0,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "claude-fable-5-1",
+      "name": "Claude Fable 5.1",
+      "vendor": "Anthropic",
+      "released": "2026-09",
+      "openWeights": false,
+      "contextK": 1000,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 50,
+      "priceTier": 5,
+      "difficulty": 1,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "gemini-3-6-flash",
+      "name": "Gemini 3.6 Flash",
+      "vendor": "Google",
+      "released": "2026-07",
+      "openWeights": false,
+      "contextK": 1049,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 3.75,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "gemini-3-7-flash",
+      "name": "Gemini 3.7 Flash",
+      "vendor": "Google",
+      "released": "2026-08",
+      "openWeights": false,
+      "contextK": 1049,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 3.75,
+      "priceTier": 2,
+      "difficulty": 1,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "gemini-3-flash-preview",
+      "name": "Gemini 3 Flash Preview",
+      "vendor": "Google",
+      "released": "2025-12",
+      "openWeights": false,
+      "contextK": 1049,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 3,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "gpt-4o",
+      "name": "GPT-4o",
+      "vendor": "OpenAI",
+      "released": "2024-05",
+      "openWeights": false,
+      "contextK": 128,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": false,
+      "priceOut": 10,
+      "priceTier": 3,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "gpt-4o-mini",
+      "name": "GPT-4o mini",
+      "vendor": "OpenAI",
+      "released": "2024-07",
+      "openWeights": false,
+      "contextK": 128,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": false,
+      "priceOut": 0.6,
+      "priceTier": 1,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "qwen3-6-flash",
+      "name": "Qwen3.6 Flash",
+      "vendor": "Alibaba",
+      "released": "2026-04",
+      "openWeights": false,
+      "contextK": 1000,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 1.125,
+      "priceTier": 1,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "qwen3-8-flash",
+      "name": "Qwen3.8 Flash",
+      "vendor": "Alibaba",
+      "released": "2026-08",
+      "openWeights": false,
+      "contextK": 1049,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 0.47,
+      "priceTier": 0,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "inkling",
+      "name": "Inkling",
+      "vendor": "Thinking Machines",
+      "released": "2026-07",
+      "openWeights": true,
+      "contextK": 1049,
+      "modalities": [
+        "text",
+        "image",
+        "audio"
+      ],
+      "reasoning": true,
+      "priceOut": 4.68,
+      "priceTier": 2,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "kimi-k2-thinking",
+      "name": "Kimi K2 Thinking",
+      "vendor": "Moonshot AI",
+      "released": "2025-11",
+      "openWeights": true,
+      "contextK": 262,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 2.5,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "deepseek-v3-1",
+      "name": "DeepSeek V3.1",
+      "vendor": "DeepSeek",
+      "released": "2025-08",
+      "openWeights": true,
+      "contextK": 164,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 1.68,
+      "priceTier": 1,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "gpt-6-astra",
+      "name": "GPT-6 Astra",
+      "vendor": "OpenAI",
+      "released": "2026-09",
+      "openWeights": false,
+      "contextK": 1050,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 50,
+      "priceTier": 5,
+      "difficulty": 1,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "gemini-3-8-flash",
+      "name": "Gemini 3.8 Flash",
+      "vendor": "Google",
+      "released": "2026-09",
+      "openWeights": false,
+      "contextK": 1049,
+      "modalities": [
+        "text",
+        "image",
+        "audio",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 3.75,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "gpt-5-pro",
+      "name": "GPT-5 Pro",
+      "vendor": "OpenAI",
+      "released": "2025-10",
+      "openWeights": false,
+      "contextK": 400,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 120,
+      "priceTier": 5,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "gpt-5-4-pro",
+      "name": "GPT-5.4 Pro",
+      "vendor": "OpenAI",
+      "released": "2026-03",
+      "openWeights": false,
+      "contextK": 1050,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 180,
+      "priceTier": 5,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "gpt-5-5-pro",
+      "name": "GPT-5.5 Pro",
+      "vendor": "OpenAI",
+      "released": "2026-04",
+      "openWeights": false,
+      "contextK": 1050,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 180,
+      "priceTier": 5,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "grok-build-0-1",
+      "name": "Grok Build 0.1",
+      "vendor": "xAI",
+      "released": "2026-04",
+      "openWeights": false,
+      "contextK": 256,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 2,
+      "priceTier": 2,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "o4-mini",
+      "name": "o4-mini",
+      "vendor": "OpenAI",
+      "released": "2025-04",
+      "openWeights": false,
+      "contextK": 200,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 4.4,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "deepseek-v3",
+      "name": "DeepSeek V3",
+      "vendor": "DeepSeek",
+      "released": "2024-12",
+      "openWeights": true,
+      "contextK": 164,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": 1.1,
+      "priceTier": 1,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "o3",
+      "name": "o3",
+      "vendor": "OpenAI",
+      "released": "2025-04",
+      "openWeights": false,
+      "contextK": 200,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 8,
+      "priceTier": 3,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "qwen3-5-122b-a10b",
+      "name": "Qwen3.5 122B A10B",
+      "vendor": "Alibaba",
+      "released": "2026-02",
+      "openWeights": true,
+      "contextK": 262,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 3.2,
+      "priceTier": 2,
+      "difficulty": 3,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "step-3-7-flash",
+      "name": "Step 3.7 Flash",
+      "vendor": "StepFun",
+      "released": "2026-05",
+      "openWeights": true,
+      "contextK": 262,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 1.11,
+      "priceTier": 1,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "glm-5v-turbo",
+      "name": "GLM-5V Turbo",
+      "vendor": "Zhipu AI (Z.ai)",
+      "released": "2026-04",
+      "openWeights": false,
+      "contextK": 203,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 4,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "hy3",
+      "name": "Hy3",
+      "vendor": "Tencent",
+      "released": "2026-07",
+      "openWeights": true,
+      "contextK": 262,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 0.528,
+      "priceTier": 1,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "qwen3-coder-plus",
+      "name": "Qwen3 Coder Plus",
+      "vendor": "Alibaba",
+      "released": "2025-07",
+      "openWeights": true,
+      "contextK": 1049,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": 5,
+      "priceTier": 2,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "qwen3-vl-235b-a22b",
+      "name": "Qwen3 VL 235B A22B",
+      "vendor": "Alibaba",
+      "released": "2025-09",
+      "openWeights": true,
+      "contextK": 262,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": false,
+      "priceOut": 2.8,
+      "priceTier": 2,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "gpt-3",
+      "name": "GPT-3 175B",
+      "vendor": "OpenAI",
+      "released": "2020-06",
+      "openWeights": false,
+      "contextK": 2,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": null,
+      "priceTier": null,
+      "difficulty": 4,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "gpt-4",
+      "name": "GPT-4",
+      "vendor": "OpenAI",
+      "released": "2023-03",
+      "openWeights": false,
+      "contextK": 8,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": 60,
+      "priceTier": 5,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "gpt-4-turbo",
+      "name": "GPT-4 Turbo",
+      "vendor": "OpenAI",
+      "released": "2023-11",
+      "openWeights": false,
+      "contextK": 128,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": false,
+      "priceOut": 30,
+      "priceTier": 4,
+      "difficulty": 4,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "gpt-35-turbo",
+      "name": "GPT-3.5 Turbo",
+      "vendor": "OpenAI",
+      "released": "2022-11",
+      "openWeights": false,
+      "contextK": 4,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": 1.5,
+      "priceTier": 1,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "o1",
+      "name": "o1",
+      "vendor": "OpenAI",
+      "released": "2024-12",
+      "openWeights": false,
+      "contextK": 200,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 60,
+      "priceTier": 5,
+      "difficulty": 4,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "claude-1",
+      "name": "Claude 1",
+      "vendor": "Anthropic",
+      "released": "2023-03",
+      "openWeights": false,
+      "contextK": null,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": null,
+      "priceTier": null,
+      "difficulty": 4,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "claude-2",
+      "name": "Claude 2",
+      "vendor": "Anthropic",
+      "released": "2023-07",
+      "openWeights": false,
+      "contextK": 100,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": 24,
+      "priceTier": 3,
+      "difficulty": 4,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "claude-3-opus",
+      "name": "Claude 3 Opus",
+      "vendor": "Anthropic",
+      "released": "2024-03",
+      "openWeights": false,
+      "contextK": 200,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": false,
+      "priceOut": 75,
+      "priceTier": 5,
+      "difficulty": 4,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "claude-3-sonnet",
+      "name": "Claude 3 Sonnet",
+      "vendor": "Anthropic",
+      "released": "2024-03",
+      "openWeights": false,
+      "contextK": 200,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": false,
+      "priceOut": 15,
+      "priceTier": 3,
+      "difficulty": 4,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "claude-35-sonnet",
+      "name": "Claude 3.5 Sonnet",
+      "vendor": "Anthropic",
+      "released": "2024-06",
+      "openWeights": false,
+      "contextK": 200,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": false,
+      "priceOut": 15,
+      "priceTier": 3,
+      "difficulty": 4,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "claude-3-haiku",
+      "name": "Claude 3 Haiku",
+      "vendor": "Anthropic",
+      "released": "2024-03",
+      "openWeights": false,
+      "contextK": 200,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": false,
+      "priceOut": 1.25,
+      "priceTier": 1,
+      "difficulty": 4,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "claude-35-haiku",
+      "name": "Claude 3.5 Haiku",
+      "vendor": "Anthropic",
+      "released": "2024-11",
+      "openWeights": false,
+      "contextK": 200,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": 4,
+      "priceTier": 2,
+      "difficulty": 4,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "gemini-1-0-pro",
+      "name": "Gemini 1.0 Pro",
+      "vendor": "Google",
+      "released": "2023-12",
+      "openWeights": false,
+      "contextK": 32,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": false,
+      "priceOut": 0.5,
+      "priceTier": 1,
+      "difficulty": 4,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "gemini-15-pro",
+      "name": "Gemini 1.5 Pro",
+      "vendor": "Google",
+      "released": "2024-02",
+      "openWeights": false,
+      "contextK": 1000,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": false,
+      "priceOut": 5,
+      "priceTier": 2,
+      "difficulty": 4,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "gemini-15-flash",
+      "name": "Gemini 1.5 Flash",
+      "vendor": "Google",
+      "released": "2024-05",
+      "openWeights": false,
+      "contextK": 1000,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": false,
+      "priceOut": 0.3,
+      "priceTier": 0,
+      "difficulty": 4,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "gemma",
+      "name": "Gemma 7B",
+      "vendor": "Google",
+      "released": "2024-02",
+      "openWeights": true,
+      "contextK": 8,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": null,
+      "priceTier": null,
+      "difficulty": 4,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "llama-2",
+      "name": "Llama 2 70B",
+      "vendor": "Meta",
+      "released": "2023-07",
+      "openWeights": true,
+      "contextK": 4,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": 2.56,
+      "priceTier": 2,
+      "difficulty": 4,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "llama-3",
+      "name": "Llama 3 70B",
+      "vendor": "Meta",
+      "released": "2024-04",
+      "openWeights": true,
+      "contextK": 8,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": null,
+      "priceTier": null,
+      "difficulty": 4,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "code-llama",
+      "name": "Code Llama 34B",
+      "vendor": "Meta",
+      "released": "2023-08",
+      "openWeights": true,
+      "contextK": 16,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": null,
+      "priceTier": null,
+      "difficulty": 4,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "mistral-7b",
+      "name": "Mistral 7B",
+      "vendor": "Mistral",
+      "released": "2023-09",
+      "openWeights": true,
+      "contextK": 8,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": 0.2,
+      "priceTier": 0,
+      "difficulty": 4,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "mixtral-8x7b",
+      "name": "Mixtral 8x7B",
+      "vendor": "Mistral",
+      "released": "2023-12",
+      "openWeights": true,
+      "contextK": 32,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": null,
+      "priceTier": null,
+      "difficulty": 4,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "vicuna",
+      "name": "Vicuna 13B",
+      "vendor": "LMSYS",
+      "released": "2023-03",
+      "openWeights": true,
+      "contextK": 2,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": null,
+      "priceTier": null,
+      "difficulty": 4,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "alpaca",
+      "name": "Alpaca 7B",
+      "vendor": "Stanford",
+      "released": "2023-03",
+      "openWeights": true,
+      "contextK": 2,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": null,
+      "priceTier": null,
+      "difficulty": 4,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "phi-3",
+      "name": "Phi-3",
+      "vendor": "Microsoft",
+      "released": "2024-04",
+      "openWeights": true,
+      "contextK": 4,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": null,
+      "priceTier": null,
+      "difficulty": 4,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "qwen-15",
+      "name": "Qwen1.5 72B",
+      "vendor": "Alibaba",
+      "released": "2024-02",
+      "openWeights": true,
+      "contextK": 32,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": null,
+      "priceTier": null,
+      "difficulty": 4,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "qwen2",
+      "name": "Qwen2 72B",
+      "vendor": "Alibaba",
+      "released": "2024-06",
+      "openWeights": true,
+      "contextK": 128,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": null,
+      "priceTier": null,
+      "difficulty": 4,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "glm-4",
+      "name": "GLM-4",
+      "vendor": "Zhipu AI (Z.ai)",
+      "released": "2024-01",
+      "openWeights": false,
+      "contextK": 128,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": null,
+      "priceTier": null,
+      "difficulty": 4,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "ernie-bot",
+      "name": "ERNIE Bot",
+      "vendor": "Baidu",
+      "released": "2023-03",
+      "openWeights": false,
+      "contextK": null,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": null,
+      "priceTier": null,
+      "difficulty": 4,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "doubao",
+      "name": "Doubao Pro",
+      "vendor": "ByteDance",
+      "released": "2024-05",
+      "openWeights": false,
+      "contextK": 32,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": null,
+      "priceTier": null,
+      "difficulty": 4,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "yi",
+      "name": "Yi 34B",
+      "vendor": "01.AI",
+      "released": "2023-11",
+      "openWeights": true,
+      "contextK": 4,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": null,
+      "priceTier": null,
+      "difficulty": 4,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "doubao-seed-1-8",
+      "name": "Doubao Seed 1.8",
+      "vendor": "ByteDance",
+      "released": "2025-12",
+      "openWeights": true,
+      "contextK": null,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 2.16,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "doubao-seed-2-0-pro",
+      "name": "Doubao Seed 2.0 Pro",
+      "vendor": "ByteDance",
+      "released": "2026-02",
+      "openWeights": false,
+      "contextK": null,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 2.2,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "doubao-seed-2-1-pro",
+      "name": "Doubao Seed 2.1 Pro",
+      "vendor": "ByteDance",
+      "released": "2026-06",
+      "openWeights": false,
+      "contextK": null,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 4.2,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "hy4-preview",
+      "name": "Hy4 Preview",
+      "vendor": "Tencent",
+      "released": "2026-08",
+      "openWeights": true,
+      "contextK": 1024,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 2.501,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "muse-spark-1-3",
+      "name": "Muse Spark 1.3",
+      "vendor": "Meta",
+      "released": "2026-09",
+      "openWeights": false,
+      "contextK": 1024,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 4.25,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "nemotron-3-ultra-550b-a55b",
+      "name": "Nemotron 3 Ultra",
+      "vendor": "NVIDIA",
+      "released": "2026-06",
+      "openWeights": true,
+      "contextK": 256,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 3.125,
+      "priceTier": 2,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "laguna-s-2-1",
+      "name": "Laguna S 2.1",
+      "vendor": "Poolside",
+      "released": "2026-07",
+      "openWeights": false,
+      "contextK": 1024,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 0.18,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "gemma-4-31b-it",
+      "name": "Gemma 4 31B IT",
+      "vendor": "Google",
+      "released": "2026-04",
+      "openWeights": true,
+      "contextK": 262,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 0.97,
+      "priceTier": 1,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "nemotron-3-5-lightning",
+      "name": "Nemotron 3.5 Lightning",
+      "vendor": "NVIDIA",
+      "released": "2026-08",
+      "openWeights": true,
+      "contextK": 256,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 0.2,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "solar-pro4",
+      "name": "Solar Pro 4",
+      "vendor": "Upstage",
+      "released": "2026-08",
+      "openWeights": false,
+      "contextK": 512,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 0.36,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "ling-3-0-flash-fin",
+      "name": "Ling 3.0 Flash Fin",
+      "vendor": "inclusionAI",
+      "released": "2026-08",
+      "openWeights": false,
+      "contextK": 256,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 0.18,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "nemotron-3-super-120b-a12b",
+      "name": "Nemotron 3 Super",
+      "vendor": "NVIDIA",
+      "released": "2026-03",
+      "openWeights": true,
+      "contextK": 256,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 0.45,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "gpt-4-1-mini",
+      "name": "GPT-4.1 mini",
+      "vendor": "OpenAI",
+      "released": "2025-04",
+      "openWeights": false,
+      "contextK": 1048,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": false,
+      "priceOut": 1.6,
+      "priceTier": 1,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "deepseek-v4-1-flash",
+      "name": "DeepSeek V4.1 Flash",
+      "vendor": "DeepSeek",
+      "released": "2026-09",
+      "openWeights": true,
+      "contextK": 1050,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 0.6,
+      "priceTier": 1,
+      "difficulty": 1,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "qwen3-7-flash",
+      "name": "Qwen3.7 Flash",
+      "vendor": "Alibaba",
+      "released": "2026-07",
+      "openWeights": true,
+      "contextK": 977,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 0.13,
+      "priceTier": 0,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "glm-4-7-flash",
+      "name": "GLM-4.7 Flash",
+      "vendor": "Zhipu AI (Z.ai)",
+      "released": "2026-01",
+      "openWeights": true,
+      "contextK": 203,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 0.4,
+      "priceTier": 0,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "mistral-nemo",
+      "name": "Mistral Nemo",
+      "vendor": "Mistral",
+      "released": "2024-07",
+      "openWeights": true,
+      "contextK": 128,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": 0.03,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "muse-spark-1-2-contributor",
+      "name": "Muse Spark 1.2 Contributor",
+      "vendor": "Meta",
+      "released": "2026-08",
+      "openWeights": false,
+      "contextK": 1024,
+      "modalities": [
+        "text",
+        "image",
+        "audio",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 0.2,
+      "priceTier": 0,
+      "difficulty": 2,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "gpt-4-1-nano",
+      "name": "GPT-4.1 nano",
+      "vendor": "OpenAI",
+      "released": "2025-04",
+      "openWeights": false,
+      "contextK": 1048,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": false,
+      "priceOut": 0.4,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "qwen3-235b-a22b-instruct-2507",
+      "name": "Qwen3 235B A22B Instruct 2507",
+      "vendor": "Alibaba",
+      "released": "2025-07",
+      "openWeights": true,
+      "contextK": 262,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": 0.92,
+      "priceTier": 1,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "qwen3-32b",
+      "name": "Qwen3 32B",
+      "vendor": "Alibaba",
+      "released": "2025-04",
+      "openWeights": true,
+      "contextK": 131,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 2.8,
+      "priceTier": 2,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "ling-3-0-flash",
+      "name": "Ling 3.0 Flash",
+      "vendor": "inclusionAI",
+      "released": "2026-07",
+      "openWeights": false,
+      "contextK": 256,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 0.063,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "laguna-xs-2-1",
+      "name": "Laguna XS 2.1",
+      "vendor": "Poolside",
+      "released": "2026-07",
+      "openWeights": false,
+      "contextK": 256,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 0.12,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "qwen3-5-9b",
+      "name": "Qwen3.5 9B",
+      "vendor": "Alibaba",
+      "released": "2026-02",
+      "openWeights": true,
+      "contextK": 262,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 0.25,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "qwen3-coder-30b-a3b",
+      "name": "Qwen3 Coder 30B A3B",
+      "vendor": "Alibaba",
+      "released": "2025-07",
+      "openWeights": true,
+      "contextK": 262,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": 2.25,
+      "priceTier": 2,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "qwen3-next-80b-a3b-instruct",
+      "name": "Qwen3-Next 80B-A3B Instruct",
+      "vendor": "Alibaba",
+      "released": "2025-09",
+      "openWeights": true,
+      "contextK": 262,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": 2,
+      "priceTier": 2,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "ling-3-0-flash-vl",
+      "name": "Ling 3.0 Flash VL",
+      "vendor": "inclusionAI",
+      "released": "2026-09",
+      "openWeights": false,
+      "contextK": 128,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 0.18,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "llama-3-1-8b-instruct",
+      "name": "Llama 3.1 8B Instruct",
+      "vendor": "Meta",
+      "released": "2024-07",
+      "openWeights": true,
+      "contextK": 128,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": 0.08,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "muse-spark-1-2",
+      "name": "Muse Spark 1.2",
+      "vendor": "Meta",
+      "released": "2026-08",
+      "openWeights": false,
+      "contextK": 1024,
+      "modalities": [
+        "text",
+        "image",
+        "audio",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 4.25,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "gemma-3-27b-it",
+      "name": "Gemma 3 27B",
+      "vendor": "Google",
+      "released": "2025-03",
+      "openWeights": true,
+      "contextK": 128,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": false,
+      "priceOut": 0.45,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "glm-5-turbo",
+      "name": "GLM-5 Turbo",
+      "vendor": "Zhipu AI (Z.ai)",
+      "released": "2026-03",
+      "openWeights": true,
+      "contextK": 203,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 4,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "gemma-4-26b-a4b-it",
+      "name": "Gemma 4 26B A4B IT",
+      "vendor": "Google",
+      "released": "2026-04",
+      "openWeights": true,
+      "contextK": 262,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 0.34,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "qwen3-coder-480b-a35b",
+      "name": "Qwen3 Coder 480B A35B",
+      "vendor": "Alibaba",
+      "released": "2025-07",
+      "openWeights": true,
+      "contextK": 262,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": 7.5,
+      "priceTier": 2,
+      "difficulty": 3,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "qwen3-8-2-4t-a95b",
+      "name": "Qwen3.8 2.4T A95B",
+      "vendor": "Alibaba",
+      "released": "2026-08",
+      "openWeights": true,
+      "contextK": 1024,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 6,
+      "priceTier": 2,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "qwen3-30b-a3b-instruct-2507",
+      "name": "Qwen3 30B A3B Instruct 2507",
+      "vendor": "Alibaba",
+      "released": "2025-07",
+      "openWeights": true,
+      "contextK": 262,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": 0.193,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "grok-4-20",
+      "name": "Grok 4.20",
+      "vendor": "xAI",
+      "released": "2026-03",
+      "openWeights": false,
+      "contextK": 1000,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 2.5,
+      "priceTier": 2,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "nova-micro-v1",
+      "name": "Nova Micro 1.0",
+      "vendor": "Amazon",
+      "released": "2024-12",
+      "openWeights": false,
+      "contextK": 125,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": 0.14,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "muse-spark-1-1",
+      "name": "Muse Spark 1.1",
+      "vendor": "Meta",
+      "released": "2026-07",
+      "openWeights": false,
+      "contextK": 1024,
+      "modalities": [
+        "text",
+        "image",
+        "audio",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 4.25,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "deepseek-v4-flash-vision-exp",
+      "name": "DeepSeek V4 Flash Vision Exp",
+      "vendor": "DeepSeek",
+      "released": "2026-09",
+      "openWeights": true,
+      "contextK": 1049,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 0.6,
+      "priceTier": 1,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "o3-mini",
+      "name": "o3-mini",
+      "vendor": "OpenAI",
+      "released": "2025-01",
+      "openWeights": false,
+      "contextK": 200,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 4.4,
+      "priceTier": 2,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "mistral-small-2603",
+      "name": "Mistral Small 4",
+      "vendor": "Mistral",
+      "released": "2026-03",
+      "openWeights": true,
+      "contextK": 256,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 0.6,
+      "priceTier": 1,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "qwen3-vl-32b-instruct",
+      "name": "Qwen3 VL 32B Instruct",
+      "vendor": "Alibaba",
+      "released": "2025-10",
+      "openWeights": true,
+      "contextK": 262,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": false,
+      "priceOut": 0.416,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "glm-4-5-air",
+      "name": "GLM-4.5 Air",
+      "vendor": "Zhipu AI (Z.ai)",
+      "released": "2025-07",
+      "openWeights": true,
+      "contextK": 131,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 1.1,
+      "priceTier": 1,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "qwen3-coder-next",
+      "name": "Qwen3 Coder Next",
+      "vendor": "Alibaba",
+      "released": "2026-02",
+      "openWeights": true,
+      "contextK": 262,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": 1.5,
+      "priceTier": 1,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "muse-glimmer-30b",
+      "name": "Muse Glimmer 30B",
+      "vendor": "Meta",
+      "released": "2026-08",
+      "openWeights": true,
+      "contextK": 128,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 1.5,
+      "priceTier": 1,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "nemotron-3-nano-30b-a3b",
+      "name": "Nemotron 3 Nano 30B A3B",
+      "vendor": "NVIDIA",
+      "released": "2025-12",
+      "openWeights": true,
+      "contextK": 256,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 0.2,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "gemma-3-12b-it",
+      "name": "Gemma 3 12B",
+      "vendor": "Google",
+      "released": "2025-03",
+      "openWeights": true,
+      "contextK": 128,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": false,
+      "priceOut": 0.15,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "mercury-2-5",
+      "name": "Mercury 2.5",
+      "vendor": "Inception",
+      "released": "2026-09",
+      "openWeights": false,
+      "contextK": 254,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 0.15,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "qwen3-vl-8b-instruct",
+      "name": "Qwen3 VL 8B Instruct",
+      "vendor": "Alibaba",
+      "released": "2025-10",
+      "openWeights": true,
+      "contextK": 262,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": false,
+      "priceOut": 0.455,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "mistral-small-24b-instruct-2501",
+      "name": "Mistral Small 3",
+      "vendor": "Mistral",
+      "released": "2025-01",
+      "openWeights": true,
+      "contextK": 32,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": 0.08,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "aion-3-0",
+      "name": "Aion-3.0",
+      "vendor": "Aion Labs",
+      "released": "2026-07",
+      "openWeights": false,
+      "contextK": 128,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 6,
+      "priceTier": 2,
+      "difficulty": 4,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "seed-2-0-mini",
+      "name": "Seed-2.0-Mini",
+      "vendor": "ByteDance",
+      "released": "2026-02",
+      "openWeights": true,
+      "contextK": 256,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 0.4,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "mistral-large-2512",
+      "name": "Mistral Large 3 2512",
+      "vendor": "Mistral",
+      "released": "2025-12",
+      "openWeights": true,
+      "contextK": 256,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": false,
+      "priceOut": 1.5,
+      "priceTier": 1,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "qwen3-vl-30b-a3b-instruct",
+      "name": "Qwen3 VL 30B A3B Instruct",
+      "vendor": "Alibaba",
+      "released": "2025-10",
+      "openWeights": true,
+      "contextK": 262,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": false,
+      "priceOut": 0.6,
+      "priceTier": 1,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "deepseek-r1-0528",
+      "name": "R1 0528",
+      "vendor": "DeepSeek",
+      "released": "2025-05",
+      "openWeights": true,
+      "contextK": 160,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 2.15,
+      "priceTier": 2,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "longcat-2-0",
+      "name": "LongCat 2.0",
+      "vendor": "Meituan",
+      "released": "2026-07",
+      "openWeights": false,
+      "contextK": 1024,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 1.2,
+      "priceTier": 1,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "ministral-8b-2512",
+      "name": "Ministral 3 8B 2512",
+      "vendor": "Mistral",
+      "released": "2025-12",
+      "openWeights": true,
+      "contextK": 256,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": false,
+      "priceOut": 0.15,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "qwen-2-5-7b-instruct",
+      "name": "Qwen2.5 7B Instruct",
+      "vendor": "Alibaba",
+      "released": "2024-09",
+      "openWeights": true,
+      "contextK": 32,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": 0.2,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "l3-lunaris-8b",
+      "name": "Llama 3 8B Lunaris",
+      "vendor": "Sao10K",
+      "released": "2024-08",
+      "openWeights": true,
+      "contextK": 8,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": 0.05,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "granite-4-0-h-micro",
+      "name": "Granite 4.0 Micro",
+      "vendor": "IBM",
+      "released": "2025-10",
+      "openWeights": true,
+      "contextK": 128,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": 0.112,
+      "priceTier": 0,
+      "difficulty": 4,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "nova-lite-v1",
+      "name": "Nova Lite 1.0",
+      "vendor": "Amazon",
+      "released": "2024-12",
+      "openWeights": false,
+      "contextK": 293,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": false,
+      "priceOut": 0.24,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "llama-3-1-70b-instruct",
+      "name": "Llama 3.1 70B Instruct",
+      "vendor": "Meta",
+      "released": "2024-07",
+      "openWeights": true,
+      "contextK": 128,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": 0.4,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "mercury-2",
+      "name": "Mercury 2",
+      "vendor": "Inception",
+      "released": "2026-03",
+      "openWeights": false,
+      "contextK": 125,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": true,
+      "priceOut": 0.75,
+      "priceTier": 1,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "seed-1-6-flash",
+      "name": "Seed 1.6 Flash",
+      "vendor": "ByteDance",
+      "released": "2025-12",
+      "openWeights": true,
+      "contextK": 256,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 0.3,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "ministral-14b-2512",
+      "name": "Ministral 3 14B 2512",
+      "vendor": "Mistral",
+      "released": "2025-12",
+      "openWeights": true,
+      "contextK": 256,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": false,
+      "priceOut": 0.2,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "ministral-3b-2512",
+      "name": "Ministral 3 3B 2512",
+      "vendor": "Mistral",
+      "released": "2025-12",
+      "openWeights": true,
+      "contextK": 128,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": false,
+      "priceOut": 0.1,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "qwen3-coder-flash",
+      "name": "Qwen3 Coder Flash",
+      "vendor": "Alibaba",
+      "released": "2025-09",
+      "openWeights": true,
+      "contextK": 977,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": 0.975,
+      "priceTier": 1,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "mistral-medium-3-1",
+      "name": "Mistral Medium 3.1",
+      "vendor": "Mistral",
+      "released": "2025-08",
+      "openWeights": false,
+      "contextK": 128,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": false,
+      "priceOut": 2,
+      "priceTier": 2,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "qwen2-5-vl-72b-instruct",
+      "name": "Qwen2.5 VL 72B Instruct",
+      "vendor": "Alibaba",
+      "released": "2025-02",
+      "openWeights": true,
+      "contextK": 125,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": false,
+      "priceOut": 1,
+      "priceTier": 1,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "qwen-2-5-72b-instruct",
+      "name": "Qwen2.5 72B Instruct",
+      "vendor": "Alibaba",
+      "released": "2024-09",
+      "openWeights": true,
+      "contextK": 32,
+      "modalities": [
+        "text"
+      ],
+      "reasoning": false,
+      "priceOut": 0.4,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    },
+    {
+      "id": "grok-4-20-multi-agent",
+      "name": "Grok 4.20 Multi-Agent",
+      "vendor": "xAI",
+      "released": "2026-03",
+      "openWeights": false,
+      "contextK": 1000,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 2.5,
+      "priceTier": 2,
+      "difficulty": 3,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "gpt-6-1-sol",
+      "name": "GPT-6.1 Sol",
+      "vendor": "OpenAI",
+      "released": "2026-09",
+      "openWeights": false,
+      "contextK": 1050,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 10,
+      "priceTier": 3,
+      "difficulty": 1,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "gpt-6-sol",
+      "name": "GPT-6 Sol",
+      "vendor": "OpenAI",
+      "released": "2026-09",
+      "openWeights": false,
+      "contextK": 1050,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 10,
+      "priceTier": 3,
+      "difficulty": 2,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "gpt-6-luna",
+      "name": "GPT-6 Luna",
+      "vendor": "OpenAI",
+      "released": "2026-09",
+      "openWeights": false,
+      "contextK": 1050,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 0.5,
+      "priceTier": 1,
+      "difficulty": 1,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "claude-sonnet-5-5",
+      "name": "Claude Sonnet 5.5",
+      "vendor": "Anthropic",
+      "released": "2026-09",
+      "openWeights": false,
+      "contextK": 1000,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 10,
+      "priceTier": 3,
+      "difficulty": 1,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "claude-opus-5-5",
+      "name": "Claude Opus 5.5",
+      "vendor": "Anthropic",
+      "released": "2026-09",
+      "openWeights": false,
+      "contextK": 1000,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 20,
+      "priceTier": 3,
+      "difficulty": 2,
+      "answerEligible": false,
+      "dailyEligible": false
+    },
+    {
+      "id": "claude-haiku-5-5",
+      "name": "Claude Haiku 5.5",
+      "vendor": "Anthropic",
+      "released": "2026-10",
+      "openWeights": false,
+      "contextK": 1000,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 0.5,
+      "priceTier": 1,
+      "difficulty": 1,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "gemini-4-argon",
+      "name": "Gemini 4 Argon",
+      "vendor": "Google",
+      "released": "2026-09",
+      "openWeights": false,
+      "contextK": 1049,
+      "modalities": [
+        "text",
+        "image",
+        "audio",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 10,
+      "priceTier": 3,
+      "difficulty": 1,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "grok-4-7",
+      "name": "Grok 4.7",
+      "vendor": "xAI",
+      "released": "2026-09",
+      "openWeights": false,
+      "contextK": 500,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 6,
+      "priceTier": 2,
+      "difficulty": 1,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "mistral-large-4-preview",
+      "name": "Mistral Large 4 Preview",
+      "vendor": "Mistral",
+      "released": "2026-10",
+      "openWeights": false,
+      "contextK": 1000,
+      "modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning": true,
+      "priceOut": 4.18,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "mimo-v2-6-pro",
+      "name": "MiMo V2.6 Pro",
+      "vendor": "Xiaomi",
+      "released": "2026-09",
+      "openWeights": true,
+      "contextK": 1000,
+      "modalities": [
+        "text",
+        "image",
+        "audio",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 0.87,
+      "priceTier": 1,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "mimo-v2-6-flash",
+      "name": "MiMo V2.6 Flash",
+      "vendor": "Xiaomi",
+      "released": "2026-09",
+      "openWeights": true,
+      "contextK": 1000,
+      "modalities": [
+        "text",
+        "image",
+        "audio",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 0.28,
+      "priceTier": 0,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "step-5-preview",
+      "name": "Step 5 Preview",
+      "vendor": "StepFun",
+      "released": "2026-09",
+      "openWeights": true,
+      "contextK": 1000,
+      "modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": 2.7,
+      "priceTier": 2,
+      "difficulty": 2,
+      "answerEligible": true,
+      "dailyEligible": true
+    },
+    {
+      "id": "dots3-note-preview",
+      "name": "dots3 note Preview",
+      "vendor": "RedNote",
+      "released": "2026-08",
+      "openWeights": true,
+      "contextK": 524,
+      "modalities": [
+        "text",
+        "image",
+        "audio",
+        "video"
+      ],
+      "reasoning": true,
+      "priceOut": null,
+      "priceTier": 0,
+      "difficulty": 3,
+      "answerEligible": true,
+      "dailyEligible": false
+    }
+  ]
+}

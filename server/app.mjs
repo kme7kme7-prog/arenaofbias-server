@@ -697,6 +697,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     return arena.vote(ctx.user, ctx.params.id, String(body.choice ?? ''));
   });
   router.on('GET', '/api/leaderboard', (ctx) => {
+    const board = ctx.url.searchParams.get('board') || null;
     const task = ctx.url.searchParams.get('task') || null;
     if (task && !catalog.task(task)) fail(404, '题目不存在');
     const category = ctx.url.searchParams.get('category') || null;
@@ -708,7 +709,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       if (value && value !== 'unset' && !catalog[field](value)) fail(400, `${field === 'harness' ? 'Harness' : '服务商'}筛选无效`, 'invalid_query');
       return [field, value];
     }));
-    return arena.leaderboard({ task, category, domain, by: ctx.url.searchParams.get('by') === 'model' ? 'model' : 'config', ...filters });
+    return arena.leaderboard({ task, category, domain, board, by: ctx.url.searchParams.get('by') === 'model' ? 'model' : 'config', ...filters });
   });
 
   registerShow1Compat(router, { db, catalog, library, snapshot: show1Snapshot, config, limit });

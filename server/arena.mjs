@@ -16,6 +16,7 @@ import { effortKey, entityKey, modelKey, providerOf } from './catalog.mjs';
 import { transaction } from './db.mjs';
 import { fail, HttpError } from './http.mjs';
 import { rankEntries, rankWorks } from './ranking.mjs';
+import { CURATED_BOARDS } from './curated-boards.mjs';
 import { generationOf } from './generation.mjs';
 import { isTextTask, isAiJudgedTask } from './categories.mjs';
 import { isSenior, isStaff } from './roles.mjs';
@@ -205,22 +206,40 @@ export function createArena({ db, catalog, library, limits, random = Math.random
   // `domain` (e.g. 化学) only tasks naming it, and the two combine. A task with two domains
   // counts fully in both. The unscoped board also reports each entry's rank inside every category.
   // Totals count only comparisons the fit used: votes between works of one entry drop out.
-  function leaderboard({ task = null, category = null, domain = null, by = 'config', snapshot = null, harness = null, provider = null } = {}) {
+  function leaderboard({ task = null, category = null, domain = null, board = null, by = 'config', snapshot = null, harness = null, provider = null } = {}) {
+    const curated = board && Object.hasOwn(CURATED_BOARDS, board) ? CURATED_BOARDS[board] : null;
+    if (board && (!curated || task || category || domain)) fail(400, '精选榜筛选无效', 'invalid_query');
     const archive = snapshot ?? catalog.snapshot();
     const filters = harness || provider ? { harness, provider } : null;
-    const cacheKey = `${archive.version}|${task ?? '*'}|${category ?? '*'}|${domain ?? '*'}|${by}${filters ? `|${harness ?? ''}|${provider ?? ''}` : ''}`;
+    const cacheKey = `${archive.version}|${task ?? '*'}|${category ?? '*'}|${domain ?? '*'}|${board ?? '*'}|${by}${filters ? `|${harness ?? ''}|${provider ?? ''}` : ''}`;
     if (cache.has(cacheKey)) return cache.get(cacheKey);
     const activeCache = cache;
     const pending = Promise.resolve().then(async () => {
       const keyOf = (work) => by === 'model' ? (work.modelKey ?? modelKey(work)) : (work.configKey ?? entityKey(work));
       const rankedTasks = (task ? [catalog.task(task)].filter(Boolean) : catalog.tasks()).filter((t) => !isAiJudgedTask(t));
-      const scoped = category || domain ? rankedTasks.filter((t) => (!category || t.category === category) && (!domain || t.domains?.includes(domain))) : null;
+      const selected = curated && new Set(curated.taskIds);
+      const scoped = curated || category || domain ? rankedTasks.filter((t) => (!selected || selected.has(t.id)) && (!category || t.category === category) && (!domain || t.domains?.includes(domain))) : null;
       const { votes, rankedEntryCount } = await countedVotes(task, archive, keyOf, filters, scoped && new Set(scoped.map((t) => t.id)));
       const ranked = await rankOffThread(votes, by, rankedEntryCount);
+      // Qualification always uses the same scoped model fit, including in configuration view.
+      // Keep all valid opponents in the fit; qualification changes membership, not ballot history.
+      let qualifiedModels;
+      if (curated) {
+        const modelRows = by === 'model' ? ranked : (await leaderboard({ board, by: 'model', snapshot: archive, harness, provider })).rows;
+        // Match Gallery's visible registry (modelPool also contains guessing-game-only entries).
+        const registered = archive.models();
+        const nameKey = (name) => String(name ?? '').normalize('NFKC').toLowerCase().replace(/[\s_-]+/g, '');
+        const ids = new Set(registered.map((model) => model.id));
+        const names = new Set(registered.flatMap((model) => [model.name, ...(model.aliases ?? [])].map(nameKey)));
+        qualifiedModels = new Set(modelRows.filter((row) => !row.provisional &&
+          (ids.has(row.sample?.modelId ?? row.model) || names.has(nameKey(row.sample?.modelName ?? row.modelName))))
+          .map((row) => row.key));
+      }
+      const qualifies = (work) => !qualifiedModels || qualifiedModels.has(work.modelKey ?? modelKey(work));
       const pool = (task ? (isAiJudgedTask(catalog.task(task)) ? [] : library.eligible(task, archive)) : (scoped ?? rankedTasks).flatMap((t) => library.eligible(t.id, archive)))
         .filter((work) => !filters || provenanceMatch(filters, work));
       let standings;
-      if (!task && !category && !domain) {
+      if (!task && !category && !domain && !curated) {
         standings = {};
         for (const name of new Set(rankedTasks.map((t) => t.category).filter(Boolean))) {
           const board = await leaderboard({ category: name, by, snapshot, harness, provider });
@@ -245,11 +264,12 @@ export function createArena({ db, catalog, library, limits, random = Math.random
         task,
         category,
         domain,
+        ...(curated ? { board: curated.id, scope: { taskIds: curated.taskIds, qualification: 'registered-nonprovisional-model', provisionalGames: limits.provisionalGames } } : {}),
         by,
         ...(standings ? { standings } : {}),
         ...(filters ? { filters } : {}),
         totals: voteTotals(votes, keyOf),
-        rows: ranked.map((row, i) => ({
+        rows: ranked.filter((row) => qualifies(row.sample)).map((row, i) => ({
           rank: i + 1,
           key: row.key,
           ...describeRanked(row),
@@ -265,7 +285,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
           works: works.get(row.key)?.count ?? 0,
           provisional: row.provisional,
         })),
-        unranked: [...works].filter(([key]) => !rankedKeys.has(key)).map(([key, { sample, count }]) => ({ key, ...describe(sample, by), works: count }))
+        unranked: [...works].filter(([key, { sample }]) => !rankedKeys.has(key) && qualifies(sample)).map(([key, { sample, count }]) => ({ key, ...describe(sample, by), works: count }))
           .sort((a, b) => a.modelName.localeCompare(b.modelName, 'en', { numeric: true }) || a.effort.localeCompare(b.effort)),
         provisionalGames: limits.provisionalGames,
         updatedAt: new Date().toISOString(),

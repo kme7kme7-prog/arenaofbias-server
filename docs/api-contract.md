@@ -703,6 +703,8 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 - `unranked` 与 `works` 计数按作品当前的来源字段筛选。
 - 带筛选时响应多一个 `"filters": { "harness": …, "provider": … }`；不带筛选时响应形状、计票范围与缓存键都与不支持筛选时完全相同。
 
+精选前端使用 `board=frontend`，不可与 `task`、`category`、`domain` 同用，仍支持 `by` 与来源筛选。只对 `server/curated-boards.mjs` 中用户已选的 36 个稳定题目 ID 汇总有效比较并重新拟合 Bradley–Terry，不平均单题分数。先以相同题目、相同来源筛选计算模型榜，只展示 Gallery 注册表（`models`，不含仅在 `modelPool` 的条目）已收录且比较数达到 `provisionalGames` 的模型；按配置也沿用此模型资格，配置自身仍可标记暂定。有效但无入榜资格的对手仍参与拟合；`totals` 描述参与拟合的比较，`rows` / `unranked` 均按模型资格过滤，名次连续。响应另有 `board: "frontend"`、`scope: { taskIds: [...], qualification: "registered-nonprovisional-model", provisionalGames: 30 }`，不含全量类别名次 `standings`。不存在的精选榜或混用范围参数返回 `400 invalid_query`。
+
 题型与领域：响应回显 `category`、`domain`（未指定为 `null`）。`totals.votes` / `totals.voters` 只计实际参与拟合的比较：同一计分单位（按配置为同一配置，按模型为同一模型）两件作品之间的票不计入；`totals.tasks` 为这些比较涉及的题目数，前端据此在领域榜少于 2 题或 50 次比较时提示样本不足。既无 `task`、`category` 也无 `domain` 的综合榜多一个 `standings`：`{ [题型]: { [key]: 该题型内名次 } }`，只列已有排名的题型，沿用同一计分单位与来源筛选。已公开的题目按 `category` 进入对应题型；迁移后分类仍为空的旧题只计入综合榜。
 
 ```json

@@ -48,7 +48,7 @@ function withHeadTags(buffer, tags) {
 
 const scriptTag = (path) => `<script src="${path}"></script>`;
 
-export function createContentHandler({ config, library, arena, siteOrigins, readGuard = createReadGuard(config) }) {
+export function createContentHandler({ config, library, arena, catalog, siteOrigins, readGuard = createReadGuard(config) }) {
   // jsdelivr is limited to npm: its GitHub paths follow a repository that can change after review.
   const cdn = config.cdn.map((host) => host === 'cdn.jsdelivr.net' ? 'https://cdn.jsdelivr.net/npm/'
     : `https://${host}${host === 'registry.npmmirror.com' ? THREE_MIRROR_PATH : ''}`).join(' ');
@@ -237,7 +237,7 @@ export function createContentHandler({ config, library, arena, siteOrigins, read
   return async (req, res) => {
     res.setHeader('Strict-Transport-Security', 'max-age=31536000');
     try {
-      return await serve(req, res);
+      return await (catalog ? catalog.withSnapshot(() => serve(req, res)) : serve(req, res));
     } catch (error) {
       if (res.headersSent) return res.destroy();
       if (error instanceof HttpError) return errorPage(res, error.status, error.message, '请稍后从展厅重新打开作品。',

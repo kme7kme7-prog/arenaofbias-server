@@ -2,7 +2,7 @@
 // activity must not make every authenticated read rebuild the work/media DTOs.
 import { createHash } from 'node:crypto';
 
-export function createCatalogResponse(db, catalog, read, { mediaTtl = 30_000 } = {}) {
+export function createCatalogRevision(db) {
   db.exec('CREATE TEMP TABLE catalog_revision (revision INTEGER NOT NULL); INSERT INTO catalog_revision VALUES (0);');
   const tables = ['works', 'questions', 'work_overrides', 'question_overrides', 'reference_uploads'];
   for (const table of [...tables, 'users']) {
@@ -14,7 +14,11 @@ export function createCatalogResponse(db, catalog, read, { mediaTtl = 30_000 } =
   }
   const revision = db.prepare('SELECT revision FROM catalog_revision');
   const external = db.prepare('PRAGMA data_version');
-  const keyOf = (snapshot) => `${snapshot.version}|${revision.get().revision}|${external.get().data_version}`;
+  return () => `${revision.get().revision}|${external.get().data_version}`;
+}
+
+export function createCatalogResponse(db, catalog, read, { mediaTtl = 30_000, revision = createCatalogRevision(db) } = {}) {
+  const keyOf = (snapshot) => `${snapshot.version}|${revision()}`;
   const building = new Map();
   let cached;
   return async (req, res) => {

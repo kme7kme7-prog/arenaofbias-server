@@ -104,6 +104,7 @@ function readSnapshot(root) {
 
 export function createCatalog(dist, questions = null) {
   let current = null;
+  let reading = null;
   let onChange = null;
   const handledRevisions = new Set();
   const queuedRevisions = new Set();
@@ -153,9 +154,18 @@ export function createCatalog(dist, questions = null) {
     scheduleTakeover(current);
     return current;
   }
+  // Reuse package and question lookups only within a synchronous read batch.
+  // Never carry this context across await: the next batch observes moderation and package changes.
+  const snapshotOfRead = () => reading?.snapshot ?? refresh();
+  function withSnapshot(read) {
+    if (reading) return read();
+    reading = { snapshot: refresh(), tasks: new Map(), allTasks: null };
+    try { return read(); } finally { reading = null; }
+  }
   const catalog = {
+    withSnapshot,
     onChange(callback) { onChange = callback; scheduleTakeover(refresh()); },
-    refresh, snapshot: refresh,
+    refresh, snapshot: snapshotOfRead,
     // The package a match was created with. A match without one, or whose release has been
     // pruned, can no longer be served or scored.
     at(root) {
@@ -166,28 +176,38 @@ export function createCatalog(dist, questions = null) {
       if (!snapshots.has(root)) snapshots.set(root, readSnapshot(root));
       return snapshots.get(root);
     },
-    get version() { return refresh().version; },
-    get datapack() { return refresh().commit; },
-    get catalogDigest() { return refresh().catalogDigest; },
-    get title() { return refresh().title; },
+    get version() { return snapshotOfRead().version; },
+    get datapack() { return snapshotOfRead().commit; },
+    get catalogDigest() { return snapshotOfRead().catalogDigest; },
+    get title() { return snapshotOfRead().title; },
     task(id, viewer = null) {
-      const packaged = refresh().task(id);
-      if (!questions) return packaged;
-      const question = questions.get(id, viewer);
-      return question ? { ...packaged, ...question, works: packaged?.works ?? new Map() } : null;
+      return withSnapshot(() => {
+        const key = JSON.stringify([id, viewer?.id ?? null, viewer?.role ?? null]);
+        if (!reading.tasks.has(key)) {
+          const packaged = reading.snapshot.task(id);
+          const question = questions?.get(id, viewer);
+          reading.tasks.set(key, questions ? question ? { ...packaged, ...question, works: packaged?.works ?? new Map() } : null : packaged);
+        }
+        return reading.tasks.get(key);
+      });
     },
-    tasks() { return questions ? questions.all().map((question) => ({ ...refresh().task(question.id), ...question, works: refresh().task(question.id)?.works ?? new Map() })) : refresh().tasks(); },
-    tags() { return [...new Set([...refresh().tags(), ...(questions?.all() ?? []).flatMap((task) => task.tags ?? [])])]; },
-    model(id) { return refresh().model(id); },
-    modelNamed(name) { return refresh().modelNamed(name); },
-    models() { return refresh().models(); },
-    harness(id) { return refresh().harness(id); },
-    harnesses() { return refresh().harnesses(); },
-    provider(id) { return refresh().provider(id); },
-    providers() { return refresh().providers(); },
-    work(taskId, id) { return refresh().work(taskId, id); },
-    works(taskId) { return refresh().works(taskId); },
-    duplicateOf(digest) { return refresh().duplicateOf(digest); },
+    tasks() {
+      return withSnapshot(() => reading.allTasks ??= questions ? questions.all().map((question) => {
+        const packaged = reading.snapshot.task(question.id);
+        return { ...packaged, ...question, works: packaged?.works ?? new Map() };
+      }) : reading.snapshot.tasks());
+    },
+    tags() { return withSnapshot(() => [...new Set([...reading.snapshot.tags(), ...(questions?.all() ?? []).flatMap((task) => task.tags ?? [])])]); },
+    model(id) { return snapshotOfRead().model(id); },
+    modelNamed(name) { return snapshotOfRead().modelNamed(name); },
+    models() { return snapshotOfRead().models(); },
+    harness(id) { return snapshotOfRead().harness(id); },
+    harnesses() { return snapshotOfRead().harnesses(); },
+    provider(id) { return snapshotOfRead().provider(id); },
+    providers() { return snapshotOfRead().providers(); },
+    work(taskId, id) { return snapshotOfRead().work(taskId, id); },
+    works(taskId) { return snapshotOfRead().works(taskId); },
+    duplicateOf(digest) { return snapshotOfRead().duplicateOf(digest); },
   };
   questions?.bindCatalog(catalog);
   return catalog;

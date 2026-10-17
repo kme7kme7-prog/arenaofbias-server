@@ -11,7 +11,8 @@ import { createLoginSecurity } from './login-security.mjs';
 import { createCapturer } from './capture.mjs';
 import { createModerator } from './moderation.mjs';
 import { createCatalog } from './catalog.mjs';
-import { createCatalogResponse } from './catalog-response.mjs';
+import { createCatalogResponse, createCatalogRevision } from './catalog-response.mjs';
+import { createSharedRead } from './shared-read.mjs';
 import { createComments } from './comments.mjs';
 import { AVATARS, EFFORTS, EMOJIS } from './config.mjs';
 import { createContentHandler } from './content.mjs';
@@ -163,20 +164,23 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const galleryWorks = () => library.allWorks().filter((work) => library.visibleTo(work, 'show2'));
   async function galleryList(user, snapshot = catalog.snapshot()) {
     await yieldToRequests();
-    const allWorks = library.allWorks({ snapshot });
+    const allWorks = catalog.withSnapshot(() => library.allWorks({ snapshot }));
     const works = [];
-    for (let i = 0; i < allWorks.length; i++) {
-      const work = allWorks[i];
-      if (library.visibleTo(work, 'show2')) works.push(library.toPublic(work, user));
-      if (i % 32 === 31) await yieldToRequests();
+    for (let i = 0; i < allWorks.length; i += 32) {
+      catalog.withSnapshot(() => {
+        for (const work of allWorks.slice(i, i + 32)) if (library.visibleTo(work, 'show2')) works.push(library.toPublic(work, user));
+      });
+      await yieldToRequests();
     }
     return works;
   }
   const withoutMine = ({ mine, ...item }) => item;
+  const catalogRevision = createCatalogRevision(db);
+  const activityRevision = () => `${catalog.snapshot().version}|${catalogRevision()}`;
   const publicCatalog = createCatalogResponse(db, catalog, async (snapshot) => ({
     ...versionInfo(snapshot), serverVersion, providers: snapshot.providers(), domains: DOMAINS, domainGroups: DOMAIN_GROUPS,
-    site: siteInfo(), works: (await galleryList(null, snapshot)).map(withoutMine), questions: questions.all().map(withoutMine),
-  }));
+    site: siteInfo(), works: (await galleryList(null, snapshot)).map(withoutMine), questions: catalog.withSnapshot(() => questions.all().map(withoutMine)),
+  }), { revision: catalogRevision });
   function session(user) {
     return {
       ...versionInfo(),
@@ -200,25 +204,34 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         questions: isSenior(user) ? questions.pendingCount() : 0,
       } : null;
   }
-  async function activity(user) {
+  const publicPools = createSharedRead({ revision: activityRevision, read: async () => {
     const snapshot = catalog.snapshot();
-    const pools = new Map();
-    const arenaStats = {};
-    for (const task of catalog.tasks()) {
+    const pools = new Map(), arenaStats = {};
+    for (const task of catalog.withSnapshot(() => catalog.tasks())) {
       if (isAiJudgedTask(task)) continue;
-      const pool = library.eligible(task.id, snapshot);
-      pools.set(task.id, pool);
-      arenaStats[task.id] = arena.poolStats(task.id, pool);
+      catalog.withSnapshot(() => {
+        const pool = library.eligible(task.id, snapshot);
+        pools.set(task.id, pool);
+        arenaStats[task.id] = arena.poolStats(task.id, pool);
+      });
       await yieldToRequests();
     }
-    return {
-      ...versionInfo(snapshot), reactions: library.reactionSummary(user),
-      arena: arenaStats,
-      ...(isSenior(user) ? { arenaModels: arena.poolModels(pools) } : {}),
-      featured: featured.read(), totals: await arena.totals(snapshot),
-      workAccess: user ? galleryWorks().map((work) => library.access(work, user)) : [],
-      review: review(user),
-    };
+    return { snapshot, pools, arenaStats };
+  } });
+  async function activity(user) {
+    for (;;) {
+      const revision = activityRevision();
+      const { snapshot, pools, arenaStats } = await publicPools();
+      const totals = await arena.totals(snapshot);
+      const result = catalog.withSnapshot(() => ({
+        ...versionInfo(snapshot), reactions: library.reactionSummary(user), arena: arenaStats,
+        ...(isSenior(user) ? { arenaModels: arena.poolModels(pools) } : {}),
+        featured: featured.read(), totals,
+        workAccess: user ? galleryWorks().map((work) => library.access(work, user)) : [],
+        review: review(user),
+      }));
+      if (activityRevision() === revision) return result;
+    }
   }
   async function bootstrap(user) {
     const snapshot = catalog.snapshot();
@@ -865,7 +878,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     capturer,
     moderator,
     handleSite,
-    handleContent: createContentHandler({ config, library, arena, siteOrigins: config.siteOrigins, readGuard }),
+    handleContent: createContentHandler({ config, library, arena, catalog, siteOrigins: config.siteOrigins, readGuard }),
     async close() {
       guessRooms.close();
       clearInterval(matchCleanup);

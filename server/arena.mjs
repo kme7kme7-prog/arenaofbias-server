@@ -47,6 +47,7 @@ const fromIdentity = (text) => {
 };
 
 export function createArena({ db, catalog, library, limits, random = Math.random }) {
+  const readBatch = (read) => catalog.withSnapshot ? catalog.withSnapshot(read) : read();
   const q = {
     insertMatch: db.prepare('INSERT INTO matches (id, user_id, task_id, a_work, b_work, a_token, b_token, created_at, expires_at, datapack_root, datapack_version, a_identity, b_identity, pin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
     match: db.prepare('SELECT * FROM matches WHERE id = ?'),
@@ -113,32 +114,34 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     const moved = votesBeforeTaskMove(db);
     const votes = [];
     const rankedKeys = new Set();
-    let scanned = 0;
-    for (const row of taskId ? q.votesOfTask.all(taskId) : q.votes.all()) {
-      // Yield even for small boards and rejected ballots; catalog size is unrelated
-      // to vote volume. The task lookup is shared only within this calculation.
-      if (++scanned % 100 === 0) await new Promise((resolve) => setImmediate(resolve));
-      if (aiJudged(row.task_id)) continue;
-      if (moved(row)) continue;
-      if (!row.a_identity || !row.b_identity || (taskIds && !taskIds.has(row.task_id))) continue;
-      const aIdentity = fromIdentity(row.a_identity), bIdentity = fromIdentity(row.b_identity);
-      // A moved upload changes the ballot task; its opponent can remain in the old task.
-      const a = lookup(row.task_id, row.a_work) ?? lookup(aIdentity.taskId, row.a_work);
-      const b = lookup(row.task_id, row.b_work) ?? lookup(bIdentity.taskId, row.b_work);
-      if (a && b) {
-        const vote = {
-          a: { ...voteAttribution(row, 'a', aIdentity, fromIdentity(row.a_correction), a, snapshot, manual), taskId: row.task_id },
-          b: { ...voteAttribution(row, 'b', bIdentity, fromIdentity(row.b_correction), b, snapshot, manual), taskId: row.task_id },
-          choice: row.choice, userId: row.user_id ?? `vote:${row.id}`,
-        };
-        if (filters && !(provenanceMatch(filters, vote.a) && provenanceMatch(filters, vote.b))) continue;
-        votes.push(vote);
-        const left = keyOf(vote.a), right = keyOf(vote.b);
-        if (left !== right && rankedKeys.size <= RANK_WORKER_ENTRY_THRESHOLD) {
-          rankedKeys.add(left);
-          rankedKeys.add(right);
+    const rows = taskId ? q.votesOfTask.all(taskId) : q.votes.all();
+    for (let i = 0; i < rows.length; i += 100) {
+      await new Promise((resolve) => setImmediate(resolve));
+      readBatch(() => {
+        for (const row of rows.slice(i, i + 100)) {
+          if (aiJudged(row.task_id)) continue;
+          if (moved(row)) continue;
+          if (!row.a_identity || !row.b_identity || (taskIds && !taskIds.has(row.task_id))) continue;
+          const aIdentity = fromIdentity(row.a_identity), bIdentity = fromIdentity(row.b_identity);
+          // A moved upload changes the ballot task; its opponent can remain in the old task.
+          const a = lookup(row.task_id, row.a_work) ?? lookup(aIdentity.taskId, row.a_work);
+          const b = lookup(row.task_id, row.b_work) ?? lookup(bIdentity.taskId, row.b_work);
+          if (a && b) {
+            const vote = {
+              a: { ...voteAttribution(row, 'a', aIdentity, fromIdentity(row.a_correction), a, snapshot, manual), taskId: row.task_id },
+              b: { ...voteAttribution(row, 'b', bIdentity, fromIdentity(row.b_correction), b, snapshot, manual), taskId: row.task_id },
+              choice: row.choice, userId: row.user_id ?? `vote:${row.id}`,
+            };
+            if (filters && !(provenanceMatch(filters, vote.a) && provenanceMatch(filters, vote.b))) continue;
+            votes.push(vote);
+            const left = keyOf(vote.a), right = keyOf(vote.b);
+            if (left !== right && rankedKeys.size <= RANK_WORKER_ENTRY_THRESHOLD) {
+              rankedKeys.add(left);
+              rankedKeys.add(right);
+            }
+          }
         }
-      }
+      });
     }
     return { votes, rankedEntryCount: rankedKeys.size };
   }

@@ -1,3 +1,18 @@
+## 2026-10-17 · 盲评公共读取与加载第一批修复（已验证，准备发布）
+
+- 用户接受第一批方案并要求继续，沿用本会话提交/推送/上线授权。主对话实施，另一活跃对话按用户要求独立复核与投票迁移过滤优化；其现场诊断/inspector事故记录完整保留于下节。
+- 同步catalog.withSnapshot复用包与按viewer隔离的题目查询，不跨await；eligible去掉重复withDisplay，计票每100票批次、目录每32件批次让出。内容请求单次同步门禁复用，不跨请求缓存权限。
+- 公共盲评池5秒复用/合并并发，借目录选择性TEMP修订及外部data_version失效，构建及返回前复核；私有字段/反应/审核/精选独立读取，totals沿用实时路径。vote-attribution仅在作品存在迁移历史时解析身份，语义对照504组合相同。无迁移、新依赖或计分规则调整。
+- 本机及保留现场额外功能的Linux候选check129/0、全量364/364通过；Gallery check80/0、53/53、build/intake通过。相同生产库副本匿名/登录/管理员等7场景关键DTO摘要完全相同；warm activity2319.72→137.09ms、member3248.92→302.84ms、admin4687.76→669.33ms、并发7765.94→571.40ms。副本媒体为空、nice19且无截图审核，不是公网收益保证。
+- 现场app/library/questions/show1compat额外功能保留，只增量发布8个运行文件与版本；一致备份后切换。本文写于提交前，实际发布/备份/验证存相邻Gallery忽略output/arena-loading-fix-20261017/release/。未操作生产投票/审核或改变数据包，截图服务隔离等第二批未实施。
+
+## 2026-10-17 · VPS卡顿现场诊断与诊断操作事故
+
+- 用户提供SSH并询问服务器卡顿。本轮现场4核、可用内存约5.2GiB、根分区81%且剩5.4GiB、vmstat约70% idle/0 iowait；主Node单线程top采样99.9%，5273监听队列多次积压219–287。环回根请求8秒超时，公网bootstrap12秒超时，说明存在应用内排队，不能仅归因公网线路。本机20包ping丢3包、平均355ms，仅代表此客户端路径与短时ICMP样本。
+- 对PID1548706做3秒CPU采样，热点在countedVotes/vote-attribution、activity→featured.read/current→library.work/isEligible→catalog.task/questions.lookup→realpathSync；支持重复统计、作品资格和同步文件读取为瓶颈。未部署性能修复，未修改业务源码、配置或生产数据库。
+- 操作事故：启用环回临时inspector采样后，为关闭诊断端口，通过Runtime.evaluate执行动态import(node:inspector)清理；该上下文缺少动态import callback，未处理拒绝导致Node退出。Brisbane 2026-10-17 20:22:14退出，systemd在20:22:17自动重启，20:22:26日志启动就绪，PID1553258/NRestarts1。已向用户明确承认原因；不是原卡顿的根因。9229端口随旧进程退出关闭。无停服回滚或数据库还原。
+- 重启后本机session HTTP200/272ms、公网session HTTP200/2.388s；activity仍10秒无正文超时，服务active，卡顿尚未修复。线上版本标记仍934865d+既有base组合，未覆盖现场额外补丁；本地已有app/catalog-response/catalog/library/shared-read工作保留，未改动。本轮未commit/push，无源码改动因此未运行源码测试。
+
 ## 2026-10-17 · Gallery公开榜十分钟快照（已授权发布）
 
 - 用户要求排行榜每十分钟计算。新增leaderboard-cache，公开GET改为leaderboardSnapshot；按包版本/范围/单位/来源复用600秒，过期按需读、合并并发、失败可重试，返回refreshIntervalSeconds及nextUpdateAt。新投票只失效内部实时计算；默认管理失效及换包仍清公开快照，内部抽样/totals保持。

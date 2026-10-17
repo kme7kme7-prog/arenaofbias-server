@@ -11,8 +11,10 @@ export function votesBeforeTaskMove(db) {
     moves.get(row.work_id).push({ task: match[1], at: row.at });
   }
   return (row) => ['a', 'b'].some((side) => {
+    const history = moves.get(row[`${side}_work`]);
+    if (!history) return false;
     const task = JSON.parse(row[`${side}_identity`] ?? 'null')?.taskId ?? row.task_id;
-    return moves.get(row[`${side}_work`])?.some((move) => move.task === task && row.created_at < move.at);
+    return history.some((move) => move.task === task && row.created_at < move.at);
   });
 }
 

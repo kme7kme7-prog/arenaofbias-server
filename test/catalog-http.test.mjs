@@ -182,3 +182,46 @@ test('a moderation write during a shared cold catalog build is visible before re
     assert.equal((await call('/api/catalog', { headers: { 'if-none-match': a.headers.get('etag') } })).status, 304);
   } finally { platform.library.toPublic = toPublic; }
 }));
+
+test('activity shares public pools across viewers, keeps private fields separate and invalidates on moderation/external writes', async () => fixture(async ({ platform, call, admin, root, data, dist }) => {
+  Object.assign(data.tasks[0].results[0], { generationMode: 'single-turn', humanIntervention: 'none' });
+  writeFileSync(join(dist, 'data.json'), JSON.stringify(data));
+  // Persist the featured refresh before counting pool builds; its asynchronous fit is independent.
+  await call('/api/activity'); await platform.featured?.drain?.();
+  const eligible = platform.library.eligible;
+  let builds = 0;
+  platform.library.eligible = (...args) => { builds++; return eligible.apply(platform.library, args); };
+  try {
+    const [anonymous, member, staff] = await Promise.all([call('/api/activity'), call('/api/activity', { who: 'member' }), call('/api/activity', { who: 'admin' })]);
+    assert.equal(anonymous.data.arena.one.works, 1);
+    assert.deepEqual(anonymous.data.arena, member.data.arena);
+    assert.deepEqual(member.data.arena, staff.data.arena);
+    assert.equal(Object.hasOwn(anonymous.data, 'arenaModels'), false);
+    assert.equal(anonymous.data.review, null); assert.deepEqual(anonymous.data.workAccess, []);
+    assert.ok(staff.data.review); assert.ok(staff.data.workAccess.length);
+    const warmBuilds = builds;
+    await call('/api/activity'); assert.equal(builds, warmBuilds, 'warm reads must not rebuild pools');
+    platform.library.setFaceSettings(admin, 'one', 'pack', { show_arena: false });
+    const hidden = await call('/api/activity'); assert.equal(hidden.data.arena.one.works, 0);
+    assert.ok(builds > warmBuilds);
+    const external = new DatabaseSync(join(root, 'data', 'platform.db'));
+    try { external.exec('UPDATE work_overrides SET show_arena = 1'); } finally { external.close(); }
+    assert.equal((await call('/api/activity')).data.arena.one.works, 1);
+  } finally { platform.library.eligible = eligible; }
+}));
+
+test('activity rebuilds after withdrawal during an in-flight shared pool calculation', async () => fixture(async ({ platform, call, admin, data, dist }) => {
+  Object.assign(data.tasks[0].results[0], { generationMode: 'single-turn', humanIntervention: 'none' });
+  writeFileSync(join(dist, 'data.json'), JSON.stringify(data));
+  const eligible = platform.library.eligible;
+  let changed = false;
+  platform.library.eligible = (...args) => {
+    const pool = eligible.apply(platform.library, args);
+    if (!changed) { changed = true; setImmediate(() => platform.library.setFaceSettings(admin, 'one', 'pack', { show_arena: false })); }
+    return pool;
+  };
+  try {
+    const results = await Promise.all([call('/api/activity'), call('/api/activity', { who: 'admin' })]);
+    for (const result of results) { assert.equal(result.status, 200); assert.equal(result.data.arena.one.works, 0); }
+  } finally { platform.library.eligible = eligible; }
+}));

@@ -569,7 +569,8 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     // Package works plus verified uploads: the pool blind comparisons draw from.
     eligible(taskId, snapshot = null) {
       const archive = snapshot ?? catalog.snapshot();
-      return [...archive.works(taskId).map(withDisplay), ...q.worksOfTask.all(taskId).map((row) => fromRow(row, archive))].filter(isEligible);
+      return catalog.withSnapshot(() => [...archive.works(taskId).map((work) => withDisplay(work)),
+        ...q.worksOfTask.all(taskId).map((row) => fromRow(row, archive))].filter(eligibleEffective));
     },
     allWorks({ uploads = this.uploads(), snapshot = catalog.snapshot() } = {}) {
       const tasks = new Map();

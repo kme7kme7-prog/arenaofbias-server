@@ -1,3 +1,9 @@
+## 2026-10-17 · Gallery公开榜十分钟快照（已授权发布）
+
+- 用户要求排行榜每十分钟计算。新增leaderboard-cache，公开GET改为leaderboardSnapshot；按包版本/范围/单位/来源复用600秒，过期按需读、合并并发、失败可重试，返回refreshIntervalSeconds及nextUpdateAt。新投票只失效内部实时计算；默认管理失效及换包仍清公开快照，内部抽样/totals保持。
+- 本机check126/0、test359/359；现场基线三文件候选+最新主线测试在VPS Node22.23.2上check126/0、test359/359。首次Linux隔离清包测试缺占位pin，补隔离配置后全量通过。Gallery check78/0、test51/51、local-source build/intake与合成页面中英目视通过，非生产十分钟验收。
+- 用户已明确授权提交、推送并上线；身份wsnxxxs / 269096463+wsnxxxs@users.noreply.github.com，每仓一条英文提交。推送main后仅发布三运行文件及版本标记，先一致备份SQLite和原文件，保留app/library/questions/show1compat的现场额外功能；无迁移或生产投票。[实现归档](docs/archive/2026-10-17-leaderboard-ten-minute-cache.md)。本条写于发布前，实际提交、备份与线上验收在相邻Gallery忽略output/leaderboard-ten-minute-20261017/release/记录；原性能检查未实施其他优化。
+
 ## 2026-10-16 · 精选前端实时榜发布 · Atmeplz
 
 - 用户授权提交、推送GitHub及VPS上线。新 `board=frontend` 接口直接读取生产有效票，复用现有投票/作品变更失效机制重算，按用户选定36题及模型级收录/30比较门槛判断资格；不再使用预览快照。

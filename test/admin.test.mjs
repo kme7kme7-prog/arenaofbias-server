@@ -584,7 +584,11 @@ test('editorial validates weights, traffic aggregates, and arena switches remove
   assert.equal(match.status, 200);
   assert.ok(!JSON.stringify(match.data).includes('模型甲'));
   assert.equal((await call('voter', 'POST', `/api/arena/matches/${match.data.id}/vote`, { choice: 'a' })).data.counted, true);
-  assert.equal((await call('voter', 'GET', '/api/leaderboard?task=one')).data.totals.votes, 1);
+  const waiting = (await call('voter', 'GET', '/api/leaderboard?task=one')).data;
+  assert.equal(waiting.totals.votes, baseline.board.totals.votes, 'the published snapshot waits ten minutes for new votes');
+  assert.equal(waiting.nextUpdateAt, baseline.board.nextUpdateAt);
+  assert.equal(waiting.refreshIntervalSeconds, 600);
+  assert.equal((await platform.arena.leaderboard({ task: 'one' })).totals.votes, 1, 'internal rankings stay live');
   await call('root', 'POST', '/api/admin/works/one/a/face-settings', { show_arena: false });
   assert.equal((await call('voter', 'GET', '/api/leaderboard?task=one')).data.totals.votes, 1, 'leaving the blind pool keeps the ballot');
   assert.equal((await call('voter', 'POST', '/api/arena/matches', { task: 'one' })).status, 409);

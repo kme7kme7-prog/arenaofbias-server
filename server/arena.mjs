@@ -17,6 +17,7 @@ import { transaction } from './db.mjs';
 import { fail, HttpError } from './http.mjs';
 import { rankEntries, rankWorks } from './ranking.mjs';
 import { CURATED_BOARDS } from './curated-boards.mjs';
+import { createLeaderboardCache } from './leaderboard-cache.mjs';
 import { generationOf } from './generation.mjs';
 import { isTextTask, isAiJudgedTask } from './categories.mjs';
 import { isSenior, isStaff } from './roles.mjs';
@@ -75,9 +76,13 @@ export function createArena({ db, catalog, library, limits, random = Math.random
   };
   cleanupExpiredMatches();
 
-  // The leaderboard only changes when votes or work states change; callers invalidate.
+  // Match sampling and totals stay live; public boards publish on a ten-minute cadence.
   let cache = new Map();
-  const invalidate = () => { cache = new Map(); };
+  const publishedBoards = createLeaderboardCache();
+  const invalidate = ({ votesOnly = false } = {}) => {
+    cache = new Map();
+    if (!votesOnly) publishedBoards.clear();
+  };
 
   // Moderation controls which ballots count, including withdrawn / arena-off works.
   // Content is pinned by ID + digest; attribution and provenance follow current works
@@ -380,6 +385,12 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     invalidate,
     cleanupExpiredMatches,
     leaderboard,
+    leaderboardSnapshot(options = {}) {
+      const snapshot = options.snapshot ?? catalog.snapshot();
+      const key = JSON.stringify([snapshot.version, ...['task', 'category', 'domain', 'board', 'by', 'harness', 'provider']
+        .map((field) => options[field] ?? null)]);
+      return publishedBoards.get(key, () => leaderboard({ ...options, snapshot }));
+    },
     totals,
     workScores,
     poolStats,
@@ -489,7 +500,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
           match.a_identity, match.b_identity);
         counted = true;
       });
-      if (counted) invalidate();
+      if (counted) invalidate({ votesOnly: true });
       const reveal = (work, identity) => work ? {
         ...library.toPublic(work, user),
         title: identity.title, model: identity.modelId, modelName: identity.modelName, vendor: identity.vendor, effort: identity.effort,

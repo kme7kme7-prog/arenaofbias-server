@@ -709,7 +709,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       if (value && value !== 'unset' && !catalog[field](value)) fail(400, `${field === 'harness' ? 'Harness' : '服务商'}筛选无效`, 'invalid_query');
       return [field, value];
     }));
-    return arena.leaderboard({ task, category, domain, board, by: ctx.url.searchParams.get('by') === 'model' ? 'model' : 'config', ...filters });
+    return arena.leaderboardSnapshot({ task, category, domain, board, by: ctx.url.searchParams.get('by') === 'model' ? 'model' : 'config', ...filters });
   });
 
   registerShow1Compat(router, { db, catalog, library, snapshot: show1Snapshot, config, limit });

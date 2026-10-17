@@ -884,7 +884,9 @@ describe('platform lifecycle', () => {
       if (match.status !== 200) break;
       await call('bob', 'POST', `/api/arena/matches/${match.data.id}/vote`, { choice: 'a' });
     }
-    const counted = (await call('bob', 'GET', '/api/leaderboard?task=one')).data.totals.votes;
+    assert.equal((await call('bob', 'GET', '/api/leaderboard?task=one')).data.totals.votes, before,
+      'new votes wait for the next public snapshot');
+    const counted = (await platform.arena.leaderboard({ task: 'one' })).totals.votes;
     assert.ok(counted > before, 'the new work collected ballots');
     const files = join(root, 'data', 'works', voted.id);
     assert.equal((await call('root', 'POST', `/api/admin/works/one/${voted.id}/face-settings`, { show_arena: false })).status, 200);

@@ -61,7 +61,8 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const library = createLibrary({ db, catalog, config, limits, legacyRounds: new Set(show1Snapshot.works.map((work) => work.promptId)) });
   const adminService = createAdmin({ db, catalog, library });
   const inbox = createInbox({ library, config, limits });
-  const arena = createArena({ db, catalog, library, limits });
+  const catalogRevision = createCatalogRevision(db);
+  const arena = createArena({ db, catalog, library, limits, revision: catalogRevision });
   const uploadedCount = db.prepare('SELECT COUNT(*) AS n FROM works WHERE owner_id = ? AND deleted_at IS NULL');
   const questionEligibility = (user) => {
     const votes = arena.votesBy(user.id), uploads = uploadedCount.get(user.id).n;
@@ -175,7 +176,6 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     return works;
   }
   const withoutMine = ({ mine, ...item }) => item;
-  const catalogRevision = createCatalogRevision(db);
   const activityRevision = () => `${catalog.snapshot().version}|${catalogRevision()}`;
   const publicCatalog = createCatalogResponse(db, catalog, async (snapshot) => ({
     ...versionInfo(snapshot), serverVersion, providers: snapshot.providers(), domains: DOMAINS, domainGroups: DOMAIN_GROUPS,
@@ -877,6 +877,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     featured,
     capturer,
     moderator,
+    warmLeaderboards() { if (config.leaderboardWarmup !== false) arena.startWarmup(); },
     handleSite,
     handleContent: createContentHandler({ config, library, arena, catalog, siteOrigins: config.siteOrigins, readGuard }),
     async close() {
@@ -886,6 +887,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       await emailAuth.drain();
       await Promise.all([moderator.close(), capturer.close()]);
       await featured.close();
+      await arena.close();
       db.close();
     },
   };

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:http';
@@ -45,8 +45,51 @@ function fixture() {
     }
     arena.invalidate();
   };
-  return { arena, vote, selected, config, close() { db.close(); rmSync(root, { recursive: true, force: true }); } };
+  return { arena, catalog, library, vote, selected, config, close() { db.close(); rmSync(root, { recursive: true, force: true }); } };
 }
+
+test('an invalidated public fit retries with the current package instead of its captured archive', async () => {
+  const f = fixture();
+  try {
+    const eligible = f.library.eligible, versions = [];
+    let changed = false;
+    f.library.eligible = (task, snapshot) => {
+      versions.push(snapshot.version);
+      const pool = eligible.call(f.library, task, snapshot);
+      if (!changed) {
+        changed = true;
+        const file = join(f.config.dist, 'data.json'), data = JSON.parse(readFileSync(file));
+        data.title = 'Replacement package'; writeFileSync(file, JSON.stringify(data));
+        f.catalog.refresh(); f.arena.invalidate();
+      }
+      return pool;
+    };
+    await f.arena.leaderboardSnapshot({ task: f.selected });
+    assert.equal(versions.length, 2);
+    assert.notEqual(versions[0], versions[1]);
+    assert.equal(versions[1], f.catalog.snapshot().version);
+  } finally { f.close(); }
+});
+
+test('global totals, scopes and units reuse validated ballots until invalidation', async () => {
+  const f = fixture();
+  try {
+    f.vote('ah', 'b', 30);
+    let lookups = 0;
+    const ballotWork = f.library.ballotWork;
+    f.library.ballotWork = (...args) => { lookups++; return ballotWork.apply(f.library, args); };
+    assert.equal((await f.arena.totals()).votes, 30);
+    const initial = lookups;
+    assert.ok(initial > 0);
+    const boards = await Promise.all([f.arena.leaderboard({ by: 'model' }), f.arena.leaderboard({}),
+      f.arena.leaderboard({ board: 'frontend', by: 'model' })]);
+    assert.ok(boards.every((board) => board.totals.votes === 30));
+    assert.equal(lookups, initial, 'scope and unit projections must not reread the same work histories');
+    f.vote('ah', 'b', 1);
+    assert.equal((await f.arena.totals()).votes, 31);
+    assert.ok(lookups > initial, 'vote invalidation refreshes the live ballot set');
+  } finally { f.close(); }
+});
 
 test('curated board uses exactly the selected questions and model-level qualification in both views', async () => {
   assert.equal(CURATED_BOARDS.frontend.taskIds.length, 36);

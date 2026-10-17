@@ -18,6 +18,7 @@ import { fail, HttpError } from './http.mjs';
 import { rankEntries, rankWorks } from './ranking.mjs';
 import { CURATED_BOARDS } from './curated-boards.mjs';
 import { createLeaderboardCache } from './leaderboard-cache.mjs';
+import { startLeaderboardWarmup } from './leaderboard-warmup.mjs';
 import { generationOf } from './generation.mjs';
 import { isTextTask, isAiJudgedTask } from './categories.mjs';
 import { isSenior, isStaff } from './roles.mjs';
@@ -46,7 +47,7 @@ const fromIdentity = (text) => {
   return { ...identity, ...generationOf(identity), providerId: providerOf(identity.providerId, providerOther || providerName) };
 };
 
-export function createArena({ db, catalog, library, limits, random = Math.random }) {
+export function createArena({ db, catalog, library, limits, random = Math.random, revision = () => '' }) {
   const readBatch = (read) => catalog.withSnapshot ? catalog.withSnapshot(read) : read();
   const q = {
     insertMatch: db.prepare('INSERT INTO matches (id, user_id, task_id, a_work, b_work, a_token, b_token, created_at, expires_at, datapack_root, datapack_version, a_identity, b_identity, pin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
@@ -80,9 +81,19 @@ export function createArena({ db, catalog, library, limits, random = Math.random
   // Match sampling and totals stay live; public boards publish on a ten-minute cadence.
   let cache = new Map();
   const publishedBoards = createLeaderboardCache();
+  let readRevision = null;
+  let warmup = null;
   const invalidate = ({ votesOnly = false } = {}) => {
     cache = new Map();
     if (!votesOnly) publishedBoards.clear();
+  };
+  const currentRevision = (snapshot) => {
+    const next = `${snapshot.version}|${revision()}`;
+    if (readRevision !== next) {
+      invalidate();
+      readRevision = next;
+    }
+    return next;
   };
 
   // Moderation controls which ballots count, including withdrawn / arena-off works.
@@ -95,7 +106,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     return !want || (want === 'unset' ? !id : id === want);
   });
 
-  async function countedVotes(taskId, snapshot, keyOf, filters = null, taskIds = null) {
+  async function validVotes(taskId, snapshot) {
     const works = new Map();
     const tasks = new Map();
     const aiJudged = (id) => {
@@ -113,7 +124,6 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     const manual = manualCorrections(db);
     const moved = votesBeforeTaskMove(db);
     const votes = [];
-    const rankedKeys = new Set();
     const rows = taskId ? q.votesOfTask.all(taskId) : q.votes.all();
     for (let i = 0; i < rows.length; i += 100) {
       await new Promise((resolve) => setImmediate(resolve));
@@ -121,7 +131,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
         for (const row of rows.slice(i, i + 100)) {
           if (aiJudged(row.task_id)) continue;
           if (moved(row)) continue;
-          if (!row.a_identity || !row.b_identity || (taskIds && !taskIds.has(row.task_id))) continue;
+          if (!row.a_identity || !row.b_identity) continue;
           const aIdentity = fromIdentity(row.a_identity), bIdentity = fromIdentity(row.b_identity);
           // A moved upload changes the ballot task; its opponent can remain in the old task.
           const a = lookup(row.task_id, row.a_work) ?? lookup(aIdentity.taskId, row.a_work);
@@ -132,16 +142,36 @@ export function createArena({ db, catalog, library, limits, random = Math.random
               b: { ...voteAttribution(row, 'b', bIdentity, fromIdentity(row.b_correction), b, snapshot, manual), taskId: row.task_id },
               choice: row.choice, userId: row.user_id ?? `vote:${row.id}`,
             };
-            if (filters && !(provenanceMatch(filters, vote.a) && provenanceMatch(filters, vote.b))) continue;
             votes.push(vote);
-            const left = keyOf(vote.a), right = keyOf(vote.b);
-            if (left !== right && rankedKeys.size <= RANK_WORKER_ENTRY_THRESHOLD) {
-              rankedKeys.add(left);
-              rankedKeys.add(right);
-            }
           }
         }
       });
+    }
+    return votes;
+  }
+
+  async function countedVotes(taskId, snapshot, keyOf, filters = null, taskIds = null) {
+    const cacheKey = `${snapshot.version}|ballots|${taskId ?? '*'}`;
+    const activeCache = cache;
+    if (!activeCache.has(cacheKey)) {
+      const pending = validVotes(taskId, snapshot);
+      activeCache.set(cacheKey, pending);
+      void pending.catch(() => { if (activeCache.get(cacheKey) === pending) activeCache.delete(cacheKey); });
+    }
+    const all = await activeCache.get(cacheKey);
+    const votes = [], rankedKeys = new Set();
+    for (let i = 0; i < all.length; i += 100) {
+      await new Promise((resolve) => setImmediate(resolve));
+      for (const vote of all.slice(i, i + 100)) {
+        if (taskIds && !taskIds.has(vote.a.taskId)) continue;
+        if (filters && !(provenanceMatch(filters, vote.a) && provenanceMatch(filters, vote.b))) continue;
+        votes.push(vote);
+        const left = keyOf(vote.a), right = keyOf(vote.b);
+        if (left !== right && rankedKeys.size <= RANK_WORKER_ENTRY_THRESHOLD) {
+          rankedKeys.add(left);
+          rankedKeys.add(right);
+        }
+      }
     }
     return { votes, rankedEntryCount: rankedKeys.size };
   }
@@ -170,6 +200,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
   // Bootstrap needs counts, not a fit or every category's standings. Keep the
   // exact same ballot validation and invalidation as the leaderboard.
   function totals(snapshot = catalog.snapshot()) {
+    currentRevision(snapshot);
     const cacheKey = `${snapshot.version}|totals`;
     if (cache.has(cacheKey)) return cache.get(cacheKey);
     const activeCache = cache;
@@ -197,6 +228,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
   }
 
   function workScores(taskId, snapshot = catalog.snapshot()) {
+    currentRevision(snapshot);
     if (isAiJudgedTask(catalog.task(taskId)) || isTextTask(catalog.task(taskId))) return Promise.resolve([]);
     const cacheKey = `${snapshot.version}|${taskId}|work`;
     if (cache.has(cacheKey)) return cache.get(cacheKey);
@@ -218,13 +250,14 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     const curated = board && Object.hasOwn(CURATED_BOARDS, board) ? CURATED_BOARDS[board] : null;
     if (board && (!curated || task || category || domain)) fail(400, '精选榜筛选无效', 'invalid_query');
     const archive = snapshot ?? catalog.snapshot();
+    currentRevision(archive);
     const filters = harness || provider ? { harness, provider } : null;
     const cacheKey = `${archive.version}|${task ?? '*'}|${category ?? '*'}|${domain ?? '*'}|${board ?? '*'}|${by}${filters ? `|${harness ?? ''}|${provider ?? ''}` : ''}`;
     if (cache.has(cacheKey)) return cache.get(cacheKey);
     const activeCache = cache;
     const pending = Promise.resolve().then(async () => {
       const keyOf = (work) => by === 'model' ? (work.modelKey ?? modelKey(work)) : (work.configKey ?? entityKey(work));
-      const rankedTasks = (task ? [catalog.task(task)].filter(Boolean) : catalog.tasks()).filter((t) => !isAiJudgedTask(t));
+      const rankedTasks = readBatch(() => (task ? [catalog.task(task)].filter(Boolean) : catalog.tasks()).filter((t) => !isAiJudgedTask(t)));
       const selected = curated && new Set(curated.taskIds);
       const scoped = curated || category || domain ? rankedTasks.filter((t) => (!selected || selected.has(t.id)) && (!category || t.category === category) && (!domain || t.domains?.includes(domain))) : null;
       const { votes, rankedEntryCount } = await countedVotes(task, archive, keyOf, filters, scoped && new Set(scoped.map((t) => t.id)));
@@ -244,8 +277,12 @@ export function createArena({ db, catalog, library, limits, random = Math.random
           .map((row) => row.key));
       }
       const qualifies = (work) => !qualifiedModels || qualifiedModels.has(work.modelKey ?? modelKey(work));
-      const pool = (task ? (isAiJudgedTask(catalog.task(task)) ? [] : library.eligible(task, archive)) : (scoped ?? rankedTasks).flatMap((t) => library.eligible(t.id, archive)))
-        .filter((work) => !filters || provenanceMatch(filters, work));
+      const pool = [];
+      for (const selectedTask of scoped ?? rankedTasks) {
+        pool.push(...readBatch(() => library.eligible(selectedTask.id, archive)
+          .filter((work) => !filters || provenanceMatch(filters, work))));
+        await new Promise((resolve) => setImmediate(resolve));
+      }
       let standings;
       if (!task && !category && !domain && !curated) {
         standings = {};
@@ -268,7 +305,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
         return describe(model ? { ...sample, modelName: model.name, vendor: model.vendor } : sample, by);
       };
       const rankedKeys = new Set(ranked.map((row) => row.key));
-      const result = {
+      const result = readBatch(() => ({
         task,
         category,
         domain,
@@ -297,7 +334,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
           .sort((a, b) => a.modelName.localeCompare(b.modelName, 'en', { numeric: true }) || a.effort.localeCompare(b.effort)),
         provisionalGames: limits.provisionalGames,
         updatedAt: new Date().toISOString(),
-      };
+      }));
       return result;
     });
     activeCache.set(cacheKey, pending);
@@ -384,16 +421,27 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     return [...models.values()].sort((a, b) => a.name.localeCompare(b.name, 'en', { numeric: true }));
   }
 
+  async function leaderboardSnapshot(options = {}) {
+    for (;;) {
+      const snapshot = options.snapshot ?? catalog.snapshot();
+      const before = currentRevision(snapshot);
+      const key = JSON.stringify([snapshot.version, ...['task', 'category', 'domain', 'board', 'by', 'harness', 'provider']
+        .map((field) => options[field] ?? null)]);
+      const result = await publishedBoards.get(key, () => leaderboard({ ...options, snapshot: options.snapshot ?? catalog.snapshot() }));
+      // A withdrawal or external database write while fitting cannot publish an old board.
+      if (before === currentRevision(options.snapshot ?? catalog.snapshot())) return result;
+    }
+  }
+
   return {
     invalidate,
     cleanupExpiredMatches,
     leaderboard,
-    leaderboardSnapshot(options = {}) {
-      const snapshot = options.snapshot ?? catalog.snapshot();
-      const key = JSON.stringify([snapshot.version, ...['task', 'category', 'domain', 'board', 'by', 'harness', 'provider']
-        .map((field) => options[field] ?? null)]);
-      return publishedBoards.get(key, () => leaderboard({ ...options, snapshot }));
+    leaderboardSnapshot,
+    startWarmup() {
+      warmup ??= startLeaderboardWarmup({ read: leaderboardSnapshot });
     },
+    async close() { await warmup?.close(); },
     totals,
     workScores,
     poolStats,

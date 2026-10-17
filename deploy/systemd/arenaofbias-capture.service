@@ -32,8 +32,13 @@ ProtectControlGroups=yes
 # Chromium's sandbox needs user namespaces; do not restrict them here.
 # route.fetch() needs the content listener and approved CDNs on the host network.
 MemoryMax=1G
+MemoryHigh=768M
 CPUQuota=100%
+CPUWeight=10
+IOWeight=10
+Nice=10
 TasksMax=256
+TimeoutStopSec=15
 Restart=on-failure
 RestartSec=3
 

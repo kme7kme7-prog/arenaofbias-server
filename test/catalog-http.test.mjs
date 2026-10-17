@@ -49,6 +49,30 @@ async function fixture(run) {
   }
 }
 
+test('published boards follow local/external withdrawals and discard an in-flight old pool', async () => fixture(async ({ platform, call, admin, data, dist, root }) => {
+  Object.assign(data.tasks[0].results[0], { generationMode: 'single-turn', humanIntervention: 'none' });
+  writeFileSync(join(dist, 'data.json'), JSON.stringify(data));
+  const path = '/api/leaderboard?by=model';
+  const first = (await call(path)).data;
+  assert.equal(first.unranked[0].works, 1);
+  platform.library.setFaceSettings(admin, 'one', 'pack', { show_arena: false });
+  assert.deepEqual((await call(path)).data.unranked, [], 'local writes invalidate without waiting ten minutes');
+  const external = new DatabaseSync(join(root, 'data/platform.db'));
+  try { external.exec('UPDATE work_overrides SET show_arena = 1'); } finally { external.close(); }
+  assert.equal((await call(path)).data.unranked[0].works, 1);
+  platform.arena.invalidate();
+  const eligible = platform.library.eligible;
+  let changed = false;
+  platform.library.eligible = (...args) => {
+    const pool = eligible.apply(platform.library, args);
+    if (!changed) { changed = true; setImmediate(() => platform.library.setFaceSettings(admin, 'one', 'pack', { show_arena: false })); }
+    return pool;
+  };
+  const results = await Promise.all([call(path), call(path)]);
+  assert.ok(changed);
+  assert.ok(results.every((result) => result.status === 200 && result.data.unranked.length === 0));
+}));
+
 test('public catalog revalidates one anonymous snapshot without touching sessions or ranking', async () => fixture(async ({ platform, call, origin }) => {
   const first = await call('/api/catalog');
   assert.equal(first.status, 200);

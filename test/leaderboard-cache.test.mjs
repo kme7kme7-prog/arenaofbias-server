@@ -39,6 +39,7 @@ test('a failed fit can retry and moderation invalidation cannot resurrect an old
   cache.clear();
   const current = cache.get('other', () => ({ rows: ['after moderation'] }));
   await current;
-  finish({ rows: ['old'] }); await old;
+  finish({ rows: ['old'] });
+  assert.strictEqual(await old, await current, 'in-flight readers must not receive the withdrawn snapshot');
   assert.strictEqual(cache.get('other', () => { assert.fail('current snapshot must be retained'); }), current);
 });

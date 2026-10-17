@@ -448,10 +448,14 @@ bantime = 1d
 
 1. 创建两个无登录 shell 的系统用户和对应同名组：`arenaofbias` 的 HOME 为 `/var/lib/arenaofbias`，`aob-capture` 的 HOME 为 `/var/lib/aob-capture`。保留已有账号，不重建。
 2. 保持 `/opt/arenaofbias-capture/node_modules` 的既有 Playwright 运行时；把本次已合入 main 的 `scripts/capture-browser.mjs` 安装为 root 所有的 `/opt/arenaofbias-capture/capture-browser.mjs`。平台的 `node_modules` 仍指向相同运行时，客户端与服务端 Playwright 版本必须一致。Chrome 使用系统 `/opt/google/chrome`，不依赖 `/root` 缓存。
-3. 将 `deploy/systemd/arenaofbias-capture.service` 安装为 `/etc/systemd/system/arenaofbias-capture.service`。此服务绑定环回，开启 Chromium 系统沙盒，隐藏 `/www`、平台 drop-in 和平台 HOME；限制 1 GiB 内存、1 CPU 和 256 tasks。不要增加 `RestrictNamespaces` 或 `MemoryDenyWriteExecute`，Chrome 沙盒和 V8 需要相应能力。保留主机网络供受控 `route.fetch()` 读取作品和批准的 CDN。
+3. 将 `deploy/systemd/arenaofbias-capture.service` 安装为 `/etc/systemd/system/arenaofbias-capture.service`。此服务绑定环回，开启 Chromium 系统沙盒，隐藏 `/www`、平台 drop-in 和平台 HOME；限制 1 GiB 内存（768 MiB开始回收）、1 CPU 和 256 tasks，CPU/IO权重10、Nice10让前台请求优先。不要增加 `RestrictNamespaces` 或 `MemoryDenyWriteExecute`，Chrome 沙盒和 V8 需要相应能力。保留主机网络供受控 `route.fetch()` 读取作品和批准的 CDN。
 4. `systemctl daemon-reload && systemctl enable --now arenaofbias-capture`。服务在发布 `/run/aob-capture/endpoint` 后才通知 ready；该文件为 `aob-capture:aob-capture 0640`，目录为 0750。端点含浏览器控制令牌，不打印、不写入日志或仓库，不公开控制端口。
 5. 停止平台后，把 `.data` 的所有者改为 `arenaofbias:arenaofbias`，根目录权限改为 0700；源码和 `.datapack` 仍由 root 持有、平台用户可读。将 `deploy/systemd/arenaofbias-server-hardening.conf` 安装到平台服务 drop-in 的 `hardening.conf`，保留现有 SMTP、审核、Turnstile 配置，daemon-reload 后启动平台。
 6. 配置 `CAPTURE_ENDPOINT_FILE=/run/aob-capture/endpoint` 时，平台只连接独立服务；连接失败转人工，不退回本地 Chrome。未配置此项时保留开发环境的本地截图路径；本地路径的 `CAPTURE_SANDBOX=1` 仍要求非 root 用户。
+
+只分离截图资源时，可先安装 `deploy/systemd/arenaofbias-server-capture.conf` 为平台drop-in；它仅添加服务顺序与端点文件，不改变平台既有User/Group、数据owner或密钥配置。平台若已为非root用户，须先确认它能通过既有 `aob-capture` 组读取端点。完整身份迁移按前述步骤独立验收，不与资源隔离捆绑。
+
+正式入口监听后会串行预热综合/精选前端的配置榜与模型榜，每轮完成600秒后再次访问相同公开缓存；`LEADERBOARD_WARMUP=0` 可关闭后台预热。公开快照仍以各自成功计算后600秒为边界，新票不提前刷新，审核/作品/包修订立即失效，计算期间发生变更则丢弃旧结果重新读取。其他筛选继续按需计算，不持久化榜单或跨进程共享。关停会等待当前预热计算结束后再关闭数据库。
 
 验收实际进程 UID、Chrome 不带 `--no-sandbox`、`chrome://sandbox` 的 namespace/seccomp 状态、两档首屏与延迟截图、页面/iframe 文字、外站 HTTP/WebSocket 阻断，以及截图用户无法读取业务库、平台密钥配置与平台进程环境。先用合成页面和临时媒体目录，不为验收创建生产投稿。
 

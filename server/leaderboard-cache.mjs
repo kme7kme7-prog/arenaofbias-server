@@ -11,6 +11,7 @@ export function createLeaderboardCache({ now = Date.now } = {}) {
       if (entries.has(key)) return entries.get(key).promise;
       const entry = { expiresAt: Infinity };
       entry.promise = Promise.resolve().then(calculate).then((data) => {
+        if (entries.get(key) !== entry) return this.get(key, calculate);
         entry.expiresAt = now() + LEADERBOARD_INTERVAL_MS;
         return { ...data, refreshIntervalSeconds: LEADERBOARD_INTERVAL_MS / 1000,
           nextUpdateAt: new Date(entry.expiresAt).toISOString() };

@@ -119,7 +119,8 @@ export function createContentHandler({ config, library, arena, catalog, siteOrig
       'Cache-Control': target.draft || target.private || key[0] === 'm' ? 'no-store' : 'private, max-age=600',
     };
     if (route?.shell) {
-      readGuard.page(req);
+      // Only the inner work consumes the expensive HTML-rendering budget. The
+      // small trusted shell is already covered by the file request limit.
       const shell = shellResponse(route, siteOrigins);
       res.writeHead(200, { ...headers, 'Content-Security-Policy': shell.policy, 'Cache-Control': 'no-store',
         'Content-Type': 'text/html; charset=utf-8', 'Content-Length': shell.body.length, 'X-Content-Type-Options': 'nosniff' });

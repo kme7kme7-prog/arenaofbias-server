@@ -23,7 +23,7 @@ test('fixed transport keeps every capability on one dedicated host and rejects a
   assert.equal(contentRoute(config, { headers: { host: 'elsewhere.test' }, url: `/v/${key('w')}/` }), null);
 });
 
-async function fixture(t) {
+async function fixture(t, options = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'content-path-'));
   mkdirSync(join(directory, 'assets'));
   writeFileSync(join(directory, 'index.html'), '<!doctype html><html><head><script type="importmap">{"imports":{"app":"/assets/app.mjs"}}</script><link href="/assets/app.css" rel="stylesheet"></head><body><img src="/image.svg"><script type="module" src="/assets/app.mjs"></script></body></html>');
@@ -32,7 +32,7 @@ async function fixture(t) {
   let available = true;
   const work = { dir: directory, entry: 'index.html', moderation: { status: 'approved' } };
   const lookup = () => available ? work : null;
-  const server = createServer(createContentHandler({ config, siteOrigins: config.siteOrigins,
+  const server = createServer(createContentHandler({ config: { ...config, ...(options.pages ? { readLimits: { pages: options.pages } } : {}) }, siteOrigins: config.siteOrigins,
     library: { byContentKey: lookup, previewByKey: lookup, curatedByKey: lookup,
       draftByToken: lookup, publicContent: Boolean, publicCuratedContent: Boolean, isEligible: Boolean },
     arena: { workForToken: lookup } }));
@@ -122,6 +122,13 @@ test('opaque work requests can preflight reads, never writes or credentialed acc
   assert.equal((await f.request(url, 'content.example.test', 'OPTIONS', { 'access-control-request-method': 'POST' })).status, 405);
   f.revoke();
   assert.equal((await f.request(url, 'content.example.test', 'OPTIONS', { 'access-control-request-method': 'GET' })).status, 410);
+});
+
+test('fixed-host shell does not halve the work HTML request budget', async t => {
+  const f = await fixture(t, { pages: 1 });
+  for (let i = 0; i < 3; i++) assert.equal((await f.request(`/v/${key('w')}/`)).status, 200);
+  assert.equal((await f.request(`/c/${key('w')}/`)).status, 200);
+  assert.equal((await f.request(`/c/${key('w')}/`)).status, 429);
 });
 
 test('shell storage and message broker accepts only its opaque child and configured parent', () => {

@@ -7,6 +7,7 @@
 import { join } from 'node:path';
 import { createAuth } from './auth.mjs';
 import { config, limits } from './config.mjs';
+import { levelOf } from './roles.mjs';
 import { openDatabase } from './db.mjs';
 
 const args = process.argv.slice(2);
@@ -56,22 +57,23 @@ try {
     const user = auth.createAdmin(args[1], await passwordFromStdin());
     console.log(`已创建管理员「${user.name}」。`);
   } else if (args.includes('--list') || !args.length) {
-    const users = db.prepare('SELECT name, role, created_at FROM users ORDER BY created_at').all();
+    const users = db.prepare('SELECT name, role, member_level, created_at FROM users ORDER BY created_at').all();
     if (!users.length) console.log('还没有账号。运行 npm run admin -- --create <用户名> 创建管理员。');
-    for (const user of users) console.log(`${roleLabels[user.role] ?? roleLabels.user}\t${user.name}\t${new Date(user.created_at).toLocaleString('zh-CN')}`);
+    for (const user of users) console.log(`Lv${levelOf(user)} ${roleLabels[user.role] ?? roleLabels.user}\t${user.name}\t${new Date(user.created_at).toLocaleString('zh-CN')}`);
   } else {
     const name = args[0];
     let role = 'admin';
     if (args.length === 2 && args[1] === '--revoke') role = 'user';
+    else if (args.length === 3 && args[1] === '--level' && /^[0-3]$/.test(args[2])) role = Number(args[2]);
     else if (args.length === 3 && args[1] === '--role' && Object.hasOwn(roleLabels, args[2])) role = args[2];
-    else if (args.length !== 1 || !name || name.startsWith('--')) throw new Error('用法：npm run admin -- <用户名> [--revoke | --role admin|moderator|user]');
+    else if (args.length !== 1 || !name || name.startsWith('--')) throw new Error('用法：npm run admin -- <用户名> [--revoke | --level 0|1|2|3 | --role admin|moderator|user]');
   const auth = createAuth(db, { admins: config.admins, secureCookies: false, sessionTtl: limits.sessionTtl });
   const user = auth.promote(name, role);
   if (!user) {
     console.error(`找不到用户「${name}」。`);
     process.exitCode = 1;
   } else {
-    console.log(`${user.name} 现在是${roleLabels[user.role]}。`);
+    console.log(`${user.name} 现在是Lv${levelOf(user)} ${roleLabels[user.role]}。`);
   }
   }
 } catch (error) {

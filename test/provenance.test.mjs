@@ -1,3 +1,4 @@
+import { finishViewing, voteAfterViewing } from './helpers/arena.mjs';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -238,6 +239,8 @@ test('an old pack accepts a custom Harness and binary providers but no Harness r
   const base = `http://127.0.0.1:${site.address().port}`;
   let cookie = '';
   const call = async (method, path, body, raw = false) => {
+    const voting = /\/api\/arena\/matches\/([^/]+)\/vote$/.exec(path);
+    if (voting) finishViewing(platform.db, voting[1]);
     const response = await fetch(base + path, { method, headers: {
       origin: base, ...(cookie ? { cookie } : {}), ...(raw ? {} : { 'content-type': 'application/json' }),
     }, body: raw ? body : JSON.stringify(body) });
@@ -276,6 +279,8 @@ test('submission, review, metadata and vote snapshots carry provenance', async (
     const headers = { origin: base };
     if (jars.get(who)) headers.cookie = jars.get(who);
     if (body !== undefined && !raw) headers['content-type'] = 'application/json';
+    const voting = /\/api\/arena\/matches\/([^/]+)\/vote$/.exec(path);
+    if (voting) finishViewing(platform.db, voting[1]);
     const response = await fetch(base + path, { method, headers, body: raw ? body : body === undefined ? undefined : JSON.stringify(body) });
     const cookie = response.headers.get('set-cookie');
     if (cookie) jars.set(who, cookie.split(';')[0]);
@@ -441,7 +446,7 @@ test('submission, review, metadata and vote snapshots carry provenance', async (
     assert.equal('harnessVersion' in identity, false);
     assert.equal(identity.configKey, `${identity.modelKey}|${identity.effortKey}`);
     for (const key of retired) assert.equal(key in identity, false);
-    assert.equal(platform.arena.vote(alice, match.id, 'a').counted, true);
+    assert.equal(voteAfterViewing(platform, alice, match.id, 'a').counted, true);
     const vote = platform.db.prepare('SELECT id FROM votes WHERE match_id = ?').get(match.id);
     const before = await platform.arena.leaderboard({ task: 'one' });
     assert.throws(() => platform.arena.correctVote({ id: 'root', name: 'root', role: 'admin' }, vote.id, 'a',

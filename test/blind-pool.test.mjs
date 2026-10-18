@@ -1,3 +1,4 @@
+import { finishViewing, voteAfterViewing } from './helpers/arena.mjs';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -114,14 +115,14 @@ test('only staff can draw and count blind votes on their own uploads', async () 
         await assert.rejects(() => f.arena.createMatch(user, 'one'), (error) => error.code === 'insufficient');
         // A role change before voting must also restore the ordinary user's restriction.
         const match = await f.arena.createMatch({ ...user, role: 'admin' }, 'one');
-        const result = f.arena.vote(user, match.id, 'a');
+        const result = voteAfterViewing(f, user, match.id, 'a');
         assert.deepEqual([result.counted, result.reason], [false, 'own']);
         assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM votes').get().n, 0);
       } else {
         const match = await f.arena.createMatch(user, 'one');
         const row = f.db.prepare('SELECT a_work, b_work FROM matches WHERE id = ?').get(match.id);
         assert.deepEqual([row.a_work, row.b_work].sort(), ['own-a', 'own-b']);
-        assert.equal(f.arena.vote(user, match.id, 'tie').counted, true, role);
+        assert.equal(voteAfterViewing(f, user, match.id, 'tie').counted, true, role);
         assert.equal((await f.arena.leaderboard({ task: 'one' })).totals.votes, 1);
         await assert.rejects(() => f.arena.createMatch(user, 'one'), (error) => error.code === 'exhausted');
       }
@@ -399,21 +400,21 @@ test('cooldown takes six reveals by creation time across tasks, then applies the
   } finally { f.close(); }
 });
 
-test('uncounted login reveals cool works for users and staff; skip saves a decision without revealing identities', async () => {
+test('unbound login ballots count and cool works for users and staff; skip saves a decision without revealing identities', async () => {
   for (const role of ['user', 'moderator', 'admin']) {
     const f = coolingFixture();
     const user = { ...coolingUser, role };
     try {
       const match = await f.draw(false, user);
       assert.deepEqual(f.pair(match), ['a1', 'b1']);
-      const revealed = f.arena.vote(user, match.id, 'a');
-      assert.deepEqual([revealed.counted, revealed.reason], [false, 'unbound']);
+      const revealed = voteAfterViewing(f, user, match.id, 'a');
+      assert.deepEqual([revealed.counted, revealed.reason], [true, '']);
       assert.ok(revealed.a && revealed.b);
-      assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM votes').get().n, 0);
+      assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM votes').get().n, 1);
       const next = await f.draw(true, user);
       assert.deepEqual(f.pair(next), ['a2', 'b2'], role);
-      assert.deepEqual(f.arena.vote(user, next.id, 'skip'), {
-        choice: 'skip', counted: false, reason: 'skipped', a: null, b: null,
+      assert.deepEqual(voteAfterViewing(f, user, next.id, 'skip'), {
+        choice: 'skip', counted: false, reason: 'skipped', a: null, b: null, countedFor: { public: false, curated: false }, curatedEligible: false, voterLevel: role === 'admin' ? 3 : role === 'moderator' ? 2 : 0,
       });
       const saved = f.db.prepare('SELECT choice, decided_at FROM matches WHERE id = ?').get(next.id);
       assert.equal(saved.choice, 'skip');
@@ -470,7 +471,7 @@ test('a senior admin pin keeps its model in every counted pair despite cooling, 
       assert.equal(row.pin, 'c');
       assert.ok([row.a_work, row.b_work].includes('c1'));
       opponents.push([row.a_work, row.b_work].find((id) => id !== 'c1'));
-      const result = f.arena.vote(admin, match.id, 'a');
+      const result = voteAfterViewing(f, admin, match.id, 'a');
       assert.deepEqual([result.counted, result.pinned], [true, row.a_work === 'c1' ? 'a' : 'b']);
       previous = match.id;
     }

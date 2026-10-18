@@ -57,8 +57,8 @@ test('v18 preserves v16/v17 metadata, audit actors and frozen vote identities on
           note: row.model_id || !vendor ? retained.note : [retained.note, `手填模型厂商：${vendor}`].filter(Boolean).join('\n'),
         });
       }
-      assert.deepEqual(db.prepare('SELECT * FROM votes ORDER BY id').all().map((row) => ({ ...row })), originalVotes);
-      assert.deepEqual(db.prepare('SELECT * FROM matches ORDER BY id').all().map((row) => ({ ...row })), originalMatches.map((row) => ({ ...row, pin: null })));
+      assert.deepEqual(db.prepare('SELECT * FROM votes ORDER BY id').all().map((row) => ({ ...row })), originalVotes.map(row => ({ ...row, voter_level: null, visitor_hash: null, voided_at: null, voided_by: null, void_reason: null })));
+      assert.deepEqual(db.prepare('SELECT * FROM matches ORDER BY id').all().map((row) => ({ ...row })), originalMatches.map((row) => ({ ...row, pin: null, visitor_hash: null, ready_at: null, choice_received_at: null, draw_ip: null, draw_subnet: null })));
       const audits = db.prepare('SELECT work_id, action, actor_id, at FROM audit ORDER BY work_id, action').all();
       assert.deepEqual(audits.map((row) => [row.work_id, row.action, row.actor_id, row.at]), [
         ['audited', 'unverified', 'admin', 50], ['manual', 'delete', 'admin', 60],

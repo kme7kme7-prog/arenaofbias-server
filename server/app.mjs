@@ -4,6 +4,10 @@ import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { setImmediate as yieldToRequests } from 'node:timers/promises';
 import { createArena } from './arena.mjs';
+import { createCurated } from './curated-boards.mjs';
+import { createQualification } from './qualification.mjs';
+import { createArenaVoters } from './arena-voter-state.mjs';
+import { createVoteRisk, normalizeIp, subnetOf } from './vote-risk.mjs';
 import { createFeatured } from './featured.mjs';
 import { avatarOf, createAuth } from './auth.mjs';
 import { createEmailAuth } from './auth-email.mjs';
@@ -32,7 +36,7 @@ import { registerShow1Guess } from './show1/guess.mjs';
 import { registerGuessRooms } from './show1/guess-room-http.mjs';
 import { turnstileEnabled, turnstileSiteKey, verifyTurnstile } from './turnstile.mjs';
 import { createReadGuard } from './read-guard.mjs';
-import { isSenior, isStaff } from './roles.mjs';
+import { isSenior, isStaff, levelOf, requireContributor } from './roles.mjs';
 
 const foldScript = readFileSync(new URL('./fold.js', import.meta.url));
 
@@ -62,14 +66,15 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const adminService = createAdmin({ db, catalog, library });
   const inbox = createInbox({ library, config, limits });
   const catalogRevision = createCatalogRevision(db);
-  const arena = createArena({ db, catalog, library, limits, revision: catalogRevision });
-  const uploadedCount = db.prepare('SELECT COUNT(*) AS n FROM works WHERE owner_id = ? AND deleted_at IS NULL');
-  const questionEligibility = (user) => {
-    const votes = arena.votesBy(user.id), uploads = uploadedCount.get(user.id).n;
-    const exempt = isStaff(user);
-    return { allowed: exempt || votes >= 100 || uploads >= 10, exempt, votes, uploads, requiredVotes: 100, requiredUploads: 10 };
-  };
-  const matchCleanup = setInterval(() => arena.cleanupExpiredMatches(), 60e3);
+  const curated = createCurated({ db, catalog, library, questions });
+  const arena = createArena({ db, catalog, library, limits, revision: catalogRevision, curated });
+  const qualification = createQualification({ db, catalog, library, auth });
+  const voters = createArenaVoters({ db, config });
+  const voteRisk = createVoteRisk({ db, invalidate: () => arena.invalidate() });
+  voteRisk.cleanup();
+  const questionEligibility = user => ({ allowed: levelOf(user) >= 1, level: levelOf(user), requiredLevel: 1,
+    ...(levelOf(user) < 1 ? { reason: 'level_required' } : {}) });
+  const matchCleanup = setInterval(() => { arena.cleanupExpiredMatches(); voters.cleanup(); voteRisk.cleanup(); }, 60e3);
   matchCleanup.unref();
   const featured = createFeatured({ db, catalog, library, arena });
   const comments = createComments(db, library);
@@ -185,6 +190,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     return {
       ...versionInfo(),
       user: user ? { ...auth.public(user), emailBound: Boolean(user.email) } : null,
+      qualification: qualification.progress(user),
       me: user ? {
         votes: arena.votesBy(user.id), pending: library.pendingCount(user.id),
         questionEligibility: questionEligibility(user),
@@ -287,7 +293,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     } finally { loginSecurity.finish(attempt); }
   });
   router.on('GET', '/api/auth/me', (ctx) => ({
-    user: ctx.user ? { id: ctx.user.id, username: ctx.user.name, role: ctx.user.role === 'admin' ? 'admin' : null, email: ctx.user.email ?? null, avatar: avatarOf(ctx.user) } : null,
+    user: ctx.user ? { id: ctx.user.id, username: ctx.user.name, role: ctx.user.role === 'admin' ? 'admin' : null, email: ctx.user.email ?? null, avatar: avatarOf(ctx.user), level: levelOf(ctx.user), levelSince: auth.public(ctx.user).levelSince, levelSource: ctx.user.level_source ?? null } : null,
   }));
   router.on('GET', '/api/auth/turnstile', () => ({ siteKey: turnstileEnabled() ? turnstileSiteKey() : null }));
   router.on('POST', '/api/auth/email/send', async (ctx) => emailAuth.send(await readJson(ctx.req), ctx.user, ctx.ip));
@@ -310,12 +316,12 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
 
   router.on('GET', '/api/questions/eligibility', (ctx) => ({ eligibility: questionEligibility(signedIn(ctx)) }));
   router.on('POST', '/api/questions', async (ctx) => {
-    const user = emailBound(ctx);
+    const user = requireContributor(signedIn(ctx));
+    emailBound(ctx);
     limit.write(user.id);
     const body = await readJson(ctx.req, 6 * 1024 * 1024);
     requireCategory(body.category);
     if (!Object.hasOwn(body, 'draftId') && !Object.hasOwn(body, 'work') && !Object.hasOwn(body, 'confirmed')) {
-      if (!questionEligibility(user).allowed) fail(403, '单独提交题目需要完成 100 次有效盲评或上传 10 件作品；附带示例结果可直接发起。', 'question_ineligible');
       const question = transaction(db, () => questions.create(user, body, catalog.tags()));
       return { question };
     }
@@ -405,7 +411,8 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   });
 
   router.on('POST', '/api/drafts', async (ctx) => {
-    const user = emailBound(ctx);
+    const user = requireContributor(signedIn(ctx));
+    emailBound(ctx);
     limit.write(user.id);
     limit.drafts(user.id);
     const task = ctx.url.searchParams.get('task') ?? '';
@@ -423,7 +430,8 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     return { ok: true };
   });
   router.on('POST', '/api/works', async (ctx) => {
-    const user = emailBound(ctx);
+    const user = requireContributor(signedIn(ctx));
+    emailBound(ctx);
     limit.write(user.id);
     const body = await readJson(ctx.req, 6 * 1024 * 1024);
     checkDatapack(ctx, library.draftTask(String(body.draftId ?? '')));
@@ -529,14 +537,15 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   // Account administration for Gallery's member list and the admin web app (the CLI in server/cli.mjs does the same).
   router.on('GET', '/api/admin/users', (ctx) => {
     adminOnly(ctx);
-    return { users: adminService.members(auth.list()) };
+    const summaries = qualification.summaries();
+    return { users: adminService.members(auth.list()).map(user => ({ ...user, exam: summaries.get(user.id) ?? { passedAt: null, attempts: 0, bestCorrect: null, questionCount: null } })) };
   });
   router.on('POST', '/api/admin/users/:id/role', async (ctx) => {
     const admin = adminOnly(ctx);
     limit.write(admin.id);
     const body = await readJson(ctx.req);
-    const user = auth.setRole(admin, ctx.params.id, String(body.role ?? ''));
-    library.audit(admin, 'role', null, `${user.name} → ${{ admin: '高级管理员', moderator: '普通管理员', user: '普通用户' }[user.role]}`);
+    const user = auth.setRole(admin, ctx.params.id, body.level ?? String(body.role ?? ''));
+    library.audit(admin, 'role', null, `${user.name} → Lv${user.level}`);
     return { user };
   });
 
@@ -697,20 +706,72 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     return { work };
   });
 
-  router.on('POST', '/api/arena/matches', async (ctx) => {
+  router.on('GET', '/api/arena/policy', ctx => voters.policy(voters.actor(ctx)));
+  router.on('POST', '/api/arena/matches', async ctx => {
     limit.matches(ctx.user?.id ?? ctx.ip);
-    const body = await readJson(ctx.req);
-    const task = String(body.task ?? '');
-    const snapshot = checkDatapack(ctx, task);
-    return arena.createMatch(ctx.user, task, body.previous, snapshot, body.avoidCooling === true, body.pin ? String(body.pin) : null);
+    const body = await readJson(ctx.req), actor = voters.actor(ctx);
+    return voters.serial(actor, async () => {
+      await voters.beforeMatch(actor, body.turnstileToken, ctx.ip);
+      const task = String(body.task ?? '');
+      const match = await arena.createMatch(ctx.user, task, body.previous, checkDatapack(ctx, task), body.avoidCooling === true,
+        body.pin ? String(body.pin) : null, actor.visitorHash);
+      db.prepare('UPDATE matches SET draw_ip=?,draw_subnet=? WHERE id=?').run(normalizeIp(ctx.ip),subnetOf(ctx.ip),match.id);
+      return { ...match, challenge: voters.challenge(actor) };
+    });
   });
-  router.on('POST', '/api/arena/matches/:id/vote', async (ctx) => {
+  router.on('POST', '/api/arena/matches/:id/ready', async ctx => {
     limit.write(ctx.user?.id ?? ctx.ip);
-    const body = await readJson(ctx.req);
-    return arena.vote(ctx.user, ctx.params.id, String(body.choice ?? ''));
+    const actor = voters.actor(ctx);
+    return voters.serial(actor, () => arena.ready(ctx.user, ctx.params.id, actor.visitorHash));
   });
+  router.on('POST', '/api/arena/matches/:id/vote', async ctx => {
+    limit.write(ctx.user?.id ?? ctx.ip);
+    const body = await readJson(ctx.req), actor = voters.actor(ctx), choice = String(body.choice ?? '');
+    return voters.serial(actor, async () => {
+      if (ctx.user) actor.user = auth.byId(ctx.user.id);
+      const evidence = voteRisk.capture(actor,ctx.params.id,choice,ctx);
+      let proof;
+      try {
+        const match = arena.checkVote(actor.user, ctx.params.id, choice, actor.visitorHash);
+        proof = await voters.beforeVote(actor, match, choice, body.turnstileToken, ctx.ip, ctx.receivedAt);
+        if (ctx.user) actor.user = auth.byId(ctx.user.id);
+        const result = arena.vote(actor.user, ctx.params.id, choice, { visitorHash: actor.visitorHash,
+          accept: current => voters.accept(actor, current, choice, proof),
+          recordDecision: () => voteRisk.record(evidence,{accepted:true,verified:proof.verified,lastVerifiedAt:voters.lastVerifiedAt(actor)}) });
+        return { ...result, challenge: voters.challenge(actor) };
+      } catch (error) {
+        voteRisk.record(evidence,{errorCode:error.code||`http_${error.status??500}`,verified:proof?.verified,lastVerifiedAt:voters.lastVerifiedAt(actor)});
+        throw error;
+      }
+    });
+  });
+  router.on('GET','/api/admin/vote-risk/summary',ctx=>voteRisk.summary(adminOnly(ctx),ctx.url.searchParams));
+  router.on('GET','/api/admin/vote-risk/choices',ctx=>voteRisk.choices(adminOnly(ctx),ctx.url.searchParams));
+  router.on('GET','/api/admin/vote-risk/model-voters',ctx=>voteRisk.modelVoters(adminOnly(ctx),ctx.url.searchParams));
+  router.on('POST','/api/admin/vote-risk/votes/void',async ctx=>{const actor=adminOnly(ctx);limit.write(actor.id);return voteRisk.voidVotes(actor,await readJson(ctx.req));});
+  router.on('POST','/api/admin/vote-risk/votes/restore',async ctx=>{const actor=adminOnly(ctx);limit.write(actor.id);return voteRisk.restoreVotes(actor,await readJson(ctx.req));});
+  router.on('GET', '/api/curated', () => curated.info());
+  router.on('GET', '/api/admin/curated', ctx => curated.adminInfo(adminOnly(ctx)));
+  router.on('POST', '/api/admin/curated/sections', async ctx => curated.createSection(adminOnly(ctx), await readJson(ctx.req)));
+  router.on('PATCH', '/api/admin/curated/sections/:id', async ctx => curated.editSection(adminOnly(ctx), ctx.params.id, await readJson(ctx.req)));
+  router.on('PUT', '/api/admin/curated/sections/order', async ctx => curated.orderSections(adminOnly(ctx), await readJson(ctx.req)));
+  router.on('DELETE', '/api/admin/curated/sections/:id', async ctx => curated.deleteSection(adminOnly(ctx), ctx.params.id, await readJson(ctx.req)));
+  router.on('PUT', '/api/admin/curated/questions', async ctx => curated.saveQuestions(adminOnly(ctx), await readJson(ctx.req)));
+  router.on('GET', '/api/qualification', ctx => qualification.overview(signedIn(ctx)));
+  router.on('POST', '/api/qualification/attempts', async ctx => { const user = signedIn(ctx); limit.write(user.id); return qualification.start(user, await readJson(ctx.req)); });
+  router.on('GET', '/api/qualification/attempts/:id', ctx => qualification.get(signedIn(ctx), ctx.params.id));
+  router.on('POST', '/api/qualification/attempts/:id/items/:itemId/ready', ctx => { const user = signedIn(ctx); limit.write(user.id); return qualification.ready(user, ctx.params.id, ctx.params.itemId); });
+  router.on('PUT', '/api/qualification/attempts/:id/items/:itemId/answer', async ctx => { const user = signedIn(ctx); limit.write(user.id); return qualification.answer(user, ctx.params.id, ctx.params.itemId, (await readJson(ctx.req)).choice); });
+  router.on('POST', '/api/qualification/attempts/:id/submit', ctx => { const user = signedIn(ctx); limit.write(user.id); return qualification.submit(user, ctx.params.id); });
+  router.on('GET', '/api/admin/qualification', ctx => qualification.adminInfo(adminOnly(ctx)));
+  router.on('GET', '/api/admin/qualification/works', ctx => qualification.works(adminOnly(ctx), ctx.url.searchParams.get('taskId')));
+  router.on('PUT', '/api/admin/qualification/settings', async ctx => qualification.saveSettings(adminOnly(ctx), await readJson(ctx.req)));
+  router.on('POST', '/api/admin/qualification/pairs', async ctx => qualification.savePair(adminOnly(ctx), await readJson(ctx.req)));
+  router.on('PATCH', '/api/admin/qualification/pairs/:id', async ctx => qualification.savePair(adminOnly(ctx), await readJson(ctx.req), ctx.params.id));
+  router.on('DELETE', '/api/admin/qualification/pairs/:id', async ctx => qualification.deletePair(adminOnly(ctx), ctx.params.id, await readJson(ctx.req)));
   router.on('GET', '/api/leaderboard', (ctx) => {
     const board = ctx.url.searchParams.get('board') || null;
+    const audience = ctx.url.searchParams.get('audience') || null, sectionId = ctx.url.searchParams.get('sectionId') || null;
     const task = ctx.url.searchParams.get('task') || null;
     if (task && !catalog.task(task)) fail(404, '题目不存在');
     const category = ctx.url.searchParams.get('category') || null;
@@ -722,7 +783,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       if (value && value !== 'unset' && !catalog[field](value)) fail(400, `${field === 'harness' ? 'Harness' : '服务商'}筛选无效`, 'invalid_query');
       return [field, value];
     }));
-    return arena.leaderboardSnapshot({ task, category, domain, board, by: ctx.url.searchParams.get('by') === 'model' ? 'model' : 'config', ...filters });
+    return arena.leaderboardSnapshot({ task, category, domain, board, audience, sectionId, by: ctx.url.searchParams.get('by') === 'model' ? 'model' : 'config', ...filters });
   });
 
   registerShow1Compat(router, { db, catalog, library, snapshot: show1Snapshot, config, limit });
@@ -854,14 +915,14 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       if (!route) fail(404, '接口不存在');
       if (route.methodNotAllowed) fail(405, '不支持这个操作');
       if (req.method !== 'GET' && req.method !== 'HEAD') assertSameOrigin(req, config);
-      const ctx = { req, res, url, params: route.params, ip: clientIp(req, config.trustProxy),
+      const ctx = { req, res, url, params: route.params, receivedAt: Date.now(), ip: clientIp(req, config.trustProxy),
         user: url.pathname === '/api/catalog' ? null : auth.userFrom(req) };
       const result = await route.handler(ctx);
       if (!res.headersSent) return sendJson(res, 200, result ?? { ok: true });
     } catch (error) {
       if (res.headersSent) return res.destroy();
       if (error instanceof HttpError) return sendJson(res, error.status, { error: error.message, ...(error.code ? { code: error.code } : {}),
-        ...(error.retryAfter ? { retryAfter: error.retryAfter } : {}) },
+        ...(error.details ?? {}), ...(error.retryAfter ? { retryAfter: error.retryAfter } : {}) },
         error.retryAfter ? { 'Retry-After': String(error.retryAfter) } : {});
       console.error(error);
       return sendJson(res, 500, { error: '服务器出错了，请稍后再试' });
@@ -871,6 +932,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   return {
     db,
     auth,
+    curated, qualification, voters, voteRisk,
     library,
     references,
     arena,
@@ -879,7 +941,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     moderator,
     warmLeaderboards() { if (config.leaderboardWarmup !== false) arena.startWarmup(); },
     handleSite,
-    handleContent: createContentHandler({ config, library, arena, catalog, siteOrigins: config.siteOrigins, readGuard }),
+    handleContent: createContentHandler({ config, library, arena, qualification, catalog, siteOrigins: config.siteOrigins, readGuard }),
     async close() {
       guessRooms.close();
       clearInterval(matchCleanup);

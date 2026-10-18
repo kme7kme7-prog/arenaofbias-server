@@ -3,7 +3,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
-const KEY = '[wmdpc][0-9a-f]{32}';
+const KEY = '[wmdpce][0-9a-f]{32}';
 const ROUTE = new RegExp(`^/(v|c)/(${KEY})(/.*)$`);
 const shellScript = readFileSync(new URL('./content-shell.js', import.meta.url), 'utf8');
 const shellHash = createHash('sha256').update(shellScript).digest('base64');

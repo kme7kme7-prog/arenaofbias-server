@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, utimesSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, mkdirSync, writeFileSync, existsSync, utimesSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 
 test('release cleanup preserves current and recently expired matches, and requires apply', () => {
-  const root = mkdtempSync(join(tmpdir(), 'release-cleanup-'));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'release-cleanup-')));
   try {
     const versions = join(root, 'versions'), data = join(root, 'data');
     mkdirSync(versions); mkdirSync(data);

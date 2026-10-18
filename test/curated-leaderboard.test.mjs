@@ -40,8 +40,9 @@ function fixture() {
     };
     for (let i = 0; i < count; i++) {
       const id = `vote-${++n}`;
-      db.prepare(`INSERT INTO votes (id, match_id, task_id, a_work, b_work, pair_key, choice, created_at, source, a_identity, b_identity)
-        VALUES (?, ?, ?, ?, ?, ?, 'a', ?, 'arena', ?, ?)`).run(id, id, task, a, b, id, n, identity(a), identity(b));
+      db.prepare(`INSERT INTO votes (id, match_id, task_id, a_work, b_work, pair_key, choice, created_at, source, a_identity, b_identity, voter_level)
+        VALUES (?, ?, ?, ?, ?, ?, 'a', ?, 'arena', ?, ?, 1)`).run(id, id, task, a, b, id,
+        db.prepare('SELECT counting_started_at FROM curated_settings WHERE id=1').get().counting_started_at, identity(a), identity(b));
     }
     arena.invalidate();
   };
@@ -105,7 +106,7 @@ test('curated board uses exactly the selected questions and model-level qualific
     f.vote('c', 'b', 100, 'not-selected'); // Full rankings qualify C; this board does not.
     const model = await f.arena.leaderboard({ board: 'frontend', by: 'model' });
     assert.equal(model.board, 'frontend');
-    assert.deepEqual(model.scope.taskIds, CURATED_BOARDS.frontend.taskIds);
+    assert.deepEqual(model.scope.taskIds, [f.selected]);
     assert.equal(model.totals.votes, 124);
     assert.deepEqual(new Set(model.rows.map((r) => r.model)), new Set(['a', 'b']));
     assert.ok(model.rows.every((r) => !r.provisional));

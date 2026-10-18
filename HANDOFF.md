@@ -1,3 +1,13 @@
+## 2026-10-19 · 成员等级、独立精选榜与投票风控（本地完成，已授权提交推送，不部署）
+
+- 本轮归档：[成员等级、独立精选榜与投票风控](docs/archive/2026-10-19-member-levels-curated-vote-risk-wsnxxxs.md)。负责人wsnxxxs；后端GPT-6.1-Sol，前端后台Sonnet 5.5，设计Opus 5.5，review GPT-6.1-Sol。Lead执行提交/推送；本轮未部署、未迁移生产库。
+- v44/v45末尾幂等迁移：旧user默认Lv0，Lv1通过20组/16正确标准对考试晋升；Lv2/Lv3兼容原moderator/admin。Lv0新建questions/drafts/works统一403，投稿仍绑邮箱，旧内容管理/重提和互动保留。考试无总时限、不限重试、冻结快照，不入任何榜。
+- 盲评两侧ready后a/b/tie≥5秒、skip≥3秒；未ready加载失败可skip。Lv0/1连续第三次≤10秒先过Turnstile，staff免快选验证；访客首验及每5次非skip选择续验，访客/未绑邮箱票计大众。正式投票保留组合去重，Turnstile严格校验arena action与hostname。
+- 精选仅计固定新起点后、投票时Lv1+的有效票，初始网页设计10题/三维建模26题；Lv3维护分区和题集，总榜/各分区各自BT与30比较门槛，600秒快照。后台计数统一taskIds/questionCount/selectedQuestionCount口径，缺失/不可用已选题仍保留标记。
+- 投票证据记录提交/抽题IP、网段、UA、账号/访客、耗时、验证和关联票；原始IP各满180天清空，仅Lv3风控可见。支持聚合/明细/模型反查及带理由、可撤销软作废，立即失效两榜缓存，不删票、不释放去重。后台admin/由前端worker实施；统一契约见docs/api-contract.md §3.26及父工作区backend-plan.md §7。
+- 后端最终check140/0、test387/387、diff --check通过，隔离真实前后端联调通过主要链路；三轮review及退出考试readyRun定点复验见归档，访客随机预取测试已改为确定互异组合。未做真实Cloudflare/Nginx/生产库副本迁移演练；后台登录偶发需点两次及/api/references等级门禁未修，详见归档“明确没做”。
+- 将来发布按backend-plan.md §9重新核对现场并增量合并，保留app/library/questions/show1compat额外功能，迁移前一致备份并验证回滚。私有方案、只读证据与隔离演示库在父工作区.local/tier-redesign/，不入库；当前运行中的本地演示服务/数据不在本文档收尾阶段改动。
+
 ## 2026-10-18 · 固定作品内容域名（实现与验收完成，发布准备中）
 
 - 用户目标是减少真实访问时的 DNS 查询，已明确授权本轮提交、推送并上线。采用现有 `w.arenaofbias.icu` 的路径票据：`/v/<key>/` 为可信外壳，`/c/<key>/` 为不透明源作品沙箱；新盲评继续随机、限时、可撤销，但不再每轮生成新主机名。旧令牌域名保留兼容；无数据库迁移、新端口或 npm 依赖。
@@ -1317,3 +1327,28 @@
 - 沿用已认可娱乐镜头/折叠与固定版本纸色背景；`playground-surface.mjs`仅对既定台灯bundle的SHA256延展桌面，防止景窗放大后出现桌面边缘。所有变换在响应时执行，不落盘改原资产或共享相机。新玩法选择只在本地揭晓，未开启旧投票/反应/评论写入或新偏好存储。
 - 最终Windows `npm run check` 113文件/0错误，`npm test` 330/330；端点公开/下架门禁、响应形状、合法/非法父站桥接、正式探针保持有回归。Show1实际本地主站构建预演46项、常速文字过场300项通过；键盘/台灯及FIELD68真实加载就绪成功。FIELD68无通用相机复位API，前端明确禁用；未逐件重新实载全部作品或真机FPS验收。
 - 发布须先更新本服务的新端点与内容桥接，再更新Show1入口；新JSON/JS/MJS文件也须进入发布包，不能仅更新content/show1compat。API合同已同步。未连生产数据库、改配置、投稿/投票/审核、生产服务重启或deploy。预演使用内存SQLite与缓存原资产，证据位于Show1 `.local/playground-backend-final.log` 和 `output/playground/main-integration/`。
+
+
+## 2026-10-19 · DeepSeek V4.1 Flash 1017 票量只读调查
+
+- 用户授权连接VPS调查疑似刷票。Brisbane 03:05:20一致只读事务导出最小投票/对局时间及pin、账号基础字段和目标作品登记，未读取账号密码摘要、会话令牌或邮箱明文。现场版本57b4393+既有base组合；本地另一轮等级/考试功能未提交改动完整保留，调查以现场运行代码为准。
+- 目标原始772场/164账号，其中7场同型号内部比较；跨型号765场/163账号，417胜/244负/104平。公网模型榜03:01:10快照764场/163人、416胜/244负/104平，随后一场新增解释时点差异。同期全站7916场/238账号；新注册175人，目标参与者新注册117人。目标24.05秒中位耗时，其他21.75秒；没有同账号同pair重复票。
+- 两名管理员wujisuan/shadow固定目标抽样64/18场，合计82场，47胜28负7平。最大贡献者xingguang641目标83场（43胜19负21平），同期总788场；fyx咸同期139场，中位6.66秒、41场不足5秒，目标18场11胜5负2平，属于速度复核线索，不能认定定向刷票。
+- 票表/对局表无IP或UA；API日志继承关闭。已有作品日志只覆盖18日21:24至19日03:07 Brisbane，按直接盲评票据路径关联53账号/110个目标投票ID，存在共享和轮换出口，既不覆盖大多数目标票，也不是提交票的IP，不能据此确认或排除多账号同人。
+- 当前不足以认定定向刷票，票量可由管理员固定抽样、同期流量与新型号补样机制部分解释。未清票、封号、写业务库、改配置/代码、重启、提交或推送；无源码修改，未跑源码测试。私有证据和脚本在父级.local/deepseek-1017-investigation/，findings.json为结构化调查结论。
+
+
+## 2026-10-19 · xingguang641 账号投票只读复核
+
+- 用户要求深入调查上轮最大贡献账号。沿用已有只读证据并重新只读查询目标账号，对局1340条（1227正式票、112跳过、1未决定），64题、无pin、同pair重复0、自己作品票0。普通账号，10月5日注册并验证邮箱；投稿14件均DeepSeek系列（原4.1 Flash 8件、1017 6件），不是身份冒用证据。
+- Brisbane 10月17日235票、18日553票；18日09:51:57–10:10:43共99票。64场抽签至投票不足5秒，58场集中solarpunk动画网页题q-e72619640152afc2，8场不足3秒也全部在该题。该账号在本题103票/全体211票，中位4.691秒；其他账号108票中位13.062秒、不足5秒6票、不足3秒0票。其余题目本人中位15.126秒。
+- 目标1017仍83场43胜19负21平；18日19:26:12–19:27:26，同一作品up-wfq8ahxx的6场3.321–4.205秒比较全部判胜，列为明确人工复核线索，尚不能认定脚本或定向刷票。全量左右选择474/449、平304；没有单侧机械点击特征，但不能据此证明所有票可信。
+- 现有作品日志仅覆盖其26场已投比较/2场目标票，19出口IP、1个UA；新读取关联39场对局含跳过，同一秒同一对局的v/c请求可来自多个出口，与其他账号共享出口池，不能建立同人控制关系，也不能等同提交投票IP。未查邮箱明文、密码摘要、会话令牌或站外真实身份。
+- 判断修正：上轮“没有明显只投该型号”仅说明模型覆盖，不能排除投票质量问题。当前应人工复核该账号快速投票簇，证据不足以直接清票/封号。未写生产业务库、重启、改代码配置或commit/push；私有结构化结论在父级.local/deepseek-1017-investigation/xing-findings.json，相关证据同目录。无源码修改，未运行源码测试。
+
+
+## 2026-10-19 - Offline exclusion of xingguang641 votes
+
+- User requested calculation only. A read-only production SQLite connection created an isolated consistent copy at Brisbane 03:15:35. Copied live server modules and the fixed c5f1cad package supplied the original eligibility, attribution and Bradley-Terry logic. Only the isolated copy was changed; authored works and other users votes remained.
+- Raw votes 22426 minus all 1227 account votes = 21199. Overall model: 1186/rank8/770 comparisons -> 1184/rank8/687. Frontend model: 1231/rank3/564 -> 1232/rank3/497. Overall configurations: Max1194/rank11 ->1194/rank13; High1106/rank45 ->1105/rank43; Low1166/rank23 ->1186/rank15, still provisional at25 comparisons. API ranks include provisional entries.
+- Copy integrity ok, zero foreign-key errors, counts consistent. Live account still has1227 votes, live source hashes unchanged, service active. No production vote/config/code changes, restart, commit or push. No source tests needed for this analysis. Full before/after boards and metadata: parent .local/deepseek-1017-investigation/counterfactual-result.json; isolated remote copy /tmp/aob-xing-counterfactual-3fegr12f.

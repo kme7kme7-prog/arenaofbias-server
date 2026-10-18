@@ -43,7 +43,7 @@ for (const version of [36, 37]) test(`v${version} to v38 backfills creation role
     for (const table of ['questions', 'works']) assert.deepEqual(
       db.prepare(`SELECT author_role, count(*) AS n FROM ${table} GROUP BY author_role ORDER BY author_role`).all().map(row => ({ ...row })),
       [{ author_role: 'admin', n: 2 }, { author_role: 'user', n: 1 }]);
-    assert.deepEqual(db.prepare('SELECT * FROM votes').all(), history.votes);
+    assert.deepEqual(db.prepare('SELECT * FROM votes').all().map(({voter_level,visitor_hash,voided_at,voided_by,void_reason,...row})=>row), history.votes.map(row=>({...row})));
     assert.deepEqual(db.prepare('SELECT * FROM audit').all(), history.audit);
     assert.equal(db.prepare("SELECT curated_as FROM works WHERE id='historical'").get().curated_as, 'replacement');
     assert.equal(db.prepare("SELECT nominated_at FROM works WHERE id='historical'").get().nominated_at, 123);

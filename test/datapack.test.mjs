@@ -1,6 +1,7 @@
+import { finishViewing, voteAfterViewing } from './helpers/arena.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer, request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -34,7 +35,7 @@ function pack(root, sha, firstModel) {
 }
 
 test('a match keeps its original package and vote identity across a same-mtime switch and restart', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'datapack-'));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'datapack-')));
   const a = join(root, 'a');
   const b = join(root, 'b');
   const current = join(root, 'current');
@@ -87,7 +88,7 @@ test('a match keeps its original package and vote identity across a same-mtime s
     await new Promise((resolve) => content.once('listening', resolve));
     assert.equal((await contentGet(match.a)).body, original.body);
     assert.match((await contentGet(new URL('/app.js', match.a))).body, /'a'/);
-    assert.equal(platform.arena.vote(user, match.id, 'a').counted, true);
+    assert.equal(voteAfterViewing(platform, user, match.id, 'a').counted, true);
     const vote = platform.db.prepare('SELECT * FROM votes WHERE match_id = ?').get(match.id);
     assert.equal(vote.source, 'arena');
     const identities = [JSON.parse(vote.a_identity), JSON.parse(vote.b_identity)];
@@ -111,8 +112,11 @@ test('a match keeps its original package and vote identity across a same-mtime s
       } });
       assert.equal(preflight.status, 204);
       assert.match(preflight.headers.get('access-control-allow-headers'), /X-Datapack-Version/);
+      const staleUser = await verifiedUser(platform.auth, 'stale-reader');
+      let staleCookie;
+      platform.auth.startSession({ setHeader: (_k,v) => { staleCookie=v.split(';')[0]; } }, staleUser.id);
       const stale = await fetch(`${base}/api/arena/matches`, { method: 'POST', headers: {
-        Origin: 'http://localhost', 'Content-Type': 'application/json', 'X-Datapack-Version': SHA_A,
+        Origin: 'http://localhost', Cookie: staleCookie, 'Content-Type': 'application/json', 'X-Datapack-Version': SHA_A,
       }, body: '{"task":"one"}' });
       assert.equal(stale.status, 200);
       assert.equal(stale.headers.get('x-datapack-stale'), '1');
@@ -157,7 +161,7 @@ test('new ballot identities omit storage flags and old identities remain readabl
       [key, JSON.stringify({ ...JSON.parse(value), curated: true })]));
     platform.db.prepare('UPDATE matches SET a_identity = ?, b_identity = ? WHERE id = ?')
       .run(historical.a_identity, historical.b_identity, match.id);
-    assert.equal(platform.arena.vote(user, match.id, 'a').counted, true);
+    assert.equal(voteAfterViewing(platform, user, match.id, 'a').counted, true);
     const vote = platform.db.prepare('SELECT * FROM votes WHERE match_id = ?').get(match.id);
     assert.equal(vote.a_identity, historical.a_identity);
     assert.equal(vote.b_identity, historical.b_identity);

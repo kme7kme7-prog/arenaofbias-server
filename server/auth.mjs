@@ -4,7 +4,7 @@ import { createHash, randomBytes, scrypt, scryptSync, timingSafeEqual } from 'no
 import { AVATARS } from './config.mjs';
 import { fail, HttpError, uniqueCookie } from './http.mjs';
 import { transaction } from './db.mjs';
-import { roleOf, isStaff, isSenior } from './roles.mjs';
+import { roleOf, isStaff, isSenior, levelOf, capabilitiesOf } from './roles.mjs';
 
 const COOKIE = 'sp_session';
 const SCRYPT = { N: 16384, r: 8, p: 1 };
@@ -36,7 +36,7 @@ export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', 
     insertVerifiedUser: db.prepare('INSERT INTO users (id, name, name_key, role, salt, hash, created_at, email, email_verified_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'),
     userByEmail: db.prepare('SELECT * FROM users WHERE email = ? COLLATE NOCASE'),
     upgradeHash: db.prepare('UPDATE users SET salt = ?, hash = ?, hash_params = NULL WHERE id = ?'),
-    setRole: db.prepare('UPDATE users SET role = ? WHERE id = ?'),
+    setLevel: db.prepare('UPDATE users SET role=?, member_level=?, level_since=?, level_source=? WHERE id=?'),
     setNickname: db.prepare('UPDATE users SET nickname = ? WHERE id = ?'),
     setAvatar: db.prepare('UPDATE users SET avatar = ? WHERE id = ?'),
     setEmail: db.prepare('UPDATE users SET email = ?, email_verified_at = ? WHERE id = ?'),
@@ -61,12 +61,26 @@ export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', 
   function syncRole(user) {
     const role = roleFor(user);
     if (role !== user.role) {
-      q.setRole.run(role, user.id);
+      const at = Date.now();
+      q.setLevel.run(role, user.member_level, at, 'admin', user.id);
       user.role = role;
+      user.level_since = at; user.level_source = 'admin';
     }
     return user;
   }
 
+  function assignedRole(value) {
+    if (Number.isInteger(value) && value >= 0 && value <= 3) return { role: value === 3 ? 'admin' : value === 2 ? 'moderator' : 'user', member: value === 1 ? 1 : 0 };
+    if (!['user','moderator','admin'].includes(value)) fail(400, '角色无效');
+    return { role: value, member: 0 };
+  }
+  function assign(user, value) {
+    const { role, member } = assignedRole(value);
+    if (admins.includes(user.name_key) && role !== 'admin') fail(409, '该账号由 ADMIN_USERNAMES 固定为管理员，请先修改服务器配置');
+    const changed = levelOf(user) !== levelOf({ role, member_level: member });
+    q.setLevel.run(role, member, changed ? Date.now() : user.level_since, changed ? 'admin' : user.level_source, user.id);
+    return q.userById.get(user.id);
+  }
   function validName(raw) {
     const name = String(raw ?? '').normalize('NFKC').trim();
     if (!/^[\p{L}\p{N}_-]{2,24}$/u.test(name)) fail(400, '用户名为 2–24 位文字、数字、下划线或连字符');
@@ -79,7 +93,8 @@ export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', 
   }
 
   return {
-    public: (user) => (user ? { id: user.id, name: user.name, nickname: user.nickname || user.name, avatar: avatarOf(user), role: roleOf(user.role) } : null),
+    public: (user) => (user ? { id: user.id, name: user.name, nickname: user.nickname || user.name, avatar: avatarOf(user), role: roleOf(user.role), level: levelOf(user), levelSince: user.level_since ? new Date(user.level_since).toISOString() : null, levelSource: user.level_source ?? null, capabilities: capabilitiesOf(user) } : null),
+    byId: (id) => { const user = q.userById.get(id); return user ? syncRole(user) : null; },
     isAdminName(rawName) {
       const key = nameKey(String(rawName ?? ''));
       const user = q.userByKey.get(key);
@@ -143,6 +158,7 @@ export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', 
       const salt = randomBytes(16).toString('hex');
       const id = newId(8);
       q.insertUser.run(id, name, key, 'admin', salt, hashPasswordSync(password, salt), Date.now());
+      q.setLevel.run('admin', 0, Date.now(), 'admin', id);
       return q.userById.get(id);
     },
 
@@ -218,31 +234,26 @@ export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', 
     },
 
     promote(rawName, role = 'admin') {
-      if (!['admin', 'moderator', 'user'].includes(role)) fail(400, '角色无效');
       const user = q.userByKey.get(nameKey(String(rawName ?? '')));
       if (!user) return null;
-      if (admins.includes(user.name_key) && role !== 'admin') fail(409, '该账号由 ADMIN_USERNAMES 固定为管理员，请先修改服务器配置');
-      q.setRole.run(role, user.id);
-      return { ...user, role };
+      return assign(user, role);
     },
 
     // Admin member list: every account with its effective role, never the credentials or a full email.
     list() {
       const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
       return q.listUsers.all().map((user) => ({ id: user.id, name: user.name, nickname: user.nickname || user.name, avatar: avatarOf(user),
-        role: roleFor(user), fixed: admins.includes(user.name_key), email: maskEmail(user.email), emailVerified: Boolean(user.email && user.email_verified_at),
+        role: roleFor(user), level: levelOf({ ...user, role: roleFor(user) }), fixed: admins.includes(user.name_key), email: maskEmail(user.email), emailVerified: Boolean(user.email && user.email_verified_at),
         createdAt: iso(user.created_at), lastSeenAt: iso(user.last_seen_at) }));
     },
 
     setRole(actor, userId, role) {
       if (!isSenior(actor)) fail(403, '仅高级管理员可以操作');
-      if (!['admin', 'moderator', 'user'].includes(role)) fail(400, '角色无效');
       const user = q.userById.get(String(userId ?? ''));
       if (!user) fail(404, '用户不存在');
       if (user.id === actor.id) fail(409, '不能修改自己的角色，避免把自己锁在管理端之外');
-      if (admins.includes(user.name_key) && role !== 'admin') fail(409, '该账号由 ADMIN_USERNAMES 固定为管理员，请先修改服务器配置');
-      q.setRole.run(role, user.id);
-      return { id: user.id, name: user.name, role };
+      const next = assign(user, role);
+      return { id: next.id, name: next.name, role: next.role, level: levelOf(next) };
     },
   };
 }

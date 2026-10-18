@@ -1,3 +1,4 @@
+import { finishViewing, voteAfterViewing } from './helpers/arena.mjs';
 // Platform rules: ranking, upload inspection and the upload → review → blind vote lifecycle.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -312,7 +313,8 @@ test('v6 migrates legacy password hashes on first successful login', async () =>
     CREATE TABLE sessions (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users (id),
       created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
     CREATE TABLE works (id TEXT PRIMARY KEY, status TEXT NOT NULL, task_id TEXT NOT NULL, owner_id TEXT, deleted_at INTEGER, reviewed_at INTEGER, updated_at INTEGER);
-    CREATE TABLE votes (id TEXT PRIMARY KEY, identity_source TEXT NOT NULL DEFAULT 'legacy');
+    CREATE TABLE matches (id TEXT PRIMARY KEY, created_at INTEGER);
+    CREATE TABLE votes (id TEXT PRIMARY KEY, pair_key TEXT, identity_source TEXT NOT NULL DEFAULT 'legacy');
     CREATE TABLE audit (id INTEGER PRIMARY KEY, at INTEGER, actor_id TEXT, actor_name TEXT, action TEXT, task_id TEXT, work_id TEXT, detail TEXT);
     PRAGMA user_version = 5;`);
   legacy.prepare('INSERT INTO users (id, name, name_key, role, salt, hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
@@ -350,7 +352,8 @@ test('malformed legacy hash_params are treated as a wrong password, never a 500'
     CREATE TABLE sessions (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users (id),
       created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
     CREATE TABLE works (id TEXT PRIMARY KEY, status TEXT NOT NULL, task_id TEXT NOT NULL, owner_id TEXT, deleted_at INTEGER, reviewed_at INTEGER, updated_at INTEGER);
-    CREATE TABLE votes (id TEXT PRIMARY KEY, identity_source TEXT NOT NULL DEFAULT 'legacy');
+    CREATE TABLE matches (id TEXT PRIMARY KEY, created_at INTEGER);
+    CREATE TABLE votes (id TEXT PRIMARY KEY, pair_key TEXT, identity_source TEXT NOT NULL DEFAULT 'legacy');
     CREATE TABLE audit (id INTEGER PRIMARY KEY, at INTEGER, actor_id TEXT, actor_name TEXT, action TEXT, task_id TEXT, work_id TEXT, detail TEXT);
     PRAGMA user_version = 5;`);
   setup.exec(MIGRATIONS[1]);
@@ -495,6 +498,8 @@ describe('platform lifecycle', () => {
     if (jars.get(who)) headers.cookie = jars.get(who);
     if (origin) headers.origin = base;
     if (body !== undefined && !raw) headers['content-type'] = 'application/json';
+    const voting = /\/api\/arena\/matches\/([^/]+)\/vote$/.exec(path);
+    if (voting) finishViewing(platform.db, voting[1]);
     const response = await fetch(base + path, { method, headers, body: raw ? body : body === undefined ? undefined : JSON.stringify(body) });
     const cookie = response.headers.get('set-cookie');
     if (cookie) jars.set(who, cookie.split(';')[0]);
@@ -601,6 +606,7 @@ describe('platform lifecycle', () => {
 
   test('legacy users need email for questions, drafts and reactions; bootstrap keeps binding private', async () => {
     const legacy = await platform.auth.register('legacy-user', 'correct horse');
+    platform.auth.promote('legacy-user', 1);
     platform.auth.startSession({ setHeader: (key, value) => { if (key === 'Set-Cookie') jars.set('legacy', value.split(';')[0]); } }, legacy.id);
     assert.equal((await call('legacy', 'GET', '/api/bootstrap')).data.user.emailBound, false);
     assert.equal((await call('alice', 'GET', '/api/bootstrap')).data.user.emailBound, true);
@@ -719,7 +725,7 @@ describe('platform lifecycle', () => {
   test('blind matches reveal nothing until the vote, and each pair counts once per voter', async () => {
     const match = await call('alice', 'POST', '/api/arena/matches', { task: 'one' });
     assert.equal(match.status, 200);
-    assert.deepEqual(Object.keys(match.data).sort(), ['a', 'b', 'calibration', 'counted', 'id', 'task']);
+    assert.deepEqual(Object.keys(match.data).sort(), ['a', 'b', 'calibration', 'challenge', 'countableFor', 'counted', 'createdAt', 'expiresAt', 'id', 'minSkipSeconds', 'minViewSeconds', 'task']);
     for (const url of [match.data.a, match.data.b]) assert.match(new URL(url).hostname, /^m[0-9a-f]{32}\.localhost$/);
     const frame = await fetchContent(match.data.a);
     assert.equal(frame.status, 200);
@@ -742,25 +748,25 @@ describe('platform lifecycle', () => {
     assert.equal(board.data.rows.length, 2);
   });
 
-  test('unbound users can reveal blind matches without recording a ballot', async () => {
+  test('unbound users record a public ballot without curated eligibility', async () => {
     const legacy = await platform.auth.register('legacy-voter', 'correct horse');
     platform.auth.startSession({ setHeader: (key, value) => { if (key === 'Set-Cookie') jars.set('unbound-voter', value.split(';')[0]); } }, legacy.id);
     const match = await call('unbound-voter', 'POST', '/api/arena/matches', { task: 'one' });
     assert.equal(match.status, 200);
-    assert.equal(match.data.counted, false);
+    assert.equal(match.data.counted, true);
     const before = platform.db.prepare('SELECT COUNT(*) AS n FROM votes').get().n;
     const result = await call('unbound-voter', 'POST', `/api/arena/matches/${match.data.id}/vote`, { choice: 'a' });
     assert.equal(result.status, 200);
-    assert.equal(result.data.counted, false);
-    assert.equal(result.data.reason, 'unbound');
+    assert.equal(result.data.counted, true);
+    assert.equal(result.data.curatedEligible, false);
     assert.ok(result.data.a && result.data.b);
-    assert.equal(platform.db.prepare('SELECT COUNT(*) AS n FROM votes').get().n, before);
+    assert.equal(platform.db.prepare('SELECT COUNT(*) AS n FROM votes').get().n, before + 1);
   });
 
   test('the leaderboard scores one task category and the combined board ranks entries per category', async () => {
     const scoped = (await call('alice', 'GET', '/api/leaderboard?category=建模')).data;
     assert.equal(scoped.category, '建模');
-    assert.equal(scoped.totals.votes, 1);
+    assert.equal(scoped.totals.votes, 2);
     const combined = (await call('alice', 'GET', '/api/leaderboard')).data;
     assert.equal(combined.category, null);
     assert.deepEqual(combined.standings, { 建模: Object.fromEntries(scoped.rows.map((row) => [row.key, row.rank])) });
@@ -771,7 +777,7 @@ describe('platform lifecycle', () => {
     // A domain narrows the board alone or with a category; the combined board stays the only one with standings.
     for (const query of ['domain=建筑', 'category=建模&domain=建筑']) {
       const board = (await call('alice', 'GET', `/api/leaderboard?${encodeURI(query)}`)).data;
-      assert.deepEqual([board.domain, board.totals.votes, board.totals.tasks, board.standings], ['建筑', 1, 1, undefined], query);
+      assert.deepEqual([board.domain, board.totals.votes, board.totals.tasks, board.standings], ['建筑', 2, 1, undefined], query);
     }
     for (const query of ['domain=化学', 'domain=建筑&task=one', 'category=文学&domain=建筑']) {
       const response = await call('alice', 'GET', `/api/leaderboard?${encodeURI(query)}`);
@@ -796,14 +802,14 @@ describe('platform lifecycle', () => {
       if (match.status !== 200) break;
       await call('bob', 'POST', `/api/arena/matches/${match.data.id}/vote`, { choice: 'tie' });
     }
-    assert.equal((await call('bob', 'GET', '/api/leaderboard?task=one')).data.totals.votes, 4);
+    assert.equal((await call('bob', 'GET', '/api/leaderboard?task=one')).data.totals.votes, 5);
     assert.equal((await call('bob', 'POST', `/api/works/one/${upload.id}/reactions`, { emoji: 'press' })).data.counts.press, 1);
     assert.equal((await call('bob', 'POST', `/api/works/one/${upload.id}/reactions`, { emoji: '🔥' })).status, 400, 'legacy emoji are gone');
 
     assert.equal((await call('root', 'POST', `/api/works/one/${upload.id}/review`, { status: 'questioned' })).status, 400);
     assert.equal((await call('root', 'POST', `/api/works/one/${upload.id}/review`, { status: 'questioned', reason: '无法核实' })).status, 200);
     assert.equal((await call('bob', 'POST', `/api/works/one/${upload.id}/reactions`, { emoji: 'stare' })).status, 409);
-    assert.equal((await call('bob', 'GET', '/api/leaderboard?task=one')).data.totals.votes, 2, 'votes involving the questioned work drop out');
+    assert.equal((await call('bob', 'GET', '/api/leaderboard?task=one')).data.totals.votes, 3, 'votes involving the questioned work drop out');
   });
 
   test('comments belong only to listed works and can be removed by their author or an admin', async () => {
@@ -837,9 +843,9 @@ describe('platform lifecycle', () => {
     const curated = await call('alice', 'POST', '/api/works/one/a1/comments', { body: '馆藏评论' });
     assert.equal(curated.status, 200);
     assert.equal((await call('root', 'DELETE', `/api/comments/${curated.data.comment.id}`)).status, 200);
-    const match = await call('guest', 'POST', '/api/arena/matches', { task: 'one' });
+    const match = await call('root', 'POST', '/api/arena/matches', { task: 'one' });
     assert.equal(match.status, 200);
-    assert.deepEqual(Object.keys(match.data).sort(), ['a', 'b', 'calibration', 'counted', 'id', 'task'], 'blind match carries no comments');
+    assert.deepEqual(Object.keys(match.data).sort(), ['a', 'b', 'calibration', 'challenge', 'countableFor', 'counted', 'createdAt', 'expiresAt', 'id', 'minSkipSeconds', 'minViewSeconds', 'task'], 'blind match carries no comments');
   });
 
   test('calibration preserves Show1 framing and camera independently without changing trial reports', async () => {
@@ -920,7 +926,7 @@ describe('platform lifecycle', () => {
     const alice = list.data.users.find((user) => user.name === 'alice');
     const root = list.data.users.find((user) => user.name === 'root');
     assert.ok(alice && root);
-    assert.deepEqual(Object.keys(alice).sort(), ['avatar', 'createdAt', 'email', 'emailVerified', 'fixed', 'id', 'lastSeenAt', 'name', 'nickname',
+    assert.deepEqual(Object.keys(alice).sort(), ['avatar', 'createdAt', 'email', 'emailVerified', 'exam', 'fixed', 'id', 'lastSeenAt', 'level', 'name', 'nickname',
       'pendingLimit', 'questions', 'role', 'trusted', 'votes', 'works'], 'the list never carries salt or hash');
     const stored = platform.db.prepare('SELECT email FROM users WHERE id = ?').get(alice.id).email;
     assert.equal(alice.email, stored ? `${stored[0]}***${stored.slice(stored.indexOf('@'))}` : null, 'emails are masked');
@@ -956,6 +962,7 @@ describe('platform lifecycle', () => {
     const entries = review.data.audit.filter((row) => row.action === 'role');
     assert.ok(entries.length >= 2, 'role changes are written to the audit log');
     assert.match(entries[0].detail, /alice/);
+    assert.equal((await call('root','POST',`/api/admin/users/${alice.id}/role`,{level:1})).status,200);
   });
 
   test('publishing requires a session and complete question details', async () => {

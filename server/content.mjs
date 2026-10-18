@@ -50,7 +50,7 @@ function withHeadTags(buffer, tags) {
 
 const scriptTag = (path) => `<script src="${path}"></script>`;
 
-export function createContentHandler({ config, library, arena, catalog, siteOrigins, readGuard = createReadGuard(config) }) {
+export function createContentHandler({ config, library, arena, qualification, catalog, siteOrigins, readGuard = createReadGuard(config) }) {
   // jsdelivr is limited to npm: its GitHub paths follow a repository that can change after review.
   const cdn = config.cdn.map((host) => host === 'cdn.jsdelivr.net' ? 'https://cdn.jsdelivr.net/npm/'
     : `https://${host}${host === 'registry.npmmirror.com' ? THREE_MIRROR_PATH : ''}`).join(' ');
@@ -86,15 +86,16 @@ export function createContentHandler({ config, library, arena, catalog, siteOrig
       return res.end(req.method === 'HEAD' ? undefined : contentRuntime);
     }
     const key = route?.key ?? String(req.headers.host ?? '').split('.')[0].toLowerCase();
-    if (!/^[wmdpc][0-9a-f]{32}$/.test(key)) return errorPage(res, 404, '作品地址无效', '请从展厅重新打开作品。');
+    if (!/^[wmdpce][0-9a-f]{32}$/.test(key)) return errorPage(res, 404, '作品地址无效', '请从展厅重新打开作品。');
 
+    const blind = key[0] === 'm' || key[0] === 'e';
     let target = null;
     let work = null;
     if (key[0] === 'd') {
       const draft = library.draftByToken(key);
       if (draft) target = { dir: draft.dir, entry: draft.entry, draft: true };
-    } else if (key[0] === 'm') {
-      work = arena.workForToken(key);
+    } else if (blind) {
+      work = key[0] === 'e' ? qualification?.workForToken(key) : arena.workForToken(key);
       if (library.isEligible(work)) target = { dir: work.dir, entry: work.entry ?? 'index.html' };
     } else if (key[0] === 'c') {
       work = library.curatedByKey(key);
@@ -106,17 +107,17 @@ export function createContentHandler({ config, library, arena, catalog, siteOrig
       work = library.byContentKey(key);
       if (library.publicContent(work)) target = { dir: work.dir, entry: work.entry, private: work.moderation.status !== 'legacy' };
     }
-    if (!target) return errorPage(res, 410, '作品已不可用', key[0] === 'm' ? '这一组比较已经结束，请开始新的一组。' : '作品尚未公开、已被删除，或预览地址已过期。');
+    if (!target) return errorPage(res, 410, '作品已不可用', blind ? '这一组比较已经结束，请开始新的一组。' : '作品尚未公开、已被删除，或预览地址已过期。');
 
     const url = new URL(req.url, route?.origin || 'http://content.invalid');
     const pathname = route?.path ?? url.pathname;
-    const playground = !target.draft && key[0] !== 'm' && url.searchParams.getAll('aob').includes('playground');
+    const playground = !target.draft && !blind && url.searchParams.getAll('aob').includes('playground');
     const stageParent = playground && siteOrigins.includes(url.searchParams.get('parent')) ? url.searchParams.get('parent') : null;
     const headers = {
       'Content-Security-Policy': route ? pathPolicy(route, cdn, siteOrigins) : policy,
       'Referrer-Policy': 'no-referrer',
       'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=()',
-      'Cache-Control': target.draft || target.private || key[0] === 'm' ? 'no-store' : 'private, max-age=600',
+      'Cache-Control': target.draft || target.private || blind ? 'no-store' : 'private, max-age=600',
     };
     if (route?.shell) {
       // Only the inner work consumes the expensive HTML-rendering budget. The
@@ -154,7 +155,7 @@ export function createContentHandler({ config, library, arena, catalog, siteOrig
       res.writeHead(200, { ...headers, 'Content-Type': 'text/javascript; charset=utf-8', 'Content-Length': stageBridge.length });
       return res.end(req.method === 'HEAD' ? undefined : stageBridge);
     }
-    const fold = key[0] === 'm' || (!target.draft && url.searchParams.getAll('aob').includes('fold'));
+    const fold = blind || (!target.draft && url.searchParams.getAll('aob').includes('fold'));
     const arenaFold = !target.draft && url.searchParams.getAll('aob').includes('arena-fold');
     const inject = pathname === SCRIPTS.arena.path ? SCRIPTS.arena : pathname === SCRIPTS.match.path ? SCRIPTS.match : target.draft ? SCRIPTS.draft : null;
     if (inject && pathname === inject.path) {
@@ -185,7 +186,7 @@ export function createContentHandler({ config, library, arena, catalog, siteOrig
     }
     const found = resolveInside(target.dir, pathname === '/' ? `/${target.entry}` : pathname);
     if (!found) return errorPage(res, 404, '找不到文件', pathname.slice(0, 120));
-    if (!target.draft && key[0] !== 'm' && url.searchParams.getAll('aob').includes('entertainment-camera') && /\.m?js$/i.test(found.file)) {
+    if (!target.draft && !blind && url.searchParams.getAll('aob').includes('entertainment-camera') && /\.m?js$/i.test(found.file)) {
       let body = entertainmentModule(readFileSync(found.file), work, pathname);
       if (body && playground) {
         const source = extendStageTable(body.toString('latin1'), { workId: work.taskId === 'desk-lamp' ? `dp-021-${work.id}` : work.id, modules: entertainmentProfile(work)?.modules }, pathname);
@@ -202,8 +203,8 @@ export function createContentHandler({ config, library, arena, catalog, siteOrig
       // for aob:work-ready); the camera bridge restores or captures per bridgePlan.
       const head = [];
       // Start the readiness clock before any parser-blocking injected script.
-      if (!stageParent && (key[0] === 'm' || key[0] === 'c' || url.searchParams.getAll('aob').includes('prev'))) {
-        head.push(arenaFold && key[0] !== 'm'
+      if (!stageParent && (blind || key[0] === 'c' || url.searchParams.getAll('aob').includes('prev'))) {
+        head.push(arenaFold && !blind
           ? entertainmentProbeTag(url.searchParams.getAll('aob').includes('arena-scene')) : probeTag());
       }
       if (target.draft) head.push(scriptTag(SCRIPTS.draft.path));
@@ -213,7 +214,7 @@ export function createContentHandler({ config, library, arena, catalog, siteOrig
       let bridge = bridgePlan(key, work, url, body);
       const entertainmentCurrent = entertainmentMatches(body, work);
       const entertainmentSettings = entertainmentOptions(work, body);
-      const arenaCamera = !target.draft && key[0] !== 'm' &&
+      const arenaCamera = !target.draft && !blind &&
         (url.searchParams.getAll('aob').includes('arena-scene') ||
           (url.searchParams.get('face') === 'arena' && url.searchParams.getAll('aob').includes('bridge')));
       if (arenaCamera && apexDocument(body)) {
@@ -263,19 +264,20 @@ export function createContentHandler({ config, library, arena, catalog, siteOrig
   // saved camera when one exists; ?aob=bridge additionally enables capture for the admin
   // calibration panel, with ?face= picking which side's camera to start from.
   function bridgePlan(key, work, url, source) {
+    const blind = key[0] === 'm' || key[0] === 'e';
     if (!work || key[0] === 'd') return null;
     const cameraOf = (face) => {
       const camera = library.calibrationOf?.(work, face)?.camera ?? null;
       return camera && validCamera(camera) ? camera : null;
     };
-    if (key[0] === 'm') {
+    if (blind) {
       const camera = cameraOf('arena');
       return camera ? [bridgeTags(camera, false)] : null;
     }
     const capture = url.searchParams.getAll('aob').includes('bridge');
     const faceParam = url.searchParams.get('face');
     const face = faceParam === 'arena' || faceParam === 'gallery' ? faceParam : null;
-    const entertainment = key[0] !== 'm' && (url.searchParams.getAll('aob').includes('arena-scene') || (capture && face === 'arena'));
+    const entertainment = !blind && (url.searchParams.getAll('aob').includes('arena-scene') || (capture && face === 'arena'));
     const camera = (entertainment ? entertainmentCamera(work, source) : null) ?? (face
       ? (cameraOf(face) ?? cameraOf(face === 'arena' ? 'gallery' : 'arena'))
       : (cameraOf('arena') ?? cameraOf('gallery')));

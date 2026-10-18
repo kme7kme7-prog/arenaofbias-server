@@ -3,6 +3,7 @@
 import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { CURATED_BOARDS } from './curated-seed.mjs';
 
 const MIGRATIONS = [
   `CREATE TABLE users (
@@ -574,6 +575,92 @@ const MIGRATIONS = [
   CREATE INDEX IF NOT EXISTS guess_friend_host ON guess_friend_rooms(host_id, status);
   CREATE INDEX IF NOT EXISTS guess_friend_guest ON guess_friend_rooms(guest_id, status);
   CREATE INDEX IF NOT EXISTS guess_friend_expiry ON guess_friend_rooms(expires_at);`),
+  // Levels, independent curated ballots and private standard-pair examinations.
+  (db) => {
+    const add = (table, columns) => {
+      const existing = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name));
+      for (const [name, type] of Object.entries(columns)) if (!existing.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+    };
+    add('users', { member_level: 'INTEGER NOT NULL DEFAULT 0 CHECK(member_level IN (0,1))',
+      level_since: 'INTEGER', level_source: "TEXT CHECK(level_source IN ('exam','admin'))" });
+    add('matches', { visitor_hash: 'TEXT', ready_at: 'INTEGER', choice_received_at: 'INTEGER' });
+    add('votes', { voter_level: 'INTEGER CHECK(voter_level BETWEEN 0 AND 3)', visitor_hash: 'TEXT' });
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS votes_visitor_pair ON votes(visitor_hash,pair_key) WHERE visitor_hash IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS matches_visitor ON matches(visitor_hash,created_at);
+      CREATE TABLE IF NOT EXISTS arena_voter_state (
+        actor_key TEXT PRIMARY KEY, guest_votes_remaining INTEGER NOT NULL DEFAULT 0,
+        fast_streak INTEGER NOT NULL DEFAULT 0, challenge_required INTEGER NOT NULL DEFAULT 0,
+        verified_at INTEGER, updated_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS curated_settings (
+        id INTEGER PRIMARY KEY CHECK(id=1), counting_started_at INTEGER NOT NULL,
+        revision INTEGER NOT NULL DEFAULT 1, updated_by TEXT, updated_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS curated_sections (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, sort_order INTEGER NOT NULL,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, updated_by TEXT);
+      CREATE TABLE IF NOT EXISTS curated_questions (
+        task_id TEXT PRIMARY KEY, section_id TEXT NOT NULL REFERENCES curated_sections(id) ON DELETE RESTRICT,
+        selected_by TEXT, selected_at INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS curated_question_section ON curated_questions(section_id);
+      CREATE TABLE IF NOT EXISTS qualification_settings (
+        id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL DEFAULT 1,
+        question_count INTEGER NOT NULL DEFAULT 20, pass_percent INTEGER NOT NULL DEFAULT 80,
+        updated_by TEXT, updated_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS qualification_pairs (
+        id TEXT PRIMARY KEY, task_id TEXT NOT NULL, a_work TEXT NOT NULL, b_work TEXT NOT NULL,
+        a_snapshot_json TEXT NOT NULL, b_snapshot_json TEXT NOT NULL,
+        correct_answer TEXT NOT NULL CHECK(correct_answer IN ('a','b')), explanation TEXT NOT NULL DEFAULT '',
+        enabled INTEGER NOT NULL DEFAULT 1, version INTEGER NOT NULL DEFAULT 1,
+        created_by TEXT NOT NULL, created_at INTEGER NOT NULL, updated_by TEXT NOT NULL, updated_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS qualification_attempts (
+        id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        settings_version INTEGER NOT NULL, question_count INTEGER NOT NULL, pass_percent INTEGER NOT NULL,
+        correct_required INTEGER NOT NULL, status TEXT NOT NULL CHECK(status IN ('active','completed','abandoned')),
+        started_at INTEGER NOT NULL, finished_at INTEGER, correct_count INTEGER, passed INTEGER);
+      CREATE INDEX IF NOT EXISTS qualification_user ON qualification_attempts(user_id,started_at);
+      CREATE UNIQUE INDEX IF NOT EXISTS qualification_active ON qualification_attempts(user_id) WHERE status='active';
+      CREATE TABLE IF NOT EXISTS qualification_attempt_items (
+        id TEXT PRIMARY KEY, attempt_id TEXT NOT NULL REFERENCES qualification_attempts(id) ON DELETE CASCADE,
+        position INTEGER NOT NULL, pair_id TEXT NOT NULL, pair_version INTEGER NOT NULL,
+        question_json TEXT NOT NULL, a_snapshot_json TEXT NOT NULL, b_snapshot_json TEXT NOT NULL,
+        correct_answer TEXT NOT NULL CHECK(correct_answer IN ('a','b')),
+        a_token TEXT NOT NULL UNIQUE, b_token TEXT NOT NULL UNIQUE, token_expires_at INTEGER NOT NULL,
+        ready_at INTEGER, answer TEXT CHECK(answer IN ('a','b')), answered_at INTEGER,
+        UNIQUE(attempt_id,position));`);
+    const now = Date.now();
+    if (db.prepare('INSERT OR IGNORE INTO curated_settings(id,counting_started_at,updated_at) VALUES (1,?,?)').run(now, now).changes) {
+      const section = db.prepare('INSERT OR IGNORE INTO curated_sections(id,name,sort_order,created_at,updated_at) VALUES (?,?,?,?,?)');
+      section.run('web-design', '网页设计', 0, now, now);
+      section.run('three-dimensional', '三维建模', 1, now, now);
+      const question = db.prepare('INSERT OR IGNORE INTO curated_questions(task_id,section_id,selected_at) VALUES (?,?,?)');
+      CURATED_BOARDS.frontend.taskIds.forEach((id, i) => question.run(id, i < 10 ? 'web-design' : 'three-dimensional', now));
+    }
+    db.prepare('INSERT OR IGNORE INTO qualification_settings(id,updated_at) VALUES (1,?)').run(now);
+  },
+  // Submission evidence and reversible ballot exclusions; old ballots have no invented IP.
+  (db) => {
+    const add = (table, columns) => {
+      const existing = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name));
+      for (const [name, type] of Object.entries(columns)) if (!existing.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+    };
+    add('matches', { draw_ip: 'TEXT', draw_subnet: 'TEXT' });
+    add('votes', { voided_at: 'INTEGER', voided_by: 'TEXT', void_reason: 'TEXT' });
+    db.exec(`CREATE TABLE IF NOT EXISTS vote_risk_settings (
+      id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL DEFAULT 1, recording_started_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS arena_choice_evidence (
+        id INTEGER PRIMARY KEY, match_id TEXT NOT NULL, vote_id TEXT,
+        submitted_at INTEGER NOT NULL, draw_created_at INTEGER NOT NULL,
+        user_id TEXT, visitor_hash TEXT, task_id TEXT NOT NULL, choice TEXT NOT NULL,
+        ip TEXT, subnet TEXT, draw_ip TEXT, draw_subnet TEXT, user_agent TEXT NOT NULL,
+        ready_elapsed_ms INTEGER, turnstile_passed INTEGER NOT NULL DEFAULT 0, last_verified_at INTEGER,
+        outcome TEXT NOT NULL, error_code TEXT, a_model TEXT, b_model TEXT);
+      CREATE INDEX IF NOT EXISTS choice_evidence_time ON arena_choice_evidence(submitted_at);
+      CREATE INDEX IF NOT EXISTS choice_evidence_ip ON arena_choice_evidence(ip,submitted_at);
+      CREATE INDEX IF NOT EXISTS choice_evidence_subnet ON arena_choice_evidence(subnet,submitted_at);
+      CREATE INDEX IF NOT EXISTS choice_evidence_user ON arena_choice_evidence(user_id,submitted_at);
+      CREATE INDEX IF NOT EXISTS choice_evidence_visitor ON arena_choice_evidence(visitor_hash,submitted_at);
+      CREATE INDEX IF NOT EXISTS choice_evidence_vote ON arena_choice_evidence(vote_id);`);
+    db.prepare('INSERT OR IGNORE INTO vote_risk_settings(id,recording_started_at) VALUES (1,?)').run(Date.now());
+  },
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

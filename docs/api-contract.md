@@ -204,15 +204,17 @@ API 域静态 `/data.json`（含等价编码路径）仅管理员登录后返回
 
 数据库字段：`id`（16 位十六进制）、`name`（显示名）、`name_key`（NFKC + trim + 小写的唯一键）、`role`（`admin` / `moderator` / `user`）、`salt` / `hash`（标准 scrypt N=16384, r=8, p=1, keylen=32）、`hash_params`（可空 JSON）、`created_at`。`hash_params=NULL` 表示标准参数；迁入的旧用户可记录 `{ "N": 32768, "r": 8, "p": 1, "keylen": 64 }`。旧用户成功登录后立即换新 salt/hash 并清空 `hash_params`；标准用户无额外哈希或查询。
 
-HTTP 公开视图恒为：
+本人账户视图（公开作者对象不暴露等级来源）：
 
 ```json
-{ "id": "…", "name": "…", "nickname": "…", "role": "user" }
+{ "id": "…", "name": "…", "nickname": "…", "role": "user", "level": 0, "levelSince": null, "levelSource": null, "capabilities": { "canSubmitQuestion": false, "canSubmitWork": false, "canTakeQualificationExam": true } }
 ```
 
-未登录时用户字段为 `null`。`nickname` 默认返回登录用户名，可经 `PATCH /api/me` 修改；数据库增加 `nickname` 列，`name` 仍为登录用户名。用户名规则：NFKC 规范化后 2–24 位文字（Unicode 字母）、数字、下划线或连字符；密码 8–128 位。
+schema v44 新增 `member_level`（user 的 0/1），`level_since`、`level_source`。旧 user 与新账号默认 Lv0；moderator=Lv2、admin=Lv3，兼容 role 值不变。Lv1 为 user/member_level=1。详见 §3.26。未登录时用户字段为 `null`。`nickname` 默认返回登录用户名，可经 `PATCH /api/me` 修改；数据库增加 `nickname` 列，`name` 仍为登录用户名。用户名规则：NFKC 规范化后 2–24 位文字（Unicode 字母）、数字、下划线或连字符；密码 8–128 位。
 
 ### 2.5 对局（match）
+
+v44 增加 `visitor_hash`（访客 cookie 的 SHA-256）、`ready_at`（首次两侧就绪的服务端时间）、`choice_received_at`（首次有效选择请求时间，验证码等待不延长快速选择窗口）。创建/预取不写 ready_at；归属、ready、最小时长均由服务端检查。
 
 数据库字段：`id`（24 位十六进制）、`user_id`（可空，匿名对局）、`task_id`、`a_work` / `b_work`（两侧作品 ID）、`a_token` / `b_token`（两侧内容令牌，`m` + 32 位十六进制，唯一）、`created_at`、`expires_at`（3 小时）、`choice`（`a` / `b` / `tie` / `skip`，未投为 null）、`decided_at`。新增 `datapack_root`（创建时 `DIST_DIR` 的真实目录）、`datapack_version` 和两侧 `a_identity` / `b_identity` JSON 快照。旧对局这些新增列为 null，只能按当前数据包尽力解析。
 
@@ -220,9 +222,11 @@ HTTP 公开视图恒为：
 
 ### 2.6 投票（vote）
 
+v44 增加 `voter_level`（入库时数字等级，访客及历史票为 NULL）、`visitor_hash`。历史票不回填、不删除；账号保留原 UNIQUE(user_id,pair_key)，访客增加 visitor_hash/pair_key 非空唯一索引。大众榜包含访客和未绑邮箱票；精选额外要求投票时 Lv1+、统一新起点之后及题目当前入选，后续升级不追溯旧票。
+
 数据库字段：`id`、`match_id`（唯一）、`user_id`、`task_id`、`a_work` / `b_work`、`pair_key`（`题目:作品A+作品B`，ID 排序后拼接）、`choice`（`a` / `b` / `tie`，`skip` 不产生投票行）、`created_at`，以及 `a_identity` / `b_identity` JSON 原始快照、`a_correction` / `b_correction` JSON 显式更正和 `source`（`arena` / `show1` / `legacy`，v18 删除冗余的 `identity_source`）。快照含当时模型 ID、名称、厂商、档位、归一化档位、model/config 计分 key、内容摘要 `digest`，以及 `harnessId`、`providerId`。这两项不参与 `configKey` 或 `digest` 计算；旧快照里的 `harnessVersion` 读取输出时忽略，不重写原始快照。数据包摘要为入口页 SHA-256，投稿为全包 SHA-256。v8 迁移前的 legacy 票在 `a_identity` / `b_identity` 中存的是裸的旧模型 ID，并非 JSON；这类票不参与计分，也不能按推测更正。迁移前没有身份快照的对局不能再投票。新票按持久快照或显式更正计分，原始快照保持不变。约束：`UNIQUE(user_id, pair_key)`——**同一用户对同一作品组合只计一票**。
 
-计入排行的投票需同时满足：投票时已登录、双方作品当前均为 `verified` 且存在、普通用户不涉及本人作品（普通与高级管理员豁免）、未评过该组合。作品被标记存疑或作废对局后，其相关投票即时退出排行，恢复后重新计入（见 3.9）；作品下架或关闭盲评不影响已计入的票。管理员保存作品信息或审核时，该作品既有 arena 票里模型、厂商或档位与当前不一致的侧写入显式归属更正与逐侧审计：投稿要求内容摘要一致，数据包作品按题目与作品 ID 对应（管理员覆盖的显示信息即当前归属）；原身份快照、来源标签、选择和票数保持，重新保存可补齐以前遗漏的更正。更正前已创建的对局仍可完成，按当前归属写更正并揭晓，不失效整批对局。标题、摘要等修改不改变归属；数据包作品在管理员保存前不随数据包版本自动改写旧票。另可由管理员明确更正单票，审计包含更正前有效值、更正后值、理由和操作者；缺少原始双侧快照的 legacy 票不可按推测更正。
+计入排行的投票需同时满足：对局与请求账号或访客 cookie 匹配、通过服务端时长与必要的人机验证、双方作品当前均为 `verified` 且存在、普通用户不涉及本人作品（普通与高级管理员豁免）、未评过该组合。作品被标记存疑或作废对局后，其相关投票即时退出排行，恢复后重新计入（见 3.9）；作品下架或关闭盲评不影响已计入的票。管理员保存作品信息或审核时，该作品既有 arena 票里模型、厂商或档位与当前不一致的侧写入显式归属更正与逐侧审计：投稿要求内容摘要一致，数据包作品按题目与作品 ID 对应（管理员覆盖的显示信息即当前归属）；原身份快照、来源标签、选择和票数保持，重新保存可补齐以前遗漏的更正。更正前已创建的对局仍可完成，按当前归属写更正并揭晓，不失效整批对局。标题、摘要等修改不改变归属；数据包作品在管理员保存前不随数据包版本自动改写旧票。另可由管理员明确更正单票，审计包含更正前有效值、更正后值、理由和操作者；缺少原始双侧快照的 legacy 票不可按推测更正。
 
 ### 2.7 审核状态流转
 
@@ -636,7 +640,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 **`POST /api/admin/users/:id/role`** —— 调整账号角色（仅高级管理员）
 
-**认证**：管理员。**限流**：无。请求体：`{ "role": "admin" }`（取值 `admin` / `moderator` / `user`）。
+**认证**：管理员。**限流**：无。请求体：`{ "level": 0 | 1 | 2 | 3 }`。兼容旧 `{ "role": "admin" | "moderator" | "user" }`，其中 user 明确映射 Lv0；有效变更记录 levelSince/levelSource=admin。
 
 成功 `200`：`{ "user": { "id": "…", "name": "bob", "role": "admin" } }`，并写审计日志（`action` 为 `role`，`detail` 形如 `bob → 管理员`，无关联题目 / 作品）。
 
@@ -644,11 +648,11 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 ### 3.8 `POST /api/arena/matches` —— 创建盲投对战
 
-**认证**：无（匿名可创建，但不计票）。**限流**：matches 桶（60 次/分钟）。
+**认证**：可选会话。访客首次创建前须通过 Turnstile，后续每五票续验；访客与未绑邮箱账号的正式票均进入大众榜。**限流**：matches 桶（60 次/分钟）。
 
 对局有效期 3 小时。服务启动及每分钟清理过期、没有正式票引用且未决定或未绑定登录用户的记录；登录用户已决定的对局（含跳过与不计票揭晓）及正式票引用的对局保留为历史，令牌仍按原有效期失效。匿名无票对局全站最多 10000 条，容量已满返回 `429 anonymous-capacity` 与 `Retry-After: 60`。猜模型练习局只存内存，已有 5000 局容量上限，另加 3 小时有效期，过期返回 `404 game-expired`。
 
-请求体：`{ "task": "chinese-architecture", "previous": "<上一场对局id，选填>", "avoidCooling": true }`；`avoidCooling` 为选填布尔值，缺省为 `false`。
+请求体：`{ "task": "chinese-architecture", "previous": "<上一场对局id，选填>", "avoidCooling": true, "turnstileToken": "选填验证token" }`；`avoidCooling` 为选填布尔值，缺省为 `false`。
 
 成功 `200`：
 
@@ -661,7 +665,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 - `a` / `b` 为两侧作品的**不透明令牌 origin**（`m` 令牌，对局有效期 3 小时），iframe 直接加载；页面与地址均不泄露作品 / 模型身份。左右顺序随机。
 - `calibration.a` / `calibration.b`：该侧竞技场取景校准（管理员按门面保存的 `framing`），无校准为 `null`；父页面据此裁切 iframe。已保存的 3D 视角（`camera`）不随接口下发，由内容服务器在对局页内嵌恢复（视角桥，见 §5）。
-- `counted`：登录且绑定邮箱时为 `true`，匿名或未绑定邮箱时为 `false`。
+- `counted` 表示可投大众票，固定 true；实际是否入库以 vote 响应为准。另返回 createdAt/expiresAt、minViewSeconds=5、minSkipSeconds=3、countableFor 与 challenge，详见 §3.26。两侧加载完成后必须调用 ready；预取和创建不开始倒计时。
 - 对局创建时一次捕获当前数据包目录和两侧身份。随后切换数据包，旧令牌仍从原目录提供 HTML 与相对资源，旧对局仍可揭晓/投票；部署应保留该目录到相关对局全部过期并经过清理宽限期。
 - 前端在写请求上携带 `X-Datapack-Version: <前端所构建的数据仓库 SHA>`（读请求不带，避免跨源 GET 预检）；创建数据包对局、数据包题目草稿及该草稿的正式投稿时，如果该值与服务端当前可信 SHA 不同，请求照常处理，响应头增加 `X-Datapack-Stale: 1`，响应体形状不变。对局仍绑定创建时的服务端快照。题目不参与此检查；缺少请求头时不增加提示头。
 - 抽样规则：按 `promptVariant`（缺失为空串）与「模型+档位」分组，只在同一提示词版本的不同配置间抽取，再各均匀抽一件作品；长短版不跨组，配置分仍跨版本合计。偏向对局数少的配置、偏向实力相近者（同档 90% 概率软匹配，分差过大重掷 2 次）；避开上一场两侧作品与已评组合。仅普通用户回避本人作品，普通管理员（`moderator`）与高级管理员（`admin`）可以配到本人作品并正常计票。无提示词变体的题目行为不变。
@@ -674,9 +678,9 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 ### 3.9 `POST /api/arena/matches/:id/vote` —— 投票并揭晓
 
-**认证**：无（但匿名票**不计入**排行）。**限流**：write 桶。
+**认证**：可选会话，必须持有创建该对局的账号或访客 cookie。访客与未绑邮箱账号均可计大众票。**限流**：write 桶。
 
-请求体：`{ "choice": "a" }`（`a` / `b` / `tie` / `skip`）。
+请求体：`{ "choice": "a", "turnstileToken": "选填验证token" }`（`a` / `b` / `tie` / `skip`）。a/b/tie 须 ready 后至少5秒；skip 为3秒，从未 ready 的加载失败对局可直接 skip。连续第三次≤10秒选择须先验证；细则见 §3.26。
 
 成功 `200`（注意：**不计票也返回 200**，以 `counted` / `reason` 区分）：
 
@@ -686,12 +690,12 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 ```
 
 - 选择 `a` / `b` / `tie` 时响应的 `a` / `b` 即**揭晓**：返回两侧作品的完整公开视图（含模型名）。
-- `counted=false` 时 `reason` 取值：`skipped`（skip）、`anonymous`（未登录）、`unbound`（未绑定邮箱）、`changed`（投票时某侧作品已失效）、`own`（普通用户涉及本人作品，管理员豁免）、`duplicate`（已评过该组合）。未绑定账号正常揭晓双方结果，但不写入投票。
-- `skip` 同样终局化对局并写入 `decided_at`，但不产生投票记录、不揭晓、不进入冷却；仅返回 `{ "choice": "skip", "counted": false, "reason": "skipped", "a": null, "b": null }`，不返回作品或模型字段。
-- 对局绑定创建者：登录用户创建的对局仅本人可投；匿名创建的对局任何人可投（但仍不计票）。
+- `counted=false` 时 `reason` 取值：`skipped`、`changed`（某侧作品已失效）、`own`（普通用户本人作品，管理员豁免）、`duplicate`（已评过该组合）。匿名或未绑邮箱不再是不计票原因。新增 countedFor:{public,curated}、curatedEligible、voterLevel、challenge。
+- `skip` 同样终局化对局并写入 `decided_at`，但不产生投票记录、不揭晓、不进入冷却；返回 `{ "choice": "skip", "counted": false, "reason": "skipped", "a": null, "b": null, "countedFor": {"public":false,"curated":false}, "curatedEligible":false, "voterLevel":null, "challenge":{...} }`，不返回作品或模型字段。
+- 对局绑定创建者：登录对局仅本人可投；匿名对局仅原访客 cookie 可投，之后登录也不能接管原匿名对局。
 - 作品被标记存疑 / 删除后，其参与的历史投票**即时退出**排行统计；恢复验证后自动回归。
 
-错误：`404 这一组已经失效`（对局不存在 / 过期 / 非本人）；`409 这一组已经提交过了`；`400 选择无效`；`429`。
+错误：`404 这一组已经失效`（对局不存在 / 过期 / 非本人）；`409 这一组已经提交过了`；`400 选择无效`；`429`。新增 409/match_not_ready、409/vote_too_early（voteAllowedAt、skipAllowedAt、serverNow、retryAfter）、403/turnstile_required、400/turnstile_failed、503/turnstile_unavailable；拒绝时不揭晓、不终局。
 
 ### 3.10 `GET /api/leaderboard` —— 排行榜
 
@@ -707,7 +711,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 - `unranked` 与 `works` 计数按作品当前的来源字段筛选。
 - 带筛选时响应多一个 `"filters": { "harness": …, "provider": … }`；不带筛选时响应形状、计票范围与缓存键都与不支持筛选时完全相同。
 
-精选前端使用 `board=frontend`，不可与 `task`、`category`、`domain` 同用，仍支持 `by` 与来源筛选。只对 `server/curated-boards.mjs` 中用户已选的 36 个稳定题目 ID 汇总有效比较并重新拟合 Bradley–Terry，不平均单题分数。先以相同题目、相同来源筛选计算模型榜，只展示 Gallery 注册表（`models`，不含仅在 `modelPool` 的条目）已收录且比较数达到 `provisionalGames` 的模型；按配置也沿用此模型资格，配置自身仍可标记暂定。有效但无入榜资格的对手仍参与拟合；`totals` 描述参与拟合的比较，`rows` / `unranked` 均按模型资格过滤，名次连续。响应另有 `board: "frontend"`、`scope: { taskIds: [...], qualification: "registered-nonprovisional-model", provisionalGames: 30 }`，不含全量类别名次 `standings`。不存在的精选榜或混用范围参数返回 `400 invalid_query`。
+大众榜使用 `audience=public`（默认），保持 source=arena 的有效历史票，并纳入上线后的访客和未绑邮箱票。精选榜使用 `audience=curated`；省略 sectionId 为精选总榜，`sectionId=<稳定ID>` 为分区榜；旧 `board=frontend` 兼容精选总榜，不能与 sectionId 同用。精选不可与 task/category/domain 混用，支持 by 与来源筛选。题集和分区来自数据库，可由 Lv3 动态维护，初始网页设计10题、三维建模26题；与大众 category 独立。仅计 `voter_level>=1` 且 created_at 不早于一次性 counting_started_at 的有效票，历史快照为 NULL 不回填；新勾选的题也使用统一起点后的合格票。每个范围独立重新拟合 Bradley–Terry，不平均单题分数。模型须已在 Gallery models/aliases 收录且本范围有效比较≥30；配置沿用同范围模型资格，配置仍可暂定。有效但未达资格的对手参与拟合，rows/unranked 按资格过滤，空榜正常。返回 audience/sectionId，以及 scope:{taskIds,countingStartedAt,revision,minimumVoterLevel:1,qualifiedModels,provisionalModels,qualification:"registered-nonprovisional-model",provisionalGames:30}，兼容 board:"frontend"，不带大众 standings。题集/分区变更立即失效并丢弃在途旧计算；新票保持600秒公开快照。GET /api/curated 提供分区名称、次序及 taskIds，详见 §3.26。
 
 题型与领域：响应回显 `category`、`domain`（未指定为 `null`）。`totals.votes` / `totals.voters` 只计实际参与拟合的比较：同一计分单位（按配置为同一配置，按模型为同一模型）两件作品之间的票不计入；`totals.tasks` 为这些比较涉及的题目数，前端据此在领域榜少于 2 题或 50 次比较时提示样本不足。既无 `task`、`category` 也无 `domain` 的综合榜多一个 `standings`：`{ [题型]: { [key]: 该题型内名次 } }`，只列已有排名的题型，沿用同一计分单位与来源筛选。已公开的题目按 `category` 进入对应题型；迁移后分类仍为空的旧题只计入综合榜。
 
@@ -730,7 +734,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 - 评分算法：Bradley–Terry 模型（平局各计半胜，弱先验 N(0,1)），映射到 Elo 刻度——均值 1000，400 分对应十倍胜率差；`interval` 为 95% 不确定区间半宽。与顺序无关。
 - `provisional`：对局数 < `provisionalGames`（30）者为暂定。
 - `unranked`：池内存在但尚无计入对局的配置，按模型名字典序排列。
-- 排行在票数或作品状态变化时失效重建，并以数据包版本参与缓存键。
+- 内部实时榜在新票后失效；公开榜新票保持600秒快照。作品状态/归属、数据包、精选配置变更立即失效。
 
 非文字题的单件作品分供代表作选择使用，不改变上述配置榜响应与算法。先以当前两件作品均 `isEligible` 的 arena 票计算该题原配置级 Bradley–Terry 强度，再以作品为单位拟合，先验为 N(配置 logit 强度, 0.5²)。同配置内不同作品的票也参与作品拟合；旧快照或显式更正中的配置键保持原计分口径。内部 `arena.workScores(taskId)` 返回 `{ id, score, interval, games }[]`；`score` 在配置分的 Elo 刻度上估计作品偏差，保持配置中心，不按作品数量再次归零；`interval` 仍为 95% 后验不确定区间半宽（以配置先验均值为锚）。超过现有 200 条目阈值时沿用 worker。文字题不计算作品分。
 
@@ -746,12 +750,13 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 ### 3.12 作品内容伺服（令牌子域）
 
-内容端口（默认 5180）按 Host 首段令牌伺服作品，规则 `^[wmdp][0-9a-f]{32}$`：
+内容端口（默认 5180）按 Host 首段令牌伺服作品，规则 `^[wmdpce][0-9a-f]{32}$`：
 
 | 前缀 | 令牌来源 | 指向 | 有效期 | 注入脚本 | Cache-Control |
 | --- | --- | --- | --- | --- | --- |
 | `d…` | 草稿创建 | 草稿目录 | 24 小时 | `__sp_probe.js`（试加载探针） | `no-store` |
 | `m…` | 对战创建 | 对局某侧作品 | 3 小时（随对局） | `__sp_fold.js`（盲投折页）+ 就绪探针 + 视角桥（有存档视角时） | `no-store` |
+| `e…` | 本人考试读取 | 随机左右的标准对某侧 | 3 小时票据；active 考卷可刷新，考试无时限 | 同 m 盲评隔离/折页/就绪探针 | `no-store` |
 | `w…` | 投稿提交（`contentKey`） | 作品目录 | 随作品存续 | 视角桥（仅当存有校准视角） | `private, max-age=600` |
 | `p…` | 后台/作者预览 | 作品目录 | 预览键有效期 | 视角桥（仅当存有校准视角） | `no-store` |
 
@@ -771,9 +776,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 ### 3.14 题目与人工审核（schema v38）
 
-**`GET /api/questions/eligibility`**：需登录，返回 `{ eligibility: { allowed, exempt, votes, uploads, requiredVotes: 100, requiredUploads: 10 } }`，bootstrap 的 `me.questionEligibility` 提供相同结构。`allowed` 仅表示能否不附示例单独建题：当前账号 votes 表成功计票记录满 100 次，或 works 表本人未删除作品满 10 件即可；无时间窗口，待审核作品计入，试上传、跳过与未计票对局不计，删除作品后实时重算。`exempt` 对 moderator/admin 为 true。此资格不代替邮箱、待审配额或内容校验。
-
-单独 `POST /api/questions` 未达标时返回 `403` / `code: question_ineligible` 和中文提示，在创建题目与绑定参考图之前拒绝。附带有效示例（本人未过期的 `__new__` 草稿、完整 work 与 confirmed）不受此门槛限制，沿用原有校验和事务；伪造或缺失示例字段不能绕过。两类管理员可直接建题，管理员专用接口继续仅高级管理员可用。无数据库迁移。
+**`GET /api/questions/eligibility`**：需登录，返回 `{eligibility:{allowed,level,requiredLevel:1,reason?}}`，session/bootstrap 的 me.questionEligibility 相同。Lv1+ allowed=true，Lv0 reason=level_required；替代旧100票/10作品门槛，无附示例绕过。POST /api/questions、/api/drafts、/api/works 新建统一要求 Lv1，Lv0 403/level_required（requiredLevel/currentLevel）；投稿仍须绑邮箱。旧投稿查看、编辑、撤回及草稿管理、评论和贴纸不因等级回退被禁止，保留各自原权限及邮箱规则。
 
 **`POST /api/questions`**：登录并绑定邮箱，write 限流，请求体上限 6 MB。`title` / `summary` / `prompt` 必填，长度上限 70 / 400 / 20000 字；提示词仅去首尾空白。`category` 为文学 / 静态网页 / 建模；`domains` 有值时为词表内 1–2 项；`templates` 文学固定 text，其他分类为 static / vite 的非空子集；可选 tags 沿用既有规则。
 
@@ -989,6 +992,142 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 ### 3.25 盲评资格维护与代表作持久化（schema v26）
 
 v26 仅追加幂等建表 `featured_picks(task_id, scope, model_key, work_id, conservative, picked_at)` 与 `featured_refreshes(task_id, day)`，不回填作品、不打开竞技场开关，也不修改旧 CHECK 约束。`scope` 为 `cover` 或 `model`；封面的 `model_key` 为空串。日刷新状态独立保存，未有当选者的题目也不会在同日重复拟合。
+
+### 3.26 用户等级、盲评验证、精选分区、考试与投票风控（schema v44–45）
+
+本节为本地已实现契约；上线需前后端同步切换。时间均为UTC ISO，时长字段明确秒，成功沿用HTTP200。Lv0成员 / Lv1认证成员 / Lv2普通管理员 / Lv3高级管理员；后端提供数字 level。
+
+#### 公共 / 登录与盲评
+
+| 方法与路径 | 请求 | 响应新增或变化 |
+| --- | --- | --- |
+| GET `/api/session`、`/api/bootstrap` | 现有 | 本人 `user.level:0..3,levelSince:string\|null,levelSource:'exam'\|'admin'\|null`，`user.capabilities:{canSubmitQuestion,canSubmitWork,canTakeQualificationExam}`；顶层 `qualification:{activeAnswered,questionCount}\|null`；`questionEligibility:{allowed,level,requiredLevel:1,reason?}`，替代100票/10作品口径 |
+| GET `/api/auth/me`；登录/注册响应 | 现有 | 本人 `user.level,levelSince,levelSource` 加法扩展；保留各自原 role 字段语义，尤其 Show1 的 admin/null 兼容响应；不向公开作者对象暴露升级信息 |
+| GET `/api/arena/policy` **新增** | 无 | `{level:null\|0..3,minViewSeconds:5,minSkipSeconds:3,rapidWindowSeconds:10,rapidStreakLimit:3,challenge:{required,reason,siteKey,action:'arena',guestVotesRemaining}}`；guest 缺 cookie 时下发 cookie，缺状态视为首次必验 |
+| POST `/api/arena/matches` **改动** | 原 `{task,previous?,avoidCooling?,pin?}` + `turnstileToken?` | 原 match 字段 + `createdAt,expiresAt,minViewSeconds:5,minSkipSeconds:3,challenge`；`counted:true` 表示可投大众票，另加 `countableFor:{public:true,curated:<当前等级lv1+且本题被勾选>}`，实际成功以 vote 响应为准 |
+| POST `/api/arena/matches/:id/ready` **新增** | `{}` | `{readyAt,voteAllowedAt,skipAllowedAt,serverNow}`，重复返回首次 readyAt；须验证 match 归属 |
+| POST `/api/arena/matches/:id/vote` **改动** | `{choice:'a'\|'b'\|'tie'\|'skip',turnstileToken?}` | 保留 `{choice,counted,reason,a,b,pinned?}`；增加 `countedFor:{public:boolean,curated:boolean},curatedEligible:boolean,voterLevel:null\|0..3,challenge`。curatedEligible 表示已入库票具备等级/起点资格；countedFor.curated 还要求本题当前被勾选，表示当前计入精选输入，公开展示仍按十分钟更新 |
+| POST `/api/questions` **改动** | 原参数 | lv0 所有分支统一 403/level_required；lv1+ 不再受 100票/10作品门槛，但保留邮箱、审核、已有格式限制 |
+| POST `/api/drafts`、POST `/api/works` **改动** | 原参数 | lv0 新建统一403/level_required；旧内容的查看/编辑/撤回保持原权限 |
+| GET `/api/curated` **新增** | 无 | `{countingStartedAt,revision,sections:[{id,name,order,questionCount,taskIds:string[]}]}`；按 order 排序，taskIds 只含该分区当前公开且可计入精选的入选题，questionCount=taskIds.length；空分区 taskIds=[]，用于精选标记与抽题入口 |
+| GET `/api/leaderboard` **改动** | 大众默认或 `audience=public`；精选总榜 `audience=curated`；分区榜 `audience=curated&sectionId=<id>`；保留 by/harness/provider | 增加 `audience:'public'\|'curated',sectionId:null\|string`，精选 `scope:{taskIds,countingStartedAt,revision,minimumVoterLevel:1,qualification,provisionalGames:30,qualifiedModels,provisionalModels}`；保留 totals/rows/unranked/refreshIntervalSeconds/nextUpdateAt |
+
+兼容规则：无 audience/board/sectionId 时就是大众榜；旧 `board=frontend` 是**新精选总榜**的兼容别名，不再表示固定「前端分区」，新前端不发送 board。旧别名只允许不传 sectionId，且与 audience=public 冲突；未知 board 返回 invalid_query。canonical `audience=curated` 无需 board，sectionId 缺省表示总榜；sectionId 只允许配合精选，不与 task/category/domain 混用。大众继续支持原 task/category/domain。不存在的 sectionId 返回 404/section_not_found；存在但空的分区返回 200、totals=0、rows=[]。
+
+总榜和分区都重新对本范围有效票做 BT 拟合、各自判断模型 30 比较资格；不能把精选总榜 row 截取当分区榜。sectionId 是稳定技术 id，name 可任意改名，前端从 `/api/curated` 渲染分区，不把「网页设计/三维/Blender/视频」写死为枚举。
+
+challenge 的统一形状为 `{required:boolean,reason:null|'guest_entry'|'guest_interval'|'rapid_choices',siteKey:string|null,action:'arena',guestVotesRemaining:number|null}`。policy/match 仅提示当前状态，vote 再判定是最终权威；跨 tab 导致临时需要验证是正常分支。
+
+**本人升级信息与进行中考试的口径：**`levelSince` 为当前等级最近一次因考试/管理员实际改变的 UTC ISO 时间，`levelSource` 为对应 `'exam'` 或 `'admin'`。初始化为lv0、新注册，以及无法证明授予时点的历史staff，两字段为null，不能伪造考试通过日期或把初始化标成管理员手动晋升。考试自动晋级、管理员接口/CLI实际改级时，与等级更新同事务写 `users.level_since/level_source`；同级重复设置不刷新时间。考试交卷时账号已被管理员升到更高等级，则保留管理员来源与时间，不覆盖。考试提交响应里的本人 user 同样带这两个字段。
+
+session/bootstrap 的顶层 `qualification` 只有本人存在 active attempt 时返回 `{activeAnswered:number,questionCount:number}`，否则（包括匿名）为null。activeAnswered 是该考卷 answer 非null的题数，修改同一题不重复累计；questionCount 用该次冻结的题量，不能用管理员现行设置。该摘要仅查考试记录/答题数，不发内容票据、不触发评分，也不产生新的attempt。
+
+新增稳定错误码：
+
+| HTTP / code | 额外字段与前端行为 |
+| --- | --- |
+| 403 `level_required` | `requiredLevel:1,currentLevel`；引导考试 |
+| 409 `match_not_ready` | 不揭晓；等两侧就绪并调用 ready |
+| 409 `vote_too_early` | `voteAllowedAt,skipAllowedAt,serverNow,retryAfter`；继续倒计时，同 match 重试 |
+| 403 `turnstile_required` | `challenge`；保留本轮与选择，验证后重试同一票 |
+| 400 `turnstile_failed` | 重置 widget，用新 token 重试 |
+| 503 `turnstile_unavailable` | 保留本轮，提示稍后重试，不放行、不记票 |
+
+#### 标准对考试（仅登录 lv0，可由本人恢复）
+
+| 方法与路径 | 请求 | 响应 |
+| --- | --- | --- |
+| GET `/api/qualification` **新增** | 登录 | `{level,eligible,exam:{version,kind:'standard-pair',questionCount:20,passPercent:80,correctRequired:16,passCorrect:16,unlimitedAttempts:true,timeLimitSeconds:null,availablePairCount,ready},activeAttemptId?,lastResult?}`；不返回题库答案 |
+| POST `/api/qualification/attempts` **新增** | `{restart?:true}` | 默认恢复已有 active，否则新抽；`{attempt:<下方Attempt>}`。题库不足返回 409/exam_not_ready 和 availablePairCount，不缩减题数 |
+| GET `/api/qualification/attempts/:id` **新增** | 本人 | `{attempt:<Attempt>}`；恢复相同题面、随机左右和已保存答案，必要时只刷新过期内容 URL |
+| POST `/api/qualification/attempts/:id/items/:itemId/ready` **新增** | `{}` | `{readyAt,answerAllowedAt,serverNow}`；两侧就绪后调用，首次幂等，作答硬控 5 秒 |
+| PUT `/api/qualification/attempts/:id/items/:itemId/answer` **新增** | `{choice:'a'\|'b'}` | `{itemId,answer:'a'\|'b',answeredCount,questionCount}`；可改答案，不返回正误；未达五秒 409/answer_too_early，含 answerAllowedAt |
+| POST `/api/qualification/attempts/:id/submit` **新增** | `{}` | `{attemptId,status:'completed',correctCount,questionCount,scorePercent,passPercent,correctRequired,passCorrect,passed,finishedAt,user:{...原user,level,levelSince,levelSource}}`；未答完 409/exam_incomplete，含 answeredCount；重复提交返回已保存结果 |
+
+**与前端设计§7的命名核对结果：一致。** 概况使用 `exam.correctRequired`、`exam.passPercent`、`exam.ready`；ready 是题库已具备本次配置所需可用标准对的布尔值，不表示考生两侧作品已加载。每题就绪为 `POST /api/qualification/attempts/:id/items/:itemId/ready`，响应 `answerAllowedAt`（并有readyAt/serverNow）；保存答案为 `PUT /api/qualification/attempts/:id/items/:itemId/answer {choice}`。不使用PATCH批量answers；passCorrect是correctRequired的同值兼容字段，本轮均为16。Turnstile widget必须设置action:challenge.action（arena），服务端验证action与允许hostname。正式盲评ready响应仍叫 `voteAllowedAt`，与考试 `answerAllowedAt` 区分。
+
+`Attempt` 的公开结构为：
+
+```json
+{
+  "id": "opaque-attempt-id",
+  "status": "active",
+  "startedAt": "2026-10-19T00:00:00.000Z",
+  "questionCount": 20,
+  "passPercent": 80,
+  "correctRequired": 16,
+  "answeredCount": 0,
+  "items": [{
+    "id": "opaque-item-id",
+    "position": 1,
+    "question": {"title": "题目名称", "prompt": "该标准对对应的同一提示词"},
+    "a": "https://w.example/v/e.../",
+    "b": "https://w.example/v/e.../",
+    "calibration": {"a": null, "b": null},
+    "readyAt": null,
+    "answerAllowedAt": null,
+    "answer": null
+  }]
+}
+```
+
+数组按 position 排序；示例只展示第 1 题，正式返回该次全部题的轻量元数据，iframe 可逐题加载。任何 attempt/item 路由先校验 user_id，不允许他人只凭 id 读取；公开 Content URL 为不可猜的限时 bearer 能力，与既有作品沙箱相同，不依赖跨内容域携带登录 cookie。completed 的 GET 只返回成绩和进度，不续发内容票据；abandoned 只能读历史摘要，不能继续作答。若内容失效，409/exam_item_unavailable 保留进度并允许 restart。
+
+#### 管理后台：精选分区与题目
+
+以下写请求都携带同一 curated revision，版本过期返回 409/curated_revision_conflict。成功统一带最新 revision；每次原子写配置并记 audit，既不改题目文本也不逐票改历史。
+
+| 方法与路径 | 权限 / 请求 | 响应 |
+| --- | --- | --- |
+| GET `/api/admin/curated` **新增** | lv3 | `{countingStartedAt,revision,sections:[{id,name,order,questionCount,selectedQuestionCount}],questions:[{taskId,title,category,selected,sectionId:null\|string,available,unavailableReason?,curatedComparisons?:number}]}`；selectedQuestionCount=questionCount=taskIds.length，仅统计当前可用的入选题；questions保留不存在/不可用的已选题及unavailable标记；curatedComparisons为可选，首版省略，见下方 |
+| POST `/api/admin/curated/sections` **新增** | lv3；`{revision,name}` | `{section:{id,name,order,questionCount:0},revision}`；自动创建稳定 id，追加末尾 |
+| PATCH `/api/admin/curated/sections/:id` **新增** | lv3；`{revision,name}` | `{section,revision}`；改名不影响 id、归属或票 |
+| PUT `/api/admin/curated/sections/order` **新增** | lv3；`{revision,sectionIds:string[]}`，须为所有现有分区的无重复完整排列 | `{sections,revision}`；统一更新 order=0..n-1，不能漏掉空分区 |
+| DELETE `/api/admin/curated/sections/:id` **新增** | lv3；`{revision,moveQuestionsTo?:string}` | `{ok:true,revision}`；空分区直接删除，非空需目标分区并原子迁题，否则409/section_not_empty；不能移动到自身/不存在分区 |
+| PUT `/api/admin/curated/questions` **新增** | lv3；`{revision,questions:[{taskId,sectionId}]}` | `{questions,revision}`；原子替换全部入选关系，[] 清空；一题最多一个分区，所有 sectionId 必须存在。原已选但不可用题可保留且不计票，禁止新选不可用题 |
+
+取消复选框即从 PUT 的 questions 中省略该题；新增勾选必须选一个 sectionId；换分区只改该题 sectionId。保存与用户投票同时发生时，票仍记录等级快照，下一次榜单以新归属重算；不修改投票本身。
+
+**可选比较数首版不提供：**`questions[].curatedComparisons` 如提供，应为该题在新精选起点后、投票时lv1+、当前入选且作品仍有效的配置级比较数（两侧configKey不同，同一配置比较不计），不能用原始votes行数冒充。现成管理接口没有这个聚合，冷请求需要复用/扫描有效票；本轮首版省略此字段，前端隐藏影响票数，不把缺失值显示为0。以后若在同一有效票缓存中一次分组即可取得，可加法返回，不为此字段额外启动BT拟合或逐题扫描。
+
+#### 管理后台：标准对与考试参数
+
+| 方法与路径 | 权限 / 请求 | 响应 |
+| --- | --- | --- |
+| GET `/api/admin/users` **改动** | lv3；现有请求 | 原有每位成员字段 + `level:0..3,exam:{passedAt:string\|null,attempts:number,bestCorrect:number\|null,questionCount:number\|null}`；摘要按下方固定口径批量读取 |
+| GET `/api/admin/qualification` **新增** | lv3 | `{settings:{version,questionCount,passPercent},pairs:[{id,version,taskId,aWorkId,bWorkId,correctAnswer:'a'\|'b',explanation,enabled,available,unavailableReason?}]}`；仅管理员看答案 |
+| PUT `/api/admin/qualification/settings` **新增** | lv3；`{version,questionCount,passPercent}` | `{settings}`；version 冲突409/exam_revision_conflict；已开始考卷规则冻结 |
+| GET `/api/admin/qualification/works?taskId=<id>` **新增** | lv3 | `{works:[{id,title,modelName,promptVariant,preview}]}`；只列该题可作为标准对的当前作品，辅助管理员选两件；后端仍在保存时重验同提示词版本与准入 |
+| POST `/api/admin/qualification/pairs` **新增** | lv3；`{taskId,aWorkId,bWorkId,correctAnswer:'a'\|'b',explanation?,enabled?:true}` | `{pair}`；服务器生成 id/version，计算内容快照；不接受客户端 digest 或 score |
+| PATCH `/api/admin/qualification/pairs/:id` **新增** | lv3；`{version,taskId?,aWorkId?,bWorkId?,correctAnswer?,explanation?,enabled?}` | `{pair}`；先组合成完整新标准对重新校验，pair version 冲突409/exam_revision_conflict；不改已开始考卷 |
+| DELETE `/api/admin/qualification/pairs/:id` **新增** | lv3；`{version}` | `{ok:true}`；软停用并增加版本，已有考卷快照保留 |
+| POST `/api/admin/users/:id/role` **改动** | lv3；`{level:0\|1\|2\|3}` | `{user:{id,name,role,level}}`；事务映射 role/member_level；防降自己和配置固定 admin。兼容旧 `{role}` 时 role=user 明确映射 lv0 |
+
+所有试卷提交使用 attempt 自己冻结的 settings 和 pair 版本，不接收管理员列表对象回传当答案。考试题库为 0 时不能宣称考试已可用；需管理员先维护至少 questionCount 个可用标准对，再开放报名。
+
+**成员考试摘要的口径：**attempts 只统计已交卷 completed 次数，不把active/abandoned算作已参加并判分的一次；passedAt 为最近一次通过考试的finished_at（UTC ISO），没有通过记录则null，管理员直接授予lv1不伪造通过考试记录。bestCorrect 取已完成考试中正确率最高的一次的correct_count，questionCount 必须取同一次冻结题量；正确率相同取最近完成的一次，避免参数变更后出现18/10等无效比值。没有已完成考试时返回 `{passedAt:null,attempts:0,bestCorrect:null,questionCount:null}`。该摘要保留历史事实，不以当前等级重新推断考试结果；列表用一次批量读取/聚合汇总，不逐用户查询或读取完整考卷内容。前端的“第N次通过”不能仅由attempts总数推断通过发生的序号。
+
+
+#### 管理后台：投票证据与风控（仅 Lv3，schema v45新增）
+
+从本轮上线后记录，旧票不补造IP。每次可归属到本人账号/访客cookie的a/b/tie/skip提交记录独立证据（包括太早、待验证、重复等失败尝试）；聚合默认只使用最终成功处理的选择，失败尝试只在明细中显示，避免验证码重试被算多票。证据不随match清理而删除。抽题IP与提交IP分别记录，不能互相替代；原始IP在各自采集180天后清空，IPv4保留/24、IPv6保留/64；UA截断512字符。仅此组Lv3接口返回IP/网段/UA，公开响应与普通后台接口不加这些字段。
+
+所有查询支持 from/to（UTC ISO，半开区间[from,to)，默认最近7天），以及可叠加 ip、subnet、userId、visitorHash、modelKey、voided=all|yes|no（默认all）。modelKey是盲评模型计分键（登记模型id或x:<归一化自填名>），匹配任意一侧；不是仅匹配胜方。IP/网段用服务端规范格式；过期raw IP不会由网段反推，groupBy=ip不展示已匿名化行。limit默认50、上限200，offset默认0；响应total为分页前行数。批量操作只按显式voteIds执行，筛选不会隐式全选。
+
+| 方法与路径 | 请求 | 响应 |
+| --- | --- | --- |
+| GET /api/admin/vote-risk/summary | 上述筛选 + groupBy=ip\|subnet\|actor（默认actor），limit/offset | {from,to,groupBy,total,rows:[<下方聚合行>]}；按voteCount降序，保留skip/不计票选择的choiceCount；聚合不含失败请求 |
+| GET /api/admin/vote-risk/choices | 上述筛选 + outcome=all\|accepted\|rejected（默认all），limit/offset | {from,to,total,rows:[{id,matchId,voteId:null\|string,submittedAt,userId,username,visitorHash,actorKey,taskId,choice,ip,subnet,drawIp,drawSubnet,userAgent,readyElapsedMs,turnstilePassed,lastVerifiedAt,outcome,errorCode,winnerModel:null\|{key,name},aModel,bModel,voidedAt,voidedBy,voidReason}]}；按时间倒序，原始IP到期为null，skip/tie无胜方 |
+| GET /api/admin/vote-risk/model-voters | 上述筛选，必填modelKey，minVotes默认5（至少1），limit/offset | {from,to,modelKey,total,rows:[{...actor聚合行,modelComparisons,wins,losses,ties,winShare}]}；按winShare降序、再按modelComparisons降序；winShare=wins/(wins+losses)，无胜负为null；展示证据而非自动判定刷票 |
+| POST /api/admin/vote-risk/votes/void | {voteIds:string[1..200],reason:string(1..500)} | {ok:true,changed:number}；仅source=arena，可处理有/无新证据的历史盲评票；整批不存在或非arena则404，不部分执行 |
+| POST /api/admin/vote-risk/votes/restore | {voteIds:string[1..200],reason:string(1..500)} | {ok:true,changed:number}；清空作废标记并恢复两榜资格（仍受原有效性规则限制） |
+
+聚合行：{key,ip?,subnet?,actorKey?,userId?,username?,visitorHash?,choiceCount,voteCount,validVoteCount,voidedVoteCount,actorCount,accountCount,visitorCount,timedChoices,fastChoices,fastChoiceShare,peakHourlyVotes,sharedIpOtherAccounts,topWinnerModel:null|{key,name},topWinnerVotes,decisiveVotes,topWinnerShare}。voteCount含作废的已入库票，validVoteCount仅表示未作废（不是作品资格等全部榜单过滤后的有效数）；choiceCount是成功处理的a/b/tie/skip次数。快速口径为非skip且readyElapsedMs≤10000；fastChoiceShare=fastChoices/timedChoices，没有计时样本为null。峰值为UTC自然小时内入库票最大值；共享账号数是同窗口与该actor共享任一未过期精确提交IP的其他注册账号去重数（不将共享网段当作共享IP，也不包含自己）；actorCount以账号或稳定访客哈希去重。胜方占比只在有voteId、两侧不同模型、a/b决定胜负的票中计算，ties和同模型比较不入分母；作废票仍可供排查，voided筛选可排除。
+
+readyElapsedMs沿用该match首次有效选择时间（验证码等待/重试不会稀释快速比例），首次尚无有效选择时用本次收到请求时间；未ready为null。turnstilePassed仅表示本次提交已成功校验token，lastVerifiedAt另给最近通过时间，包含访客抽题首验；不返回或保存token。
+
+软作废只在votes增加voided_at/voided_by/void_reason，历史行/组合唯一约束不删，不释放重复投票资格；两榜及作品分的有效输入排除作废票，操作后立即清内部与600秒公开缓存，并递增独立风控revision保证在途旧计算丢弃。撤销也写audit；audit不复制原始IP。后端不自动封号/作废，不开放Lv2读取。新建arena_choice_evidence及索引，matches增加draw_ip/draw_subnet；清理复用现有每分钟周期及启动检查，不增加服务或日志系统。schema v45追加在v44之后，保证已准备的本地v44联调库可增量升级；不会重置题库、认证或精选起点。model-voters只聚合有voteId且两侧不同模型的选择。所有查询另返回recordingStartedAt，标明证据覆盖起点。
+
 
 ## 4. 数据包契约（`dist/data.json`）
 

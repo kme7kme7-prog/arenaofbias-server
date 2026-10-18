@@ -1,6 +1,7 @@
-// Verified accounts for tests whose subject is unrelated to email delivery.
+// Certified, email-bound fixture accounts. Level-zero tests use auth.register directly.
 export async function verifiedUser(auth, name, password = 'correct horse') {
   const user = await auth.register(name, password);
+  auth.promote(name, 1);
   return auth.bindEmail(user.id, `${name}@example.test`);
 }
 

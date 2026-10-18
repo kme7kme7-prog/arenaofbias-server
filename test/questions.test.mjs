@@ -214,45 +214,25 @@ describe('question and sample review lifecycle', () => {
     if (root) rmSync(root, { recursive: true, force: true });
   });
 
-  test('plain questions require 100 counted votes OR 10 live uploads and expose current progress', async () => {
+  test('question eligibility depends on level, not old vote or upload thresholds', async () => {
     const user = await verifiedUser(platform.auth, 'threshold');
-    assert.equal((await call('threshold', 'POST', '/api/auth/login', { name: 'threshold', password: 'correct horse' })).status, 200);
-    assert.equal((await call('guest', 'GET', '/api/questions/eligibility')).status, 401);
-    const state = async () => (await call('threshold', 'GET', '/api/questions/eligibility')).data.eligibility;
-    assert.deepEqual(await state(), { allowed: false, exempt: false, votes: 0, uploads: 0, requiredVotes: 100, requiredUploads: 10 });
-    const insert = platform.db.prepare(`INSERT INTO works (id, task_id, owner_id, title, model_other, content_key, source_name, root,
-      entry, file_count, bytes, digest, checks, trial, created_at, updated_at, moderation, deleted_at)
-      VALUES (?, 'one', ?, 'Threshold', 'Model', ?, 'sample.html', '', 'index.html', 1, 100, 'fixture', '[]', '{}', 1, 1, '{"status":"pending"}', ?)`);
-    for (let i = 0; i < 10; i++) insert.run(`threshold-${i}`, user.id, `threshold-${i}`, i === 9 ? 1 : null);
-    seedQuestionVotes(platform.db, user.id, 99);
-    // A skipped match and a trial draft must not increase either counter.
-    platform.db.prepare(`INSERT INTO matches (id, user_id, task_id, a_work, b_work, a_token, b_token, created_at, expires_at, choice)
-      VALUES ('threshold-skip', ?, 'one', 'a', 'b', 'threshold-a', 'threshold-b', 1, 2, 'skip')`).run(user.id);
-    await draft('threshold');
-    assert.deepEqual(await state(), { allowed: false, exempt: false, votes: 99, uploads: 9, requiredVotes: 100, requiredUploads: 10 });
-    const before = platform.db.prepare('SELECT COUNT(*) AS n FROM questions').get().n;
-    const denied = await call('threshold', 'POST', '/api/questions', questionBody);
-    assert.equal(denied.status, 403); assert.equal(denied.data.code, 'question_ineligible');
-    assert.equal(platform.db.prepare('SELECT COUNT(*) AS n FROM questions').get().n, before);
-    seedQuestionVotes(platform.db, user.id, 1, 99);
-    assert.equal((await state()).allowed, true);
-    assert.equal((await call('threshold', 'POST', '/api/questions', questionBody)).status, 200);
-    platform.db.prepare('DELETE FROM votes WHERE id = ?').run(`eligibility-${user.id}-99`);
-    platform.db.exec("UPDATE works SET deleted_at = NULL WHERE id = 'threshold-9'");
-    assert.equal((await state()).uploads, 10);
-    assert.equal((await call('threshold', 'POST', '/api/questions', questionBody)).status, 200);
-    platform.db.exec("UPDATE works SET deleted_at = 1 WHERE id = 'threshold-9'");
-    assert.equal((await state()).allowed, false);
-    assert.equal((await call('threshold', 'POST', '/api/questions', questionBody)).status, 403);
-    for (const role of ['moderator', 'admin']) {
-      platform.auth.promote('threshold', role);
-      assert.equal((await state()).exempt, true);
-      assert.equal((await call('threshold', 'POST', '/api/questions', questionBody)).status, 200);
+    platform.auth.promote('threshold',0);
+    assert.equal((await call('threshold','POST','/api/auth/login',{name:'threshold',password:'correct horse'})).status,200);
+    seedQuestionVotes(platform.db,user.id,100);
+    const state = async () => (await call('threshold','GET','/api/questions/eligibility')).data.eligibility;
+    assert.deepEqual(await state(),{allowed:false,level:0,requiredLevel:1,reason:'level_required'});
+    assert.equal((await call('threshold','POST','/api/questions',questionBody)).data.code,'level_required');
+    platform.auth.promote('threshold',1);
+    assert.deepEqual(await state(),{allowed:true,level:1,requiredLevel:1});
+    assert.equal((await call('threshold','POST','/api/questions',questionBody)).status,200);
+    for (const role of ['moderator','admin']) {
+      platform.auth.promote('threshold',role);
+      assert.equal((await state()).allowed,true);
     }
-    assert.deepEqual((await call('threshold', 'GET', '/api/bootstrap')).data.me.questionEligibility, await state());
+    assert.deepEqual((await call('threshold','GET','/api/bootstrap')).data.me.questionEligibility,await state());
   });
 
-  test('a valid attached sample bypasses the threshold but fake sample fields do not create a question', async () => {
+  test('certified members can attach samples but fake sample fields do not create a question', async () => {
     await verifiedUser(platform.auth, 'newcomer');
     assert.equal((await call('newcomer', 'POST', '/api/auth/login', { name: 'newcomer', password: 'correct horse' })).status, 200);
     const before = platform.db.prepare('SELECT COUNT(*) AS n FROM questions').get().n;
@@ -264,7 +244,7 @@ describe('question and sample review lifecycle', () => {
     const saved = await create('newcomer');
     assert.ok(saved.question.id); assert.ok(saved.work.id);
     const eligibility = (await call('newcomer', 'GET', '/api/questions/eligibility')).data.eligibility;
-    assert.equal(eligibility.allowed, false); assert.equal(eligibility.uploads, 1); assert.equal(eligibility.votes, 0);
+    assert.deepEqual(eligibility, { allowed: true, level: 1, requiredLevel: 1 });
   });
 
   test('categories are required, templates match and tags may be empty or omit the category', async () => {

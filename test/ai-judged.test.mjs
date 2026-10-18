@@ -1,3 +1,4 @@
+import { finishViewing, voteAfterViewing } from './helpers/arena.mjs';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -60,9 +61,9 @@ test('reasoning leaves stored ballots intact while removing pools, scores and co
       .run(user.id, user.name, user.name, 'unused', 'unused', 1);
     for (let i = 0; i < users.length; i++) {
       const match = await platform.arena.createMatch(users[i], tasks[i].id);
-      assert.equal(platform.arena.vote(users[i], match.id, 'a').counted, true);
+      assert.equal(voteAfterViewing(platform, users[i], match.id, 'a').counted, true);
     }
-    const pending = await platform.arena.createMatch(null, 'reasoning');
+    const pending = await platform.arena.createMatch(users[0], 'reasoning');
     const ballots = platform.db.prepare('SELECT * FROM votes ORDER BY id').all();
     // The compat layer scores its own source and must also stop reading these votes.
     platform.db.exec(`INSERT INTO matches (id, user_id, task_id, a_work, b_work, a_token, b_token, created_at, expires_at)
@@ -88,7 +89,7 @@ test('reasoning leaves stored ballots intact while removing pools, scores and co
     assert.ok(!Object.hasOwn(after.featured, 'reasoning'));
     assert.deepEqual(platform.arena.poolStats('reasoning'), { works: 0, entries: 0 });
     await assert.rejects(() => platform.arena.createMatch(null, 'reasoning'), (error) => error.code === 'ai-judged');
-    assert.throws(() => platform.arena.vote(null, pending.id, 'a'), (error) => error.code === 'ai-judged');
+    assert.throws(() => voteAfterViewing(platform, users[0], pending.id, 'a'), (error) => error.code === 'ai-judged');
     for (const path of ['/api/leaderboard', '/api/leaderboard?category=文学', '/api/leaderboard?domain=数学']) {
       assert.equal((await get(path)).totals.votes, 1, path);
     }

@@ -35,7 +35,7 @@ async function fixture(t, options = {}) {
   const server = createServer(createContentHandler({ config: { ...config, ...(options.pages ? { readLimits: { pages: options.pages } } : {}) }, siteOrigins: config.siteOrigins,
     library: { byContentKey: lookup, previewByKey: lookup, curatedByKey: lookup,
       draftByToken: lookup, publicContent: Boolean, publicCuratedContent: Boolean, isEligible: Boolean },
-    arena: { workForToken: lookup } }));
+    arena: { workForToken: lookup }, qualification: { workForToken: lookup } }));
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { await new Promise(resolve => server.close(resolve)); rmSync(directory, { recursive: true, force: true }); });
   const request = (path, host = 'content.example.test', method = 'GET', headers = {}) => new Promise((resolve, reject) => {
@@ -50,7 +50,7 @@ async function fixture(t, options = {}) {
 
 test('trusted shell contains no work code and sandbox responses are opaque even outside the shell', async t => {
   const f = await fixture(t);
-  for (const k of ['w', 'm', 'd', 'p', 'c'].map(key)) {
+  for (const k of ['w', 'm', 'd', 'p', 'c', 'e'].map(key)) {
     const shell = await f.request(`/v/${k}/?aob=fold`);
     assert.equal(shell.status, 200);
     assert.match(shell.body, new RegExp(`data-source="/c/${k}/\\?aob=fold"`));

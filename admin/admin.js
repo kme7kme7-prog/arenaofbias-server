@@ -37,6 +37,7 @@ const ICONS = {
   list: '<path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/>',
   game: '<path d="M7 8h10a4 4 0 0 1 3.8 3l1 5a2 2 0 0 1-3.3 1.8L16 16H8l-2.5 1.8A2 2 0 0 1 2.2 16l1-5A4 4 0 0 1 7 8ZM7 11v4M5 13h4M16 12h.01M18 14h.01"/>',
   calendar: '<rect x="3.5" y="5" width="17" height="15"/><path d="M3.5 9h17M8 3v4M16 3v4"/>',
+  more: '<path d="M5 12h.01M12 12h.01M19 12h.01"/>',
 };
 const icon = (name) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]}</svg>`;
 // Same mark as the gallery: a solid line (同) over a broken one (异).
@@ -153,7 +154,10 @@ const statusBadge = (status, reason = '') => {
 const ACTIONS = { submit: '提交作品', verified: '通过核验', questioned: '标记存疑', unverified: '退回未验证', delete: '删除作品', role: '调整角色',
   'question-create': '发起题目', 'question-review': '审核题目', 'question-delete': '删除题目',
   'content-review': '内容审核', 'content-retry': '重新自动审核',
-  'face-settings': '门面开关', meta: '编辑信息', curate: '收录为馆藏', nominate: '提名收录', 'withdraw-nomination': '撤回提名', 'inbox-upload': '收件箱上传', 'inbox-register': '登记入库', 'inbox-remove': '收件箱移除' };
+  'face-settings': '门面开关', meta: '编辑信息', curate: '收录为馆藏', nominate: '提名收录', 'withdraw-nomination': '撤回提名', 'inbox-upload': '收件箱上传', 'inbox-register': '登记入库', 'inbox-remove': '收件箱移除',
+  'curated-section-create': '新建精选分区', 'curated-section-edit': '重命名精选分区', 'curated-section-order': '调整精选分区顺序', 'curated-section-delete': '删除精选分区', 'curated-questions': '更新精选题目',
+  'qualification-settings': '考试设置', 'qualification-pair-create': '新建标准对', 'qualification-pair-edit': '编辑标准对', 'qualification-pair-disable': '停用标准对', 'qualification-promote': '考试晋升',
+  'vote-void': '作废投票', 'vote-restore': '撤销作废投票' };
 // Per-face review: the same work is approved separately for the gallery (display)
 // and the arena (blind test). `audience` carries both flags; adminWork rows also
 // carry explicit show_gallery/show_arena.
@@ -163,7 +167,8 @@ const contentReady = (w) => ['legacy', 'approved'].includes(w.moderation?.status
 const isStaff = (user) => ['admin', 'moderator'].includes(user?.role);
 const isSenior = () => state.user?.role === 'admin';
 const canDecide = (work) => isSenior() || !work.mine;
-const ROLE_LABELS = { admin: '高级管理员', moderator: '普通管理员', user: '普通用户' };
+const LEVELS = { 3: 'Lv3 高级管理员', 2: 'Lv2 普通管理员', 1: 'Lv1 认证成员', 0: 'Lv0 成员' };
+const levelOfUser = (u) => u.level ?? ({ admin: 3, moderator: 2 }[u.role] ?? 0);
 const publisher = (item) => item.author?.role === 'user' ? '用户' : '管理员';
 const faceOn = (w, face = state.system) => !contentHeld(w) && Boolean(w[`show_${face}`] ?? AUDIENCE_FACE[face].includes(w.audience));
 const CONTENT_STATUS = { pending: '自动审核中', approved: '内容已通过', review: '内容待人工审核', rejected: '内容未通过', legacy: '历史作品' };
@@ -186,7 +191,10 @@ const state = { user: undefined, data: null, works: null, audit: [], users: null
   sidebarCollapsed: store.get('admin-sidebar-collapsed') === '1',
   workPage: 1, workTask: '', workStatus: '', workShow: '', workHarness: '', workProvider: '', workSearch: '', traffic: null,
   workModel: '', workEffort: '', workAuthor: '', workGenerationMode: '', workHumanIntervention: '', workEfforts: [],
-  inbox: null, inboxForms: {}, intake: null, adminQuestions: null, reviewCounts: null, domainGroups: [] };
+  inbox: null, inboxForms: {}, intake: null, adminQuestions: null, reviewCounts: null, domainGroups: [],
+  curated: null, curatedDraft: null, curatedFilter: 'all', curatedSearch: '', curatedType: '', curatedTarget: '', curatedNote: '',
+  qualification: null, examWorks: {},
+  risk: { view: 'ip', range: '7d', from: '', to: '', voided: 'all', outcome: 'all', ip: '', subnet: '', userId: '', visitorHash: '', modelKey: '', minVotes: 5, limit: 50, offset: 0, sort: '', dir: 'desc', data: null, loading: false, error: '', selected: new Map(), expanded: new Set() } };
 const taskTitle = (id) => [...(state.adminQuestions ?? []), ...(state.questions ?? [])].find((t) => t.id === id)?.title ?? id;
 
 async function loadCatalog() {
@@ -246,6 +254,8 @@ const routeParts = () => location.hash.replace(/^#\/?/, '').split('?')[0].split(
 const TABS = [
   { id: 'works', label: '作品', icon: 'file' },
   { id: 'tasks', label: '题目', icon: 'guide' },
+  { id: 'qualification', label: '资格考试', icon: 'check' },
+  { id: 'vote-risk', label: '投票风控', icon: 'shield' },
 ];
 const COMMON_TABS = [
   { id: 'dashboard', label: '仪表盘', icon: 'chart' },
@@ -254,7 +264,7 @@ const COMMON_TABS = [
   { id: 'traffic', label: '流量', icon: 'clock' },
 ];
 const ARENA_NAV = [
-  ['内容管理', [['works', '作品管理', 'file', '#/works'], ['intake', '收件箱 · 娱乐作品', 'inbox', '#/intake'], ['tasks', '题目管理', 'guide', '#/tasks'], ['gallery-review', '审核', 'shield', 'https://gallery.arenaofbias.icu/#/review']]],
+  ['内容管理', [['works', '作品管理', 'file', '#/works'], ['intake', '收件箱 · 娱乐作品', 'inbox', '#/intake'], ['tasks', '题目管理', 'guide', '#/tasks'], ['qualification', '资格考试', 'check', '#/qualification'], ['vote-risk', '投票风控', 'shield', '#/vote-risk'], ['gallery-review', '审核', 'shield', 'https://gallery.arenaofbias.icu/#/review']]],
   ['玩法', [['guess', '模一把', 'game', '#/guess'], ['activity', '活动管理', 'calendar', '#/activity']]],
 ];
 const SUBMIT_URL = 'https://gallery.arenaofbias.icu/#/submit';
@@ -467,10 +477,362 @@ function syncQuestionDomains(form) {
   $$('[name="domains"]', form).forEach((input) => { input.disabled = count >= MAX_DOMAINS && !input.checked; });
   $('[data-domain-count]', form).textContent = `已选 ${count} / ${MAX_DOMAINS}`;
 }
+const taskCard = (task, { lead = '', mark = '', note = '', cls = '', category = false } = {}) => `<article class="admin-task${cls}">${lead}<div class="admin-task-main"><h3>${esc(task.title)}${mark}</h3><p class="muted">${publisher(task)} · ${esc(QUESTION_STATUS[task.moderation?.status] ?? '')}${category ? ` · ${esc(QUESTION_TYPES[task.category] ?? task.category ?? '')}` : ''} · ${task.works ?? 0} 件作品 · ${task.votes ?? 0} 票</p>${note}</div><div class="actions"><button class="btn" data-question-edit="${esc(task.id)}">编辑与审核</button><button class="btn" data-task-note="${esc(task.id)}">${state.system === 'gallery' ? '编辑策展文案' : '编辑点评与权重'}</button><button class="btn danger" data-question-delete="${esc(task.id)}"${task.votes ? ' disabled title="有票题目不能删除"' : ''}>删除</button></div></article>`;
 function tasksView() {
   const tasks = state.adminQuestions ?? [];
-  return `${pageHero('题目管理', `${faceLabel()}题目`, '统一管理题目信息、投稿开关和审核状态。新题目须经人工审核。', [['题目', tasks.length]])}
-    <section class="block"><div class="actions"><button class="btn primary" type="button" data-new-question>新建题目</button></div><div class="admin-task-list">${tasks.map((task) => `<article class="admin-task"><div><h3>${esc(task.title)}</h3><p class="muted">${publisher(task)} · ${esc(QUESTION_STATUS[task.moderation?.status] ?? '')} · ${task.works ?? 0} 件作品 · ${task.votes ?? 0} 票</p></div><div class="actions"><button class="btn" data-question-edit="${esc(task.id)}">编辑与审核</button><button class="btn" data-task-note="${esc(task.id)}">${state.system === 'gallery' ? '编辑策展文案' : '编辑点评与权重'}</button><button class="btn danger" data-question-delete="${esc(task.id)}"${task.votes ? ' disabled title="有票题目不能删除"' : ''}>删除</button></div></article>`).join('')}</div></section>`;
+  const curated = curatedOn() && state.curated;
+  return `${pageHero('题目管理', `${faceLabel()}题目`, '统一管理题目信息、投稿开关和审核状态。新题目须经人工审核。', [['题目', tasks.length], ...(curated ? [['精选', curatedCurrent().size]] : [])])}
+    <section class="block"><div class="actions"><button class="btn primary" type="button" data-new-question>新建题目</button></div>
+    ${curated ? `<div class="admin-filter curated-toolbar"><input class="input" type="search" data-curated-search value="${esc(state.curatedSearch)}" placeholder="搜索题目" aria-label="搜索题目">
+      <select class="input" data-curated-type aria-label="按类型筛选"><option value="">全部类型</option>${Object.entries(QUESTION_TYPES).map(([value, label]) => `<option value="${value}"${state.curatedType === value ? ' selected' : ''}>${label}</option>`).join('')}</select></div>
+    <div data-curated-body>${curatedBody()}</div>`
+    : `${curatedOn() && state.curatedNote ? `<p class="form-error" role="alert">${esc(state.curatedNote)}</p>` : ''}<div class="admin-task-list">${tasks.map((task) => taskCard(task)).join('')}</div>`}</section>`;
+}
+
+// ---- curated rankings: the question set is edited in a staged draft and saved as one request (Lv3, gallery) ----
+const curatedOn = () => state.system === 'gallery' && isSenior();
+const curatedOriginal = () => new Map((state.curated?.questions ?? []).filter((q) => q.selected).map((q) => [q.taskId, q.sectionId]));
+const curatedCurrent = () => state.curatedDraft ?? curatedOriginal();
+const curatedSections = () => state.curated?.sections ?? [];
+const sectionName = (id) => curatedSections().find((section) => section.id === id)?.name ?? id ?? '';
+function curatedDiff() {
+  const before = curatedOriginal(), after = curatedCurrent();
+  const added = [], removed = [], moved = [];
+  for (const [id, section] of after) { if (!before.has(id)) added.push(id); else if (before.get(id) !== section) moved.push(id); }
+  for (const id of before.keys()) if (!after.has(id)) removed.push(id);
+  return { added, removed, moved, count: added.length + removed.length + moved.length };
+}
+const curatedDirty = () => curatedOn() && Boolean(state.curatedDraft) && curatedDiff().count > 0;
+function stageCurated(change) {
+  const draft = new Map(curatedCurrent());
+  change(draft);
+  state.curatedDraft = draft;
+  if (!curatedDiff().count) state.curatedDraft = null;
+  state.curatedNote = '';
+}
+// New ticks go to the chosen section, which defaults to the filtered section, else the first one.
+const curatedTarget = () => {
+  const sections = curatedSections();
+  const wanted = state.curatedTarget || (sections.some((section) => section.id === state.curatedFilter) ? state.curatedFilter : '');
+  return sections.find((section) => section.id === wanted)?.id ?? sections[0]?.id ?? '';
+};
+const NO_REASONING = '推理题由 AI 评分，不进排行榜';
+function curatedRows() {
+  const byId = new Map((state.curated?.questions ?? []).map((q) => [q.taskId, q]));
+  const selection = curatedCurrent();
+  const text = state.curatedSearch.trim().toLowerCase();
+  return (state.adminQuestions ?? []).map((task) => {
+    const q = byId.get(task.id) ?? { taskId: task.id, available: false, unavailableReason: '精选信息未载入' };
+    const on = selection.has(task.id);
+    const lock = task.category === '推理' ? NO_REASONING : !q.available ? `${q.unavailableReason ?? '暂不可用'}，${on ? '暂不计票' : '暂不能加入精选'}` : '';
+    // A ticked question that has since become unavailable can still be unticked.
+    return { task, q, on, lock, editable: task.category !== '推理' && (q.available || on), addable: task.category !== '推理' && q.available };
+  }).filter(({ task, on }) => (!state.curatedType || task.category === state.curatedType)
+    && (state.curatedFilter === 'all' || (state.curatedFilter === 'none' ? !on : selection.get(task.id) === state.curatedFilter))
+    && (!text || task.title.toLowerCase().includes(text)));
+}
+function curatedChips() {
+  const selection = curatedCurrent();
+  const tasks = state.adminQuestions ?? [];
+  const chip = (id, label, count) => `<button class="chip" type="button" data-curated-filter="${esc(id)}" aria-pressed="${state.curatedFilter === id}"><span data-i18n-ignore>${esc(label)}</span><span class="mono">${count}</span></button>`;
+  return `<div class="chips curated-chips" role="group" aria-label="精选筛选">${chip('all', '全部', tasks.length)}${chip('none', '未精选', tasks.filter((task) => !selection.has(task.id)).length)}`
+    + `${curatedSections().map((section) => chip(section.id, section.name, [...selection.values()].filter((id) => id === section.id).length)).join('')}</div>`;
+}
+function curatedStrip() {
+  const dirty = curatedDirty();
+  const selection = [...curatedCurrent().values()];
+  return `<div class="curated-sections" role="group" aria-label="精选分区"><span class="curated-label">精选分区</span>
+    ${curatedSections().map((section) => `<span class="section-chip"><b>${esc(section.name)}</b><span class="mono">${selection.filter((id) => id === section.id).length}</span><button class="icon-btn" type="button" data-section-menu="${esc(section.id)}" aria-label="管理分区「${esc(section.name)}」"${dirty ? ' disabled' : ''}>${icon('more')}</button></span>`).join('')}
+    <button class="btn sm" type="button" data-section-new${dirty ? ' disabled' : ''}>+ 新建分区</button>${dirty ? '<small class="muted">先保存或放弃题目改动</small>' : ''}</div>`;
+}
+function curatedRow({ task, q, on, lock, editable }) {
+  const before = curatedOriginal();
+  const was = before.has(task.id);
+  const section = curatedCurrent().get(task.id);
+  const mark = on && !was ? '将加入' : !on && was ? '将移出' : on && was && before.get(task.id) !== section ? `换到 ${sectionName(section)}` : '';
+  const sections = curatedSections();
+  const lead = `<div class="curated-cell"><label class="curated-check"><input type="checkbox" data-curated-toggle="${esc(task.id)}"${on ? ' checked' : ''}${editable && (on || sections.length) ? '' : ' disabled'} aria-label="${esc(task.title)}加入精选"><span>精选</span></label>
+    ${on ? `<select class="input" data-curated-section="${esc(task.id)}" aria-label="${esc(task.title)}的精选分区">${sections.map((item) => `<option value="${esc(item.id)}"${item.id === section ? ' selected' : ''}>${esc(item.name)}</option>`).join('')}</select>` : '<span class="curated-none" aria-hidden="true">—</span>'}</div>`;
+  const note = `${lock ? `<p class="curated-lock">${esc(lock)}</p>` : ''}${on && q.curatedComparisons != null ? `<p class="curated-lock">精选榜 ${q.curatedComparisons} 次比较</p>` : ''}`;
+  return taskCard(task, { lead, note, category: true, cls: `${mark ? ' is-changed' : ''}${lock && !editable ? ' is-locked' : ''}`, mark: mark ? ` <span class="badge curated-mark">${esc(mark)}</span>` : '' });
+}
+function curatedBody() {
+  const rows = curatedRows();
+  const diff = curatedDiff();
+  const addable = rows.filter((row) => row.addable).length;
+  const sections = curatedSections();
+  const bar = diff.count ? `<div class="curated-bar" role="region" aria-label="未保存的精选改动"><div><p><b>未保存：</b>${[diff.added.length && `加入 ${diff.added.length} 题`, diff.removed.length && `移出 ${diff.removed.length} 题`, diff.moved.length && `换分区 ${diff.moved.length} 题`].filter(Boolean).join(' · ')}</p>${state.curatedNote ? `<p class="form-error" role="alert">${esc(state.curatedNote)}</p>` : ''}</div>
+    <div class="actions"><button class="btn ghost" type="button" data-curated-discard>放弃改动</button><button class="btn primary" type="button" data-curated-save>保存精选题目</button></div></div>` : '';
+  return `${!diff.count && state.curatedNote ? `<p class="curated-note" role="status">${esc(state.curatedNote)}</p>` : ''}${curatedStrip()}${curatedChips()}
+    <div class="curated-head"><label class="curated-check"><input type="checkbox" data-curated-all${addable ? '' : ' disabled'}><span>全选当前筛选可选的 ${addable} 道</span></label>
+      <label class="curated-target">新勾选的放入 <select class="input" data-curated-target aria-label="新勾选的题目放入哪个分区"${sections.length ? '' : ' disabled'}>${sections.length ? sections.map((section) => `<option value="${esc(section.id)}"${section.id === curatedTarget() ? ' selected' : ''}>${esc(section.name)}</option>`).join('') : '<option>请先新建分区</option>'}</select></label></div>
+    ${rows.length ? `<div class="admin-task-list">${rows.map(curatedRow).join('')}</div>` : '<p class="board-empty">没有符合条件的题目。</p>'}${bar}`;
+}
+// The header tick is a tri-state that only HTML properties can express.
+function syncCuratedUi() {
+  const all = $('[data-curated-all]', app());
+  if (!all) return;
+  const rows = curatedRows().filter((row) => row.addable);
+  const picked = rows.filter((row) => row.on).length;
+  all.checked = rows.length > 0 && picked === rows.length;
+  all.indeterminate = picked > 0 && picked < rows.length;
+}
+function paintCurated() {
+  const body = $('[data-curated-body]', app());
+  if (!body) { render(); return; }
+  body.innerHTML = curatedBody();
+  syncCuratedUi();
+}
+async function loadCurated() { state.curated = await api('admin/curated'); }
+// Section edits and the save carry the revision they were made against; a conflict reloads the latest state.
+async function curatedFailed(error) {
+  if (error.code !== 'curated_revision_conflict') { toast(error.message); return; }
+  state.curatedDraft = null;
+  state.curatedNote = '精选题目刚被其他管理员修改，已重新载入最新状态';
+  try { await loadCurated(); } catch { /* the notice stays */ }
+  paintCurated();
+}
+const curatedCall = (path, method, body) => api(`admin/curated/${path}`, { method, body: { revision: state.curated.revision, ...body } });
+
+function sectionNameDialog(section) {
+  const sheet = openDialog({ title: section ? '重命名分区' : '新建分区', className: 'confirm-sheet', body: `<form class="admin-editor" novalidate>
+    <label class="field"><span class="field-label">分区名称</span><input class="input" name="name" maxlength="40" value="${esc(section?.name ?? '')}" required></label>
+    ${section ? '<p class="fine">改名不影响题目归属和已有的票。</p>' : ''}<p class="form-error" role="alert"></p>
+    <div class="sheet-actions"><button class="btn" type="button" data-sheet-close>取消</button><button class="btn primary" type="submit">${section ? '保存' : '创建'}</button></div></form>` });
+  const form = $('form', sheet.el);
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const name = form.name.value.trim();
+    if (!name) { $('.form-error', form).textContent = '请填写分区名称'; return; }
+    const done = busy($('button[type="submit"]', form));
+    try {
+      if (section) await curatedCall(`sections/${encodeURIComponent(section.id)}`, 'PATCH', { name });
+      else await curatedCall('sections', 'POST', { name });
+      sheet.close(); await loadCurated(); paintCurated(); toast(section ? '分区已改名' : '分区已创建');
+    } catch (error) { sheet.close(); await curatedFailed(error); done(); }
+  });
+  setTimeout(() => form.name.select());
+}
+function sectionMenuDialog(section) {
+  const sections = curatedSections();
+  const index = sections.findIndex((item) => item.id === section.id);
+  const sheet = openDialog({ title: `分区「${section.name}」`, className: 'confirm-sheet', body: `<div class="section-menu">
+    <button class="btn" type="button" data-act="rename">重命名</button>
+    <button class="btn" type="button" data-act="left"${index <= 0 ? ' disabled' : ''}>左移</button>
+    <button class="btn" type="button" data-act="right"${index >= sections.length - 1 ? ' disabled' : ''}>右移</button>
+    <button class="btn danger" type="button" data-act="delete">删除分区</button></div><p class="fine">前台侧栏按这里的顺序显示分区。</p>` });
+  sheet.el.addEventListener('click', async (event) => {
+    const act = event.target.closest('[data-act]')?.dataset.act;
+    if (!act) return;
+    sheet.close();
+    if (act === 'rename') { sectionNameDialog(section); return; }
+    if (act === 'delete') { sectionDeleteDialog(section); return; }
+    const ids = sections.map((item) => item.id);
+    const to = index + (act === 'left' ? -1 : 1);
+    [ids[index], ids[to]] = [ids[to], ids[index]];
+    try { await curatedCall('sections/order', 'PUT', { sectionIds: ids }); await loadCurated(); paintCurated(); toast('分区顺序已更新'); }
+    catch (error) { await curatedFailed(error); }
+  });
+}
+async function sectionDeleteDialog(section) {
+  const count = [...curatedOriginal().values()].filter((id) => id === section.id).length;
+  const others = curatedSections().filter((item) => item.id !== section.id);
+  const remove = async (moveQuestionsTo) => {
+    try { await curatedCall(`sections/${encodeURIComponent(section.id)}`, 'DELETE', moveQuestionsTo ? { moveQuestionsTo } : {}); await loadCurated(); if (state.curatedFilter === section.id) state.curatedFilter = 'all'; paintCurated(); toast('分区已删除'); return true; }
+    catch (error) { await curatedFailed(error); return false; }
+  };
+  if (!count) {
+    if (await confirmDialog({ title: `删除分区「${section.name}」？`, message: '这个分区是空的，删除后不能恢复。', confirm: '删除分区', danger: true })) await remove();
+    return;
+  }
+  const sheet = openDialog({ title: `删除「${section.name}」？`, className: 'confirm-sheet', body: `<form novalidate><p class="sheet-text">这个分区有 ${count} 道题。</p>
+    ${others.length ? `<label class="face-checks"><input type="radio" name="mode" value="move" checked> 移到 <select class="input" name="target" aria-label="移到哪个分区">${others.map((item) => `<option value="${esc(item.id)}">${esc(item.name)}</option>`).join('')}</select></label>` : ''}
+    <label class="face-checks"><input type="radio" name="mode" value="unselect"${others.length ? '' : ' checked'}> 先去取消这些题的精选</label>
+    <div class="sheet-actions"><button class="btn" type="button" data-sheet-close>取消</button><button class="btn primary danger" type="submit">继续</button></div></form>` });
+  const form = $('form', sheet.el);
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const mode = form.elements.namedItem('mode').value;
+    sheet.close();
+    if (mode === 'unselect') { state.curatedFilter = section.id; paintCurated(); toast('已筛选出这个分区的题目，取消精选并保存后再删除分区'); return; }
+    await remove(form.elements.namedItem('target').value);
+  });
+}
+function curatedConfirm(diff) {
+  const names = (ids) => ids.map((id) => `「${esc(taskTitle(id))}」`).join('、');
+  const since = state.curated?.countingStartedAt ? `自 ${formatDate(state.curated.countingStartedAt)} 以来` : '';
+  const before = curatedOriginal(), after = curatedCurrent();
+  const body = `<div class="curated-confirm">
+    ${diff.added.length ? `<p><b>加入 ${diff.added.length} 题</b>：${diff.added.map((id) => `「${esc(taskTitle(id))}」（${esc(sectionName(after.get(id)))}）`).join('、')}。这些题${since}Lv1+ 成员的选择会计入精选榜。</p>` : ''}
+    ${diff.removed.length ? `<p><b>移出 ${diff.removed.length} 题</b>：${names(diff.removed)}。它们的比较不再计入精选榜；投票记录保留，重新加入后恢复。</p>` : ''}
+    ${diff.moved.length ? `<p><b>换分区 ${diff.moved.length} 题</b>：${diff.moved.map((id) => `「${esc(taskTitle(id))}」${esc(sectionName(before.get(id)))} → ${esc(sectionName(after.get(id)))}`).join('；')}。总榜不受影响，两个分区的名次会重新计算。</p>` : ''}
+    <p class="muted">精选榜在下一次计算时更新（10 分钟内）。</p>
+    ${after.size ? '' : '<p class="curated-warn" role="alert">保存后精选榜没有题目，会显示为空。</p>'}</div>`;
+  return new Promise((resolve) => {
+    let answer = false;
+    const sheet = openDialog({ title: '更新精选题目？', className: 'confirm-sheet', body: `${body}<div class="sheet-actions"><button class="btn" type="button" data-sheet-close>取消</button><button class="btn primary" type="button" data-confirm>确认更新</button></div>`, onClose: () => resolve(answer) });
+    $('[data-confirm]', sheet.el).addEventListener('click', () => { answer = true; sheet.close(); });
+  });
+}
+async function saveCurated(button) {
+  const diff = curatedDiff();
+  if (!diff.count || !await curatedConfirm(diff)) return;
+  const done = busy(button, '正在保存…');
+  try {
+    await curatedCall('questions', 'PUT', { questions: [...curatedCurrent()].map(([taskId, sectionId]) => ({ taskId, sectionId })) });
+    state.curatedDraft = null;
+    state.curatedNote = '';
+    await loadCurated();
+    toast(`精选题目已更新：${[diff.added.length && `加入 ${diff.added.length} 题`, diff.removed.length && `移出 ${diff.removed.length} 题`, diff.moved.length && `换分区 ${diff.moved.length} 题`].filter(Boolean).join('，')}。榜单 10 分钟内刷新`);
+  } catch (error) {
+    if (error.code === 'curated_revision_conflict') { await curatedFailed(error); return; }
+    state.curatedNote = `保存失败：${error.message}`;
+  }
+  paintCurated();
+  done();
+}
+// Leaving with staged edits asks first; the draft is only dropped on a yes.
+async function leaveCurated() {
+  if (!curatedDirty()) return true;
+  if (!await confirmDialog({ title: '放弃未保存的精选改动？', message: '题目的精选勾选和分区还没有保存，离开后会丢失。', confirm: '放弃改动', danger: true })) return false;
+  state.curatedDraft = null;
+  return true;
+}
+addEventListener('beforeunload', (event) => { if (curatedDirty()) { event.preventDefault(); event.returnValue = ''; } });
+
+// ---- qualification test: the standard pairs and the exam's settings (Lv3) ----
+const examTasks = () => [...new Map([...(state.data?.tasks ?? []), ...(state.questions ?? [])].map((task) => [task.id, task])).values()];
+const examTaskTitle = (id) => examTasks().find((task) => task.id === id)?.title ?? taskTitle(id);
+const examWorkLabel = (taskId, id) => { const work = state.examWorks[taskId]?.find((item) => item.id === id); return work ? `${work.modelName} · ${work.title}` : id; };
+async function loadExamWorks(taskId) {
+  if (!taskId || state.examWorks[taskId]) return state.examWorks[taskId] ?? [];
+  const { works } = await api(`admin/qualification/works?taskId=${encodeURIComponent(taskId)}`);
+  return (state.examWorks[taskId] = works);
+}
+const examRequired = (settings) => Math.ceil(settings.questionCount * settings.passPercent / 100);
+function qualificationView() {
+  const exam = state.qualification;
+  if (!exam) return `${pageHero('资格考试', '标准对', '资格考试用的标准对：每组两件作品，管理员标好哪件更好。', [['可用', '—'], ['停用', '—']])}<section class="block" aria-busy="true">${skeleton(5)}</section>`;
+  const usable = exam.pairs.filter((pair) => pair.enabled && pair.available).length;
+  const off = exam.pairs.filter((pair) => !pair.enabled).length;
+  const { settings } = exam;
+  const rows = exam.pairs.map((pair) => {
+    const status = !pair.enabled ? '<span class="status status-unverified">停用</span>' : pair.available ? '<span class="status status-verified">可用</span>' : `<span class="status status-questioned" title="${esc(pair.unavailableReason ?? '')}">不可用：${esc(pair.unavailableReason ?? '内容已变化')}</span>`;
+    return `<article class="admin-task exam-pair${pair.enabled ? '' : ' is-locked'}"><div class="admin-task-main"><h3>${esc(examTaskTitle(pair.taskId))} ${status}</h3>
+      <p class="muted" data-i18n-ignore>A：${esc(examWorkLabel(pair.taskId, pair.aWorkId))} vs B：${esc(examWorkLabel(pair.taskId, pair.bWorkId))}</p>
+      <p class="muted">标准答案：<b>${pair.correctAnswer === 'a' ? 'A 更好' : 'B 更好'}</b>${pair.explanation ? ` · <span class="exam-note" data-i18n-ignore>${esc(pair.explanation)}</span>` : ''}</p></div>
+      <div class="actions"><button class="btn" type="button" data-pair-edit="${esc(pair.id)}">编辑</button><button class="btn" type="button" data-pair-toggle="${esc(pair.id)}">${pair.enabled ? '停用' : '启用'}</button></div></article>`;
+  }).join('');
+  return `${pageHero('资格考试', '标准对', 'Lv0 成员通过资格考试升为 Lv1。题库不足每场题量时，考试不开放。', [['可用', usable], ['停用', off], ['每场', `${settings.questionCount} 题`], ['及格', `${settings.passPercent}%`]])}
+    <section class="block"><div class="actions"><button class="btn primary" type="button" data-pair-new>新建标准对</button><button class="btn" type="button" data-exam-settings>考试设置</button></div>
+    ${usable < settings.questionCount ? `<p class="curated-warn" role="status">可用标准对 ${usable} 组，少于每场 ${settings.questionCount} 组，考试暂不开放</p>` : ''}
+    ${rows ? `<div class="admin-task-list">${rows}</div>` : '<p class="board-empty">还没有标准对。</p>'}</section>`;
+}
+function examSettingsDialog() {
+  const { settings } = state.qualification;
+  const sheet = openDialog({ title: '考试设置', className: 'confirm-sheet', body: `<form class="admin-editor" novalidate>
+    <div class="field-row"><label class="field"><span class="field-label">每场题量</span><input class="input" name="questionCount" type="number" min="1" max="100" step="1" value="${settings.questionCount}" required></label>
+    <label class="field"><span class="field-label">及格百分比</span><input class="input" name="passPercent" type="number" min="1" max="100" step="1" value="${settings.passPercent}" required></label></div>
+    <p class="fine">及格线 = <b data-need></b>。已开始的考卷不受影响。</p><p class="form-error" role="alert"></p>
+    <div class="sheet-actions"><button class="btn" type="button" data-sheet-close>取消</button><button class="btn primary" type="submit">保存</button></div></form>` });
+  const form = $('form', sheet.el);
+  const read = () => ({ questionCount: Number(form.questionCount.value), passPercent: Number(form.passPercent.value) });
+  const update = () => { const v = read(); $('[data-need]', form).textContent = Number.isInteger(v.questionCount) && Number.isInteger(v.passPercent) ? `${examRequired(v)} / ${v.questionCount}` : '—'; };
+  form.addEventListener('input', update); update();
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const value = read();
+    if (![value.questionCount, value.passPercent].every((n) => Number.isInteger(n) && n >= 1 && n <= 100)) { $('.form-error', form).textContent = '题量和及格百分比须为 1–100 的整数'; return; }
+    const done = busy($('button[type="submit"]', form), '正在保存…');
+    try { await api('admin/qualification/settings', { method: 'PUT', body: { version: settings.version, ...value } }); sheet.close(); await reload(); toast('考试设置已保存'); }
+    catch (error) {
+      if (error.code === 'exam_revision_conflict') { sheet.close(); await reload(); toast('考试设置刚被其他管理员修改，已重新载入'); return; }
+      $('.form-error', form).textContent = error.message; done();
+    }
+  });
+}
+function pairDialog(pair, preset = null) {
+  const tasks = examTasks();
+  const initialTask = pair?.taskId ?? preset?.taskId ?? '';
+  const taskOptions = (needle = '') => `<option value="">选择题目</option>${tasks.filter((task) => task.id === initialTask || !needle || task.title.toLowerCase().includes(needle)).map((task) => `<option value="${esc(task.id)}"${task.id === (pair?.taskId ?? preset?.taskId) && !needle ? ' selected' : ''}>${esc(task.title)}</option>`).join('')}`;
+  const sheet = openDialog({ title: pair ? '编辑标准对' : '新建标准对', className: 'exam-pair-sheet', body: `<form class="admin-editor" novalidate>
+    <div class="exam-task-pick"><label class="field"><span class="field-label">筛选题目</span><input class="input" type="search" name="needle" placeholder="输入题目名称的一部分" autocomplete="off"></label>
+      <label class="field"><span class="field-label">题目</span><select class="input" name="taskId" required>${taskOptions()}</select></label></div>
+    <div class="exam-sides">${['a', 'b'].map((side) => `<div class="exam-side"><label class="field"><span class="field-label">作品 ${side.toUpperCase()}</span><select class="input" name="${side}WorkId" required disabled><option value="">先选题目</option></select></label>
+      <div class="exam-preview" data-preview="${side}"><p class="muted">选好作品后在这里并排预览</p></div>
+      <label class="pick-card"><input type="radio" name="correctAnswer" value="${side}"${pair?.correctAnswer === side ? ' checked' : ''}><span>${side.toUpperCase()} 更好</span></label></div>`).join('')}</div>
+    <label class="field"><span class="field-label">说明<small>选填，为什么更好，只给管理员看</small></span><textarea class="input" name="explanation" rows="2" maxlength="500">${esc(pair?.explanation ?? '')}</textarea></label>
+    <p class="form-error" role="alert"></p>
+    <div class="sheet-actions"><button class="btn" type="button" data-sheet-close>取消</button>${pair ? '' : '<button class="btn" type="submit" data-again>保存并新建下一组</button>'}<button class="btn primary" type="submit">保存</button></div></form>` });
+  const form = $('form', sheet.el);
+  const sideSelect = (side) => form.elements.namedItem(`${side}WorkId`);
+  const preview = (side) => {
+    const work = state.examWorks[form.taskId.value]?.find((item) => item.id === sideSelect(side).value);
+    $(`[data-preview="${side}"]`, form).innerHTML = work?.preview ? `<iframe src="${esc(work.preview)}" sandbox="allow-scripts allow-pointer-lock" loading="lazy" title="预览作品 ${side.toUpperCase()}"></iframe><a class="btn sm" href="${esc(work.preview)}" target="_blank" rel="noopener">在新窗口预览 ↗</a>` : '<p class="muted">选好作品后在这里并排预览</p>';
+  };
+  const fill = async (initial) => {
+    const taskId = form.taskId.value;
+    const selects = ['a', 'b'].map(sideSelect);
+    selects.forEach((select) => { select.disabled = true; select.innerHTML = `<option value="">${taskId ? '正在载入…' : '先选题目'}</option>`; });
+    ['a', 'b'].forEach(preview);
+    if (!taskId) return;
+    let works;
+    try { works = await loadExamWorks(taskId); } catch (error) { $('.form-error', form).textContent = error.message; return; }
+    if (form.taskId.value !== taskId) return;
+    $('.form-error', form).textContent = works.length < 2 ? '这道题可作为标准对的作品不足两件' : '';
+    selects.forEach((select, i) => {
+      const current = initial?.taskId === taskId ? initial[`${i ? 'b' : 'a'}WorkId`] : '';
+      const missing = current && !works.some((work) => work.id === current);
+      select.innerHTML = `<option value="">选择作品</option>${missing ? `<option value="${esc(current)}" selected>${esc(current)}（当前，已不可选）</option>` : ''}${works.map((work) => `<option value="${esc(work.id)}"${work.id === current ? ' selected' : ''}>${esc(`${work.modelName} · ${work.title}`)}</option>`).join('')}`;
+      select.disabled = false;
+    });
+    ['a', 'b'].forEach(preview);
+  };
+  form.addEventListener('input', (event) => {
+    if (event.target.name !== 'needle') return;
+    const current = form.taskId.value;
+    form.taskId.innerHTML = taskOptions(event.target.value.trim().toLowerCase());
+    form.taskId.value = [...form.taskId.options].some((option) => option.value === current) ? current : '';
+    if (form.taskId.value !== current) fill(null);
+  });
+  form.addEventListener('change', (event) => {
+    if (event.target === form.taskId) fill(null);
+    else if (/WorkId$/.test(event.target.name)) preview(event.target.name[0]);
+  });
+  fill(pair ?? preset);
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const again = event.submitter?.hasAttribute('data-again');
+    const error = $('.form-error', form);
+    const body = { taskId: form.taskId.value, aWorkId: form.aWorkId.value, bWorkId: form.bWorkId.value, correctAnswer: form.elements.namedItem('correctAnswer').value, explanation: form.explanation.value.trim() };
+    if (!body.taskId || !body.aWorkId || !body.bWorkId) { error.textContent = '请选择题目和两件作品'; return; }
+    if (body.aWorkId === body.bWorkId) { error.textContent = '两边不能是同一件作品'; return; }
+    if (!body.correctAnswer) { error.textContent = '请在作品下方标出哪一件更好'; return; }
+    const done = busy(event.submitter ?? $('button[type="submit"]', form), '正在保存…');
+    try {
+      if (pair) await api(`admin/qualification/pairs/${encodeURIComponent(pair.id)}`, { method: 'PATCH', body: { version: pair.version, ...body } });
+      else await api('admin/qualification/pairs', { method: 'POST', body });
+      sheet.close(); await reload(); toast('标准对已保存');
+      if (again) pairDialog(null, { taskId: body.taskId });
+    } catch (err) {
+      if (err.code === 'exam_revision_conflict') { sheet.close(); await reload(); toast('这组刚被其他管理员修改，已重新载入'); return; }
+      error.textContent = err.message; done();
+    }
+  });
+}
+async function togglePair(button) {
+  const pair = state.qualification?.pairs.find((item) => item.id === button.dataset.pairToggle);
+  if (!pair) return;
+  const done = busy(button);
+  try {
+    if (pair.enabled) await api(`admin/qualification/pairs/${encodeURIComponent(pair.id)}`, { method: 'DELETE', body: { version: pair.version } });
+    else await api(`admin/qualification/pairs/${encodeURIComponent(pair.id)}`, { method: 'PATCH', body: { version: pair.version, enabled: true } });
+    await reload();
+    toast(pair.enabled ? '标准对已停用' : '标准对已启用');
+  } catch (error) {
+    toast(error.code === 'exam_revision_conflict' ? '这组刚被其他管理员修改，已重新载入' : error.message);
+    if (error.code === 'exam_revision_conflict') await reload(); else done();
+  }
 }
 function questionDialog(question) {
   const sheet = openDialog({ title: `编辑与审核 · ${question.title}`, body: `<form class="admin-editor">
@@ -928,21 +1290,24 @@ async function editorialDialog(taskId) {
 }
 
 // -- users tab --
+const examLine = (exam) => !exam?.attempts ? '未参加' : exam.passedAt ? `${formatDate(exam.passedAt)} 通过` : `未通过 · ${exam.attempts} 次 · 最好 ${exam.bestCorrect ?? 0}/${exam.questionCount ?? '—'}`;
 function usersView() {
   const users = state.users ?? [];
   const rows = users.map((u) => {
     const self = u.id === state.user.id;
+    const level = levelOfUser(u);
     return `<tr>
       <td class="c-title"><span class="avatar" aria-hidden="true">${esc(u.name.slice(0, 1).toUpperCase())}</span><b>${esc(u.name)}</b>${self ? '<span class="badge">当前账号</span>' : ''}</td>
-      <td><span class="status role-${esc(u.role)}">${icon(isStaff(u) ? 'shield' : 'user')}${ROLE_LABELS[u.role] ?? '普通用户'}</span></td>
+      <td><span class="status role-${level === 3 ? 'admin' : 'user'}">${icon(level >= 2 ? 'shield' : 'user')}${LEVELS[level]}</span></td>
+      <td>${level < 2 ? esc(examLine(u.exam)) : '—'}</td>
       <td><time>${formatTime(u.createdAt)}</time></td>
-      <td class="c-actions"><select class="input" data-user-role="${esc(u.id)}" aria-label="调整${esc(u.name)}的角色"${self ? ' disabled title="不能修改自己的角色"' : ''}>${Object.entries(ROLE_LABELS).map(([role, label]) => `<option value="${role}"${role === u.role ? ' selected' : ''}>${label}</option>`).join('')}</select></td>
+      <td class="c-actions"><select class="input" data-user-role="${esc(u.id)}" aria-label="调整${esc(u.name)}的等级"${self ? ' disabled title="不能修改自己的等级"' : ''}>${Object.entries(LEVELS).sort(([x], [y]) => y - x).map(([value, label]) => `<option value="${value}"${Number(value) === level ? ' selected' : ''}>${label}</option>`).join('')}</select></td>
     </tr>`;
   }).join('');
-  return `${pageHero('用户管理', '用户', '账号与角色。管理员可以审核作品、调整其他账号的角色；自己的角色只能由别的管理员修改。', [['账号', users.length], ['管理员', users.filter((u) => u.role === 'admin').length]])}
+  return `${pageHero('用户管理', '用户', '账号与等级。Lv2 及以上可以审核作品；只有 Lv3 高级管理员能调整等级，自己的等级只能由别的高级管理员修改。', [['账号', users.length], ['管理员（Lv2+）', users.filter((u) => levelOfUser(u) >= 2).length]])}
   <section class="block">
     ${state.users === null ? skeleton(5) : `<div class="table-wrap"><table class="board users-table">
-      <thead><tr><th class="c-title">用户名</th><th>角色</th><th>注册时间</th><th class="c-actions">操作</th></tr></thead>
+      <thead><tr><th class="c-title">用户名</th><th>等级</th><th>资格考试</th><th>注册时间</th><th class="c-actions">操作</th></tr></thead>
       <tbody>${rows}</tbody>
     </table></div>`}
   </section>`;
@@ -1125,6 +1490,352 @@ function patchWorks(newMain) {
     else if (oldEl && !newEl) oldEl.remove();
   }
 }
+// ---- vote risk: who votes, from where and how fast (Lv3) ----
+// The server only shows evidence; nothing here judges anyone. The marks below are plain
+// thresholds that point the eye at a row, and a void is a soft, reversible flag on the vote.
+const RISK_VIEWS = [['ip', '按 IP'], ['subnet', '按网段'], ['actor', '按账号 / 访客'], ['model', '按模型反查'], ['choices', '投票明细']];
+const RISK_RANGES = [['24h', '近 24 小时', 1], ['3d', '近 3 天', 3], ['7d', '近 7 天', 7], ['30d', '近 30 天', 30], ['custom', '自定义', 0]];
+const RISK_MARK = { fastShare: 0.7, fastMin: 10, winnerShare: 0.8, decisiveMin: 10, hourly: 60, crowd: 5, shared: 3 };
+const RISK_CHOICE = { a: 'A 更好', b: 'B 更好', tie: '不分伯仲', skip: '跳过' };
+const RISK_ERROR = { vote_too_early: '太早', duplicate_vote: '重复', already_voted: '重复', turnstile_required: '待验证', turnstile_failed: '验证未过' };
+let riskToken = 0;
+const riskPct = (value) => (value == null ? '—' : `${Math.round(value * 100)}%`);
+const riskSeconds = (ms) => (ms == null ? '—' : `${(ms / 1000).toFixed(1)} 秒`);
+const riskStamp = (value) => (value ? new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '—');
+const riskLocal = (date) => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+const riskModelName = (key) => (state.data?.models ?? []).find((model) => model.id === key)?.name ?? String(key ?? '').replace(/^x:/, '');
+const riskModelLabel = (model) => (model ? model.name || riskModelName(model.key) || model.key : '—');
+const riskActor = (row) => (row.userId
+  ? `<b data-i18n-ignore>${esc(row.username ?? row.userId)}</b> <small class="muted">账号</small>`
+  : `<span class="mono" title="${esc(row.visitorHash)}">访客 ${esc(String(row.visitorHash ?? '').slice(0, 8))}</span>`);
+function riskWindow() {
+  const r = state.risk;
+  if (r.range === 'custom') {
+    const from = new Date(r.from), to = new Date(r.to);
+    if (!r.from || !r.to || !(from < to)) throw new Error('请选择有效的起止时间（起点要早于终点）');
+    return { from: from.toISOString(), to: to.toISOString() };
+  }
+  const days = RISK_RANGES.find(([id]) => id === r.range)?.[2] ?? 7, now = Date.now();
+  return { from: new Date(now - days * 86400e3).toISOString(), to: new Date(now).toISOString() };
+}
+function riskQuery() {
+  const r = state.risk, params = new URLSearchParams(riskWindow());
+  for (const name of ['ip', 'subnet', 'userId', 'visitorHash', 'modelKey']) if (r[name].trim()) params.set(name, r[name].trim());
+  if (r.voided !== 'all') params.set('voided', r.voided);
+  params.set('limit', r.limit);
+  params.set('offset', r.offset);
+  if (r.view === 'choices' && r.outcome !== 'all') params.set('outcome', r.outcome);
+  if (r.view === 'model') params.set('minVotes', Math.max(1, Number(r.minVotes) || 5));
+  if (['ip', 'subnet', 'actor'].includes(r.view)) params.set('groupBy', r.view);
+  return params;
+}
+async function loadRisk() {
+  const r = state.risk, token = ++riskToken;
+  r.error = '';
+  if (r.view === 'model' && !r.modelKey.trim()) { r.data = null; r.loading = false; paintRisk(); return; }
+  let query;
+  try { query = riskQuery(); } catch (error) { r.error = error.message; r.data = null; r.loading = false; paintRisk(); return; }
+  r.loading = true;
+  paintRisk();
+  const path = r.view === 'choices' ? 'choices' : r.view === 'model' ? 'model-voters' : 'summary';
+  try {
+    const data = await api(`admin/vote-risk/${path}?${query}`);
+    if (token !== riskToken) return;
+    r.data = data;
+  } catch (error) {
+    if (token !== riskToken) return;
+    if (error.status === 401 || error.status === 403) { await boot(); return; }
+    r.error = error.message;
+    r.data = null;
+  }
+  r.loading = false;
+  paintRisk();
+}
+function riskMarks(row) {
+  const out = [];
+  if (row.fastChoiceShare != null && row.timedChoices >= RISK_MARK.fastMin && row.fastChoiceShare >= RISK_MARK.fastShare) out.push(['快速', `${riskPct(row.fastChoiceShare)} 的选择在 10 秒内完成（${row.timedChoices} 次有计时）`]);
+  const share = row.winShare ?? row.topWinnerShare, decisive = row.winShare != null ? row.wins + row.losses : row.decisiveVotes;
+  if (share != null && decisive >= RISK_MARK.decisiveMin && share >= RISK_MARK.winnerShare) out.push(['偏向', `${riskPct(share)} 的决胜票投给同一模型（${decisive} 张决胜票）`]);
+  if (row.peakHourlyVotes >= RISK_MARK.hourly) out.push(['高频', `最忙的一小时入库 ${row.peakHourlyVotes} 张票`]);
+  if (state.risk.view !== 'actor' && state.risk.view !== 'model' && row.actorCount >= RISK_MARK.crowd) out.push(['多人', `同一${state.risk.view === 'ip' ? ' IP ' : '网段'}下有 ${row.actorCount} 个账号或访客`]);
+  if (row.sharedIpOtherAccounts >= RISK_MARK.shared) out.push(['共享 IP', `与另外 ${row.sharedIpOtherAccounts} 个账号用过同一个 IP`]);
+  return out;
+}
+const riskFlagHtml = (row) => riskMarks(row).map(([label, why]) => `<span class="risk-flag" title="${esc(why)}">${label}</span>`).join('');
+const riskHot = (hot, html) => `<span${hot ? ' class="risk-hot"' : ''}>${html}</span>`;
+const riskWinner = (row) => (row.topWinnerModel
+  ? `<button class="link-btn" type="button" data-risk-model="${esc(row.topWinnerModel.key)}" title="反查给 ${esc(riskModelLabel(row.topWinnerModel))} 投票的人">${esc(riskModelLabel(row.topWinnerModel))}</button> ${riskHot(row.topWinnerShare >= RISK_MARK.winnerShare && row.decisiveVotes >= RISK_MARK.decisiveMin, riskPct(row.topWinnerShare))} <small class="muted" title="胜出 ${row.topWinnerVotes} / 决胜 ${row.decisiveVotes}">${row.topWinnerVotes}/${row.decisiveVotes}</small>`
+  : '<span class="muted">—</span>');
+const riskFast = (row) => `${riskHot(row.fastChoiceShare != null && row.timedChoices >= RISK_MARK.fastMin && row.fastChoiceShare >= RISK_MARK.fastShare, riskPct(row.fastChoiceShare))} <small class="muted" title="有计时的非跳过选择">${row.timedChoices ?? 0} 次</small>`;
+const riskVotes = (row) => `<b>${row.voteCount}</b>${row.voidedVoteCount ? ` <small class="muted" title="其中已作废 ${row.voidedVoteCount} 张">作废 ${row.voidedVoteCount}</small>` : ''}`;
+const drillAttrs = (row) => {
+  const view = state.risk.view;
+  if (view === 'ip') return `data-risk-drill="ip" data-value="${esc(row.ip ?? row.key)}"`;
+  if (view === 'subnet') return `data-risk-drill="subnet" data-value="${esc(row.subnet ?? row.key)}"`;
+  return `data-risk-drill="actor" data-user="${esc(row.userId ?? '')}" data-visitor="${esc(row.visitorHash ?? '')}"`;
+};
+function riskColumns() {
+  const view = state.risk.view, group = view === 'ip' || view === 'subnet';
+  const lead = group
+    ? { key: 'key', label: view === 'ip' ? 'IP' : '网段', value: (row) => row.key, html: (row) => `<span class="mono" data-i18n-ignore>${esc(row.key)}</span>` }
+    : { key: 'key', label: '账号 / 访客', value: (row) => row.username ?? row.visitorHash ?? '', html: riskActor };
+  const votes = { key: 'voteCount', label: '票数', value: (row) => row.voteCount, html: riskVotes, num: true };
+  const fast = { key: 'fastChoiceShare', label: '快速占比', value: (row) => row.fastChoiceShare, html: riskFast, num: true };
+  const winner = { key: 'topWinnerShare', label: '最集中的胜出模型', value: (row) => row.topWinnerShare, html: riskWinner };
+  const peak = { key: 'peakHourlyVotes', label: '峰值 / 小时', value: (row) => row.peakHourlyVotes, html: (row) => riskHot(row.peakHourlyVotes >= RISK_MARK.hourly, row.peakHourlyVotes), num: true };
+  const marks = { key: 'marks', label: '提示', value: (row) => riskMarks(row).length, html: riskFlagHtml };
+  const open = { key: '', label: '', html: (row) => `<button class="btn sm" type="button" ${drillAttrs(row)}>查看明细</button>` };
+  if (group) {
+    return [lead, votes,
+      { key: 'actorCount', label: '账号 / 访客', value: (row) => row.actorCount, num: true,
+        html: (row) => `${riskHot(row.actorCount >= RISK_MARK.crowd, `<button class="link-btn" type="button" data-risk-drill="${view}-actors" data-value="${esc(row.key)}" title="按账号 / 访客查看这里的投票人">${row.actorCount}</button>`)} <small class="muted">账号 ${row.accountCount} · 访客 ${row.visitorCount}</small>` },
+      fast, winner, peak, marks, open];
+  }
+  if (view === 'model') {
+    return [lead,
+      { key: 'modelComparisons', label: '对该模型的比较', value: (row) => row.modelComparisons, html: (row) => `<b>${row.modelComparisons}</b>`, num: true },
+      { key: 'wins', label: '胜 · 负 · 平', value: (row) => row.wins, html: (row) => `${row.wins} · ${row.losses} · ${row.ties}`, num: true },
+      { key: 'winShare', label: '偏向该模型', value: (row) => row.winShare, html: (row) => riskHot(row.winShare != null && row.wins + row.losses >= RISK_MARK.decisiveMin && row.winShare >= RISK_MARK.winnerShare, riskPct(row.winShare)), num: true },
+      votes, fast, marks, open];
+  }
+  return [lead, votes, peak, fast,
+    { key: 'sharedIpOtherAccounts', label: '同 IP 其他账号', value: (row) => row.sharedIpOtherAccounts, num: true,
+      html: (row) => riskHot(row.sharedIpOtherAccounts >= RISK_MARK.shared, row.sharedIpOtherAccounts ?? 0) },
+    winner, marks, open];
+}
+function riskSorted(rows, columns) {
+  const { sort, dir } = state.risk, column = columns.find((item) => item.key === sort && item.value);
+  if (!column) return rows;
+  const sign = dir === 'asc' ? 1 : -1;
+  return [...rows].sort((x, y) => {
+    const a = column.value(x), b = column.value(y);
+    if (a == null && b == null) return 0;
+    if (a == null) return 1;
+    if (b == null) return -1;
+    return (typeof a === 'string' ? a.localeCompare(b, 'zh-CN') : a - b) * sign;
+  });
+}
+function riskSummaryTable() {
+  const r = state.risk, columns = riskColumns(), rows = riskSorted(r.data.rows, columns);
+  if (!rows.length) return `<p class="board-empty">这个窗口内没有符合条件的记录。${r.view === 'model' ? `可以把「最少比较」调低（现在是 ${r.minVotes}）。` : ''}</p>`;
+  return `<div class="table-wrap"><table class="board risk-table">
+    <thead><tr>${columns.map((column) => `<th${column.num ? ' class="c-num"' : ''}${column.key === r.sort ? ` aria-sort="${r.dir === 'asc' ? 'ascending' : 'descending'}"` : ''}>${column.value
+      ? `<button class="risk-sort" type="button" data-risk-sort="${column.key}">${column.label}${column.key === r.sort ? `<i aria-hidden="true">${r.dir === 'asc' ? '↑' : '↓'}</i>` : ''}</button>` : column.label}</th>`).join('')}</tr></thead>
+    <tbody>${rows.map((row) => `<tr${riskMarks(row).length ? ' class="has-mark"' : ''}>${columns.map((column) => `<td${column.num ? ' class="c-num"' : ''}>${column.html(row)}</td>`).join('')}</tr>`).join('')}</tbody>
+  </table></div>`;
+}
+function riskChoiceStatus(row) {
+  if (row.outcome === 'rejected') return `<span class="risk-state is-rejected" title="这次提交没有成功处理">未计入 · ${esc(RISK_ERROR[row.errorCode] ?? row.errorCode ?? '失败')}</span>`;
+  return row.voidedAt ? '<span class="status status-questioned">已作废</span>' : '<span class="risk-state">有效</span>';
+}
+function riskChoicesTable() {
+  const r = state.risk, rows = r.data.rows;
+  if (!rows.length) return '<p class="board-empty">这个窗口内没有符合条件的投票记录。</p>';
+  const selectable = rows.filter((row) => row.voteId);
+  const allOn = selectable.length > 0 && selectable.every((row) => r.selected.has(row.voteId));
+  return `<div class="table-wrap"><table class="board risk-table risk-choices">
+    <thead><tr><th class="c-check"><input type="checkbox" data-risk-all aria-label="选择本页所有可作废的票"${allOn ? ' checked' : ''}${selectable.length ? '' : ' disabled'}></th>
+      <th>时间</th><th>IP</th><th>账号 / 访客</th><th>题目</th><th>选择</th><th>胜出模型</th><th class="c-num">用时</th><th>状态</th><th></th></tr></thead>
+    <tbody>${rows.map((row) => {
+    const open = r.expanded.has(row.id);
+    const slow = row.readyElapsedMs != null && row.readyElapsedMs <= 10000 && row.choice !== 'skip';
+    return `<tr class="${row.voidedAt ? 'is-voided' : ''}${row.outcome === 'rejected' ? ' is-rejected' : ''}">
+      <td class="c-check">${row.voteId ? `<input type="checkbox" data-risk-pick="${esc(row.voteId)}" aria-label="选择这张票"${r.selected.has(row.voteId) ? ' checked' : ''}>` : ''}</td>
+      <td><time>${riskStamp(row.submittedAt)}</time></td>
+      <td>${row.ip ? `<button class="link-btn mono" type="button" data-risk-drill="ip" data-value="${esc(row.ip)}" title="只看这个 IP" data-i18n-ignore>${esc(row.ip)}</button>` : `<span class="muted" title="原始 IP 已过期，只保留网段">已匿名化</span>`}<br>${row.subnet ? `<button class="link-btn mono small" type="button" data-risk-drill="subnet" data-value="${esc(row.subnet)}" title="只看这个网段" data-i18n-ignore>${esc(row.subnet)}</button>` : ''}</td>
+      <td>${riskActor(row)}</td>
+      <td data-i18n-ignore>${esc(taskTitle(row.taskId))}</td>
+      <td>${RISK_CHOICE[row.choice] ?? esc(row.choice)}</td>
+      <td>${row.winnerModel ? `<button class="link-btn" type="button" data-risk-model="${esc(row.winnerModel.key)}" title="反查给该模型投票的人" data-i18n-ignore>${esc(riskModelLabel(row.winnerModel))}</button>` : '<span class="muted">—</span>'}</td>
+      <td class="c-num">${riskHot(slow, riskSeconds(row.readyElapsedMs))}</td>
+      <td>${riskChoiceStatus(row)}</td>
+      <td><button class="btn sm ghost" type="button" data-risk-expand="${esc(row.id)}" aria-expanded="${open}" aria-label="详情">${icon('more')}</button></td>
+    </tr>${open ? `<tr class="risk-detail"><td></td><td colspan="9"><dl>
+      <div><dt>抽题 IP</dt><dd class="mono" data-i18n-ignore>${esc(row.drawIp ?? '已匿名化')}${row.drawSubnet ? ` · ${esc(row.drawSubnet)}` : ''}</dd></div>
+      <div><dt>浏览器标识</dt><dd class="mono" data-i18n-ignore>${esc(row.userAgent ?? '—')}</dd></div>
+      <div><dt>人机验证</dt><dd>${row.turnstilePassed ? '本次通过' : '本次未验证'}${row.lastVerifiedAt ? ` · 最近通过 ${riskStamp(row.lastVerifiedAt)}` : ''}</dd></div>
+      <div><dt>对阵</dt><dd data-i18n-ignore>A ${esc(riskModelLabel(row.aModel))} · B ${esc(riskModelLabel(row.bModel))}</dd></div>
+      ${row.voidedAt ? `<div><dt>作废</dt><dd><span data-i18n-ignore>${esc(row.voidedBy ?? '')}</span> · ${riskStamp(row.voidedAt)} · <span data-i18n-ignore>${esc(row.voidReason ?? '')}</span></dd></div>` : ''}
+    </dl></td></tr>` : ''}`;
+  }).join('')}</tbody></table></div>`;
+}
+function riskPager() {
+  const r = state.risk, total = r.data?.total ?? 0, rows = r.data?.rows.length ?? 0;
+  if (!total) return '';
+  return `<div class="admin-pagination risk-pager"><button class="btn sm" type="button" data-risk-page="${Math.max(0, r.offset - r.limit)}"${r.offset <= 0 ? ' disabled' : ''}>上一页</button>
+    <span>第 ${r.offset + 1}–${r.offset + rows} 条 / 共 ${total} 条</span>
+    <button class="btn sm" type="button" data-risk-page="${r.offset + r.limit}"${r.offset + r.limit >= total ? ' disabled' : ''}>下一页</button>
+    <label class="risk-size">每页<select class="input" data-risk-field="limit" aria-label="每页条数">${[50, 100, 200].map((n) => `<option value="${n}"${n === r.limit ? ' selected' : ''}>${n}</option>`).join('')}</select></label></div>`;
+}
+function riskBar() {
+  const r = state.risk, picked = [...r.selected.values()];
+  if (!picked.length) return '';
+  const live = picked.filter((item) => !item.voided).length, voided = picked.length - live;
+  return `<div class="curated-bar risk-bar" role="region" aria-label="已选投票"><p><b>已选 ${picked.length} 张票</b> <span class="muted">${live ? `${live} 张有效` : ''}${live && voided ? ' · ' : ''}${voided ? `${voided} 张已作废` : ''}（可跨页累计，每次最多 200 张）</span></p>
+    <div class="actions"><button class="btn" type="button" data-risk-clear>清空选择</button>${voided ? '<button class="btn" type="button" data-risk-restore>撤销作废…</button>' : ''}${live ? '<button class="btn primary danger" type="button" data-risk-void>软作废…</button>' : ''}</div></div>`;
+}
+function riskBody() {
+  const r = state.risk, summary = r.view !== 'choices';
+  const tabs = `<div class="seg risk-tabs" role="group" aria-label="查看方式">${RISK_VIEWS.map(([id, label]) => `<button type="button" data-risk-view="${id}" aria-pressed="${r.view === id}">${label}</button>`).join('')}</div>`;
+  const tools = r.view === 'choices'
+    ? `<label class="risk-inline">结果<select class="input" data-risk-field="outcome" aria-label="结果筛选"><option value="all"${r.outcome === 'all' ? ' selected' : ''}>全部</option><option value="accepted"${r.outcome === 'accepted' ? ' selected' : ''}>已处理</option><option value="rejected"${r.outcome === 'rejected' ? ' selected' : ''}>失败的提交</option></select></label>`
+    : r.view === 'model' ? `<label class="risk-inline">最少比较<input class="input" type="number" min="1" step="1" value="${esc(r.minVotes)}" data-risk-field="minVotes" aria-label="最少比较次数"></label>` : '';
+  let content;
+  if (r.error) content = `<p class="form-error" role="alert">${esc(r.error)}</p>`;
+  else if (r.view === 'model' && !r.modelKey.trim()) content = '<p class="board-empty">在上方「模型」里填入或选择一个模型，看看是谁在给它集中投票。也可以在别的表格里点模型名进入。</p>';
+  else if (!r.data) content = skeleton(5);
+  else content = summary ? riskSummaryTable() : riskChoicesTable();
+  const started = r.data?.recordingStartedAt;
+  const early = started && r.data.from && new Date(r.data.from) < new Date(started);
+  const note = started ? `<p class="fine risk-note">证据从 ${formatDate(started)} 开始记录，更早的票没有 IP 与计时。${early ? '<b>所选窗口包含记录之前的时段，那部分不在统计内。</b>' : ''}原始 IP 保留 180 天，之后只保留网段。</p>` : '';
+  const legend = summary ? `<p class="fine risk-note">「提示」只是阈值标记，不代表已判定刷票：快速 = 10 秒内完成的选择占 ≥${RISK_MARK.fastShare * 100}%（至少 ${RISK_MARK.fastMin} 次有计时）；偏向 = 决胜票 ≥${RISK_MARK.winnerShare * 100}% 投给同一模型（至少 ${RISK_MARK.decisiveMin} 张）；高频 = 单小时 ≥${RISK_MARK.hourly} 张；多人 = 同一 IP / 网段下 ≥${RISK_MARK.crowd} 个账号或访客；共享 IP = 与 ≥${RISK_MARK.shared} 个其他账号用过同一 IP。排序只作用于当前页（服务器按票数从多到少分页）。</p>` : '';
+  // Regions are patched one by one (see paintRisk), so a reload never replaces the tabs under the pointer.
+  const region = (name, html) => `<div data-risk-region="${name}">${html}</div>`;
+  return region('toolbar', `<div class="risk-toolbar">${tabs}<span class="risk-tools">${tools}<button class="btn sm" type="button" data-risk-reload>${icon('reload')}刷新</button></span></div>${note}`)
+    + region('results', `<div class="risk-results${r.loading ? ' is-loading' : ''}" aria-busy="${r.loading}">${content}</div>${r.data && !r.error ? riskPager() : ''}${legend}`)
+    + region('bar', `<div data-risk-bar>${riskBar()}</div>`);
+}
+function riskFilters() {
+  const r = state.risk, models = state.data?.models ?? [];
+  const text = (name, label, placeholder, extra = '') => `<label class="field"><span class="field-label">${label}</span><input class="input mono" data-risk-field="${name}" value="${esc(r[name])}" placeholder="${placeholder}" autocomplete="off" spellcheck="false" ${extra}></label>`;
+  return `<div class="risk-filters" data-risk-filters>
+    <label class="field"><span class="field-label">时间窗口</span><select class="input" data-risk-field="range">${RISK_RANGES.map(([id, label]) => `<option value="${id}"${r.range === id ? ' selected' : ''}>${label}</option>`).join('')}</select></label>
+    ${r.range === 'custom' ? `<label class="field"><span class="field-label">起</span><input class="input" type="datetime-local" data-risk-field="from" value="${esc(r.from)}"></label>
+      <label class="field"><span class="field-label">止</span><input class="input" type="datetime-local" data-risk-field="to" value="${esc(r.to)}"></label>` : ''}
+    <label class="field"><span class="field-label">作废状态</span><select class="input" data-risk-field="voided"><option value="all"${r.voided === 'all' ? ' selected' : ''}>全部</option><option value="no"${r.voided === 'no' ? ' selected' : ''}>未作废</option><option value="yes"${r.voided === 'yes' ? ' selected' : ''}>已作废</option></select></label>
+    ${text('ip', 'IP', '如 203.0.113.7')}${text('subnet', '网段', '如 203.0.113.0/24')}${text('userId', '账号 ID', '账号的用户 ID')}${text('visitorHash', '访客标识', '访客哈希')}
+    <label class="field"><span class="field-label">模型</span><input class="input mono" data-risk-field="modelKey" list="risk-models" value="${esc(r.modelKey)}" placeholder="模型 id，自填模型为 x:名称" autocomplete="off" spellcheck="false"><datalist id="risk-models">${models.map((model) => `<option value="${esc(model.id)}">${esc(model.name)}</option>`).join('')}</datalist></label>
+    <div class="field risk-reset"><button class="btn" type="button" data-risk-reset>清除筛选</button></div></div>`;
+}
+function voteRiskView() {
+  return `${pageHero('投票风控', '投票风控', '从 IP、账号和模型三个角度找集中刷票的迹象。这里只展示证据，不会自动封号或作废；作废是软作废，可以随时撤销。', [['窗口', '—'], ['结果', '—'], ['已选', '0']])}
+    <section class="block risk-page">${riskFilters()}<div data-risk-body>${riskBody()}</div></section>`;
+}
+function paintRisk() {
+  const body = $('[data-risk-body]');
+  if (!body) return;
+  const next = document.createElement('div');
+  next.innerHTML = riskBody();
+  if (!$('[data-risk-region]', body)) body.innerHTML = next.innerHTML;
+  else for (const fresh of $$('[data-risk-region]', next)) {
+    const current = $(`[data-risk-region="${fresh.dataset.riskRegion}"]`, body);
+    if (current.painted === fresh.innerHTML) continue;
+    const scroll = $('.table-wrap', current)?.scrollLeft ?? 0;
+    current.innerHTML = fresh.innerHTML;
+    current.painted = fresh.innerHTML;
+    const wrap = $('.table-wrap', current);
+    if (wrap) wrap.scrollLeft = scroll;
+  }
+  const r = state.risk, stats = $$('.page-hero .stats dd');
+  if (stats.length === 3) {
+    stats[0].textContent = { '24h': '24 小时', '3d': '3 天', '7d': '7 天', '30d': '30 天', custom: '自定' }[r.range];
+    stats[1].textContent = r.data ? String(r.data.total) : '—';
+    stats[2].textContent = String(r.selected.size);
+  }
+}
+function paintRiskBar() {
+  const bar = $('[data-risk-bar]');
+  if (bar) bar.innerHTML = riskBar();
+  const stats = $$('.page-hero .stats dd');
+  if (stats.length === 3) stats[2].textContent = String(state.risk.selected.size);
+}
+function riskGo(patch, { reset = true } = {}) {
+  Object.assign(state.risk, patch);
+  if (reset) state.risk.offset = 0;
+  loadRisk();
+}
+function riskDrill(button) {
+  const kind = button.dataset.riskDrill, none = { ip: '', subnet: '', userId: '', visitorHash: '' };
+  const patch = kind === 'ip' ? { ...none, ip: button.dataset.value }
+    : kind === 'subnet' ? { ...none, subnet: button.dataset.value }
+      : kind === 'ip-actors' ? { ...none, ip: button.dataset.value }
+        : kind === 'subnet-actors' ? { ...none, subnet: button.dataset.value }
+          : { ...none, userId: button.dataset.user, visitorHash: button.dataset.user ? '' : button.dataset.visitor };
+  riskGo({ ...patch, view: kind.endsWith('-actors') ? 'actor' : 'choices', sort: '' });
+  $('[data-risk-filters]').outerHTML = riskFilters();
+}
+function riskVoteDialog(restore) {
+  const r = state.risk, picked = [...r.selected.entries()].filter(([, item]) => item.voided === restore);
+  if (!picked.length) return;
+  if (picked.length > 200) { toast('一次最多处理 200 张票，请先取消一部分'); return; }
+  const actors = new Set(picked.map(([, item]) => item.actor)).size, ips = new Set(picked.map(([, item]) => item.ip).filter(Boolean)).size;
+  const sheet = openDialog({ title: restore ? `撤销 ${picked.length} 张票的作废` : `软作废 ${picked.length} 张票`, className: 'confirm-sheet', body: `<form class="admin-editor" novalidate>
+    <p class="sheet-text">${restore ? `这 ${picked.length} 张票会重新计入大众榜与精选榜（仍受原有的有效性规则限制）。` : `涉及 ${actors} 个账号 / 访客、${ips} 个 IP。作废的票不再计入大众榜、精选榜和作品分，数据与重复投票限制都保留，之后可以撤销。`}</p>
+    <label class="field"><span class="field-label">理由<small>必填，会记入审核记录</small></span><textarea class="input" name="reason" rows="3" maxlength="500" required placeholder="${restore ? '例如：复核后确认是同一办公室的正常投票' : '例如：同一网段 10 分钟内 120 张快速投票，集中投给同一模型'}"></textarea></label>
+    <p class="form-error" role="alert"></p>
+    <div class="sheet-actions"><button class="btn" type="button" data-sheet-close>取消</button><button class="btn primary${restore ? '' : ' danger'}" type="submit">${restore ? '确认撤销作废' : '确认作废'}</button></div></form>` });
+  const form = $('form', sheet.el), line = $('.form-error', sheet.el);
+  $('[name=reason]', form).focus();
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const reason = new FormData(form).get('reason').trim();
+    if (!reason) { line.textContent = '请填写理由'; return; }
+    const done = busy($('[type=submit]', form));
+    try {
+      const { changed } = await api(`admin/vote-risk/votes/${restore ? 'restore' : 'void'}`, { method: 'POST', body: { voteIds: picked.map(([id]) => id), reason } });
+      for (const [id] of picked) r.selected.delete(id);
+      sheet.close();
+      toast(restore ? `已撤销 ${changed} 张票的作废` : `已作废 ${changed} 张票，榜单随即重算`);
+      await loadRisk();
+    } catch (error) {
+      line.textContent = error.status === 404 ? '有票已不存在或不是盲评票，请刷新后重新选择' : error.message;
+      done();
+    }
+  });
+}
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('[data-risk-body], [data-risk-filters]')) return;
+  const r = state.risk, hit = (selector) => e.target.closest(selector);
+  const view = hit('[data-risk-view]');
+  if (view) { if (r.view !== view.dataset.riskView) riskGo({ view: view.dataset.riskView, sort: '' }); return; }
+  const drill = hit('[data-risk-drill]');
+  if (drill) { riskDrill(drill); return; }
+  const model = hit('[data-risk-model]');
+  if (model) { riskGo({ modelKey: model.dataset.riskModel, view: 'model', sort: '' }); $('[data-risk-filters]').outerHTML = riskFilters(); return; }
+  const sort = hit('[data-risk-sort]');
+  if (sort) { const key = sort.dataset.riskSort; Object.assign(r, { sort: key, dir: r.sort === key && r.dir === 'desc' ? 'asc' : 'desc' }); paintRisk(); return; }
+  const page = hit('[data-risk-page]');
+  if (page && !page.disabled) { riskGo({ offset: Number(page.dataset.riskPage) }, { reset: false }); return; }
+  if (hit('[data-risk-reload]')) { loadRisk(); return; }
+  if (hit('[data-risk-reset]')) { Object.assign(r, { ip: '', subnet: '', userId: '', visitorHash: '', modelKey: '', voided: 'all', outcome: 'all', range: '7d', sort: '' }); riskGo({}); $('[data-risk-filters]').outerHTML = riskFilters(); return; }
+  const expand = hit('[data-risk-expand]');
+  if (expand) { const id = expand.dataset.riskExpand; r.expanded.has(id) ? r.expanded.delete(id) : r.expanded.add(id); paintRisk(); return; }
+  if (hit('[data-risk-clear]')) { r.selected.clear(); paintRisk(); return; }
+  if (hit('[data-risk-void]')) { riskVoteDialog(false); return; }
+  if (hit('[data-risk-restore]')) { riskVoteDialog(true); }
+});
+document.addEventListener('change', (e) => {
+  const target = e.target;
+  if (!(target instanceof HTMLElement) || !target.closest('[data-risk-body], [data-risk-filters]')) return;
+  const r = state.risk;
+  if (target.matches('[data-risk-pick]')) {
+    const row = r.data?.rows.find((item) => item.voteId === target.dataset.riskPick);
+    if (!row) return;
+    if (target.checked) r.selected.set(row.voteId, { voided: Boolean(row.voidedAt), actor: row.actorKey, ip: row.ip ?? row.subnet });
+    else r.selected.delete(row.voteId);
+    const all = $('[data-risk-all]');
+    if (all) all.checked = r.data.rows.filter((item) => item.voteId).every((item) => r.selected.has(item.voteId));
+    paintRiskBar();
+    return;
+  }
+  if (target.matches('[data-risk-all]')) {
+    for (const row of r.data?.rows ?? []) {
+      if (!row.voteId) continue;
+      if (target.checked) r.selected.set(row.voteId, { voided: Boolean(row.voidedAt), actor: row.actorKey, ip: row.ip ?? row.subnet });
+      else r.selected.delete(row.voteId);
+    }
+    paintRisk();
+    return;
+  }
+  const field = target.dataset.riskField;
+  if (!field) return;
+  let value = target.value;
+  if (field === 'limit') value = Number(value);
+  if (field === 'range' && value === 'custom' && !r.from) { r.from = riskLocal(new Date(Date.now() - 7 * 86400e3)); r.to = riskLocal(new Date()); }
+  riskGo({ [field]: value });
+  if (field === 'range') $('[data-risk-filters]').outerHTML = riskFilters();
+});
+
 async function reload({ navigation = false } = {}) {
   const requestId = ++state.requestId;
   const [route = 'works'] = routeParts();
@@ -1146,7 +1857,15 @@ async function reload({ navigation = false } = {}) {
   if (navigation || !app().dataset.shell) render({ soft: route === 'works' && !state.workLoading });
   try {
     if (route === 'users') state.users = (await api('admin/users')).users;
-    else if (route === 'tasks') state.adminQuestions = (await api('admin/questions')).questions;
+    else if (route === 'tasks') {
+      const [questions, curated] = await Promise.all([api('admin/questions'), curatedOn() ? api('admin/curated').catch((error) => { state.curatedNote = `精选信息暂时无法载入：${error.message}`; return null; }) : null]);
+      state.adminQuestions = questions.questions;
+      if (curated) { state.curated = curated; if (!curatedDirty()) state.curatedNote = ''; }
+    } else if (route === 'qualification') {
+      state.qualification = await api('admin/qualification');
+      await Promise.all([...new Set(state.qualification.pairs.map((pair) => pair.taskId))].map((taskId) => loadExamWorks(taskId).catch(() => [])));
+    }
+    else if (route === 'vote-risk') { if (navigation || !state.risk.data) loadRisk(); }
     else if (route === 'works') {
       const data = await api(`admin/works?${key}`);
       if (requestId !== state.requestId || system !== state.system || (routeParts()[0] || 'works') !== 'works') return;
@@ -1187,7 +1906,7 @@ function render({ soft = false, world = false } = {}) {
   if (!routeAllowed(route, sub)) { location.hash = state.system === 'common' ? (isSenior() ? '#/dashboard' : '#/upload') : '#/works'; return; }
   const body = state.system === 'common'
     ? route === 'upload' ? uploadView() : route === 'users' ? usersView() : route === 'traffic' ? trafficView() : dashboardView()
-    : route === 'works' ? systemWorksView() : route === 'intake' ? intakeView() : route === 'tasks' ? tasksView() : placeholderView(route);
+    : route === 'works' ? systemWorksView() : route === 'intake' ? intakeView() : route === 'tasks' ? tasksView() : route === 'qualification' ? qualificationView() : route === 'vote-risk' ? voteRiskView() : placeholderView(route);
   const content = `${state.error ? `<p class="form-error page-error">${esc(state.error)}</p>` : ''}${body}`;
   const shellKey = `${state.system}/${route}/${sub || ''}`;
   const currentMain = $('main.page', app());
@@ -1228,6 +1947,7 @@ function render({ soft = false, world = false } = {}) {
   }
   document.title = `${route === 'guess' ? '模一把' : route === 'activity' ? '活动管理' : tabsForSystem().find((tab) => tab.id === route)?.label ?? '管理后台'} · 管理后台`;
   if (route === 'works') updateBulkSelection();
+  if (route === 'tasks') syncCuratedUi();
   syncThemeUi();
 }
 
@@ -1259,6 +1979,7 @@ async function boot() {
 document.addEventListener('click', async (e) => {
   const system = e.target.closest('[data-system]');
   if (system && state.system !== system.dataset.system) {
+    if (!await leaveCurated()) return;
     state.system = system.dataset.system; store.set('admin-system', state.system); state.workPage = 1;
     applySystemTheme();
     if (routeParts()[0] === 'review') { location.replace(REVIEW_URL); return; }
@@ -1305,6 +2026,20 @@ document.addEventListener('click', async (e) => {
     }
     return;
   }
+  const filterChip = e.target.closest('[data-curated-filter]');
+  if (filterChip) { state.curatedFilter = filterChip.dataset.curatedFilter; state.curatedTarget = ''; paintCurated(); return; }
+  if (e.target.closest('[data-curated-discard]')) { state.curatedDraft = null; state.curatedNote = ''; paintCurated(); return; }
+  const curatedSave = e.target.closest('[data-curated-save]');
+  if (curatedSave) { await saveCurated(curatedSave); return; }
+  if (e.target.closest('[data-section-new]')) { sectionNameDialog(null); return; }
+  const sectionMenu = e.target.closest('[data-section-menu]');
+  if (sectionMenu) { const section = curatedSections().find((item) => item.id === sectionMenu.dataset.sectionMenu); if (section) sectionMenuDialog(section); return; }
+  if (e.target.closest('[data-pair-new]')) { pairDialog(null); return; }
+  const pairEdit = e.target.closest('[data-pair-edit]');
+  if (pairEdit) { pairDialog(state.qualification?.pairs.find((item) => item.id === pairEdit.dataset.pairEdit)); return; }
+  const pairToggle = e.target.closest('[data-pair-toggle]');
+  if (pairToggle) { await togglePair(pairToggle); return; }
+  if (e.target.closest('[data-exam-settings]')) { examSettingsDialog(); return; }
   const page = e.target.closest('[data-page]');
   if (page && !page.disabled) { state.workPage = Number(page.dataset.page); syncWorksHash(); await reload({ navigation: true }); return; }
   const bulk = e.target.closest('[data-bulk-face]');
@@ -1378,8 +2113,8 @@ document.addEventListener('click', async (e) => {
     if (!user) return;
     const doneBusy = busy(roleBtn, '正在保存…');
     try {
-      await api(`admin/users/${encodeURIComponent(user.id)}/role`, { method: 'POST', body: { role: target } });
-      toast(`${user.name} 现在是${target === 'admin' ? '管理员' : '普通成员'}`);
+      await api(`admin/users/${encodeURIComponent(user.id)}/role`, { method: 'POST', body: { level: target === 'admin' ? 3 : 0 } });
+      toast(`${user.name} 现在是${target === 'admin' ? ' Lv3 高级管理员' : ' Lv0 成员'}`);
       await reload();
     } catch (error) {
       toast(error.message);
@@ -1388,10 +2123,32 @@ document.addEventListener('click', async (e) => {
   }
 });
 document.addEventListener('change', async (e) => {
+  const curatedToggle = e.target.closest('[data-curated-toggle]');
+  if (curatedToggle) {
+    const id = curatedToggle.dataset.curatedToggle;
+    const section = curatedTarget();
+    if (curatedToggle.checked && !section) { curatedToggle.checked = false; toast('请先新建一个精选分区'); return; }
+    stageCurated((draft) => { if (curatedToggle.checked) draft.set(id, section); else draft.delete(id); });
+    paintCurated();
+    return;
+  }
+  const curatedSection = e.target.closest('[data-curated-section]');
+  if (curatedSection) { stageCurated((draft) => draft.set(curatedSection.dataset.curatedSection, curatedSection.value)); paintCurated(); return; }
+  const curatedAll = e.target.closest('[data-curated-all]');
+  if (curatedAll) {
+    const section = curatedTarget();
+    if (curatedAll.checked && !section) { curatedAll.checked = false; toast('请先新建一个精选分区'); return; }
+    const rows = curatedRows().filter((row) => row.addable);
+    stageCurated((draft) => { for (const row of rows) { if (curatedAll.checked) { if (!draft.has(row.task.id)) draft.set(row.task.id, section); } else draft.delete(row.task.id); } });
+    paintCurated();
+    return;
+  }
+  if (e.target.closest('[data-curated-target]')) { state.curatedTarget = e.target.value; return; }
+  if (e.target.closest('[data-curated-type]')) { state.curatedType = e.target.value; paintCurated(); return; }
   const roleSelect = e.target.closest('[data-user-role]');
   if (roleSelect) {
     roleSelect.disabled = true;
-    try { await api(`admin/users/${encodeURIComponent(roleSelect.dataset.userRole)}/role`, { method: 'POST', body: { role: roleSelect.value } }); await reload(); toast('角色已更新'); }
+    try { await api(`admin/users/${encodeURIComponent(roleSelect.dataset.userRole)}/role`, { method: 'POST', body: { level: Number(roleSelect.value) } }); await reload(); toast('等级已更新'); }
     catch (error) { toast(error.message); roleSelect.disabled = false; }
     return;
   }
@@ -1426,6 +2183,7 @@ document.addEventListener('change', async (e) => {
 // Provenance fields: show the free-text box, enable the version, offer a registry match.
 document.addEventListener('input', (e) => {
   if (e.target.matches?.('[data-provenance-choice], [name="harnessOther"]')) refreshProvenance(e.target.form);
+  if (e.target.matches?.('[data-curated-search]')) { state.curatedSearch = e.target.value; paintCurated(); }
 });
 document.addEventListener('click', (e) => {
   const pick = e.target.closest?.('[data-pick-provenance]');
@@ -1534,6 +2292,10 @@ document.addEventListener('drop', async (e) => {
   zone.classList.remove('dragging');
   if (e.dataTransfer?.files?.length) await inboxUpload(e.dataTransfer.files);
 });
-addEventListener('hashchange', () => { if (isStaff(state.user)) reload({ navigation: true }); });
+addEventListener('hashchange', async () => {
+  if (!isStaff(state.user)) return;
+  if (routeParts()[0] !== 'tasks' && !await leaveCurated()) { history.replaceState(null, '', '#/tasks'); return; }
+  reload({ navigation: true });
+});
 
 boot();

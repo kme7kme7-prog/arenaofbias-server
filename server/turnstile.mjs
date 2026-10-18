@@ -10,10 +10,10 @@ export const turnstileSiteKey = () => process.env.TURNSTILE_SITE_KEY || null;
 export const turnstileEnabled = () => Boolean(process.env.TURNSTILE_SITE_KEY && process.env.TURNSTILE_SECRET_KEY);
 
 // 三态结果：ok 放行 / fail 没过（脚本或 token 过期）/ down 校验服务够不着
-export const verifyTurnstile = async (token, ip) => {
+export const verifyTurnstile = async (token, ip, { required = false, action = null, hostnames = [] } = {}) => {
   if (!turnstileEnabled()) {
     // An intentionally disabled local challenge differs from a half-configured one.
-    return process.env.TURNSTILE_SITE_KEY || process.env.TURNSTILE_SECRET_KEY ? 'down' : 'ok';
+    return required || process.env.TURNSTILE_SITE_KEY || process.env.TURNSTILE_SECRET_KEY ? 'down' : 'ok';
   }
   if (typeof token !== 'string' || !token) return 'fail';
   const body = new URLSearchParams({
@@ -28,7 +28,7 @@ export const verifyTurnstile = async (token, ip) => {
       { method: 'POST', body, signal: AbortSignal.timeout(8000) },
     );
     const data = await response.json();
-    return data.success ? 'ok' : 'fail';
+    return data.success && (!action || data.action === action) && (!hostnames.length || hostnames.includes(data.hostname)) ? 'ok' : 'fail';
   } catch {
     // 宁可暂时拒绝也不放行：Cloudflare 够不着时让真人稍后重试，
     // 好过给刷接口的脚本开天窗

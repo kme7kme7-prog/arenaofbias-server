@@ -1,3 +1,4 @@
+import { finishViewing, voteAfterViewing } from './helpers/arena.mjs';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, request } from 'node:http';
@@ -65,6 +66,8 @@ async function withPlatform(run, configOptions = {}) {
   async function call(who, method, path, body = undefined, raw = false) {
     const headers = { ...(method !== 'GET' ? { Origin: base } : {}), ...(cookies.get(who) ? { Cookie: cookies.get(who) } : {}) };
     if (body !== undefined && !raw) headers['Content-Type'] = 'application/json';
+    const voting = /\/api\/arena\/matches\/([^/]+)\/vote$/.exec(path);
+    if (voting) finishViewing(platform.db, voting[1]);
     const response = await fetch(base + path, { method, headers, body: body === undefined ? undefined : raw ? body : JSON.stringify(body) });
     const cookie = response.headers.get('set-cookie');
     if (cookie) cookies.set(who, cookie.split(';')[0]);
@@ -74,6 +77,7 @@ async function withPlatform(run, configOptions = {}) {
     platform.auth.createAdmin('root', 'correct horse');
     const voter = await platform.auth.register('voter', 'correct horse');
     platform.auth.bindEmail(voter.id, 'voter@example.test');
+    platform.auth.promote('voter', 1);
     assert.equal((await call('root', 'POST', '/api/auth/login', { name: 'root', password: 'correct horse' })).status, 200);
     assert.equal((await call('voter', 'POST', '/api/auth/login', { name: 'voter', password: 'correct horse' })).status, 200);
     await run({ platform, call });
@@ -502,7 +506,7 @@ test('moving a work excludes its former-question ballots without deleting them o
   await upload('two', 'mb', 'New-opponent');
   const voter = { ...platform.db.prepare("SELECT * FROM users WHERE name='voter'").get(), email: 'voter@example.test' };
   const match = await platform.arena.createMatch(voter, 'one');
-  assert.equal(platform.arena.vote(voter, match.id, 'a').counted, true);
+  assert.equal(voteAfterViewing(platform, voter, match.id, 'a').counted, true);
   platform.db.exec(`INSERT INTO matches (id, user_id, task_id, a_work, b_work, a_token, b_token, created_at, expires_at)
     SELECT 'compat-' || id, user_id, task_id, a_work, b_work, 'compat-' || a_token, 'compat-' || b_token, created_at, expires_at FROM matches WHERE id='${match.id}';
     INSERT INTO votes (id, match_id, user_id, task_id, a_work, b_work, pair_key, choice, created_at, a_identity, b_identity, source)
@@ -514,7 +518,7 @@ test('moving a work excludes its former-question ballots without deleting them o
   assert.equal((await platform.arena.leaderboard()).totals.votes, 0);
   assert.equal((await call('voter', 'GET', '/api/votes?scope=entertainment')).data.votes.length, 0);
   const fresh = await platform.arena.createMatch(voter, 'two');
-  assert.equal(platform.arena.vote(voter, fresh.id, 'tie').counted, true);
+  assert.equal(voteAfterViewing(platform, voter, fresh.id, 'tie').counted, true);
   assert.equal((await platform.arena.leaderboard()).totals.votes, 1, 'new-question comparisons count');
   assert.equal((await call('root', 'POST', `/api/admin/works/two/${moved}/meta`, { task: 'one' })).status, 200);
   assert.equal((await platform.arena.leaderboard()).totals.votes, 0, 'returning does not revive either former-question ballot');
@@ -704,7 +708,7 @@ test('admin upload attribution corrections move existing and in-flight ballots w
   admin.email = 'root@example.test';
   const first = await platform.arena.createMatch(voter, 'two');
   const pending = await platform.arena.createMatch(admin, 'two');
-  assert.equal(platform.arena.vote(voter, first.id, 'a').counted, true);
+  assert.equal(voteAfterViewing(platform, voter, first.id, 'a').counted, true);
   const original = platform.db.prepare('SELECT * FROM votes WHERE match_id = ?').get(first.id);
   assert.ok((await platform.arena.leaderboard({ task: 'two' })).rows.some((row) => row.modelName === 'GPT6.1'));
   const edit = await call('root', 'POST', `/api/admin/works/two/${id}/meta`, { modelId: 'ma' });
@@ -717,7 +721,7 @@ test('admin upload attribution corrections move existing and in-flight ballots w
   const board = await platform.arena.leaderboard({ task: 'two' });
   assert.ok(board.rows.some((row) => row.model === 'ma' && row.games === 1));
   assert.ok(!board.rows.some((row) => row.modelName === 'GPT6.1'));
-  assert.equal(platform.arena.vote(admin, pending.id, 'a').counted, true, 'an existing match remains usable');
+  assert.equal(voteAfterViewing(platform, admin, pending.id, 'a').counted, true, 'an existing match remains usable');
   const second = platform.db.prepare('SELECT * FROM votes WHERE match_id = ?').get(pending.id);
   const secondSide = second.a_work === id ? 'a' : 'b';
   assert.equal(JSON.parse(second[`${secondSide}_identity`]).modelName, 'GPT6.1');
@@ -746,7 +750,7 @@ test('admin upload attribution corrections move existing and in-flight ballots w
 test('admin package attribution edits resolve saved ballots without writing corrections', async () => withPlatform(async ({ platform, call }) => {
   const voter = platform.db.prepare("SELECT * FROM users WHERE name = 'voter'").get();
   const match = await platform.arena.createMatch(voter, 'one');
-  assert.equal(platform.arena.vote(voter, match.id, 'a').counted, true);
+  assert.equal(voteAfterViewing(platform, voter, match.id, 'a').counted, true);
   const original = platform.db.prepare('SELECT * FROM votes WHERE match_id = ?').get(match.id);
   const side = original.a_work === 'a' ? 'a' : 'b';
   assert.equal((await call('root', 'POST', '/api/admin/works/one/a/meta', { effort: 'High' })).status, 200);

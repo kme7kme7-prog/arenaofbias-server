@@ -94,7 +94,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
     "connect-src 'self' https://challenges.cloudflare.com",
-    `frame-src 'self' https://challenges.cloudflare.com ${config.contentTemplate.replace('{token}', '*')}`,
+    `frame-src 'self' https://challenges.cloudflare.com ${config.contentTemplate.replace('{token}', '*')} ${config.contentPathOrigin || ''}`,
     "worker-src 'self' blob:",
     "object-src 'none'",
     "base-uri 'self'",
@@ -151,7 +151,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     datapack: snapshot.commit, catalogDigest: snapshot.catalogDigest, apiVersion: 2,
   });
   const siteInfo = () => ({
-    content: config.contentTemplate,
+    content: config.contentPathOrigin ? `${config.contentPathOrigin}/v/{token}` : config.contentTemplate,
     cdn: config.cdn,
     capture: capturer.available,
     contentModeration: moderator.enabled,

@@ -3,6 +3,7 @@
 import { dirname, join, resolve } from 'node:path';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { validateContentOrigin } from './content-path.mjs';
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const env = process.env;
@@ -33,6 +34,8 @@ export const config = {
   // Locally *.localhost resolves to this machine; production needs a wildcard domain
   // on a registrable domain separate from the site (see docs/ARCHITECTURE.md).
   contentTemplate: env.CONTENT_ORIGIN_TEMPLATE || `http://{token}.localhost:${contentPort}`,
+  // Opt-in fixed-host transport. A trusted shell isolates each opaque work frame.
+  contentPathOrigin: validateContentOrigin(env.CONTENT_PATH_ORIGIN || '', list(env.SITE_ORIGINS, `http://localhost:${port},http://127.0.0.1:${port}`)),
   // Trusted frontend origins: credentialed API access and work framing.
   siteOrigins: list(env.SITE_ORIGINS, `http://localhost:${port},http://127.0.0.1:${port}`),
   // Usernames that always hold the admin role; `npm run admin -- <name>` also promotes.

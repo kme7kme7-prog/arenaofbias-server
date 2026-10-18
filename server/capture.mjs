@@ -9,6 +9,7 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
 import { THREE_MIRROR_PATH } from './config.mjs';
+import { contentRuntimePath } from './content-path.mjs';
 
 const SHOTS = [
   { id: 'first', viewport: { width: 1440, height: 900 }, mobile: false },
@@ -37,9 +38,13 @@ async function pageText(page) {
 // CDN bodies are hashed into resources so a later capture can tell when one changed.
 export async function guardCaptureContext(context, { origin, cdn, resources = null }) {
   const workOrigin = new URL(origin).origin;
+  const workPath = /^\/v\/[wmdpc][0-9a-f]{32}(?:\/|$)/.exec(new URL(origin).pathname)?.[0].replace(/\/$/, '');
+  const workKey = workPath?.slice('/v/'.length);
+  const ownResource = url => url.origin === workOrigin && (!workKey ||
+    url.pathname === contentRuntimePath || [`/v/${workKey}/`, `/c/${workKey}/`].some(prefix => url.pathname.startsWith(prefix)));
   const cdnOrigins = new Set(cdn.map((host) => new URL(`https://${host}`).origin));
   const allowed = (url, document) => !url.username && !url.password &&
-    (url.origin === workOrigin || (!document && url.protocol === 'https:' && cdnOrigins.has(url.origin)
+    (ownResource(url) || (!document && url.protocol === 'https:' && cdnOrigins.has(url.origin)
       && (url.hostname !== 'registry.npmmirror.com' || url.pathname.startsWith(THREE_MIRROR_PATH))));
   await context.routeWebSocket('**/*', (socket) => socket.close());
   await context.route('**/*', async (route) => {

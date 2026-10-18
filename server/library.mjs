@@ -14,6 +14,7 @@ import { inspectUpload } from './inspect.mjs';
 import { isTextTask, templatesOf } from './categories.mjs';
 import { GENERATION_FIELDS, IGNORED_GENERATION_FIELDS, generationFrom, generationOf, generationAudit, generationAuditView } from './generation.mjs';
 import { readWorkPreview } from './work-previews.mjs';
+import { contentUrl } from './content-path.mjs';
 
 const token = (prefix) => `${prefix}${randomBytes(16).toString('hex')}`;
 const workId = () => `up-${[...randomBytes(8)].map((byte) => (byte % 36).toString(36)).join('')}`;
@@ -70,7 +71,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
   const publicContent = (work) => publicContentEffective(withDisplay(work));
   const dirs = { drafts: join(config.dataDir, 'drafts'), works: join(config.dataDir, 'works'), media: join(config.dataDir, 'media') };
   for (const dir of Object.values(dirs)) mkdirSync(dir, { recursive: true });
-  const originOf = (key) => config.contentTemplate.replace('{token}', key);
+  const originOf = (key) => contentUrl(config, key);
   // Short-lived bearer previews are only issued in owner/admin responses. Public
   // work hosts never serve a held upload, even when its old URL is known.
   // Datapack ids repeat across tasks, so a key belongs to one task/id pair.

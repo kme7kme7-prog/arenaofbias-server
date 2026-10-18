@@ -23,6 +23,7 @@
 //     arena keys; migrated old-site votes keep source='legacy' and are excluded from
 //     these reads and scores. The reset command removes their old deduplication rows.
 import { createHash, randomBytes } from 'node:crypto';
+import { contentUrl } from './content-path.mjs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { transaction } from './db.mjs';
@@ -322,7 +323,7 @@ export function registerShow1Compat(router, deps) {
       return {
         id: row.rid ?? row.id, promptId: row.round, modelId: row.model_id,
         modelName: row.modelName, vendor: row.vendor, title: row.title, isDemo: 0,
-        content: JSON.stringify(story ?? { kind: 'html', src: `${deps.config.contentTemplate.replace('{token}', row.content_key)}/` }),
+        content: JSON.stringify(story ?? { kind: 'html', src: `${contentUrl(deps.config, row.content_key)}/` }),
       };
     })];
   };

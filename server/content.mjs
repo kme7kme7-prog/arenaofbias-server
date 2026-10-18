@@ -2,6 +2,8 @@
 // draft is reached through its own host name ({token}.<content domain>), so every page gets
 // a separate origin and can reach neither the site's session nor another work.
 import { readFileSync } from 'node:fs';
+import { extname } from 'node:path';
+import { contentRoute, shellResponse, pathDocument, pathPolicy, rebaseCss, contentRuntime, contentRuntimePath } from './content-path.mjs';
 import { entertainmentProbeTag } from './work-ready.mjs';
 import { THREE_MIRROR_PATH } from './config.mjs';
 import { HttpError, resolveInside, streamFile } from './http.mjs';
@@ -70,12 +72,20 @@ export function createContentHandler({ config, library, arena, catalog, siteOrig
   ].join('; ');
 
   function serve(req, res) {
-    if (req.method !== 'GET' && req.method !== 'HEAD') {
+    const route = contentRoute(config, req);
+    const preflight = req.method === 'OPTIONS' && route && !route.shell;
+    if (req.method !== 'GET' && req.method !== 'HEAD' && !preflight) {
       res.writeHead(405, { Allow: 'GET, HEAD' });
       return res.end();
     }
     readGuard.file(req);
-    const key = String(req.headers.host ?? '').split('.')[0].toLowerCase();
+    if (config.contentPathOrigin && String(req.headers.host).toLowerCase() === new URL(config.contentPathOrigin).host.toLowerCase()
+      && req.url.split('?')[0] === contentRuntimePath) {
+      res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Content-Length': contentRuntime.length,
+        'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff' });
+      return res.end(req.method === 'HEAD' ? undefined : contentRuntime);
+    }
+    const key = route?.key ?? String(req.headers.host ?? '').split('.')[0].toLowerCase();
     if (!/^[wmdpc][0-9a-f]{32}$/.test(key)) return errorPage(res, 404, '作品地址无效', '请从展厅重新打开作品。');
 
     let target = null;
@@ -98,16 +108,47 @@ export function createContentHandler({ config, library, arena, catalog, siteOrig
     }
     if (!target) return errorPage(res, 410, '作品已不可用', key[0] === 'm' ? '这一组比较已经结束，请开始新的一组。' : '作品尚未公开、已被删除，或预览地址已过期。');
 
-    const url = new URL(req.url, 'http://content.invalid');
-    const { pathname } = url;
+    const url = new URL(req.url, route?.origin || 'http://content.invalid');
+    const pathname = route?.path ?? url.pathname;
     const playground = !target.draft && key[0] !== 'm' && url.searchParams.getAll('aob').includes('playground');
     const stageParent = playground && siteOrigins.includes(url.searchParams.get('parent')) ? url.searchParams.get('parent') : null;
     const headers = {
-      'Content-Security-Policy': policy,
+      'Content-Security-Policy': route ? pathPolicy(route, cdn, siteOrigins) : policy,
       'Referrer-Policy': 'no-referrer',
       'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=()',
       'Cache-Control': target.draft || target.private || key[0] === 'm' ? 'no-store' : 'private, max-age=600',
     };
+    if (route?.shell) {
+      readGuard.page(req);
+      const shell = shellResponse(route, siteOrigins);
+      res.writeHead(200, { ...headers, 'Content-Security-Policy': shell.policy, 'Cache-Control': 'no-store',
+        'Content-Type': 'text/html; charset=utf-8', 'Content-Length': shell.body.length, 'X-Content-Type-Options': 'nosniff' });
+      return res.end(req.method === 'HEAD' ? undefined : shell.body);
+    }
+    if (route) {
+      // The work's own capability is the only path allowed by its CSP. No cookies
+      // or credentialed CORS are accepted; main-site APIs keep their origin checks.
+      headers['Access-Control-Allow-Origin'] = '*';
+      if (preflight) {
+        if (!['GET', 'HEAD'].includes(req.headers['access-control-request-method'])) {
+          res.writeHead(405, { ...headers, Allow: 'GET, HEAD' });
+          return res.end();
+        }
+        const requested = String(req.headers['access-control-request-headers'] || '');
+        if (!/^[a-z0-9,\s!#$%&'*+.^_`|~-]*$/i.test(requested)) {
+          res.writeHead(400, headers);
+          return res.end();
+        }
+        res.writeHead(204, { ...headers, 'Access-Control-Allow-Methods': 'GET, HEAD',
+          'Access-Control-Allow-Headers': requested, 'Access-Control-Max-Age': '600',
+          Vary: 'Access-Control-Request-Method, Access-Control-Request-Headers' });
+        return res.end();
+      }
+      if (pathname === '/__content-runtime.js') {
+        res.writeHead(200, { ...headers, 'Content-Type': 'text/javascript; charset=utf-8', 'Content-Length': contentRuntime.length });
+        return res.end(req.method === 'HEAD' ? undefined : contentRuntime);
+      }
+    }
     if (pathname === '/__playground.js' && !target.draft) {
       res.writeHead(200, { ...headers, 'Content-Type': 'text/javascript; charset=utf-8', 'Content-Length': stageBridge.length });
       return res.end(req.method === 'HEAD' ? undefined : stageBridge);
@@ -201,10 +242,16 @@ export function createContentHandler({ config, library, arena, catalog, siteOrig
         if (arenaCamera && entertainmentCurrent) body = stageRender(body);
         const paperWorks = { 'mechanical-keyboard': ['gpt-6-sol-high', 'mimo-v2.6-pro', 'gpt-6-astra-high', 'gpt-5.6-sol-max'], 'desk-lamp': ['gpt-6-sol-high', 'gpt-6-astra-high', 'gpt-6-sol-max', 'gpt-6-astra-max'] };
         const paper = entertainmentCurrent && !!paperWorks[work.taskId]?.includes(work.id);
-        head.unshift('<script>window.__PLAYGROUND_ORIGIN__=' + JSON.stringify(stageParent) + ';window.__OBJECT_STAGE_CAMERA__=' + JSON.stringify(entertainmentCamera(work, readFileSync(found.file))) + ';window.__OBJECT_STAGE_PAPER__=' + JSON.stringify(paper) + '</script><script src="/__playground.js"></script>');
+        head.unshift('<script>window.__PLAYGROUND_ORIGIN__=' + JSON.stringify(route?.origin || stageParent) + ';window.__OBJECT_STAGE_CAMERA__=' + JSON.stringify(entertainmentCamera(work, readFileSync(found.file))) + ';window.__OBJECT_STAGE_PAPER__=' + JSON.stringify(paper) + '</script><script src="/__playground.js"></script>');
       }
       if (head.length) body = withHeadTags(body, head.join(''));
+      if (route) body = pathDocument(body, route, pathname);
       res.writeHead(200, { ...headers, 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': body.length, 'X-Content-Type-Options': 'nosniff' });
+      return res.end(req.method === 'HEAD' ? undefined : body);
+    }
+    if (route && extname(found.file).toLowerCase() === '.css') {
+      const body = Buffer.from(rebaseCss(readFileSync(found.file, 'utf8'), route.prefix));
+      res.writeHead(200, { ...headers, 'Content-Type': 'text/css; charset=utf-8', 'Content-Length': body.length, 'X-Content-Type-Options': 'nosniff' });
       return res.end(req.method === 'HEAD' ? undefined : body);
     }
     return streamFile(req, res, found, headers);

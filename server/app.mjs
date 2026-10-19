@@ -18,6 +18,7 @@ import { createCatalog } from './catalog.mjs';
 import { createCatalogResponse, createCatalogRevision } from './catalog-response.mjs';
 import { createSharedRead } from './shared-read.mjs';
 import { createComments } from './comments.mjs';
+import { createChangelog } from './changelog.mjs';
 import { AVATARS, EFFORTS, EMOJIS } from './config.mjs';
 import { createContentHandler } from './content.mjs';
 import { openDatabase, transaction } from './db.mjs';
@@ -48,6 +49,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     catch { return 'dev'; }
   })();
   const db = openDatabase(join(config.dataDir, 'platform.db'));
+  const changelog = createChangelog(db);
   const references = createReferences({ db, config, limits });
   const questions = createQuestions(db, { references });
   references.bindQuestions(questions);
@@ -247,6 +249,17 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   }
 
   const router = createRouter();
+  router.on('GET', '/api/changelog', ctx => sendJson(ctx.res, 200, changelog.published(ctx.url.searchParams.get('limit')), { 'Cache-Control': 'no-cache' }));
+  router.on('GET', '/api/admin/changelog', ctx => { adminOnly(ctx); return changelog.all(); });
+  router.on('POST', '/api/admin/changelog', async ctx => {
+    const actor = adminOnly(ctx);
+    return changelog.create(actor, await readJson(ctx.req));
+  });
+  router.on('POST', '/api/admin/changelog/:id', async ctx => {
+    const actor = adminOnly(ctx);
+    return changelog.update(actor, ctx.params.id, await readJson(ctx.req));
+  });
+  router.on('DELETE', '/api/admin/changelog/:id', ctx => { adminOnly(ctx); return changelog.remove(ctx.params.id); });
   router.on('GET', '/api/fold.js', ({ req, res }) => {
     res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Content-Length': foldScript.length,
       'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' });

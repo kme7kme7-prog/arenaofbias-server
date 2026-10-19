@@ -1,3 +1,10 @@
+## 2026-10-19 · 网站更新日志（本地完成，未提交/部署）
+
+- v46 末尾幂等迁移建 `changelog_entries`；新 `server/changelog.mjs`：公开 `GET /api/changelog[?limit=N]`（仅已发布，publishedOn/id 倒序，含 total，no-cache）；Lv3 `GET/POST /api/admin/changelog`、`POST|DELETE /api/admin/changelog/:id`（no-store）。契约见 docs/api-contract.md 末节。后台展览馆系统新增「更新日志」页（列表、编辑弹窗与实时预览、草稿/发布/撤回/删除），仅 Lv3。
+- 分工：后端 GPT-6.1-Sol，后台页面 Sonnet 5.5，设计 Opus 5.5（Lead），review GPT-6.1-Sol。无种子数据、无新依赖。
+- 验证：check 142/0、test 391/391（新增 test/changelog.test.mjs 4 条：迁移幂等、草稿隔离、非 Lv3 403、典型 400）；隔离 DATA_DIR 重启及前后端联调通过。未做生产库副本迁移演练。
+- 发布时需同时部署 server 三个文件、admin 两个文件与 Gallery 前端；迁移前一致备份。
+
 ## 2026-10-19 · 成员等级、独立精选榜与投票风控（本地完成，已授权提交推送，不部署）
 
 - 本轮归档：[成员等级、独立精选榜与投票风控](docs/archive/2026-10-19-member-levels-curated-vote-risk-wsnxxxs.md)。负责人wsnxxxs；后端GPT-6.1-Sol，前端后台Sonnet 5.5，设计Opus 5.5，review GPT-6.1-Sol。Lead执行提交/推送；本轮未部署、未迁移生产库。

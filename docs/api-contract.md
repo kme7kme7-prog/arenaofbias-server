@@ -1247,3 +1247,19 @@ readyElapsedMs沿用该match首次有效选择时间（验证码等待/重试不
 - 好友房首轮保存 `rulesVersion:2`、完整 catalog 与 catalogVersion 至现有房间 JSON；整场的后续轮次及重启都使用快照。Room 仅公开版本；`friends/catalog` 向成员返回其当前房间的公开目录，不泄露答案标记。无快照旧房间以 `catalog_changed` 中性结束。
 - 新增高级管理员接口：GET `/api/admin/guess/stats`，GET/POST `/api/admin/guess/models`。POST 校验同源、8 KiB 正文、字段白名单、唯一 ID/名称、日期/枚举/数值、厂商地区；先验证后原子写入 `config.dataDir/guess-models-extra.json`（最多 2000 条），即时生效，启动重载。只追加，不覆盖已有条目。
 - 前端核心是唯一源，经 Show1 `scripts/sync-guess-core.mjs` 生成后端核心与目录。无新数据库迁移、无展览馆审核改动。发布需协调前后端并刷新旧页面；旧客户端不识别第六价格档。
+
+### 网站更新日志（2026-10-19，schema v46）
+
+迁移 v46 幂等创建 `changelog_entries` 与 `changelog_published` 索引，不录入初始内容。
+
+| 方法 | 路径 | 响应 |
+| --- | --- | --- |
+| GET | `/api/changelog[?limit=N]` | `{entries, total}`，无需登录，仅已发布条目；total 为已发布总数，不受 limit 影响 |
+| GET | `/api/admin/changelog` | `{entries}`，含草稿，仅 Lv3 |
+| POST | `/api/admin/changelog` | 新建整条内容，返回 `{entry}`，仅 Lv3 |
+| POST | `/api/admin/changelog/:id` | 替换整条内容，返回 `{entry}`，仅 Lv3；不存在 404 |
+| DELETE | `/api/admin/changelog/:id` | `{ok:true}`，仅 Lv3；不存在 404 |
+
+公开条目字段：`id`（整数）、`kind`、`title`、`body`、`titleEn`、`bodyEn`、`link`、`publishedOn`。后台条目另含 `status`、`createdAt`、`updatedAt`（ISO 8601 时间字符串），不返回维护者账号。所有列表按 `publishedOn DESC, id DESC`。公开接口 `Cache-Control: no-cache`，后台沿用 `no-store`。`limit` 仅在为 1–100 的整数时截断，否则返回全部。
+
+两个 POST 均接收 `{kind,title,body,titleEn,bodyEn,link,publishedOn,status}`：kind 为 feature/improve/fix/rule；中文标题去首尾空白后 1–60 字符；正文 1–4000 字符；英文标题最多 120、英文正文最多 8000 字符，二者同时填或同时空；link 为空或以 `#/`、`https://` 开头且最多 300 字符；publishedOn 为合法 `YYYY-MM-DD`（缺省为当天 UTC 日期，可回填）；status 为 draft/published。英文与链接缺省为空。校验失败 400，`error` 为可展示的中文。复用 `adminOnly`：已登录非 Lv3 返回 403，未登录沿用 401；写请求沿用平台同源校验。

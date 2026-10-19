@@ -193,7 +193,7 @@ const state = { user: undefined, data: null, works: null, audit: [], users: null
   workModel: '', workEffort: '', workAuthor: '', workGenerationMode: '', workHumanIntervention: '', workEfforts: [],
   inbox: null, inboxForms: {}, intake: null, adminQuestions: null, reviewCounts: null, domainGroups: [],
   curated: null, curatedDraft: null, curatedFilter: 'all', curatedSearch: '', curatedType: '', curatedTarget: '', curatedNote: '',
-  qualification: null, examWorks: {},
+  qualification: null, examWorks: {}, changelog: null, changelogFilter: 'all',
   risk: { view: 'ip', range: '7d', from: '', to: '', voided: 'all', outcome: 'all', ip: '', subnet: '', userId: '', visitorHash: '', modelKey: '', minVotes: 5, limit: 50, offset: 0, sort: '', dir: 'desc', data: null, loading: false, error: '', selected: new Map(), expanded: new Set() } };
 const taskTitle = (id) => [...(state.adminQuestions ?? []), ...(state.questions ?? [])].find((t) => t.id === id)?.title ?? id;
 
@@ -256,6 +256,7 @@ const TABS = [
   { id: 'tasks', label: '题目', icon: 'guide' },
   { id: 'qualification', label: '资格考试', icon: 'check' },
   { id: 'vote-risk', label: '投票风控', icon: 'shield' },
+  { id: 'changelog', label: '更新日志', icon: 'calendar' },
 ];
 const COMMON_TABS = [
   { id: 'dashboard', label: '仪表盘', icon: 'chart' },
@@ -1490,6 +1491,145 @@ function patchWorks(newMain) {
     else if (oldEl && !newEl) oldEl.remove();
   }
 }
+// ---- website changelog: the entries behind the gallery's #/changelog page (Lv3) ----
+const CL_KINDS = { feature: ['新功能', 'New'], improve: ['改进', 'Improved'], fix: ['修复', 'Fixed'], rule: ['规则调整', 'Policy'] };
+const CL_STATUS = { all: '全部', published: '已发布', draft: '草稿' };
+const CL_MAX = { title: 60, body: 4000, titleEn: 120, bodyEn: 8000, link: 300 };
+const clToday = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+// The same body subset the gallery renders: paragraphs, - and 1. lists, **bold**, `code`, [text](link).
+function clInline(source) {
+  return esc(source).split(/(`[^`]+`)/).map((part, i) => (i % 2 ? `<code>${part.slice(1, -1)}</code>` : part
+    .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (whole, text, url) => (/^(#\/|https:\/\/|mailto:)/.test(url) ? `<a href="${url}" target="_blank" rel="noopener">${text}</a>` : whole)))).join('');
+}
+function clBody(text) {
+  const blocks = [];
+  for (const line of String(text).split(/\r?\n/)) {
+    if (!line.trim()) { blocks.push(null); continue; }
+    const item = line.match(/^(-|\d+\.)\s+(.*)$/);
+    const tag = item ? (item[1] === '-' ? 'ul' : 'ol') : 'p';
+    const last = blocks.at(-1);
+    if (last && last.tag === tag) last.lines.push(item ? item[2] : line.trim());
+    else blocks.push({ tag, lines: [item ? item[2] : line.trim()] });
+  }
+  return blocks.filter(Boolean).map(({ tag, lines }) => (tag === 'p' ? `<p>${lines.map(clInline).join('<br>')}</p>` : `<${tag}>${lines.map((l) => `<li>${clInline(l)}</li>`).join('')}</${tag}>`)).join('');
+}
+function clPreview(v, lang) {
+  const en = lang === 'en' && v.titleEn.trim() && v.bodyEn.trim();
+  const title = en ? v.titleEn : v.title, body = en ? v.bodyEn : v.body;
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(v.publishedOn) ? v.publishedOn : '';
+  const [y, m, d] = date.split('-').map(Number);
+  const week = date ? new Date(y, m - 1, d).toLocaleDateString(lang === 'en' ? 'en' : 'zh-CN', { weekday: 'short' }) : '';
+  const link = v.link.trim();
+  return `<article class="cl-preview-entry" data-i18n-ignore>
+    <div class="cl-preview-when"><b class="mono">${date ? date.slice(5) : '--'}</b><span>${esc(week)}</span></div>
+    <p class="cl-preview-kind"><span class="badge">${CL_KINDS[v.kind][lang === 'en' ? 1 : 0]}</span>${lang === 'en' && !en ? '<span class="badge status-unverified">仅中文 · Chinese only</span>' : ''}</p>
+    <h3>${esc(title.trim()) || '<span class="muted">（标题）</span>'}</h3>
+    <div class="cl-preview-body">${body.trim() ? clBody(body) : '<p class="muted">（正文）</p>'}</div>
+    ${/^(#\/|https:\/\/)/.test(link) ? `<p class="cl-preview-more">去看看 →</p>` : ''}
+  </article>`;
+}
+function changelogView() {
+  const entries = state.changelog;
+  if (!entries) return `${pageHero('更新日志', '网站更新', '展览馆「更新日志」页与首页新闻胶囊的内容。', [['已发布', '—'], ['草稿', '—']])}<section class="block" aria-busy="true">${skeleton(4)}</section>`;
+  const count = (status) => (status === 'all' ? entries.length : entries.filter((e) => e.status === status).length);
+  const shown = state.changelogFilter === 'all' ? entries : entries.filter((e) => e.status === state.changelogFilter);
+  const rows = shown.map((e) => `<article class="admin-task cl-row"><div class="admin-task-main"><h3><span class="mono muted">${e.publishedOn}</span><span class="badge">${CL_KINDS[e.kind][0]}</span><span data-i18n-ignore>${esc(e.title)}</span>${e.titleEn ? '<small class="muted">EN</small>' : ''}${e.status === 'draft' ? '<span class="status status-unverified">草稿</span>' : ''}</h3></div>
+    <div class="actions"><button class="btn" type="button" data-cl-edit="${e.id}">编辑</button><button class="btn danger" type="button" data-cl-delete="${e.id}">删除</button></div></article>`).join('');
+  return `${pageHero('更新日志', '网站更新', '展览馆「更新日志」页与首页新闻胶囊的内容。草稿不会出现在前台。', [['已发布', count('published')], ['草稿', count('draft')]])}
+    <section class="block"><div class="cl-toolbar"><div class="chips" role="group" aria-label="状态筛选">${Object.entries(CL_STATUS).map(([id, label]) => `<button class="chip" type="button" data-cl-filter="${id}" aria-pressed="${state.changelogFilter === id}">${label}<span class="mono">${count(id)}</span></button>`).join('')}</div>
+      <button class="btn primary" type="button" data-cl-new>新建更新</button></div>
+    ${rows ? `<div class="admin-task-list">${rows}</div>` : `<p class="board-empty">${entries.length ? '这个状态下还没有更新。' : '还没有更新记录。'}</p>`}</section>`;
+}
+async function changelogDelete(entry) {
+  if (!await confirmDialog({ title: '删除这条更新？', message: `删除「${entry.title}」？删除后无法恢复。`, confirm: '删除', danger: true })) return false;
+  try { await api(`admin/changelog/${entry.id}`, { method: 'DELETE' }); await reload(); toast('更新已删除'); return true; }
+  catch (error) { toast(error.message); return false; }
+}
+function changelogDialog(entry) {
+  const edit = Boolean(entry);
+  const initial = { kind: entry?.kind ?? 'feature', title: entry?.title ?? '', body: entry?.body ?? '', titleEn: entry?.titleEn ?? '', bodyEn: entry?.bodyEn ?? '', link: entry?.link ?? '', publishedOn: entry?.publishedOn ?? clToday() };
+  const field = (name, label, control, hint = '') => `<label class="field"><span class="field-label">${label}${CL_MAX[name] ? `<small data-count="${name}"></small>` : ''}</span>${control}${hint ? `<span class="fine">${hint}</span>` : ''}<span class="form-error" role="alert" data-err="${name}"></span></label>`;
+  const sheet = openDialog({ title: edit ? '编辑更新' : '新建更新', className: 'changelog-sheet', body: `<form class="admin-editor cl-form" novalidate>
+    <div class="cl-columns">
+      <div class="cl-fields">
+        <div class="field"><span class="field-label">类型</span><div class="chips" role="group" aria-label="类型">${Object.entries(CL_KINDS).map(([id, [zh]]) => `<button class="chip" type="button" data-cl-kind="${id}" aria-pressed="${id === initial.kind}">${zh}</button>`).join('')}</div><span class="form-error" role="alert" data-err="kind"></span></div>
+        ${field('publishedOn', '发布日期', `<input class="input" name="publishedOn" type="date" value="${initial.publishedOn}" required>`)}
+        ${field('title', '标题', `<input class="input" name="title" autocomplete="off" value="${esc(initial.title)}">`)}
+        ${field('body', '正文', `<textarea class="input" name="body" rows="12">${esc(initial.body)}</textarea>`, '支持：空行分段、- 列表、1. 有序列表、**粗体**、`代码`、[文字](链接)')}
+        ${field('link', '「去看看」链接（选填）', `<input class="input" name="link" autocomplete="off" placeholder="#/leaderboard 或 https://…" value="${esc(initial.link)}">`)}
+        <details class="cl-en"${initial.titleEn || initial.bodyEn ? ' open' : ''}><summary>英文版（可选，标题与正文要么都填要么都空）</summary>
+          ${field('titleEn', '英文标题', `<input class="input" name="titleEn" autocomplete="off" value="${esc(initial.titleEn)}">`)}
+          ${field('bodyEn', '英文正文', `<textarea class="input" name="bodyEn" rows="8">${esc(initial.bodyEn)}</textarea>`)}
+        </details>
+      </div>
+      <aside class="cl-side" aria-label="前台预览"><div class="cl-side-head"><span class="field-label">前台预览</span><div class="seg" role="group" aria-label="预览语言"><button type="button" data-cl-lang="zh" aria-pressed="true">中文</button><button type="button" data-cl-lang="en" aria-pressed="false">English</button></div></div>
+        <div class="cl-preview" data-cl-preview></div></aside>
+    </div>
+    <p class="form-error" role="alert" data-err="form"></p>
+    <div class="sheet-actions cl-foot">${edit ? '<button class="btn danger" type="button" data-cl-remove>删除</button>' : ''}<span class="spacer"></span><button class="btn" type="button" data-sheet-close>取消</button>
+      ${edit && entry.status === 'published' ? '<button class="btn" type="button" data-cl-save="draft">撤回为草稿</button><button class="btn primary" type="button" data-cl-save="published">保存</button>' : '<button class="btn" type="button" data-cl-save="draft">存为草稿</button><button class="btn primary" type="button" data-cl-save="published">发布</button>'}
+    </div></form>` });
+  const form = $('form', sheet.el);
+  let kind = initial.kind, lang = 'zh', closing = false;
+  const input = (name) => form.elements.namedItem(name);
+  const read = () => ({ kind, title: input('title').value.trim(), body: input('body').value.trim(), titleEn: input('titleEn').value.trim(), bodyEn: input('bodyEn').value.trim(), link: input('link').value.trim(), publishedOn: input('publishedOn').value });
+  const dirty = () => JSON.stringify(read()) !== JSON.stringify({ ...initial, title: initial.title.trim(), body: initial.body.trim(), titleEn: initial.titleEn.trim(), bodyEn: initial.bodyEn.trim(), link: initial.link.trim() });
+  const errors = (map = {}) => $$('[data-err]', form).forEach((el) => { el.textContent = map[el.dataset.err] ?? ''; });
+  const paint = () => {
+    for (const name of Object.keys(CL_MAX)) {
+      const counter = $(`[data-count="${name}"]`, form);
+      const n = input(name).value.length;
+      counter.textContent = `${n} / ${CL_MAX[name]}`;
+      counter.classList.toggle('is-over', n > CL_MAX[name]);
+    }
+    $('[data-cl-preview]', form).innerHTML = clPreview(read(), lang);
+  };
+  const check = (v) => {
+    const found = {};
+    if (!CL_KINDS[v.kind]) found.kind = '请选择类型';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v.publishedOn)) found.publishedOn = '请选择发布日期';
+    if (!v.title || v.title.length > CL_MAX.title) found.title = `标题须为 1 至 ${CL_MAX.title} 字`;
+    if (!v.body || v.body.length > CL_MAX.body) found.body = `正文须为 1 至 ${CL_MAX.body} 字`;
+    if (v.link && (v.link.length > CL_MAX.link || !/^(#\/|https:\/\/)/.test(v.link))) found.link = '链接须以 #/ 或 https:// 开头，且不超过 300 字';
+    if (v.titleEn.length > CL_MAX.titleEn) found.titleEn = `英文标题最多 ${CL_MAX.titleEn} 字符`;
+    if (v.bodyEn.length > CL_MAX.bodyEn) found.bodyEn = `英文正文最多 ${CL_MAX.bodyEn} 字符`;
+    if (!found.titleEn && !found.bodyEn && Boolean(v.titleEn) !== Boolean(v.bodyEn)) found[v.titleEn ? 'bodyEn' : 'titleEn'] = '英文标题和正文请同时填写或同时留空';
+    if (found.titleEn || found.bodyEn) form.querySelector('.cl-en').open = true;
+    return found;
+  };
+  paint();
+  form.addEventListener('input', paint);
+  form.addEventListener('click', async (event) => {
+    const pick = event.target.closest('[data-cl-kind]');
+    if (pick) { kind = pick.dataset.clKind; $$('[data-cl-kind]', form).forEach((b) => b.setAttribute('aria-pressed', String(b === pick))); paint(); return; }
+    const choice = event.target.closest('[data-cl-lang]');
+    if (choice) { lang = choice.dataset.clLang; $$('[data-cl-lang]', form).forEach((b) => b.setAttribute('aria-pressed', String(b === choice))); paint(); return; }
+    if (event.target.closest('[data-cl-remove]')) { if (await changelogDelete(entry)) { closing = true; sheet.close(); } return; }
+    const save = event.target.closest('[data-cl-save]');
+    if (!save) return;
+    const values = read();
+    const found = check(values);
+    errors(found);
+    if (Object.keys(found).length) return;
+    const done = busy(save, '正在保存…');
+    try {
+      await api(edit ? `admin/changelog/${entry.id}` : 'admin/changelog', { method: 'POST', body: { ...values, status: save.dataset.clSave } });
+      closing = true; sheet.close(); await reload();
+      toast(save.dataset.clSave === 'published' ? '已发布' : '已存为草稿');
+    } catch (error) {
+      if (error.status === 401 || error.status === 403) { closing = true; sheet.close(); await boot(); return; }
+      errors({ form: error.message }); done();
+    }
+  });
+  // Leaving with edits asks first: the close button, cancel, the backdrop and Esc all end up here.
+  const leave = async () => { if (closing) return; if (!dirty() || await confirmDialog({ title: '放弃未保存的修改？', message: '关闭后这次的修改不会保留。', confirm: '放弃修改', danger: true })) { closing = true; sheet.close(); } };
+  sheet.el.addEventListener('click', (event) => {
+    if (event.target === sheet.el || event.target.closest('[data-sheet-close]')) { event.stopImmediatePropagation(); void leave(); }
+  }, true);
+  sheet.el.addEventListener('cancel', (event) => { if (!closing) { event.preventDefault(); void leave(); } });
+}
+
 // ---- vote risk: who votes, from where and how fast (Lv3) ----
 // The server only shows evidence; nothing here judges anyone. The marks below are plain
 // thresholds that point the eye at a row, and a void is a soft, reversible flag on the vote.
@@ -1865,6 +2005,7 @@ async function reload({ navigation = false } = {}) {
       state.qualification = await api('admin/qualification');
       await Promise.all([...new Set(state.qualification.pairs.map((pair) => pair.taskId))].map((taskId) => loadExamWorks(taskId).catch(() => [])));
     }
+    else if (route === 'changelog') state.changelog = (await api('admin/changelog')).entries;
     else if (route === 'vote-risk') { if (navigation || !state.risk.data) loadRisk(); }
     else if (route === 'works') {
       const data = await api(`admin/works?${key}`);
@@ -1906,7 +2047,7 @@ function render({ soft = false, world = false } = {}) {
   if (!routeAllowed(route, sub)) { location.hash = state.system === 'common' ? (isSenior() ? '#/dashboard' : '#/upload') : '#/works'; return; }
   const body = state.system === 'common'
     ? route === 'upload' ? uploadView() : route === 'users' ? usersView() : route === 'traffic' ? trafficView() : dashboardView()
-    : route === 'works' ? systemWorksView() : route === 'intake' ? intakeView() : route === 'tasks' ? tasksView() : route === 'qualification' ? qualificationView() : route === 'vote-risk' ? voteRiskView() : placeholderView(route);
+    : route === 'works' ? systemWorksView() : route === 'intake' ? intakeView() : route === 'tasks' ? tasksView() : route === 'qualification' ? qualificationView() : route === 'vote-risk' ? voteRiskView() : route === 'changelog' ? changelogView() : placeholderView(route);
   const content = `${state.error ? `<p class="form-error page-error">${esc(state.error)}</p>` : ''}${body}`;
   const shellKey = `${state.system}/${route}/${sub || ''}`;
   const currentMain = $('main.page', app());
@@ -2034,6 +2175,13 @@ document.addEventListener('click', async (e) => {
   if (e.target.closest('[data-section-new]')) { sectionNameDialog(null); return; }
   const sectionMenu = e.target.closest('[data-section-menu]');
   if (sectionMenu) { const section = curatedSections().find((item) => item.id === sectionMenu.dataset.sectionMenu); if (section) sectionMenuDialog(section); return; }
+  const clFilter = e.target.closest('[data-cl-filter]');
+  if (clFilter) { state.changelogFilter = clFilter.dataset.clFilter; render({ soft: true }); return; }
+  if (e.target.closest('[data-cl-new]')) { changelogDialog(null); return; }
+  const clEdit = e.target.closest('[data-cl-edit]');
+  if (clEdit) { const entry = state.changelog?.find((item) => String(item.id) === clEdit.dataset.clEdit); if (entry) changelogDialog(entry); return; }
+  const clDelete = e.target.closest('[data-cl-delete]');
+  if (clDelete) { const entry = state.changelog?.find((item) => String(item.id) === clDelete.dataset.clDelete); if (entry) await changelogDelete(entry); return; }
   if (e.target.closest('[data-pair-new]')) { pairDialog(null); return; }
   const pairEdit = e.target.closest('[data-pair-edit]');
   if (pairEdit) { pairDialog(state.qualification?.pairs.find((item) => item.id === pairEdit.dataset.pairEdit)); return; }

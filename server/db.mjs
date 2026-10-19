@@ -661,6 +661,18 @@ const MIGRATIONS = [
       CREATE INDEX IF NOT EXISTS choice_evidence_vote ON arena_choice_evidence(vote_id);`);
     db.prepare('INSERT OR IGNORE INTO vote_risk_settings(id,recording_started_at) VALUES (1,?)').run(Date.now());
   },
+  // Website changelog: drafts stay private until explicitly published.
+  (db) => db.exec(`CREATE TABLE IF NOT EXISTS changelog_entries (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL CHECK(kind IN ('feature','improve','fix','rule')),
+    title TEXT NOT NULL, body TEXT NOT NULL,
+    title_en TEXT NOT NULL DEFAULT '', body_en TEXT NOT NULL DEFAULT '',
+    link TEXT NOT NULL DEFAULT '', published_on TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('draft','published')),
+    created_by TEXT, updated_by TEXT,
+    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS changelog_published ON changelog_entries(status,published_on DESC,id DESC);`),
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

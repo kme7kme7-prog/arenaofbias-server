@@ -779,3 +779,43 @@ dialog.sheet.exam-pair-sheet { width: min(980px, calc(100% - 32px)); }
   .risk-pager { flex-wrap: wrap; gap: 8px 12px; }
   .risk-tabs { width: 100%; }
 }
+
+/* ---- 更新日志：列表与编辑弹窗（选中用墨灰，不用强调色，与前台一致） ---- */
+.cl-toolbar { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px 16px; margin-bottom: 14px; }
+.cl-toolbar .chips { margin: 0; }
+.cl-toolbar .chip[aria-pressed="true"], .changelog-sheet .chip[aria-pressed="true"] { border-color: var(--ink-2); background: var(--surface-2); color: var(--ink); }
+.cl-row h3 { font-size: 15px; }
+.cl-row h3 small { font: 11px var(--mono); }
+dialog.sheet.changelog-sheet { width: min(920px, calc(100% - 32px)); }
+.changelog-sheet .admin-editor { max-width: none; }
+.cl-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 0.9fr); gap: 0 28px; align-items: start; }
+.cl-fields .chips { margin: 0; }
+.cl-form .field .form-error { margin: 0; }
+.cl-form .fine { display: block; margin: 0; }
+.cl-form [data-count].is-over { color: var(--danger); }
+.cl-en { margin: 0 0 14px; }
+.cl-en summary { margin-bottom: 12px; color: var(--ink-2); font-size: 13px; cursor: pointer; }
+.cl-side { position: sticky; top: 0; min-width: 0; }
+.cl-side-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.cl-side .seg button { min-height: 30px; padding: 0 12px; font-size: 12.5px; }
+.cl-preview { padding: 18px 20px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
+.cl-preview-entry { display: grid; grid-template-columns: 52px minmax(0, 1fr); column-gap: 16px; grid-template-areas: "when kind" "when title" "when body" "when more"; }
+.cl-preview-when { grid-area: when; display: flex; flex-direction: column; }
+.cl-preview-when b { font-size: 14px; font-weight: 500; line-height: 22px; }
+.cl-preview-when span { color: var(--muted); font-size: 12px; }
+.cl-preview-kind { grid-area: kind; display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+.cl-preview-entry h3 { grid-area: title; margin: 8px 0 0; font: 600 17px/1.5 var(--sans); }
+.cl-preview-body { grid-area: body; margin-top: 6px; color: var(--ink-2); font-size: 14px; line-height: 1.75; overflow-wrap: anywhere; }
+.cl-preview-body p, .cl-preview-body ul, .cl-preview-body ol { margin: 0 0 0.7em; }
+.cl-preview-body ul, .cl-preview-body ol { padding-left: 1.4em; }
+.cl-preview-body > :last-child { margin-bottom: 0; }
+.cl-preview-body b { color: var(--ink); }
+.cl-preview-body code { padding: 1px 5px; border-radius: 4px; background: var(--surface-2); color: var(--ink); font: 0.88em var(--mono); }
+.cl-preview-body a { color: var(--ink); text-underline-offset: 3px; }
+.cl-preview-more { grid-area: more; margin: 10px 0 0; font-size: 13px; font-weight: 500; }
+.cl-foot { position: sticky; bottom: 0; z-index: 2; margin: 18px -24px -24px; padding: 14px 24px; border-top: 1px solid var(--line); background: var(--raised); }
+@media (max-width: 760px) {
+  .cl-columns { grid-template-columns: 1fr; }
+  .cl-side { position: static; }
+  .cl-toolbar .btn { width: 100%; }
+}

@@ -1,4 +1,6 @@
-## 2026-10-19 · 网站更新日志（本地完成，未提交/部署）
+## 2026-10-19 · 网站更新日志（已提交 6d941d2 并与成员等级 v44–v45 一起上线，schema 46）
+
+- 上线（2026-10-19）：以线上源码为底三方合并主线 57b4393→6d941d2，保留现场补丁；生产库副本迁移演练与 reviewer（GPT-6.1-Sol）候选测试通过后一次切换，无回滚。重启 2.08s，库计数前后一致，全部账号 Lv0。备份与回滚包 /root/aob-release-20261019/backup，发布记录在父工作区 .local/release-20261019/RELEASE.md。未做生产登录/投票/真实 Cloudflare 全链路；更新日志首批 6 条（中英）已按用户确认录入线上。
 
 - v46 末尾幂等迁移建 `changelog_entries`；新 `server/changelog.mjs`：公开 `GET /api/changelog[?limit=N]`（仅已发布，publishedOn/id 倒序，含 total，no-cache）；Lv3 `GET/POST /api/admin/changelog`、`POST|DELETE /api/admin/changelog/:id`（no-store）。契约见 docs/api-contract.md 末节。后台展览馆系统新增「更新日志」页（列表、编辑弹窗与实时预览、草稿/发布/撤回/删除），仅 Lv3。
 - 分工：后端 GPT-6.1-Sol，后台页面 Sonnet 5.5，设计 Opus 5.5（Lead），review GPT-6.1-Sol。无种子数据、无新依赖。

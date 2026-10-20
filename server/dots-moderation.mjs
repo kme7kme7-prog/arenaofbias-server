@@ -1,7 +1,7 @@
 // External content moderation by dots, a bot that reaches us over the public API.
 // Scope moderation: list the dots queue, view a queued work (metadata, files,
 // screenshots), approve, and reject with a reason. Scope capture:read: list works
-// whose screenshots failed or that have no cover. Scope cover:write: replace a
+// whose screenshots failed (capture_incomplete or no first screen). Scope cover:write: replace a
 // work's cover. Every route below is the whole whitelist; the site dispatcher
 // refuses tokens everywhere else.
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
@@ -121,10 +121,15 @@ export function createDotsModeration({ db, config, library, mode, tokens, covers
     routed: db.prepare(`SELECT id FROM works WHERE deleted_at IS NULL
       AND json_extract(moderation, '$.route') IN ('dots', 'dots-review-only')
       AND json_extract(moderation, '$.status') IN ('pending', 'review')`),
-    // Uploads whose screenshots failed or that have no cover, oldest first, keyset paged.
-    captureGaps: db.prepare(`SELECT id, task_id, created_at FROM works WHERE deleted_at IS NULL
-      AND (json_extract(moderation, '$.error') = 'capture_incomplete' OR cover IS NULL OR cover = '')
-      AND (created_at > ? OR (created_at = ? AND id > ?)) ORDER BY created_at, id LIMIT ?`),
+    // Works whose screenshots failed: moderation.error is capture_incomplete, or the
+    // published captures JSON has no desktop first screen. works.cover (the author's own
+    // optional cover) is not a criterion. Keyset paging on the primary key, so the scan
+    // walks the existing id index and stops at the page size; no extra index needed.
+    // Covers named cover-* only come from a manual replacement (work-covers.mjs).
+    captureGaps: Object.fromEntries(Object.entries({ all: '', exclude: "AND COALESCE(cover, '') NOT LIKE 'cover-%'", only: "AND cover LIKE 'cover-%'" })
+      .map(([key, manual]) => [key, db.prepare(`SELECT id FROM works WHERE id > ? AND deleted_at IS NULL
+        AND (json_extract(moderation, '$.error') = 'capture_incomplete' OR COALESCE(json_extract(captures, '$.first'), '') = '')
+        ${manual} ORDER BY id LIMIT ?`)])),
   };
 
   // Where a work stands for dots, or null when dots has no say over it.
@@ -271,26 +276,28 @@ export function createDotsModeration({ db, config, library, mode, tokens, covers
   // Only what is needed to pick a cover job: no author, note, contact or file data.
   router.on('GET', '/api/dots/captures/failed', { scope: 'capture:read', action: 'list-capture-gaps', run: ({ url }) => {
     const limit = Math.min(100, Math.max(1, Number.parseInt(url.searchParams.get('limit') ?? '50', 10) || 50));
-    let after = [0, ''];
+    const manualCover = url.searchParams.get('manualCover') ?? 'all';
+    if (!Object.hasOwn(q.captureGaps, manualCover)) fail(400, 'manualCover 只能是 all、exclude 或 only', 'invalid_filter');
+    let after = '';
     const cursor = url.searchParams.get('cursor');
     if (cursor) {
-      const match = /^(\d{1,16}):(up-[a-z0-9]{8})$/.exec(Buffer.from(cursor, 'base64url').toString('utf8'));
-      if (!match) fail(400, 'cursor 无效', 'invalid_cursor');
-      after = [Number(match[1]), match[2]];
+      after = Buffer.from(cursor, 'base64url').toString('utf8');
+      if (!/^[\w-]{1,64}$/.test(after)) fail(400, 'cursor 无效', 'invalid_cursor');
     }
-    const rows = q.captureGaps.all(after[0], after[0], after[1], limit + 1);
+    const rows = q.captureGaps[manualCover].all(after, limit + 1);
     const items = [];
     for (const row of rows.slice(0, limit)) {
       const work = library.uploadById(row.id);
       if (!work || work.curated) continue;
-      const shots = images(work);
+      const captures = work.captures ?? {};
       items.push({ task: work.taskId, id: work.id, title: work.title, status: work.moderation.status,
-        reasons: [...(work.moderation.error === 'capture_incomplete' ? ['capture_incomplete'] : []), ...(work.cover ? [] : ['no_cover'])],
-        hasCover: Boolean(work.cover), screenshots: { first: shots.includes('first.jpg'), mobile: shots.includes('mobile.jpg') },
+        reasons: [...(work.moderation.error === 'capture_incomplete' ? ['capture_incomplete'] : []), ...(captures.first ? [] : ['no_first_capture'])],
+        screenshots: { first: Boolean(captures.first), mobile: Boolean(captures.mobile) },
+        hasCover: Boolean(work.cover), hasManualCover: /^cover-/.test(work.cover ?? ''),
         submittedAt: iso(work.createdAt) });
     }
     const last = rows.length > limit ? rows[limit - 1] : null;
-    return { items, nextCursor: last ? Buffer.from(`${last.created_at}:${last.id}`).toString('base64url') : null };
+    return { items, nextCursor: last ? Buffer.from(last.id).toString('base64url') : null };
   } });
   // Body is the raw image. Only works.cover changes: never the files, model or labels.
   router.on('PUT', '/api/dots/works/:task/:id/cover', { scope: 'cover:write', action: 'cover-replace', run: async ({ req, params, token }) => {

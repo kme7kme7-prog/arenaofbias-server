@@ -492,33 +492,58 @@ test('scopes are granted per token, withdrawn one at a time, and closed by the e
   }, { extra: { dotsApiOff: true } });
 });
 
-test('capture:read lists failed captures and coverless works with paging and no private fields', async () => {
-  await setup(async ({ call, submit, tokens, platform, stored }) => {
-    const token = tokens.create('cap', 'test', 'capture:read').token;
-    const withCover = await submit();
-    const noCover = await submit('owner', { cover: null, note: '作者的私密备注' });
-    const failed = await submit();
+test('capture:read lists capture_incomplete works and works without a first screen, not coverless ones', async () => {
+  await setup(async ({ call, raw, submit, tokens, platform, stored }) => {
+    const token = tokens.create('cap', 'test', 'capture:read,cover:write').token;
+    const captured = await submit();
+    const coverless = await submit('owner', { cover: null, note: '作者的私密备注' });
+    const incomplete = await submit();
+    const noFirst = await submit();
+    const manual = await submit('owner', { cover: null });
     await platform.moderator.idle();
+    for (const work of [captured, coverless, incomplete, noFirst, manual]) assert.ok(platform.library.work('one', work.id).captures.first);
     platform.db.prepare('UPDATE works SET moderation = ? WHERE id = ?')
-      .run(JSON.stringify({ ...stored(failed.id), status: 'review', error: 'capture_incomplete' }), failed.id);
-    platform.db.prepare('UPDATE works SET created_at = created_at + 1000 WHERE id = ?').run(failed.id);
-    const seen = [];
-    let cursor = null;
-    let pages = 0;
-    do {
-      const page = await call(null, 'GET', `/api/dots/captures/failed?limit=1${cursor ? `&cursor=${cursor}` : ''}`, undefined, { bearer: token });
-      assert.equal(page.status, 200);
-      seen.push(...page.data.items);
-      cursor = page.data.nextCursor;
-      pages += 1;
-    } while (cursor && pages < 10);
-    assert.deepEqual(seen.map((item) => item.id), [noCover.id, failed.id]);
-    assert.deepEqual(seen[0].reasons, ['no_cover']);
-    assert.deepEqual(seen[1].reasons, ['capture_incomplete']);
-    assert.ok(!seen.some((item) => item.id === withCover.id));
-    for (const item of seen) assert.deepEqual(Object.keys(item).sort(), ['hasCover', 'id', 'reasons', 'screenshots', 'status', 'submittedAt', 'task', 'title']);
+      .run(JSON.stringify({ ...stored(incomplete.id), status: 'review', error: 'capture_incomplete' }), incomplete.id);
+    platform.library.setCaptures(noFirst.id, { mobile: 'mobile.jpg' });
+    platform.library.setCaptures(manual.id, {});
+    assert.equal((await raw(token, 'PUT', `/api/dots/works/one/${manual.id}/cover`, png(120, 120))).status, 200);
+
+    const list = async (query = '') => {
+      const seen = [];
+      let cursor = null;
+      let pages = 0;
+      do {
+        const page = await call(null, 'GET', `/api/dots/captures/failed?limit=1${query}${cursor ? `&cursor=${cursor}` : ''}`, undefined, { bearer: token });
+        assert.equal(page.status, 200);
+        assert.ok(page.data.items.length <= 1);
+        seen.push(...page.data.items);
+        cursor = page.data.nextCursor;
+        pages += 1;
+      } while (cursor && pages < 20);
+      return seen;
+    };
+    const seen = await list();
+    const expected = [incomplete.id, noFirst.id, manual.id].sort();
+    assert.deepEqual(seen.map((item) => item.id), expected, 'paged in id order, each once');
+    const byId = Object.fromEntries(seen.map((item) => [item.id, item]));
+    assert.deepEqual(byId[incomplete.id].reasons, ['capture_incomplete']);
+    assert.deepEqual(byId[incomplete.id].screenshots, { first: true, mobile: true });
+    assert.deepEqual(byId[noFirst.id].reasons, ['no_first_capture']);
+    assert.deepEqual(byId[noFirst.id].screenshots, { first: false, mobile: true });
+    assert.equal(byId[noFirst.id].hasManualCover, false);
+    assert.equal(byId[manual.id].hasManualCover, true);
+    assert.equal(byId[manual.id].hasCover, true);
+    for (const item of seen) assert.deepEqual(Object.keys(item).sort(), ['hasCover', 'hasManualCover', 'id', 'reasons', 'screenshots', 'status', 'submittedAt', 'task', 'title']);
     assert.doesNotMatch(JSON.stringify(seen), /owner|作者的私密备注|@/);
-    assert.equal((await call(null, 'GET', '/api/dots/captures/failed?cursor=bad', undefined, { bearer: token })).status, 400);
+    assert.ok(!seen.some((item) => [captured.id, coverless.id].includes(item.id)), 'a first screen without a cover is not a capture gap');
+
+    assert.deepEqual((await list('&manualCover=exclude')).map((item) => item.id), [incomplete.id, noFirst.id].sort());
+    assert.deepEqual((await list('&manualCover=only')).map((item) => item.id), [manual.id]);
+    const big = await call(null, 'GET', '/api/dots/captures/failed?limit=100', undefined, { bearer: token });
+    assert.equal(big.data.items.length, 3);
+    assert.equal(big.data.nextCursor, null);
+    assert.equal((await call(null, 'GET', '/api/dots/captures/failed?cursor=%2E%2E', undefined, { bearer: token })).status, 400);
+    assert.equal((await call(null, 'GET', '/api/dots/captures/failed?manualCover=maybe', undefined, { bearer: token })).status, 400);
   });
 });
 

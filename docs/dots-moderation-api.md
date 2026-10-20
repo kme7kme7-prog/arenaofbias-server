@@ -5,7 +5,7 @@
 | scope | 能做什么 | 接口 |
 |---|---|---|
 | `moderation` | 列待审队列、看作品内容和截图、通过、打回（必须写理由） | `/api/dots/moderation/*` |
-| `capture:read` | 只读列出截图失败或没有封面的作品 | `GET /api/dots/captures/failed` |
+| `capture:read` | 只读列出截图失败（`capture_incomplete` 或没有桌面首屏截图）的作品 | `GET /api/dots/captures/failed` |
 | `cover:write` | 给作品上传或替换封面 | `PUT /api/dots/works/:task/:id/cover` |
 
 缺某项权限时返回 `403 {"code":"scope_required"}`。权限由运维逐项开关，去掉某项或整个令牌作废都在下一个请求生效。
@@ -125,7 +125,7 @@ dots 的“通过”和机器自动通过一样：作品对作者和管理员可
 
 同一个决定重复提交返回 `{"applied": false, ...}`，不会重复生效。
 
-### 7. 截图失败 / 无封面列表 `GET /api/dots/captures/failed?limit=50&cursor=...`（`capture:read`）
+### 7. 截图失败列表 `GET /api/dots/captures/failed?limit=50&manualCover=all&cursor=...`（`capture:read`）
 
 ```bash
 curl -sS "https://<API 域名>/api/dots/captures/failed?limit=50" -H "Authorization: Bearer $TOKEN"
@@ -136,18 +136,22 @@ curl -sS "https://<API 域名>/api/dots/captures/failed?limit=50" -H "Authorizat
   "items": [
     {
       "task": "one", "id": "up-abc123", "title": "作品标题", "status": "review",
-      "reasons": ["capture_incomplete", "no_cover"], "hasCover": false,
+      "reasons": ["capture_incomplete", "no_first_capture"],
       "screenshots": { "first": false, "mobile": true },
+      "hasCover": true, "hasManualCover": true,
       "submittedAt": "2026-10-20T10:00:00.000Z"
     }
   ],
-  "nextCursor": "MTc5MjU1MTYwMDAwMDp1cC1hYmMxMjM"
+  "nextCursor": "dXAtYWJjMTIz"
 }
 ```
 
-- 范围：内容审核记为 `capture_incomplete`（截图不完整），或没有封面的上传作品。按投稿时间从早到晚。
+- 范围：上传作品中，内容审核记为 `capture_incomplete`（截图不完整），**或**已发布截图里没有桌面首屏（`captures.first`）的。`reasons` 分别是 `capture_incomplete`、`no_first_capture`，可同时出现。
+- 作者自己传没传封面（`hasCover`）不是筛选条件：封面是投稿时可选的，大多数作品本来就没有。
+- 已经人工（dots 或管理员）换过封面的作品照样列出，`hasManualCover: true`，因为封面不能代替截图，截图仍然缺。只想看还没处理过封面的，用 `manualCover=exclude`；只看已换过的，用 `manualCover=only`；默认 `all`。其他值返回 `400 invalid_filter`。
+- 按作品 id 排序（不是投稿时间），翻页期间新出现的作品可能落在已翻过的位置，下次从头拉即可。
 - `limit` 1–100，默认 50。`nextCursor` 不为 null 时把它原样作为下一页的 `cursor`；为 null 表示到底了。cursor 无效返回 `400 invalid_cursor`。
-- 只返回上面这些字段：没有作者、备注、邮箱、文件或 IP。`status` 是内容审核状态（pending / review / approved / rejected / legacy）。
+- 只返回上面这些字段：没有作者、备注、邮箱、文件或 IP。`screenshots` 表示已发布截图里有没有桌面首屏 / 手机首屏。`status` 是内容审核状态（pending / review / approved / rejected / legacy）。
 
 ### 8. 上传或替换封面 `PUT /api/dots/works/:task/:id/cover`（`cover:write`）
 

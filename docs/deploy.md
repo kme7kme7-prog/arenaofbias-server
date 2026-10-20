@@ -380,7 +380,7 @@ Environment="MODERATION_API_KEY=<server-only-key>"
 
 浏览器启动失败后 `site.capture=false`，冷却五分钟后的下一件作品再尝试启动，恢复成功后变回 true；单个视口截图失败会用新 context 重试一次，两档仍需齐备才能送 Luna。`CAPTURE=0` 始终关闭截图。配置后 daemon-reload 并重启，在 bootstrap 同时核对 `site.capture`、`site.contentModeration` 和 `site.autoModeration`：后者只有审核开启、密钥已配置且截图当前可用时才为 true。审核开启但自动能力为 false 时，新作品转人工，前端应提示「管理员检查内容」。
 
-`newContext` 没有 Playwright 自带超时。单件截图另有总时长和分步上限，超时后这一件按失败结束（该视口仍重试一次；材料不齐则审核记 `capture_incomplete` 并转人工），关闭 context 与 page，截图队列和审核队列都继续下一件。这些调用无响应，或浏览器连接断开时，平台丢弃当前连接，下一件重新连接；配置了 `CAPTURE_ENDPOINT_FILE` 时会重新读取端点。这种丢弃不进入五分钟冷却。浏览器进程启动失败或独立服务连不上，仍沿用原来的五分钟冷却。`0`、空值和非法值都退回默认值，不能把上限关掉。加载后 3.5 秒和延迟截图前 8.5 秒是固定等待，不是这些上限。路由安装、鼠标操作和页面文字还有内部上限（15 秒、10 秒、45 秒），同样受单件总时长约束。
+`newContext` 没有 Playwright 自带超时。单件截图另有总时长和分步上限，超时后这一件按失败结束（该视口仍重试一次；材料不齐则审核记 `capture_incomplete` 并转人工），关闭 context 与 page，截图队列和审核队列都继续下一件。这些调用无响应，或浏览器连接断开时，平台丢弃当前连接，下一件重新连接；配置了 `CAPTURE_ENDPOINT_FILE` 时会重新读取端点。这种丢弃不进入五分钟冷却。`0`、空值和非法值都退回默认值，不能把上限关掉。加载后 3.5 秒和延迟截图前 8.5 秒是固定等待，不是这些上限。路由安装、鼠标操作和页面文字还有内部上限（15 秒、10 秒、45 秒），同样受单件总时长约束。
 
 | 变量 | 默认 | 含义 |
 | --- | --- | --- |
@@ -391,6 +391,19 @@ Environment="MODERATION_API_KEY=<server-only-key>"
 | `CAPTURE_SCREENSHOT_TIMEOUT_MS` | `60000` | 单张截图。正常约 25–30 秒，不要设到这个附近 |
 | `CAPTURE_CLOSE_TIMEOUT_MS` | `15000` | 关闭 page、context 或浏览器连接 |
 | `CAPTURE_CONNECT_TIMEOUT_MS` | `30000` | 连接独立截图服务，或本地启动浏览器 |
+| `CAPTURE_WEBGL_TASK_TIMEOUT_MS` | `300000` | 创建了 WebGL 上下文的页面，单件总时长 |
+| `CAPTURE_WEBGL_SCREENSHOT_TIMEOUT_MS` | `120000` | WebGL 页面的单张截图 |
+| `CAPTURE_WEBGL_FPS` | `8` | WebGL 页面的动画帧上限，截图时暂停 |
+| `CAPTURE_RETRY_BASE_MS` | `5000` | 连不上独立服务时第一次等待 |
+| `CAPTURE_RETRY_MAX_MS` | `60000` | 等待间隔上限 |
+| `CAPTURE_UNAVAILABLE_MAX_MS` | `1800000` | 连续连不上超过此时长，排队作品转人工 |
+| `CAPTURE_MAX_PAGE_BYTES` | `5242880` | 入口 HTML 上限，超过不截图、直接转人工 |
+
+WebGL 作品在截图机上走 SwiftShader 软件渲染，本身就慢。截图 context 注入的脚本在页面请求 WebGL 上下文后，把 `requestAnimationFrame` 限到每秒 `CAPTURE_WEBGL_FPS` 次，每次截图前暂停、截完恢复；没有用 WebGL 的页面不受影响。截图前探测到 WebGL（或页面 5 秒内不响应探测）时，这一件的总时长放宽到 `CAPTURE_WEBGL_TASK_TIMEOUT_MS`，单张截图放宽到 `CAPTURE_WEBGL_SCREENSHOT_TIMEOUT_MS`。导航改为等 `domcontentloaded`，再最多等 `CAPTURE_GOTO_TIMEOUT_MS` 的 load；load 到点未完成时按当前画面截图，不再整档失败。
+
+配置了 `CAPTURE_ENDPOINT_FILE` 时，端点文件不存在或连接失败（例如 `arenaofbias-capture` 正在重启）不再写五分钟冷却，也不让排队作品立即失败：队列保留当前这一件，按 5 秒起、翻倍、最多 60 秒的间隔等待重连，连上后从头截这一件。连续连不上超过 `CAPTURE_UNAVAILABLE_MAX_MS` 后，排队作品逐件记 `capture_unavailable` 转人工（每件仍先试连一次），服务恢复后自动回到正常截图。本地 Chrome（未配置端点）或 Playwright 导入失败仍是五分钟冷却。
+
+审核在截图前先看入口 HTML 的文件大小：超过 `CAPTURE_MAX_PAGE_BYTES` 直接记 `page_too_large`，入口文件不存在记 `page_missing`，都转人工且不进截图队列。普通截图（非审核）遇到超大入口页同样跳过，作品显示文字封面。判断依据是入口文件，与原来送审时的 5MB 检查一致，不是整个作品包的大小。
 
 先在隔离环境确认两档截图及 Responses API 的 Flex 结构化响应；真实调用会计费，本地回归可使用模拟接口。用测试投稿确认公开列表/原作品源/媒体均被限制，作者与管理员可预览，自动通过后公开，疑似与错误转人工。后台人工通过内容理由选填，空白保存「人工复核通过」；拒绝理由必填。
 

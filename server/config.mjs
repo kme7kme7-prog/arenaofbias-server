@@ -16,16 +16,17 @@ export function parseTrustProxy(value = '') {
   throw new Error('TRUST_PROXY must be 0, 1, or loopback');
 }
 
-// Positive millisecond overrides. Zero, blank and non-digits keep the default so a
-// bad value cannot turn the capture queue's safety limits off.
+// Positive overrides. Zero, blank and non-digits keep the default so a bad value
+// cannot turn the capture queue's safety limits off.
+function positive(source, name, fallback) {
+  const raw = source[name];
+  if (raw == null || raw === '' || !/^\d+$/.test(String(raw))) return fallback;
+  const value = Number(raw);
+  return value > 0 ? value : fallback;
+}
+
 export function captureTimeoutConfig(source = {}) {
-  const ms = (name, fallback) => {
-    const raw = source[name];
-    if (raw == null || raw === '') return fallback;
-    if (!/^\d+$/.test(String(raw))) return fallback;
-    const value = Number(raw);
-    return value > 0 ? value : fallback;
-  };
+  const ms = (name, fallback) => positive(source, name, fallback);
   return {
     task: ms('CAPTURE_TASK_TIMEOUT_MS', 180_000),
     newContext: ms('CAPTURE_NEW_CONTEXT_TIMEOUT_MS', 45_000),
@@ -34,6 +35,21 @@ export function captureTimeoutConfig(source = {}) {
     screenshot: ms('CAPTURE_SCREENSHOT_TIMEOUT_MS', 60_000),
     close: ms('CAPTURE_CLOSE_TIMEOUT_MS', 15_000),
     connect: ms('CAPTURE_CONNECT_TIMEOUT_MS', 30_000),
+    // A page that creates a WebGL context gets a longer job and screenshot limit.
+    webglTask: ms('CAPTURE_WEBGL_TASK_TIMEOUT_MS', 300_000),
+    webglScreenshot: ms('CAPTURE_WEBGL_SCREENSHOT_TIMEOUT_MS', 120_000),
+    // While the capture service cannot be reached the queue waits and retries.
+    retryBase: ms('CAPTURE_RETRY_BASE_MS', 5_000),
+    retryMax: ms('CAPTURE_RETRY_MAX_MS', 60_000),
+    unavailable: ms('CAPTURE_UNAVAILABLE_MAX_MS', 1_800_000),
+  };
+}
+
+// WebGL frame cap and the entry page size that skips screenshots.
+export function captureOptionsConfig(source = {}) {
+  return {
+    webglFps: positive(source, 'CAPTURE_WEBGL_FPS', 8),
+    maxPageBytes: positive(source, 'CAPTURE_MAX_PAGE_BYTES', 5 * 1024 * 1024),
   };
 }
 
@@ -72,6 +88,7 @@ export const config = {
   captureSandbox: env.CAPTURE_SANDBOX === '1',
   // Per-step and per-job capture limits. See captureTimeoutConfig for names and defaults.
   captureTimeouts: captureTimeoutConfig(env),
+  captureOptions: captureOptionsConfig(env),
   leaderboardWarmup: env.LEADERBOARD_WARMUP !== '0',
   // New uploads stay private until the Flex check passes, and off the public work host until a human review.
   moderation: {

@@ -7,8 +7,9 @@
 // Browser calls that can sit forever (newContext has no Playwright timeout) are raced
 // with CAPTURE_*_TIMEOUT_MS. The whole job also stops at CAPTURE_TASK_TIMEOUT_MS.
 // A timed-out call drops the connection so the next attempt opens a new one.
+// When the service cannot be reached, queued work waits and retries instead of failing.
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
 import { THREE_MIRROR_PATH } from './config.mjs';
@@ -28,6 +29,64 @@ const DISGUISE = `(() => {
     Object.defineProperty(proto, name, { get() { return get.call(this).replace('HeadlessChrome', 'Chrome'); }, configurable: true });
   }
 })();`;
+
+// WebGL pages render through SwiftShader on the capture host and can keep its GPU
+// process busy enough that screenshots time out. Once a page asks for a WebGL
+// context, requestAnimationFrame runs at most `fps` times a second, and the
+// capturer pauses it while a screenshot is taken. Other pages are left alone.
+const FRAMES = "Symbol.for('aob.capture.frames')";
+export function frameGuard(fps) {
+  return `(() => {
+  const key = ${FRAMES};
+  if (globalThis[key] || typeof globalThis.requestAnimationFrame !== 'function') return;
+  const native = globalThis.requestAnimationFrame.bind(globalThis);
+  const gap = 1000 / ${Number(fps) || 8};
+  const state = { webgl: false, paused: false };
+  const pending = new Map();
+  let next = 1;
+  let armed = false;
+  let last = -Infinity;
+  const pump = (time) => {
+    armed = false;
+    if (!pending.size) return;
+    if (state.paused || (state.webgl && time - last < gap - 1)) { armed = true; native(pump); return; }
+    last = time;
+    const batch = [...pending.values()];
+    pending.clear();
+    for (const callback of batch) {
+      try { callback(time); } catch (error) { setTimeout(() => { throw error; }); }
+    }
+  };
+  const arm = () => { if (!armed && pending.size) { armed = true; native(pump); } };
+  globalThis.requestAnimationFrame = function requestAnimationFrame(callback) {
+    if (typeof callback !== 'function') return native(callback);
+    const id = next++;
+    pending.set(id, callback);
+    arm();
+    return id;
+  };
+  globalThis.cancelAnimationFrame = function cancelAnimationFrame(id) { pending.delete(id); };
+  for (const proto of [globalThis.HTMLCanvasElement?.prototype, globalThis.OffscreenCanvas?.prototype]) {
+    const original = proto?.getContext;
+    if (typeof original !== 'function') continue;
+    Object.defineProperty(proto, 'getContext', { configurable: true, writable: true, value: function getContext(type, ...rest) {
+      if (/^(?:webgl2?|experimental-webgl)$/i.test(String(type))) state.webgl = true;
+      return original.call(this, type, ...rest);
+    } });
+  }
+  Object.defineProperty(globalThis, key, { value: Object.freeze({
+    get webgl() { return state.webgl; },
+    pause() { state.paused = true; },
+    resume() { state.paused = false; arm(); },
+  }) });
+})();`;
+}
+
+// Size of a stored upload's entry page, or null when it cannot be read.
+export function entryBytes(work) {
+  if (!work?.dir || !work?.entry) return null;
+  try { return statSync(join(work.dir, work.entry)).size; } catch { return null; }
+}
 
 // Text of the page and every frame inside it; a frame's text is not part of body.innerText.
 async function pageText(page) {
@@ -91,7 +150,9 @@ export async function guardCaptureContext(context, { origin, cdn, resources = nu
 const TIMEOUT_DEFAULTS = {
   task: 180_000, newContext: 45_000, newPage: 30_000, goto: 45_000, screenshot: 60_000,
   close: 15_000, connect: 30_000, route: 15_000, input: 10_000, text: 45_000,
+  webglTask: 300_000, webglScreenshot: 120_000, retryBase: 5_000, retryMax: 60_000, unavailable: 1_800_000, probe: 5_000,
 };
+const OPTION_DEFAULTS = { webglFps: 8, maxPageBytes: 5 * 1024 * 1024 };
 
 class CaptureTimeout extends Error {
   constructor(step) {
@@ -99,6 +160,34 @@ class CaptureTimeout extends Error {
     this.name = 'CaptureTimeout';
     this.step = step;
   }
+}
+
+// The capture service could not be reached. The queue keeps the item and retries later.
+class CaptureUnavailable extends Error {
+  constructor() {
+    super('独立截图服务连接失败');
+    this.name = 'CaptureUnavailable';
+  }
+}
+
+function resolveOptions(configured = {}) {
+  const source = configured ?? {};
+  return Object.fromEntries(Object.entries(OPTION_DEFAULTS).map(([key, fallback]) =>
+    [key, Number.isInteger(source[key]) && source[key] > 0 ? source[key] : fallback]));
+}
+
+// A frame that does not answer within the probe limit is busy rendering; treat it as WebGL.
+async function framesUseWebgl(page, limit) {
+  const frames = typeof page.frames === 'function' ? page.frames() : [];
+  const answers = await Promise.all(frames.map((frame) => typeof frame.evaluate !== 'function' ? false
+    : withTimeout(Promise.resolve().then(() => frame.evaluate(`globalThis[${FRAMES}]?.webgl === true`)), limit, 'probe').catch(() => true)));
+  return answers.some(Boolean);
+}
+
+async function setFrames(page, action, limit) {
+  const frames = typeof page.frames === 'function' ? page.frames() : [];
+  await Promise.all(frames.map((frame) => typeof frame.evaluate !== 'function' ? null
+    : withTimeout(Promise.resolve().then(() => frame.evaluate(`globalThis[${FRAMES}]?.${action}()`)), limit, 'probe').catch(() => {})));
 }
 
 function resolveTimeouts(configured = {}) {
@@ -126,6 +215,8 @@ function withTimeout(promise, ms, step) {
 
 export function createCapturer({ config, library, loadChromium = async () => (await import('playwright')).chromium, now = Date.now }) {
   const timeouts = resolveTimeouts(config.captureTimeouts);
+  const options = resolveOptions(config.captureOptions);
+  const initScript = `${DISGUISE}\n${frameGuard(options.webglFps)}`;
   let browser = null;
   let networkBlocker = null;
   let available = false;
@@ -137,6 +228,13 @@ export function createCapturer({ config, library, loadChromium = async () => (aw
   let activeBudget = null;
   let notedDiscard = false;
   let failActiveStep = null;
+  // Remote connection failures are transient: no cooldown, the queue waits instead.
+  let transient = false;
+  let outageSince = null;
+  let outageFailures = 0;
+  let gaveUp = false;
+  let sleeper = null;
+  let wake = null;
   const dropped = new WeakSet();
   const queue = [];
 
@@ -205,14 +303,26 @@ export function createCapturer({ config, library, loadChromium = async () => (aw
     let rejectBudget;
     const signal = new Promise((_, reject) => { rejectBudget = reject; });
     signal.catch(() => {});
-    const deadline = Date.now() + ms;
-    const timer = setTimeout(() => {
-      discardBrowser(browser);
-      rejectBudget(new CaptureTimeout('task'));
-    }, ms);
+    const start = Date.now();
+    let deadline = start + ms;
+    let timer;
+    const arm = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        discardBrowser(browser);
+        rejectBudget(new CaptureTimeout('task'));
+      }, Math.max(0, deadline - Date.now()));
+    };
+    arm();
     return {
       signal,
       remaining: () => deadline - Date.now(),
+      // Raise the job limit to `total` from the start of the job; never lowers it.
+      extend: (total) => {
+        if (start + total <= deadline || Date.now() >= deadline) return;
+        deadline = start + total;
+        arm();
+      },
       clear: () => clearTimeout(timer),
     };
   }
@@ -235,14 +345,16 @@ export function createCapturer({ config, library, loadChromium = async () => (aw
       if (config.captureEndpointFile) {
         // The worker owns Chrome and its rejecting proxy. Read anew after every
         // disconnect because a restarted worker publishes a fresh endpoint.
-        const endpoint = readFileSync(config.captureEndpointFile, 'utf8').trim();
-        const pending = chromium.connect(endpoint, { timeout: limit });
+        // A missing endpoint means the service is restarting; wait like a refused connection.
+        let endpoint;
+        try { endpoint = readFileSync(config.captureEndpointFile, 'utf8').trim(); } catch { throw new CaptureUnavailable(); }
+        const pending = Promise.resolve().then(() => chromium.connect(endpoint, { timeout: limit }));
         try {
           browser = await timedConnect(pending, limit);
         } catch (error) {
           // The endpoint includes a capability token; keep it out of logs.
           if (error instanceof CaptureTimeout && error.step === 'task') throw error;
-          throw new Error('独立截图服务连接失败');
+          throw new CaptureUnavailable();
         }
       } else {
         // Unrouted browser traffic has no network path. Permitted resources are
@@ -294,12 +406,27 @@ export function createCapturer({ config, library, loadChromium = async () => (aw
         await launch();
         available = !closed;
         failedAt = null;
+        transient = false;
+        if (outageSince !== null) console.info('独立截图服务已恢复，排队作品继续截图。');
+        outageSince = null;
+        outageFailures = 0;
+        gaveUp = false;
         if (!reported) console.info('自动截图可用。');
       } catch (error) {
         if (error instanceof CaptureTimeout && error.step === 'task') throw error;
         available = false;
-        failedAt = now();
-        console.warn(`自动截图不可用（${error.message.split('\n')[0]}）。上传作品将显示文字封面，自动内容审查转人工；五分钟后新任务将重试。`);
+        if (error instanceof CaptureUnavailable) {
+          transient = true;
+          outageFailures++;
+          if (outageSince === null) {
+            outageSince = now();
+            console.warn(`独立截图服务暂时连不上（${error.message}）。排队作品等待重试，最长 ${Math.round(timeouts.unavailable / 60e3)} 分钟后才转人工。`);
+          }
+        } else {
+          transient = false;
+          failedAt = now();
+          console.warn(`自动截图不可用（${error.message.split('\n')[0]}）。上传作品将显示文字封面，自动内容审查转人工；五分钟后新任务将重试。`);
+        }
       } finally {
         reported = true;
       }
@@ -330,7 +457,10 @@ export function createCapturer({ config, library, loadChromium = async () => (aw
     activeBudget = budget;
     let stop = false;
     try {
-      if (!await initialize()) return null;
+      if (!await initialize()) {
+        if (transient) throw new CaptureUnavailable();
+        return null;
+      }
       const origin = library.publicContent(work) ? library.originOf(work.contentKey) : library.previewOrigin(work);
       const captures = {};
       const late = {};
@@ -345,33 +475,63 @@ export function createCapturer({ config, library, loadChromium = async () => (aw
           let owner = browser;
           try {
             if (budget.remaining() <= 0) { stop = true; break; }
-            if (!await initialize()) break;
+            if (!await initialize()) {
+              if (transient) throw new CaptureUnavailable();
+              break;
+            }
             owner = browser;
             context = await openContext(owner, shot);
-            await step(() => context.addInitScript(DISGUISE), timeouts.route, 'route');
+            await step(() => context.addInitScript(initScript), timeouts.route, 'route');
             await step(() => guardCaptureContext(context, { origin, cdn: config.cdn, resources }), timeouts.route, 'route');
             page = await step(() => context.newPage(), timeouts.newPage, 'new_page');
             const gotoLimit = Math.max(1, Math.min(timeouts.goto, budget.remaining()));
-            const response = await step(() => page.goto(`${origin}/`, { waitUntil: 'load', timeout: gotoLimit }), relaxed(gotoLimit), 'goto');
+            const response = await step(() => page.goto(`${origin}/`, { waitUntil: 'domcontentloaded', timeout: gotoLimit }), relaxed(gotoLimit), 'goto');
             if (!response?.ok()) throw new Error('作品页面未成功加载');
+            // A page still loading textures or models after the limit is shot as it stands.
+            if (typeof page.waitForLoadState === 'function') {
+              const loadLimit = Math.max(1, Math.min(timeouts.goto, budget.remaining()));
+              try {
+                await step(() => page.waitForLoadState('load', { timeout: loadLimit }), relaxed(loadLimit), 'load');
+              } catch (error) {
+                if (error instanceof CaptureTimeout || error?.name !== 'TimeoutError') throw error;
+                console.warn(`作品页面未在时限内加载完，按当前状态截图 ${work.id} ${shot.id}`);
+              }
+            }
             await step(() => page.waitForTimeout(3500), relaxed(3500), 'wait');
+            const webgl = await framesUseWebgl(page, timeouts.probe);
+            if (webgl) budget.extend(timeouts.webglTask);
+            const screenshotCap = webgl ? timeouts.webglScreenshot : timeouts.screenshot;
+            const shoot = async (file) => {
+              const limit = Math.max(1, Math.min(screenshotCap, budget.remaining()));
+              if (webgl) await setFrames(page, 'pause', timeouts.probe);
+              try {
+                await step(() => page.screenshot({ path: join(library.mediaDir, work.id, file), type: 'jpeg', quality: 84, timeout: limit }), relaxed(limit), 'screenshot');
+              } finally {
+                if (webgl) await setFrames(page, 'resume', timeouts.probe);
+              }
+            };
             mkdirSync(join(library.mediaDir, work.id), { recursive: true });
             const name = `${prefix}${shot.id}.jpg`;
-            const shotLimit = Math.max(1, Math.min(timeouts.screenshot, budget.remaining()));
-            await step(() => page.screenshot({ path: join(library.mediaDir, work.id, name), type: 'jpeg', quality: 84, timeout: shotLimit }), relaxed(shotLimit), 'screenshot');
+            await shoot(name);
             const text = await step(() => pageText(page), timeouts.text, 'text');
             texts.push(text);
             firstTexts.push(text);
             captures[shot.id] = name;
             try {
               const { width, height } = shot.viewport;
-              await step(() => page.mouse.move(width / 2, height / 2), timeouts.input, 'input');
-              await step(() => page.mouse.wheel(0, height * 4), timeouts.input, 'input');
-              await step(() => page.mouse.click(width / 2, height / 2), timeouts.input, 'input');
+              // Input waits for a rendered frame; a paused WebGL page answers at once.
+              const inputLimit = webgl ? timeouts.input * 3 : timeouts.input;
+              if (webgl) await setFrames(page, 'pause', timeouts.probe);
+              try {
+                await step(() => page.mouse.move(width / 2, height / 2), inputLimit, 'input');
+                await step(() => page.mouse.wheel(0, height * 4), inputLimit, 'input');
+                await step(() => page.mouse.click(width / 2, height / 2), inputLimit, 'input');
+              } finally {
+                if (webgl) await setFrames(page, 'resume', timeouts.probe);
+              }
               await step(() => page.waitForTimeout(8500), relaxed(8500), 'wait');
               const lateName = `${prefix}${shot.id}-late.jpg`;
-              const lateLimit = Math.max(1, Math.min(timeouts.screenshot, budget.remaining()));
-              await step(() => page.screenshot({ path: join(library.mediaDir, work.id, lateName), type: 'jpeg', quality: 84, timeout: lateLimit }), relaxed(lateLimit), 'screenshot');
+              await shoot(lateName);
               texts.push(await step(() => pageText(page), timeouts.text, 'text'));
               late[shot.id] = lateName;
             } catch (error) {
@@ -381,6 +541,7 @@ export function createCapturer({ config, library, loadChromium = async () => (aw
             }
             break;
           } catch (error) {
+            if (error instanceof CaptureUnavailable) throw error;
             if (error instanceof CaptureTimeout && error.step !== 'task' && owner) discardBrowser(owner);
             if (attempt === 1 || (error instanceof CaptureTimeout && error.step === 'task')) {
               console.warn(`截图失败 ${work.id} ${shot.id}：${error.message.split('\n')[0]}`);
@@ -399,15 +560,45 @@ export function createCapturer({ config, library, loadChromium = async () => (aw
     }
   }
 
+  // Wait with backoff while the capture service is down. False once the outage
+  // has lasted CAPTURE_UNAVAILABLE_MAX_MS; later items then fail fast until it recovers.
+  async function waitForService() {
+    if (closed || outageSince === null) return !closed;
+    const waited = now() - outageSince;
+    if (waited >= timeouts.unavailable) return false;
+    const delay = Math.min(timeouts.retryMax, timeouts.retryBase * 2 ** Math.min(20, Math.max(0, outageFailures - 1)), timeouts.unavailable - waited);
+    await new Promise((resolve) => {
+      wake = resolve;
+      sleeper = setTimeout(resolve, delay);
+    });
+    sleeper = null;
+    wake = null;
+    return !closed;
+  }
+
+  const unavailableResult = () => ({ unavailable: true, captures: {}, late: {}, texts: [], firstTexts: [], resources: {} });
+
   async function drain() {
     while (queue.length && !closed) {
-      const { work, options, resolve } = queue.shift();
+      const item = queue[0];
+      let result = null;
       try {
-        resolve(await capture(work, options));
+        result = await capture(item.work, item.options);
       } catch (error) {
-        resolve(null);
-        console.warn(`截图失败 ${work.id}：${error.message.split('\n')[0]}`);
+        if (error instanceof CaptureUnavailable) {
+          if (await waitForService()) continue;
+          if (closed) break;
+          if (!gaveUp) {
+            gaveUp = true;
+            console.warn(`独立截图服务超过 ${Math.round(timeouts.unavailable / 60e3)} 分钟连不上，排队作品转人工，恢复后自动继续。`);
+          }
+          result = unavailableResult();
+        } else {
+          console.warn(`截图失败 ${item.work.id}：${error.message.split('\n')[0]}`);
+        }
       }
+      if (queue[0] === item) queue.shift();
+      item.resolve(result);
     }
     for (const item of queue.splice(0)) item.resolve(null);
   }
@@ -423,16 +614,24 @@ export function createCapturer({ config, library, loadChromium = async () => (aw
   return {
     get available() { return available; },
     initialize,
-    enqueue(work, options) {
+    enqueue(work, settings) {
       if (!config.capture || closed || (failedAt !== null && now() - failedAt < 5 * 60e3)) return Promise.resolve(null);
+      // Oversized pages go straight to people; the screenshot would only hold the queue.
+      const size = entryBytes(work);
+      if (size !== null && size > options.maxPageBytes) {
+        console.warn(`作品入口页 ${(size / 1048576).toFixed(1)} MB 超过截图上限，跳过截图 ${work.id}`);
+        return Promise.resolve(null);
+      }
       return new Promise((resolve) => {
-        queue.push({ work, options, resolve });
+        queue.push({ work, options: settings, resolve });
         start();
       });
     },
     async close() {
       closed = true;
       available = false;
+      clearTimeout(sleeper);
+      wake?.();
       failActiveStep?.(new Error('截图已关闭'));
       for (const item of queue.splice(0)) item.resolve(null);
       const current = browser;

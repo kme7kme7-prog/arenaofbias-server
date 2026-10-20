@@ -13,15 +13,6 @@ function validate(input) {
 }
 
 export function createAnnouncements(db) {
-  const clients = new Set();
-  const latestId = () => db.prepare('SELECT MAX(id) AS id FROM announcements').get().id ?? 0;
-  const broadcast = id => {
-    const message = `event: announcement\ndata: ${JSON.stringify({ id })}\n\n`;
-    for (const client of clients) {
-      try { client.res.write(message); }
-      catch { client.close(); }
-    }
-  };
   return {
     published() {
       return { entries: db.prepare('SELECT id,title,body,published_at FROM announcements ORDER BY id DESC').all().map(publicEntry) };
@@ -30,23 +21,14 @@ export function createAnnouncements(db) {
       const { title, body } = validate(input);
       const result = db.prepare('INSERT INTO announcements(title,body,published_at,created_by) VALUES (?,?,?,?)')
         .run(title, body, Date.now(), actor.id);
-      const entry = publicEntry(db.prepare('SELECT * FROM announcements WHERE id=?').get(Number(result.lastInsertRowid)));
-      broadcast(entry.id);
-      return { entry };
+      return { entry: publicEntry(db.prepare('SELECT * FROM announcements WHERE id=?').get(Number(result.lastInsertRowid))) };
     },
-    subscribe(req, res) {
-      res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8',
-        'Cache-Control': 'no-cache, no-transform', 'X-Accel-Buffering': 'no',
-        'X-Content-Type-Options': 'nosniff' });
-      if (req.method === 'HEAD') return res.end();
-      res.write(`event: announcement\ndata: ${JSON.stringify({ id: latestId() })}\n\n`);
-      const client = { res, close: () => {} };
-      const heartbeat = setInterval(() => { if (!res.destroyed) res.write(': keepalive\n\n'); }, 25000);
-      heartbeat.unref();
-      client.close = () => { clearInterval(heartbeat); clients.delete(client); if (!res.destroyed) res.end(); };
-      clients.add(client);
-      res.once('close', client.close);
-    },
-    close() { for (const client of clients) client.close(); },
   };
+}
+
+// The live stream is retired; clients poll GET /api/announcements. Pages that still
+// open an EventSource get 204, which per the HTML spec stops it from reconnecting.
+export function retiredAnnouncementStream(req, res) {
+  res.writeHead(204, { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+  res.end();
 }

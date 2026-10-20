@@ -44,7 +44,8 @@ async function shutdown() {
     process.exit(1);
   }, 10_000);
   try {
-    await drainServers([site, content]);
+    platform.closeStreams();
+    await drainServers([site, content], { forceAfterMs: 1500 });
     await platform.close();
     clearTimeout(timeout);
     process.exit(0);

@@ -1,3 +1,9 @@
+## 2026-10-20 · 公告改轮询，SSE 停服不再卡住（PR）
+
+- EdgeOne 回源默认 15 秒无数据即断开，公告 SSE 心跳 25 秒，公网实测每条连接 15.0 秒被切断，前端约每 18 秒重连。公告改为前端每 60 秒轮询 `GET /api/announcements`（Gallery 另开 PR）；`/api/announcements/events` 固定返回 204，旧页面的 EventSource 收到后停止重连，退回自身的每分钟轮询。广播和心跳代码已删，发布 API 不变。
+- 停服：原先 `server.close()` 等待永不结束的 SSE，10 秒后强制 exit 1 且跳过 `platform.close()`。现在先 `platform.closeStreams()` 结束好友房 SSE，再 drain；1.5 秒后仍未结束的连接用 `closeAllConnections()` 关闭。本地有好友房 SSE 时 SIGTERM 11 ms 内 exit 0。
+- 好友房 SSE 每 10 秒发 `: keepalive`，低于 EdgeOne 的 15 秒。无迁移、无依赖、无需改 Nginx / EdgeOne。
+
 ## 2026-10-20 · 网站公告 API（已授权推送 GitHub，未部署）
 
 - v47 幂等迁移新增 `announcements`；新模块 `server/announcements.mjs` 提供公开全量历史、管理员即时发布与 SSE 广播。仅 Lv3 能发布；标题和 Markdown 正文有长度及控制字符校验，公告不可编辑/删除。

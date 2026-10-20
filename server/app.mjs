@@ -19,7 +19,7 @@ import { createCatalogResponse, createCatalogRevision } from './catalog-response
 import { createSharedRead } from './shared-read.mjs';
 import { createComments } from './comments.mjs';
 import { createChangelog } from './changelog.mjs';
-import { createAnnouncements } from './announcements.mjs';
+import { createAnnouncements, retiredAnnouncementStream } from './announcements.mjs';
 import { AVATARS, EFFORTS, EMOJIS } from './config.mjs';
 import { createContentHandler } from './content.mjs';
 import { openDatabase, transaction } from './db.mjs';
@@ -252,7 +252,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
 
   const router = createRouter();
   router.on('GET', '/api/announcements', ctx => sendJson(ctx.res, 200, announcements.published(), { 'Cache-Control': 'no-cache' }));
-  router.on('GET', '/api/announcements/events', ctx => announcements.subscribe(ctx.req, ctx.res));
+  router.on('GET', '/api/announcements/events', ctx => retiredAnnouncementStream(ctx.req, ctx.res));
   router.on('POST', '/api/admin/announcements', async ctx => {
     const actor = adminOnly(ctx);
     return announcements.create(actor, await readJson(ctx.req));
@@ -962,9 +962,10 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     moderator,
     warmLeaderboards() { if (config.leaderboardWarmup !== false) arena.startWarmup(); },
     handleSite,
+    // Long-lived responses end first so draining the HTTP servers does not wait on them.
+    closeStreams() { guessRooms.closeStreams(); },
     handleContent: createContentHandler({ config, library, arena, qualification, catalog, siteOrigins: config.siteOrigins, readGuard }),
     async close() {
-      announcements.close();
       guessRooms.close();
       clearInterval(matchCleanup);
       clearInterval(referenceCleanup);

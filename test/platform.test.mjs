@@ -589,7 +589,7 @@ describe('platform lifecycle', () => {
     const cookie = login.headers.get('set-cookie').split(';')[0];
     const boot = await fetch(`${base}/api/bootstrap`, { headers: { origin, cookie } });
     assert.equal((await boot.json()).user.name, 'alice');
-    assert.equal(boot.headers.get('vary'), 'Origin');
+    assert.equal(boot.headers.get('vary'), 'Origin, Accept-Encoding');
     const unauthorized = await fetch(`${base}/api/me`, { headers: { origin } });
     assert.equal(unauthorized.status, 401);
     assert.equal(unauthorized.headers.get('access-control-allow-origin'), origin);
@@ -629,8 +629,10 @@ describe('platform lifecycle', () => {
   });
 
   test('trusted origins can read the stale datapack response header', async () => {
-    const trusted = await fetch(`${base}/api/bootstrap`, { headers: { origin: 'http://127.0.0.1' } });
+    const trusted = await fetch(`${base}/api/session`, { headers: { origin: 'http://127.0.0.1' } });
     assert.equal(trusted.headers.get('access-control-expose-headers'), 'X-Datapack-Stale');
+    const boot = await fetch(`${base}/api/bootstrap`, { headers: { origin: 'http://127.0.0.1' } });
+    assert.equal(boot.headers.get('access-control-expose-headers'), 'X-Datapack-Stale, ETag, Server-Timing');
     const foreign = await fetch(`${base}/api/bootstrap`, { headers: { origin: 'https://evil.example' } });
     assert.equal(foreign.headers.get('access-control-expose-headers'), null);
   });

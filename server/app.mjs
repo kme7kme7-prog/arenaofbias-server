@@ -15,7 +15,7 @@ import { createLoginSecurity } from './login-security.mjs';
 import { createCapturer } from './capture.mjs';
 import { createModerator } from './moderation.mjs';
 import { createCatalog } from './catalog.mjs';
-import { createCatalogResponse, createCatalogRevision } from './catalog-response.mjs';
+import { createActivityRevision, createCatalogResponse, createCatalogRevision, createSharedJson } from './catalog-response.mjs';
 import { createSharedRead } from './shared-read.mjs';
 import { createComments } from './comments.mjs';
 import { createChangelog } from './changelog.mjs';
@@ -243,12 +243,26 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       if (activityRevision() === revision) return result;
     }
   }
-  async function bootstrap(user) {
+  // `lite` leaves out `works` (most of the body); everything else, including
+  // serverVersion and datapack, stays. Older servers ignore the parameter.
+  async function bootstrap(user, { lite = false } = {}) {
     const snapshot = catalog.snapshot();
     const { workAccess, ...live } = await activity(user);
     return { ...versionInfo(snapshot), serverVersion, providers: snapshot.providers(), domains: DOMAINS, domainGroups: DOMAIN_GROUPS,
-      site: siteInfo(), works: await galleryList(user, snapshot), questions: questions.all(user), ...session(user), ...live };
+      site: siteInfo(), ...(lite ? {} : { works: await galleryList(user, snapshot) }), questions: questions.all(user), ...session(user), ...live };
   }
+  // Signed-out bootstrap is the same for everyone, so it is built once per generation.
+  // Signed-in requests never touch it. private keeps CDNs from storing it.
+  const bootstrapActivity = createActivityRevision(db);
+  const anonymousBootstrap = (lite) => createSharedJson({
+    strict: () => `${catalog.snapshot().version}|${catalogRevision()}|${capturer.available}|${moderator.enabled}`,
+    loose: bootstrapActivity,
+    read: () => bootstrap(null, { lite }),
+    ttl: config.bootstrapCacheMs ?? 15_000,
+    cacheControl: 'private, no-cache',
+    label: 'bootstrap',
+  });
+  const publicBootstrap = { full: anonymousBootstrap(false), lite: anonymousBootstrap(true) };
 
   const router = createRouter();
   router.on('GET', '/api/announcements', ctx => sendJson(ctx.res, 200, announcements.published(), { 'Cache-Control': 'no-cache' }));
@@ -273,7 +287,11 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' });
     res.end(req.method === 'HEAD' ? undefined : foldScript);
   });
-  router.on('GET', '/api/bootstrap', (ctx) => bootstrap(ctx.user));
+  router.on('GET', '/api/bootstrap', (ctx) => {
+    const lite = ctx.url.searchParams.get('lite') === '1';
+    if (!ctx.user) return publicBootstrap[lite ? 'lite' : 'full'](ctx.req, ctx.res);
+    return bootstrap(ctx.user, { lite });
+  });
   router.on('GET', '/api/catalog', ({ req, res }) => publicCatalog(req, res));
   router.on('GET', '/api/session', (ctx) => session(ctx.user));
   router.on('GET', '/api/activity', (ctx) => activity(ctx.user));
@@ -904,7 +922,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         if (isTrustedOrigin(req, config)) {
           res.setHeader('Access-Control-Allow-Origin', req.headers.origin);
           res.setHeader('Access-Control-Allow-Credentials', 'true');
-          res.setHeader('Access-Control-Expose-Headers', url.pathname === '/api/catalog' ? 'X-Datapack-Stale, ETag, Server-Timing' : 'X-Datapack-Stale');
+          res.setHeader('Access-Control-Expose-Headers', ['/api/catalog', '/api/bootstrap'].includes(url.pathname) ? 'X-Datapack-Stale, ETag, Server-Timing' : 'X-Datapack-Stale');
         }
       }
       const referenceMedia = url.pathname.startsWith('/media/references/') || url.pathname.startsWith('/media/pack-references/');

@@ -87,6 +87,7 @@ npm start
 | `COOKIE_SAME_SITE` | `Lax` | `Lax` / `Strict` / `None`；跨站 HTTPS 部署用 `None`，并必须开启 `COOKIE_SECURE=1` |
 | `TRUST_PROXY` | 关（`1` 开启） | 仅信任本机单层反代的 `X-Forwarded-For` 最后一项有效 IP；非本机连接或无效头使用连接 IP。边缘代理须覆盖原头或追加真实客户端 IP |
 | `READ_API_PER_MIN` / `READ_CATALOG_PER_MIN` | `180` / `30` | 按真实 IP 限制 API GET/HEAD，以及跨端点共享的整表/榜单读取；最小为 1 |
+| `BOOTSTRAP_CACHE_MS` | `15000` | 未登录 bootstrap 缓存的最长复用时间；题目、作品、覆盖、公开作者、包版本、投票、反应和精选变化会立即使其失效，此值只兜底其余变化；最小 1000 |
 | `READ_FILES_PER_MIN` / `READ_PAGES_PER_MIN` | `1200` / `60` | 按真实 IP 限制后端静态/作品资源与作品 HTML，跨作品域名共享；最小为 1 |
 | `SERVER_VERSION` | Git HEAD 或 `dev` | 启动时确定的服务端版本，返回在 bootstrap 中 |
 | `SMTP_HOST` / `SMTP_PORT` | 未配置 / `465` | 验证码 SMTP 主机与端口（465 隐式 TLS；其它端口默认 STARTTLS） |
@@ -120,7 +121,7 @@ npm start
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/robots.txt` | 站点端口与作品端口都返回 `Disallow: /`（`server/robots.mjs`），API 与作品沙盒不进搜索结果 |
-| GET | `/api/bootstrap` | 首屏聚合：当前用户、站点配置、作品列表、反应汇总、各题对战池、排行榜总计、我的投票/待审数、管理员待审计数 |
+| GET | `/api/bootstrap` | 首屏聚合：当前用户、站点配置、作品列表、反应汇总、各题对战池、排行榜总计、我的投票/待审数、管理员待审计数。`?lite=1` 省略 `works`（其余字段含 `serverVersion`、`datapack` 照常）；未登录响应按数据版本缓存，带 ETag / 304 |
 | GET | `/api/prompts` | Show1 共用与历史题库，长短原文通过同题 `promptVariants` 返回 |
 | POST | `/api/auth/register` | 凭注册邮箱验证码创建账号并建立会话（限流） |
 | POST | `/api/auth/login` | 登录（限流） |

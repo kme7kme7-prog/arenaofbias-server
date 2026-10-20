@@ -1,4 +1,11 @@
-## 2026-10-20 · 公告改轮询，SSE 停服不再卡住（PR）
+## 2026-10-20 · bootstrap 压缩、未登录缓存与 lite（#17，晚于 #18 合并，未部署）
+
+- 1 KiB 以上 JSON 按 `Accept-Encoding` 用 br（质量 5）/ gzip（级别 6）异步压缩，带 `Vary: Accept-Encoding`。`/api/catalog` 和未登录 `/api/bootstrap` 共用 `createSharedJson`：序列化、哈希和压缩每个数据版本只做一次，ETag 按编码区分，比较时忽略 `W/` 和编码后缀，支持 304。
+- 未登录 bootstrap 失效：目录修订（包版本、题目/作品/覆盖/参考图/公开作者、外部提交）、截图/审核开关、新的投票/反应/精选临时触发器，外加 `BOOTSTRAP_CACHE_MS`（默认 15 秒）兜底。登录用户照旧每次生成，`no-store`，不进缓存。未登录头为 `private, no-cache`，CDN 不存。
+- `?lite=1` 省略 `works`，保留 `serverVersion`、`datapack` 等；管理端改用 lite。旧前端不受影响，新管理端遇到旧后端时拿到完整内容。Gallery 已用 catalog/session/activity，Show1 和门户不读 bootstrap，前端不需要改。
+- 不改 Nginx / EdgeOne：Nginx gzip 跳过已有 Content-Encoding 的响应，EO 透传。无迁移、无依赖。数据与验证见归档：[bootstrap 减负](docs/archive/2026-10-20-bootstrap-cache-kme7kme7-prog.md)。
+
+## 2026-10-20 · 公告改轮询，SSE 停服不再卡住（#18 已合并 b78f0b2，线上已部署）
 
 - EdgeOne 回源默认 15 秒无数据即断开，公告 SSE 心跳 25 秒，公网实测每条连接 15.0 秒被切断，前端约每 18 秒重连。公告改为前端每 60 秒轮询 `GET /api/announcements`（Gallery 另开 PR）；`/api/announcements/events` 固定返回 204，旧页面的 EventSource 收到后停止重连，退回自身的每分钟轮询。广播和心跳代码已删，发布 API 不变。
 - 停服：原先 `server.close()` 等待永不结束的 SSE，10 秒后强制 exit 1 且跳过 `platform.close()`。现在先 `platform.closeStreams()` 结束好友房 SSE，再 drain；1.5 秒后仍未结束的连接用 `closeAllConnections()` 关闭。本地有好友房 SSE 时 SIGTERM 11 ms 内 exit 0。

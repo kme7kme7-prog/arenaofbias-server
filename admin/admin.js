@@ -2094,7 +2094,7 @@ function render({ soft = false, world = false } = {}) {
 
 async function boot() {
   try {
-    const data = await api('bootstrap');
+    const data = await api('bootstrap?lite=1');
     state.user = data.user;
     state.questions = data.questions;
     state.reviewCounts = data.review;

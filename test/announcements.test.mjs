@@ -45,7 +45,7 @@ test('announcement v47 migration is idempotent and survives reopening', () => {
     db.close();
     db = openDatabase(file);
     try {
-      assert.equal(db.prepare('PRAGMA user_version').get().user_version, 47);
+      assert.equal(db.prepare('PRAGMA user_version').get().user_version, MIGRATIONS.length);
       assert.equal(db.prepare('SELECT COUNT(*) AS n FROM announcements').get().n, 0);
     } finally { db.close(); }
   } finally { rmSync(root, { recursive: true, force: true }); }

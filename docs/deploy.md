@@ -432,6 +432,23 @@ Flex 固定为唯一计费档，不自动改用标准档。密钥缺失、`CAPTU
 
 本轮上传审核收口可先发布后端，再发布 Gallery；新前端对缺少 `autoModeration` / `review.content` 有兜底，旧前端发送的 `harnessVersion` 会被忽略，因此前端也可先发布。不新增数据库清理迁移，`harness_version` 列和存量值保留；私有数据仓同轮更新来源脚本，后续构建不输出 Harness 版本。消费者 pin 仍按不可变数据包发布流程另行切换。
 
+### 6.0 dots 审核（v48）
+
+- 需要 `CONTENT_MODERATION=1`。`MODERATION_MODE` 默认 `machine`，代码发布后行为不变；上线时在 drop-in 设 `Environment="MODERATION_MODE=dots"` 后重启，或不重启由管理员 `POST /api/admin/moderation-mode {"mode":"dots"}`（也可在服务器上 `node scripts/moderation-token.mjs mode dots`）。数据库覆盖值优先于环境变量；`mode env` 清除覆盖。
+- 回滚：`mode machine`（或清除覆盖且环境变量为 `machine`）立即生效，已交给 dots 的待审作品在下一分钟内交回机器；已在 `dots-review-only` 人工队列的作品原样留在人工队列。退回旧代码也安全：旧代码忽略 `route`，pending 作品照常由机器审核，v48 的三张表闲置即可。
+- 令牌只在服务器上用服务账号和服务的 `DATA_DIR` 生成（`systemctl cat arenaofbias-server` 查看），先发布并重启让 v48 迁移完成：
+
+```bash
+cd /www/wwwroot/arenaofbias-server
+sudo -u <服务用户> DATA_DIR=<服务的 DATA_DIR> node scripts/moderation-token.mjs create dots
+sudo -u <服务用户> DATA_DIR=<服务的 DATA_DIR> node scripts/moderation-token.mjs list
+sudo -u <服务用户> DATA_DIR=<服务的 DATA_DIR> node scripts/moderation-token.mjs revoke <id>
+sudo -u <服务用户> DATA_DIR=<服务的 DATA_DIR> node scripts/moderation-token.mjs audit 50
+```
+
+  `mode` 命令输出里的 `env` 是当前 shell 的环境变量，服务实际值以管理端 `GET /api/admin/moderation-mode` 为准。明文只打印一次，库里只存哈希。不要贴进聊天记录、工单或日志；交给 dots 的使用者走端到端加密的一次性渠道，或由他本人在服务器上生成。丢失即吊销重发。
+- 部署时已在队列里的作品不受影响：它们的 pending 不带 `route`，照旧走机器；状态值含义不变。
+
 ### 6.1 独立审查服务器与 SSH 连接
 
 正式站无法连接官方 API 时，可以在可用的审查服务器运行 `scripts/moderation-relay.mjs`。它只接受已配置 Key 的 `/v1/responses` 请求，限定 `gpt-6-luna`、`service_tier=flex`、`store=false` 和非流式响应；只连接官方 Responses API，保留上游 HTTP 状态，不重试或切换计费档。请求最多 81 MiB、上游时限 15 分钟，客户端断开会取消上游请求。未记录 Key、请求正文或提供商错误消息。

@@ -1,3 +1,10 @@
+## 2026-10-20 · 截图与审核队列超时（本地完成，未部署）
+
+- 线上从 2026-10-20 01:11（UTC+8）起截图和审核停摆。`browser.newContext` 没有超时，串行截图队列会停在这一步；审核队列等待同一件 `capturer.enqueue`，所以一起停。
+- 已给 newContext、newPage、goto、screenshot、close、connect 和单件总时长加上限，变量与默认值见 README 与 docs/deploy.md。超时后该件按原失败语义结束（视口重试一次，材料不齐则 `capture_incomplete` 转人工），关闭 context/page，两个队列继续。连接无响应或断开时丢弃当前连接，下一件重建并重读端点；启动或连接失败仍冷却五分钟。
+- 验证：`npm run check` 142/0；`test/capture.test.mjs` 19/19。`npm test` 398/399。失败的 1 条是 `test/blind-pool.test.mjs` 厂商改名断言，未改过的 main 上同样是 390/391，该文件单独跑 21/21。未跑真实 Chrome 或独立 capture 服务，未部署。
+- 归档：[截图队列超时](docs/archive/2026-10-20-capture-timeouts-kme7kme7-prog.md)。
+
 ## 2026-10-19 · 网站更新日志（已提交 6d941d2 并与成员等级 v44–v45 一起上线，schema 46）
 
 - 上线（2026-10-19）：以线上源码为底三方合并主线 57b4393→6d941d2，保留现场补丁；生产库副本迁移演练与 reviewer（GPT-6.1-Sol）候选测试通过后一次切换，无回滚。重启 2.08s，库计数前后一致，全部账号 Lv0。备份与回滚包 /root/aob-release-20261019/backup，发布记录在父工作区 .local/release-20261019/RELEASE.md。未做生产登录/投票/真实 Cloudflare 全链路；更新日志首批 6 条（中英）已按用户确认录入线上。

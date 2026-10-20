@@ -16,6 +16,27 @@ export function parseTrustProxy(value = '') {
   throw new Error('TRUST_PROXY must be 0, 1, or loopback');
 }
 
+// Positive millisecond overrides. Zero, blank and non-digits keep the default so a
+// bad value cannot turn the capture queue's safety limits off.
+export function captureTimeoutConfig(source = {}) {
+  const ms = (name, fallback) => {
+    const raw = source[name];
+    if (raw == null || raw === '') return fallback;
+    if (!/^\d+$/.test(String(raw))) return fallback;
+    const value = Number(raw);
+    return value > 0 ? value : fallback;
+  };
+  return {
+    task: ms('CAPTURE_TASK_TIMEOUT_MS', 180_000),
+    newContext: ms('CAPTURE_NEW_CONTEXT_TIMEOUT_MS', 45_000),
+    newPage: ms('CAPTURE_NEW_PAGE_TIMEOUT_MS', 30_000),
+    goto: ms('CAPTURE_GOTO_TIMEOUT_MS', 45_000),
+    screenshot: ms('CAPTURE_SCREENSHOT_TIMEOUT_MS', 60_000),
+    close: ms('CAPTURE_CLOSE_TIMEOUT_MS', 15_000),
+    connect: ms('CAPTURE_CONNECT_TIMEOUT_MS', 30_000),
+  };
+}
+
 const port = int(env.PORT, 5173);
 const contentPort = int(env.CONTENT_PORT, 5180);
 
@@ -49,6 +70,8 @@ export const config = {
   captureEndpointFile: env.CAPTURE_ENDPOINT_FILE || '',
   // Chromium's OS sandbox for captures; needs the service to run as a non-root user.
   captureSandbox: env.CAPTURE_SANDBOX === '1',
+  // Per-step and per-job capture limits. See captureTimeoutConfig for names and defaults.
+  captureTimeouts: captureTimeoutConfig(env),
   leaderboardWarmup: env.LEADERBOARD_WARMUP !== '0',
   // New uploads stay private until the Flex check passes, and off the public work host until a human review.
   moderation: {

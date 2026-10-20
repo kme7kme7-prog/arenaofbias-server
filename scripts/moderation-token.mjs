@@ -1,8 +1,15 @@
 // Moderation tokens and mode for dots, run on the server as the service user with
 // the service environment (DATA_DIR). The plaintext token is printed once and never stored.
-//   node scripts/moderation-token.mjs create <label>     new token; prints it once
-//   node scripts/moderation-token.mjs list               ids, labels, created/revoked/last used
-//   node scripts/moderation-token.mjs revoke <id>        takes effect on the next request
+//   node scripts/moderation-token.mjs create <label> [scopes]   new token; prints it once.
+//                                                        scopes: comma separated, default moderation;
+//                                                        moderation, capture:read, cover:write
+//   node scripts/moderation-token.mjs list               ids, labels, scopes, created/revoked/last used
+//   node scripts/moderation-token.mjs grant <id> <scope>     add one scope
+//   node scripts/moderation-token.mjs withdraw <id> <scope>  remove one scope (next request)
+//   node scripts/moderation-token.mjs revoke <id>        the whole token, on the next request
+//   node scripts/moderation-token.mjs cover-history <work id>
+//   node scripts/moderation-token.mjs cover-rollback <work id> [history id]
+//                                                        point the work back at its previous cover
 //   node scripts/moderation-token.mjs mode [machine|dots|dots-review-only|env]
 //                                                        show, or override MODERATION_MODE (env clears it)
 //   node scripts/moderation-token.mjs audit [limit]      recent token requests, newest first
@@ -10,9 +17,10 @@ import { join } from 'node:path';
 import { userInfo } from 'node:os';
 import { config } from '../server/config.mjs';
 import { openDatabase } from '../server/db.mjs';
-import { MODERATION_MODES, createModerationMode, createModerationTokens } from '../server/dots-moderation.mjs';
+import { MODERATION_MODES, TOKEN_SCOPES, createModerationMode, createModerationTokens } from '../server/dots-moderation.mjs';
+import { createCoverStore } from '../server/work-covers.mjs';
 
-const [command, value] = process.argv.slice(2);
+const [command, value, extra] = process.argv.slice(2);
 const db = openDatabase(join(config.dataDir, 'platform.db'));
 const tokens = createModerationTokens(db);
 const mode = createModerationMode(db, config);
@@ -21,13 +29,28 @@ const when = (ms) => (ms ? new Date(ms).toISOString() : '-');
 
 try {
   if (command === 'create') {
-    const created = tokens.create(value, operator);
-    process.stderr.write(`已创建 ${created.id}（${created.label}）。下面一行是令牌明文，只显示这一次，库里只存 SHA-256：\n`);
+    const created = tokens.create(value, operator, extra ?? 'moderation');
+    process.stderr.write(`已创建 ${created.id}（${created.label}，权限 ${created.scopes.join(',')}）。下面一行是令牌明文，只显示这一次，库里只存 SHA-256：\n`);
     process.stdout.write(`${created.token}\n`);
   } else if (command === 'list') {
     for (const row of tokens.list()) {
-      console.log([row.id, row.label, `created ${when(row.created_at)} by ${row.created_by}`,
+      console.log([row.id, row.label, `scopes ${row.scopes.join(',') || '(none)'}`, `created ${when(row.created_at)} by ${row.created_by}`,
         row.revoked_at ? `REVOKED ${when(row.revoked_at)}` : 'active', `last used ${when(row.last_used_at)}`].join('  '));
+    }
+  } else if (command === 'grant' || command === 'withdraw') {
+    if (!value || !extra) throw new Error(`用法：${command} <id> <${TOKEN_SCOPES.join('|')}>`);
+    console.log(`${value} 现有权限：${tokens[command](value, extra).join(',') || '(none)'}`);
+  } else if (command === 'cover-history' || command === 'cover-rollback') {
+    const row = db.prepare('SELECT id, task_id, cover FROM works WHERE id = ? AND deleted_at IS NULL').get(String(value ?? ''));
+    if (!row) throw new Error('作品不存在');
+    const covers = createCoverStore({ db, library: { mediaDir: join(config.dataDir, 'media') } });
+    const work = { id: row.id, taskId: row.task_id, cover: row.cover, curated: false };
+    if (command === 'cover-history') {
+      console.log(`当前封面：${row.cover ?? '(无)'}`);
+      for (const entry of covers.history(work)) console.log([entry.id, entry.at, entry.action, `${entry.previous ?? '(无)'} -> ${entry.next ?? '(无)'}`, entry.actor].join('  '));
+    } else {
+      console.log(JSON.stringify(covers.rollback(work, extra ?? null, { id: operator, name: operator })));
+      console.log('已回滚；服务进程按数据库版本号发现这次写入，bootstrap / catalog 缓存下一次请求即重建');
     }
   } else if (command === 'revoke') {
     if (!value) throw new Error('用法：revoke <id>');
@@ -41,7 +64,7 @@ try {
       console.log([when(row.at), row.token_id, row.token_label, row.action, row.task_id ?? '-', row.work_id ?? '-', row.outcome, row.ip ?? '-', row.reason ?? ''].join('  '));
     }
   } else {
-    console.log(`用法：node scripts/moderation-token.mjs create <label> | list | revoke <id> | mode [${MODERATION_MODES.join('|')}|env] | audit [limit]`);
+    console.log(`用法：node scripts/moderation-token.mjs create <label> [${TOKEN_SCOPES.join(',')}] | list | grant <id> <scope> | withdraw <id> <scope> | revoke <id> | mode [${MODERATION_MODES.join('|')}|env] | audit [limit] | cover-history <work id> | cover-rollback <work id> [history id]`);
     process.exitCode = command ? 1 : 0;
   }
 } catch (error) {

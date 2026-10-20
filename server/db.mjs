@@ -712,6 +712,27 @@ const MIGRATIONS = [
     updated_at INTEGER NOT NULL,
     updated_by TEXT NOT NULL
   );`),
+  // Per-token scopes (existing tokens keep moderation only) and the cover history
+  // behind dots cover uploads and their rollback. Old cover files are never removed.
+  (db) => {
+    if (!db.prepare('PRAGMA table_info(moderation_tokens)').all().some((column) => column.name === 'scopes')) {
+      db.exec("ALTER TABLE moderation_tokens ADD COLUMN scopes TEXT NOT NULL DEFAULT 'moderation'");
+    }
+    db.exec(`CREATE TABLE IF NOT EXISTS cover_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      at INTEGER NOT NULL,
+      work_id TEXT NOT NULL,
+      task_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      previous TEXT,
+      next TEXT,
+      snapshot TEXT,
+      actor_id TEXT NOT NULL,
+      actor_name TEXT NOT NULL,
+      detail TEXT NOT NULL DEFAULT '{}'
+    );
+    CREATE INDEX IF NOT EXISTS cover_history_work ON cover_history(work_id, id);`);
+  },
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

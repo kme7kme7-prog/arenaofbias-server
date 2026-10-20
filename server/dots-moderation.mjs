@@ -1,11 +1,14 @@
 // External content moderation by dots, a bot that reaches us over the public API.
-// A dots token opens exactly four abilities: list the dots queue, view a queued work
-// (metadata, files, screenshots), approve, and reject with a reason. Every route
-// below is the whole whitelist; the site dispatcher refuses tokens everywhere else.
+// Scope moderation: list the dots queue, view a queued work (metadata, files,
+// screenshots), approve, and reject with a reason. Scope capture:read: list works
+// whose screenshots failed or that have no cover. Scope cover:write: replace a
+// work's cover. Every route below is the whole whitelist; the site dispatcher
+// refuses tokens everywhere else.
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { readdirSync, realpathSync, statSync } from 'node:fs';
 import { extname, join, relative, resolve, sep } from 'node:path';
-import { HttpError, clientIp, createRouter, fail, rateLimit, readJson, sendJson, streamFile } from './http.mjs';
+import { HttpError, clientIp, createRouter, fail, rateLimit, readBody, readJson, sendJson, streamFile } from './http.mjs';
+import { checkCover } from './work-covers.mjs';
 
 export const MODERATION_MODES = ['machine', 'dots', 'dots-review-only'];
 const validMode = (value) => MODERATION_MODES.includes(value);
@@ -39,29 +42,59 @@ export function createModerationMode(db, config) {
   };
 }
 
+// Abilities a token may hold, each granted and withdrawn on its own.
+export const TOKEN_SCOPES = ['moderation', 'capture:read', 'cover:write'];
+export function parseScopes(value) {
+  const list = [...new Set(String(value ?? '').split(/[\s,]+/).filter(Boolean))];
+  const unknown = list.filter((scope) => !TOKEN_SCOPES.includes(scope));
+  if (unknown.length) fail(400, `未知权限：${unknown.join('、')}；可用 ${TOKEN_SCOPES.join('、')}`, 'invalid_scope');
+  return TOKEN_SCOPES.filter((scope) => list.includes(scope));
+}
+
+// Stored values are read leniently: an unknown name grants nothing instead of failing.
+const storedScopes = (value) => TOKEN_SCOPES.filter((scope) => String(value ?? '').split(/\s+/).includes(scope));
+
 const TOKEN = /^aobd_([0-9a-f]{12})_([A-Za-z0-9_-]{43})$/;
 const hashOf = (token) => createHash('sha256').update(String(token)).digest();
 const DUMMY = Buffer.alloc(32);
 
 export function createModerationTokens(db) {
   const q = {
-    insert: db.prepare('INSERT INTO moderation_tokens (id, label, token_hash, created_at, created_by) VALUES (?, ?, ?, ?, ?)'),
+    insert: db.prepare('INSERT INTO moderation_tokens (id, label, token_hash, created_at, created_by, scopes) VALUES (?, ?, ?, ?, ?, ?)'),
     byId: db.prepare('SELECT * FROM moderation_tokens WHERE id = ?'),
-    list: db.prepare('SELECT id, label, created_at, created_by, revoked_at, last_used_at FROM moderation_tokens ORDER BY created_at'),
+    list: db.prepare('SELECT id, label, scopes, created_at, created_by, revoked_at, last_used_at FROM moderation_tokens ORDER BY created_at'),
+    scopes: db.prepare('UPDATE moderation_tokens SET scopes = ? WHERE id = ? AND revoked_at IS NULL'),
     revoke: db.prepare('UPDATE moderation_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL'),
     touch: db.prepare('UPDATE moderation_tokens SET last_used_at = ? WHERE id = ?'),
   };
   return {
     // The plaintext is returned once and never stored.
-    create(label, createdBy) {
+    create(label, createdBy, scopes = ['moderation']) {
       const name = String(label ?? '').trim();
       if (!/^[\w.@:-]{1,60}$/.test(name)) fail(400, '标签只能用 1–60 个字母、数字或 _ . @ : -');
+      const granted = parseScopes(Array.isArray(scopes) ? scopes.join(' ') : scopes);
+      if (!granted.length) fail(400, '至少要给一项权限', 'invalid_scope');
       const id = randomBytes(6).toString('hex');
       const token = `aobd_${id}_${randomBytes(32).toString('base64url')}`;
-      q.insert.run(id, name, hashOf(token).toString('hex'), Date.now(), String(createdBy || 'cli'));
-      return { id, label: name, token };
+      q.insert.run(id, name, hashOf(token).toString('hex'), Date.now(), String(createdBy || 'cli'), granted.join(' '));
+      return { id, label: name, scopes: granted, token };
     },
-    list() { return q.list.all(); },
+    list() { return q.list.all().map((row) => ({ ...row, scopes: storedScopes(row.scopes) })); },
+    // Grant or withdraw single scopes; an empty set leaves a token that can do nothing.
+    setScopes(id, scopes) {
+      const granted = parseScopes(Array.isArray(scopes) ? scopes.join(' ') : scopes);
+      if (!q.scopes.run(granted.join(' '), String(id)).changes) fail(404, '令牌不存在或已吊销', 'not_found');
+      return granted;
+    },
+    grant(id, scope) {
+      const row = q.byId.get(String(id));
+      return this.setScopes(id, [...storedScopes(row?.scopes), ...parseScopes(scope)]);
+    },
+    withdraw(id, scope) {
+      const row = q.byId.get(String(id));
+      const drop = parseScopes(scope);
+      return this.setScopes(id, storedScopes(row?.scopes).filter((item) => !drop.includes(item)));
+    },
     revoke(id) { return q.revoke.run(Date.now(), String(id)).changes > 0; },
     // Constant-time comparison of SHA-256 digests; unknown ids compare against a dummy.
     verify(token) {
@@ -78,7 +111,8 @@ export function createModerationTokens(db) {
 const IMAGE = /^[\w.-]{1,120}\.(?:jpe?g|png|webp)$/i;
 const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
 
-export function createDotsModeration({ db, config, library, mode, tokens, onChange = () => {} }) {
+export function createDotsModeration({ db, config, library, mode, tokens, covers = null, coverBytes = 3 * 1024 * 1024, onChange = () => {} }) {
+  const switches = { off: Boolean(config.moderation?.dotsApiOff), scopesOff: new Set(config.moderation?.dotsDisabledScopes ?? []) };
   const perToken = rateLimit(60_000, config.moderation?.dotsRequestsPerMin ?? 120, '请求太频繁，请稍后再试', 'rate_limited');
   const failures = rateLimit(60_000, 20, '鉴权失败次数过多，请稍后再试', 'rate_limited');
   const q = {
@@ -87,6 +121,10 @@ export function createDotsModeration({ db, config, library, mode, tokens, onChan
     routed: db.prepare(`SELECT id FROM works WHERE deleted_at IS NULL
       AND json_extract(moderation, '$.route') IN ('dots', 'dots-review-only')
       AND json_extract(moderation, '$.status') IN ('pending', 'review')`),
+    // Uploads whose screenshots failed or that have no cover, oldest first, keyset paged.
+    captureGaps: db.prepare(`SELECT id, task_id, created_at FROM works WHERE deleted_at IS NULL
+      AND (json_extract(moderation, '$.error') = 'capture_incomplete' OR cover IS NULL OR cover = '')
+      AND (created_at > ? OR (created_at = ? AND id > ?)) ORDER BY created_at, id LIMIT ?`),
   };
 
   // Where a work stands for dots, or null when dots has no say over it.
@@ -188,7 +226,7 @@ export function createDotsModeration({ db, config, library, mode, tokens, onChan
   }
 
   const router = createRouter();
-  router.on('GET', '/api/dots/moderation/queue', { action: 'list', run: () => {
+  router.on('GET', '/api/dots/moderation/queue', { scope: 'moderation', action: 'list', run: () => {
     const now = Date.now();
     const items = [];
     for (const { id } of q.routed.all()) {
@@ -199,12 +237,12 @@ export function createDotsModeration({ db, config, library, mode, tokens, onChan
     items.sort((a, b) => a.queuedAt.localeCompare(b.queuedAt) || a.id.localeCompare(b.id));
     return { mode: mode.current, timeoutMs: mode.timeoutMs, items };
   } });
-  router.on('GET', '/api/dots/moderation/works/:task/:id', { action: 'view', run: ({ params }) => {
+  router.on('GET', '/api/dots/moderation/works/:task/:id', { scope: 'moderation', action: 'view', run: ({ params }) => {
     const work = queued(params);
     return { work: { ...summary(work, stage(work)), files: files(work),
       images: images(work).map((name) => ({ name, url: `${base(work)}/images/${encodeURIComponent(name)}` })) } };
   } });
-  router.on('GET', '/api/dots/moderation/works/:task/:id/images/:name', { action: 'view-image', run: async ({ req, res, params }) => {
+  router.on('GET', '/api/dots/moderation/works/:task/:id/images/:name', { scope: 'moderation', action: 'view-image', run: async ({ req, res, params }) => {
     const work = queued(params);
     let name = '';
     try { name = decodeURIComponent(params.name); } catch { /* rejected below */ }
@@ -213,22 +251,57 @@ export function createDotsModeration({ db, config, library, mode, tokens, onChan
     await streamFile(req, res, { file, size: statSync(file).size }, { 'Cache-Control': 'no-store', 'Content-Security-Policy': "sandbox; default-src 'none'" });
   } });
   // Raw bytes for inspection only: never rendered on the API origin.
-  router.on('GET', '/api/dots/moderation/works/:task/:id/file', { action: 'view-file', run: async ({ req, res, params, url }) => {
+  router.on('GET', '/api/dots/moderation/works/:task/:id/file', { scope: 'moderation', action: 'view-file', run: async ({ req, res, params, url }) => {
     const work = queued(params);
     const found = fileOf(work, url.searchParams.get('path'));
     await streamFile(req, res, found, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'attachment',
       'Cache-Control': 'no-store', 'Content-Security-Policy': "sandbox; default-src 'none'" });
   } });
-  router.on('POST', '/api/dots/moderation/works/:task/:id/approve', { action: 'approve', run: async ({ req, params, token, note }) => {
+  router.on('POST', '/api/dots/moderation/works/:task/:id/approve', { scope: 'moderation', action: 'approve', run: async ({ req, params, token, note }) => {
     const body = await readJson(req, 8 * 1024);
     const reason = note.reason = String(body.reason ?? '').trim().slice(0, 500) || 'dots 审核通过';
     return { result: decide(token, params, 'approved', reason, body.version) };
   } });
-  router.on('POST', '/api/dots/moderation/works/:task/:id/reject', { action: 'reject', run: async ({ req, params, token, note }) => {
+  router.on('POST', '/api/dots/moderation/works/:task/:id/reject', { scope: 'moderation', action: 'reject', run: async ({ req, params, token, note }) => {
     const body = await readJson(req, 8 * 1024);
     const reason = note.reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 500) : '';
     if (!reason) fail(400, '打回必须填写理由', 'reason_required');
     return { result: decide(token, params, 'rejected', reason, body.version) };
+  } });
+  // Only what is needed to pick a cover job: no author, note, contact or file data.
+  router.on('GET', '/api/dots/captures/failed', { scope: 'capture:read', action: 'list-capture-gaps', run: ({ url }) => {
+    const limit = Math.min(100, Math.max(1, Number.parseInt(url.searchParams.get('limit') ?? '50', 10) || 50));
+    let after = [0, ''];
+    const cursor = url.searchParams.get('cursor');
+    if (cursor) {
+      const match = /^(\d{1,16}):(up-[a-z0-9]{8})$/.exec(Buffer.from(cursor, 'base64url').toString('utf8'));
+      if (!match) fail(400, 'cursor 无效', 'invalid_cursor');
+      after = [Number(match[1]), match[2]];
+    }
+    const rows = q.captureGaps.all(after[0], after[0], after[1], limit + 1);
+    const items = [];
+    for (const row of rows.slice(0, limit)) {
+      const work = library.uploadById(row.id);
+      if (!work || work.curated) continue;
+      const shots = images(work);
+      items.push({ task: work.taskId, id: work.id, title: work.title, status: work.moderation.status,
+        reasons: [...(work.moderation.error === 'capture_incomplete' ? ['capture_incomplete'] : []), ...(work.cover ? [] : ['no_cover'])],
+        hasCover: Boolean(work.cover), screenshots: { first: shots.includes('first.jpg'), mobile: shots.includes('mobile.jpg') },
+        submittedAt: iso(work.createdAt) });
+    }
+    const last = rows.length > limit ? rows[limit - 1] : null;
+    return { items, nextCursor: last ? Buffer.from(`${last.created_at}:${last.id}`).toString('base64url') : null };
+  } });
+  // Body is the raw image. Only works.cover changes: never the files, model or labels.
+  router.on('PUT', '/api/dots/works/:task/:id/cover', { scope: 'cover:write', action: 'cover-replace', run: async ({ req, params, token }) => {
+    if (!covers) fail(404, '接口不存在', 'not_found');
+    const work = library.work(params.task, params.id);
+    if (!work || work.curated || !library.uploadById(work.id)) fail(404, '作品不存在', 'not_found');
+    const buffer = await readBody(req, coverBytes);
+    const image = checkCover(buffer, coverBytes);
+    const result = covers.replace(work, buffer, image, { id: `dots:${token.id}`, name: `dots:${token.label}` }, 'dots');
+    onChange();
+    return { result: { task: work.taskId, id: work.id, ...result, type: image.mime, width: image.width, height: image.height } };
   } });
 
   return {
@@ -236,6 +309,7 @@ export function createDotsModeration({ db, config, library, mode, tokens, onChan
       const ip = clientIp(req, config.trustProxy);
       let token = null, action = 'unknown', params = {}, reason = null;
       try {
+        if (switches.off) fail(503, 'dots 接口已被运维临时关闭', 'dots_disabled');
         const header = String(req.headers.authorization ?? '');
         const bearer = /^Bearer\s+(\S+)$/i.exec(header)?.[1];
         if (!bearer) { failures(ip); fail(401, '缺少审核令牌', 'unauthorized'); }
@@ -246,6 +320,8 @@ export function createDotsModeration({ db, config, library, mode, tokens, onChan
         if (!route) fail(404, '接口不存在', 'not_found');
         if (route.methodNotAllowed) fail(405, '不支持这个操作', 'method_not_allowed');
         ({ action } = route.handler);
+        if (switches.scopesOff.has(route.handler.scope)) fail(503, '这项能力已被运维临时关闭', 'scope_disabled');
+        if (!storedScopes(token.scopes).includes(route.handler.scope)) fail(403, `令牌没有 ${route.handler.scope} 权限`, 'scope_required');
         params = route.params;
         tokens.touch(token.id);
         const note = {};

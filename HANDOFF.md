@@ -1,3 +1,9 @@
+## 2026-10-20 · API 与作品域 robots、作品外壳分享卡片（PR，未部署）
+
+- 站点端口和作品端口的 `/robots.txt` 统一返回 `Disallow: /`：`server/robots.mjs` 在 `server/index.mjs` 外层包住两个 handler，不改 `app.mjs` 与 `content.mjs`，可直接增量合并到带现场补丁的线上版本。
+- 作品外壳 `/v/<key>/` 标题改为「AI 作品预览 · 亿模亿样」，补 `noindex`、description、Open Graph、itemprop 和 twitter 标签，分享图用 Gallery 的 `https://gallery.arenaofbias.icu/assets/share-preview.png`（占位，随 Gallery 发布）。外壳脚本与其 CSP 哈希不变。
+- 验证与细节见归档：[搜索收录与分享卡片](docs/archive/2026-10-20-seo-robots-share-kme7kme7-prog.md)。
+
 ## 2026-10-20 · 截图与审核队列超时（本地完成，未部署）
 
 - 线上从 2026-10-20 01:11（UTC+8）起截图和审核停摆。`browser.newContext` 没有超时，串行截图队列会停在这一步；审核队列等待同一件 `capturer.enqueue`，所以一起停。

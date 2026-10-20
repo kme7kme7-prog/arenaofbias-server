@@ -55,6 +55,7 @@ test('trusted shell contains no work code and sandbox responses are opaque even 
     assert.equal(shell.status, 200);
     assert.match(shell.body, new RegExp(`data-source="/c/${k}/\\?aob=fold"`));
     assert.doesNotMatch(shell.body, /export default 42|<img src=/);
+    assert.match(shell.body, /<meta property="og:image" content="https:\/\/gallery\.arenaofbias\.icu\/assets\/share-preview\.png">/);
     assert.match(shell.headers['content-security-policy'], /script-src 'sha256-/);
     assert.equal(shell.headers['cache-control'], 'no-store');
     const work = await f.request(`/c/${k}/?aob=fold`);

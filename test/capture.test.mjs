@@ -4,8 +4,8 @@ import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { captureTimeoutConfig } from '../server/config.mjs';
-import { createCapturer } from '../server/capture.mjs';
+import { captureOptionsConfig, captureTimeoutConfig } from '../server/config.mjs';
+import { createCapturer, frameGuard } from '../server/capture.mjs';
 import { createModerator } from '../server/moderation.mjs';
 
 function consumeHang(options, step) {
@@ -35,8 +35,16 @@ function fixture(t, options = {}) {
     const attempt = contexts.filter((item) => item.settings.isMobile === settings.isMobile).length;
     contexts.push(context);
     const text = settings.isMobile ? 'mobile text' : 'desktop text';
-    const frame = (value) => ({ locator: () => ({ innerText: async () => value }) });
+    const frame = (value) => ({ locator: () => ({ innerText: async () => value }),
+      evaluate: async (expression) => {
+        (options.evaluated ??= []).push(expression);
+        return /\.webgl === true$/.test(expression) ? Boolean(options.webgl) : undefined;
+      } });
     context.newPage = async () => ({
+      waitForLoadState: async (state, settings) => {
+        context.load = { state, settings };
+        if (options.loadTimeout) throw Object.assign(new Error('load timeout'), { name: 'TimeoutError' });
+      },
       goto: async (_url, navigation) => {
         context.navigation = navigation;
         if (consumeHang(options, 'goto')) await new Promise(() => {});
@@ -55,7 +63,7 @@ function fixture(t, options = {}) {
     });
     return context;
   };
-  browser.close = async () => browser.emit('disconnected');
+  browser.close = async () => { f.closes = (f.closes ?? 0) + 1; browser.emit('disconnected'); };
   const library = { mediaDir, publicContent: () => true, originOf: () => 'http://work.localhost',
     hasDirectory: () => true, setCaptures: (id, captures) => saved.push({ id, captures }) };
   let f;
@@ -198,28 +206,206 @@ test('remote capture rereads the endpoint after disconnect and writes screenshot
   ]);
 });
 
+const RETRY = { retryBase: 20, retryMax: 40, unavailable: 60_000 };
+
 for (const failure of ['missing endpoint', 'connection']) {
-  test(`remote ${failure} failure does not fall back to local Chrome or log the endpoint token`, async (t) => {
+  test(`remote ${failure} failure waits and retries without a cooldown or logging the endpoint token`, async (t) => {
     const directory = mkdtempSync(join(tmpdir(), 'capture-endpoint-'));
     const endpointFile = join(directory, 'endpoint');
     t.after(() => rmSync(directory, { recursive: true, force: true }));
     if (failure === 'connection') writeFileSync(endpointFile, 'ws://127.0.0.1:1234/private-token\n');
-    const f = fixture(t, { config: { captureEndpointFile: endpointFile }, loadChromium: async () => ({
+    let attempts = 0;
+    let browser;
+    const f = fixture(t, { timeouts: RETRY, config: { captureEndpointFile: endpointFile }, loadChromium: async () => ({
       launch: async () => assert.fail('remote failure must not launch locally'),
-      connect: async () => { throw new Error('Failed ws://127.0.0.1:1234/private-token'); },
+      connect: async () => {
+        attempts++;
+        if (attempts < 3) throw new Error('Failed ws://127.0.0.1:1234/private-token');
+        return browser;
+      },
     }) });
+    browser = f.browser;
     const warn = t.mock.method(console, 'warn', () => {});
     assert.equal(await f.capturer.initialize(), false);
-    assert.equal(await f.capturer.enqueue(f.work), null);
     assert.equal(f.capturer.available, false);
+    if (failure === 'missing endpoint') {
+      attempts = 1;
+      setTimeout(() => writeFileSync(endpointFile, 'ws://127.0.0.1:1234/private-token\n'), 10);
+    }
+    const result = await f.capturer.enqueue(f.work);
+    assert.deepEqual(result.captures, { first: 'first.jpg', mobile: 'mobile.jpg' });
+    assert.equal(attempts, 3);
+    assert.equal(f.capturer.available, true);
     assert.equal(warn.mock.callCount(), 1);
     assert.doesNotMatch(warn.mock.calls[0].arguments[0], /private-token/);
   });
 }
 
+test('a long outage gives up per item, then capture resumes when the service returns', async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'capture-endpoint-'));
+  const endpointFile = join(directory, 'endpoint');
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  let up = false;
+  let browser;
+  const f = fixture(t, { timeouts: { ...RETRY, unavailable: 80 }, config: { captureEndpointFile: endpointFile }, loadChromium: async () => ({
+    connect: async () => { if (!up) throw new Error('refused'); return browser; },
+  }) });
+  browser = f.browser;
+  t.mock.method(console, 'warn', () => {});
+  const started = Date.now();
+  const first = await f.capturer.enqueue(f.work);
+  assert.equal(first.unavailable, true);
+  assert.ok(Date.now() - started >= 60, 'the item waited before giving up');
+  assert.equal((await f.capturer.enqueue({ ...f.work, id: 'next' })).unavailable, true);
+  writeFileSync(endpointFile, 'ws://127.0.0.1:1234/token\n');
+  up = true;
+  assert.equal((await f.capturer.enqueue({ ...f.work, id: 'later' })).captures.first, 'first.jpg');
+});
+
+test('a disconnect from a restarting service mid-item waits and redoes the item', async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'capture-endpoint-'));
+  const endpointFile = join(directory, 'endpoint');
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  writeFileSync(endpointFile, 'ws://127.0.0.1:1234/token\n');
+  let f;
+  let connects = 0;
+  f = fixture(t, {
+    timeouts: { ...RETRY, task: 10_000, goto: 5000, close: 100 },
+    hang: 'goto', hangCount: 1,
+    onHang: () => setImmediate(() => {
+      rmSync(endpointFile);
+      f.browser.emit('disconnected');
+      setTimeout(() => writeFileSync(endpointFile, 'ws://127.0.0.1:2345/token\n'), 30);
+    }),
+    config: { captureEndpointFile: endpointFile },
+    loadChromium: async () => ({ connect: async () => { connects++; return f.browser; } }),
+  });
+  t.mock.method(console, 'warn', () => {});
+  const result = await f.capturer.enqueue(f.work);
+  assert.deepEqual(result.captures, { first: 'first.jpg', mobile: 'mobile.jpg' });
+  assert.equal(connects, 2);
+});
+
+test('a WebGL page gets the longer limits and its frames pause around each screenshot', async (t) => {
+  const options = { webgl: true, timeouts: { screenshot: 1111, webglScreenshot: 2222 } };
+  const f = fixture(t, options);
+  const result = await f.capturer.enqueue(f.work);
+  assert.deepEqual(result.captures, { first: 'first.jpg', mobile: 'mobile.jpg' });
+  assert.ok(f.contexts.every((context) => context.screenshotTimeout === 2222));
+  const actions = options.evaluated.map((expression) => /\.(pause|resume)\(\)$/.exec(expression)?.[1]).filter(Boolean);
+  assert.deepEqual(actions, Array(6).fill(['pause', 'resume']).flat());
+  const plain = { timeouts: { screenshot: 1111, webglScreenshot: 2222 } };
+  const g = fixture(t, plain);
+  await g.capturer.enqueue(g.work);
+  assert.ok(g.contexts.every((context) => context.screenshotTimeout === 1111));
+  assert.equal(plain.evaluated.some((expression) => /pause/.test(expression)), false);
+});
+
+test('a WebGL page extends the job limit so its second viewport still runs', async (t) => {
+  const timeouts = { task: 60, webglTask: 5000, goto: 1000, newContext: 1000, newPage: 1000, screenshot: 1000, close: 100, connect: 1000 };
+  const slow = (options) => fixture(t, { ...options, timeouts });
+  const f = slow({ webgl: true });
+  const g = slow({ webgl: false });
+  for (const item of [f, g]) {
+    const contexts = item.contexts;
+    item.browser.newContext = ((original) => async (settings) => {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      return original(settings);
+    })(item.browser.newContext);
+    void contexts;
+  }
+  t.mock.method(console, 'warn', () => {});
+  assert.deepEqual(Object.keys((await f.capturer.enqueue(f.work)).captures), ['first', 'mobile']);
+  assert.notDeepEqual(Object.keys((await g.capturer.enqueue(g.work)).captures), ['first', 'mobile']);
+});
+
+test('a page whose load event never fires is shot as it stands', async (t) => {
+  const f = fixture(t, { loadTimeout: true });
+  const warn = t.mock.method(console, 'warn', () => {});
+  const result = await f.capturer.enqueue(f.work);
+  assert.deepEqual(result.captures, { first: 'first.jpg', mobile: 'mobile.jpg' });
+  assert.ok(f.contexts.every((context) => context.navigation.waitUntil === 'domcontentloaded' && context.load.state === 'load'));
+  assert.ok(warn.mock.calls.some((call) => /未在时限内加载完/.test(call.arguments[0])));
+});
+
+test('the frame guard throttles animation frames only after a WebGL context and can pause them', async () => {
+  let clock = 0;
+  const queued = [];
+  const canvas = function HTMLCanvasElement() {};
+  canvas.prototype.getContext = function getContext(type) { return { type }; };
+  const scope = { requestAnimationFrame: (callback) => { queued.push(callback); return queued.length; }, HTMLCanvasElement: canvas,
+    setTimeout };
+  const run = new Function('globalThis', frameGuard(10));
+  run(scope);
+  const tick = () => { clock += 1000 / 60; const batch = queued.splice(0); for (const callback of batch) callback(clock); };
+  let calls = 0;
+  const loop = () => { calls++; scope.requestAnimationFrame(loop); };
+  scope.requestAnimationFrame(loop);
+  for (let i = 0; i < 30; i++) tick();
+  assert.equal(calls, 30);
+  new canvas().getContext('webgl2');
+  calls = 0;
+  for (let i = 0; i < 60; i++) tick();
+  assert.ok(calls >= 9 && calls <= 11, `throttled to about 10 fps, got ${calls}`);
+  const control = scope[Symbol.for('aob.capture.frames')];
+  assert.equal(control.webgl, true);
+  control.pause();
+  calls = 0;
+  for (let i = 0; i < 30; i++) tick();
+  assert.equal(calls, 0);
+  control.resume();
+  for (let i = 0; i < 30; i++) tick();
+  assert.ok(calls > 0);
+  const id = scope.requestAnimationFrame(() => assert.fail('cancelled callback ran'));
+  scope.cancelAnimationFrame(id);
+});
+
+test('an oversized entry page skips the screenshot queue and moderation sends it to people', async (t) => {
+  const f = fixture(t, { config: { captureOptions: { maxPageBytes: 100 } }, loadChromium: async () => assert.fail('no browser for oversized work') });
+  t.mock.method(console, 'warn', () => {});
+  writeFileSync(join(f.mediaDir, 'big.html'), 'x'.repeat(101));
+  writeFileSync(join(f.mediaDir, 'small.html'), 'x'.repeat(100));
+  const big = { ...f.work, dir: f.mediaDir, entry: 'big.html' };
+  assert.equal(await f.capturer.enqueue(big), null);
+  let captured = 0;
+  const works = [{ ...big, id: 'big' }, { ...big, id: 'gone', entry: 'gone.html' }].map((work) => ({
+    ...work, moderation: { status: 'pending' }, title: '标题', summary: '', note: '', modelName: '', modelId: 'm',
+    vendor: '', effort: '', harnessOther: '', providerOther: '',
+  }));
+  const results = [];
+  const moderator = createModerator({
+    config: { captureOptions: { maxPageBytes: 100 }, moderation: { enabled: true, apiKey: 'test-key', baseUrl: 'http://127.0.0.1:9/v1', model: 'gpt-6-luna' } },
+    library: { uploads: () => works, uploadById: (id) => works.find((work) => work.id === id),
+      finishModeration: (work, result) => { results.push([work.id, result.status, result.error]); return true; } },
+    capturer: { enqueue: async () => { captured++; return null; } },
+  });
+  t.after(() => moderator.close());
+  await new Promise((resolve) => setImmediate(resolve));
+  await moderator.idle();
+  assert.deepEqual(results, [['big', 'review', 'page_too_large'], ['gone', 'review', 'page_missing']]);
+  assert.equal(captured, 0);
+  assert.equal(captureOptionsConfig({ CAPTURE_MAX_PAGE_BYTES: '1048576' }).maxPageBytes, 1048576);
+  assert.equal(captureOptionsConfig({}).maxPageBytes, 5 * 1024 * 1024);
+});
+
+test('moderation records capture_unavailable when the service stays down', async (t) => {
+  const results = [];
+  const work = { id: 'w', moderation: { status: 'pending' }, title: '', dir: tmpdir(), entry: '.' };
+  const moderator = createModerator({
+    config: { moderation: { enabled: true, apiKey: 'k', baseUrl: 'http://127.0.0.1:9/v1', model: 'm' } },
+    library: { uploads: () => [work], uploadById: () => work, finishModeration: (_work, result) => { results.push(result.error); return true; } },
+    capturer: { enqueue: async () => ({ unavailable: true, captures: {}, late: {}, texts: [] }) },
+  });
+  t.after(() => moderator.close());
+  await new Promise((resolve) => setImmediate(resolve));
+  await moderator.idle();
+  assert.deepEqual(results, ['capture_unavailable']);
+});
+
 test('capture timeout configuration keeps positive overrides and falls back otherwise', () => {
   assert.deepEqual(captureTimeoutConfig({}), {
     task: 180_000, newContext: 45_000, newPage: 30_000, goto: 45_000, screenshot: 60_000, close: 15_000, connect: 30_000,
+    webglTask: 300_000, webglScreenshot: 120_000, retryBase: 5_000, retryMax: 60_000, unavailable: 1_800_000,
   });
   assert.equal(captureTimeoutConfig({ CAPTURE_TASK_TIMEOUT_MS: '0' }).task, 180_000);
   assert.equal(captureTimeoutConfig({ CAPTURE_GOTO_TIMEOUT_MS: 'soon' }).goto, 45_000);
@@ -331,8 +517,9 @@ test('moderation records an incomplete capture and continues when the browser ha
   });
   const works = ['a', 'b'].map((id) => ({
     id, moderation: { status: 'pending' }, title: '标题', summary: '', note: '', modelName: '', modelId: 'm',
-    vendor: '', effort: '', harnessOther: '', providerOther: '', dir: f.mediaDir, entry: 'missing.html', contentKey: 'key',
+    vendor: '', effort: '', harnessOther: '', providerOther: '', dir: f.mediaDir, entry: 'index.html', contentKey: 'key',
   }));
+  writeFileSync(join(f.mediaDir, 'index.html'), '<p>ok</p>');
   const results = [];
   const moderator = createModerator({
     config: { moderation: { enabled: true, apiKey: 'test-key', baseUrl: 'http://127.0.0.1:9/v1', model: 'gpt-6-luna' } },

@@ -3,6 +3,7 @@
 // Static signals turn an automatic approval into a human review when needed.
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { extname, join } from 'node:path';
+import { entryBytes } from './capture.mjs';
 
 const RULES = `你是作品投稿平台的内容审查员。按同一标准审查用户声明、页面文字和图片。
 拒绝：色情或性剥削内容；严重血腥、鼓吹暴力或恐怖主义；仇恨煽动；诈骗、赌博招揽、恶意广告引流；暴露他人隐私；明确教唆违法伤害的内容。
@@ -124,10 +125,12 @@ function withSignals(result, signals) {
 const complete = (capture) => Boolean(capture?.captures?.first && capture?.captures?.mobile &&
   capture?.late?.first && capture?.late?.mobile && capture.texts?.length === 4);
 
-function inputFor(work, library, capture) {
+const MAX_PAGE_BYTES = 5 * 1024 * 1024;
+
+function inputFor(work, library, capture, maxPageBytes = MAX_PAGE_BYTES) {
   if (!complete(capture)) throw new Error('capture_incomplete');
   const html = readFileSync(join(work.dir, work.entry), 'utf8');
-  if (Buffer.byteLength(html) > 5 * 1024 * 1024) throw new Error('page_too_large');
+  if (Buffer.byteLength(html) > maxPageBytes) throw new Error('page_too_large');
   // Model, vendor, effort and tool declarations are free text that content review does not need.
   const text = JSON.stringify({ title: work.title, summary: work.summary, note: work.note,
     generationMode: work.generationMode, humanIntervention: work.humanIntervention,
@@ -145,6 +148,7 @@ function inputFor(work, library, capture) {
 
 export function createModerator({ config, library, capturer, onChange = () => {} }) {
   const settings = config.moderation ?? {};
+  const maxPageBytes = config.captureOptions?.maxPageBytes ?? MAX_PAGE_BYTES;
   let closed = false;
   let running = null;
   let controller = null;
@@ -159,8 +163,14 @@ export function createModerator({ config, library, capturer, onChange = () => {}
 
   async function check(work) {
     if (!settings.apiKey) throw new Error('api_key_missing');
+    // The entry page decides: an oversized one goes to people without a screenshot,
+    // and a missing one cannot be reviewed at all.
+    const size = entryBytes(work);
+    if (size === null) throw new Error('page_missing');
+    if (size > maxPageBytes) throw new Error('page_too_large');
     const capture = await capturer.enqueue(work);
     if (closed) return null;
+    if (capture?.unavailable) throw new Error('capture_unavailable');
     return ruleRejection(work, capture) ?? withSignals(await review(work, capture), staticSignals(work.dir));
   }
 
@@ -168,7 +178,7 @@ export function createModerator({ config, library, capturer, onChange = () => {}
     if (!settings.apiKey) throw new Error('api_key_missing');
     const endpoint = new URL('responses', `${settings.baseUrl.replace(/\/+$/, '')}/`);
     if (endpoint.protocol !== 'https:' && !(endpoint.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(endpoint.hostname))) throw new Error('endpoint_invalid');
-    const input = inputFor(work, library, capture);
+    const input = inputFor(work, library, capture, maxPageBytes);
     controller = new AbortController();
     const timeout = setTimeout(() => controller?.abort(), 15 * 60e3);
     timeout.unref();

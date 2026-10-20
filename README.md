@@ -73,6 +73,12 @@ npm start
 | `CAPTURE_SCREENSHOT_TIMEOUT_MS` | `60000` | 单张 `screenshot` 上限。正常一张截图约 25–30 秒 |
 | `CAPTURE_CLOSE_TIMEOUT_MS` | `15000` | 关闭 page、context 或浏览器连接的上限 |
 | `CAPTURE_CONNECT_TIMEOUT_MS` | `30000` | 连接独立截图服务或本地启动浏览器的上限 |
+| `CAPTURE_WEBGL_TASK_TIMEOUT_MS` | `300000` | 页面创建了 WebGL 上下文时，单件总时长放宽到此值 |
+| `CAPTURE_WEBGL_SCREENSHOT_TIMEOUT_MS` | `120000` | WebGL 页面的单张截图上限 |
+| `CAPTURE_WEBGL_FPS` | `8` | WebGL 页面 `requestAnimationFrame` 每秒最多次数；截图期间暂停 |
+| `CAPTURE_RETRY_BASE_MS` / `CAPTURE_RETRY_MAX_MS` | `5000` / `60000` | 独立截图服务连不上时，队列等待重试的起始与最大间隔（指数退避） |
+| `CAPTURE_UNAVAILABLE_MAX_MS` | `1800000` | 连不上持续超过此时长后，排队作品记 `capture_unavailable` 转人工；之后每件仍先尝试连接 |
+| `CAPTURE_MAX_PAGE_BYTES` | `5242880` | 入口 HTML 超过此字节数时不截图；审核直接记 `page_too_large` 转人工 |
 | `CONTENT_MODERATION` | 关（`1` 开启） | 新投稿先保持私密，异步审查文字、封面及桌面/手机首屏；异常转人工 |
 | `MODERATION_API_KEY` / `OPENAI_API_KEY` | 未配置 | 服务器审核 API 密钥，前者优先；不下发至浏览器 |
 | `MODERATION_BASE_URL` | `https://api.openai.com/v1` | Responses API 根地址；SSH relay 部署见部署文档 6.1，密钥只配置在服务器 |
@@ -101,7 +107,7 @@ npm start
 
 ## 自动内容审查
 
-服务器设置 `CONTENT_MODERATION=1`，在服务器环境中配置 `MODERATION_API_KEY` 或 `OPENAI_API_KEY`，并启用已有截图环境（`CAPTURE=1`、预配置 Playwright 与 Chrome）。默认调用 OpenAI Responses API 的 GPT-6 Luna Flex；不新增 npm 依赖。缺少密钥、截图不完整、超时或 Flex 容量不足时保留私密状态，转人工复核；不自动改用标准档。上表 `CAPTURE_*_TIMEOUT_MS` 为 `0`、空或非数字时保持默认值，不能关掉上限。分步超时或连接断开会丢弃当前浏览器连接并在下一件重建；浏览器启动或连接失败仍冷却五分钟。细节见部署文档。
+服务器设置 `CONTENT_MODERATION=1`，在服务器环境中配置 `MODERATION_API_KEY` 或 `OPENAI_API_KEY`，并启用已有截图环境（`CAPTURE=1`、预配置 Playwright 与 Chrome）。默认调用 OpenAI Responses API 的 GPT-6 Luna Flex；不新增 npm 依赖。缺少密钥、截图不完整、超时或 Flex 容量不足时保留私密状态，转人工复核；不自动改用标准档。上表 `CAPTURE_*_TIMEOUT_MS` 为 `0`、空或非数字时保持默认值，不能关掉上限。分步超时或连接断开会丢弃当前浏览器连接并在下一件重建；独立截图服务连不上时队列等待重试，本地浏览器启动失败仍冷却五分钟。细节见部署文档。
 
 内容状态独立于 `unverified / verified / questioned`：`pending` 等待自动审查，`approved` 可公开，`review` 等人工，`rejected` 不公开。公开门面开关仍生效；只有核验为 `verified` 的作品才能进盲评。作者和管理员响应中会发放有效一小时的随机预览地址，地址本身具有预览能力，不应转发；封面和截图仍校验作者/管理员会话。后台支持人工通过、拒绝和重新自动审查，并记录审计。修改送审文字后重新进入 `pending`，启动时恢复尚未处理的队列。
 

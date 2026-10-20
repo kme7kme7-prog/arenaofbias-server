@@ -1,3 +1,11 @@
+## 2026-10-20 · WebGL 截图限帧、放宽时限，截图服务断线等待重试，超大入口页转人工（PR，未部署）
+
+- 截图机上 WebGL 作品走 SwiftShader 软件渲染，本身就慢。截图 context 注入脚本：页面请求 WebGL 上下文后 `requestAnimationFrame` 限到 `CAPTURE_WEBGL_FPS`（默认 8），截图和鼠标操作期间暂停。探测到 WebGL 时单件总时长放宽到 300 秒、单张截图 120 秒。导航改等 `domcontentloaded`，load 到点未完成按当前画面截图。
+- 独立截图服务连不上（端点文件不存在、连接失败或超时）不再写 `failedAt` 五分钟冷却：队列保留当前一件，5 秒起翻倍、最多 60 秒等待重连；连续 30 分钟连不上后逐件记 `capture_unavailable` 转人工，恢复后自动继续。本地 Chrome 启动失败和 Playwright 导入失败仍冷却五分钟。
+- 审核在截图前检查入口 HTML 文件大小，超过 `CAPTURE_MAX_PAGE_BYTES`（默认 5 MiB）直接 `page_too_large`，入口缺失记 `page_missing`，都不进截图队列。
+- 不改 `scripts/capture-browser.mjs`、systemd、孤儿清理；不做定期重建浏览器。无迁移、无依赖。
+- 归档：[WebGL 截图与截图服务断线](docs/archive/2026-10-20-capture-webgl-kme7kme7-prog.md)。
+
 ## 2026-10-20 · API 与作品域 robots、作品外壳分享卡片（PR，未部署）
 
 - 站点端口和作品端口的 `/robots.txt` 统一返回 `Disallow: /`：`server/robots.mjs` 在 `server/index.mjs` 外层包住两个 handler，不改 `app.mjs` 与 `content.mjs`，可直接增量合并到带现场补丁的线上版本。

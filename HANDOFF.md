@@ -45,6 +45,12 @@
 - 实际候选路由与线上原路由在 VPS 独立低优先级进程、同一只读 SQLite 事务中对照：2411 件作品/103题，三份完整返回 JSON SHA256 一致。旧路由4.19秒/28675次SQL；候选首次2.52秒、热态0.46秒/1398次SQL。首次仍有预览文件校验/哈希开销，不承诺整页固定0.46秒；5.7MB全量响应的按需加载留待后续。
 - 证据及补丁在上级 `.local/review-query-fix-20261021/`：before/after-targeted.log、syntax.log、tests.log、retry-http.log、tests-bounded.log、profile-result.json、candidate.json。`runtime-candidate/server/app.mjs` 只在上一轮下载的生产 app 上应用当前审核路由补丁，保留其余生产差异；真正部署前须重新确认生产哈希和活动任务，再备份、做当前运行组合验证。此次没有写生产数据、更新线上文件、重启服务、commit或push。
 
+## 2026-10-20 · dots 3D 预览上传接口（PR，未合并，未部署）
+
+- 新权限 `preview:write`（单独授权、撤权，`DOTS_DISABLED_SCOPES=preview:write` 全局关闭）：`PUT /api/dots/works/:task/:id/preview` 收 ≤2 MB 的 gzip `.sbox`，服务器按白名单校验并重建后存为 `preview-<stamp>.sbox` + 清单，激活为 `preview.json`，海报是当前人工封面；不碰作品文件和作品行，不覆盖烘焙预览。
+- `GET /api/dots/captures/failed?category=建模`（别名 `3d`）：只列三维建模题的作品，每项带 `category`、`webgpu`、`webgpuSignals`（静态扫描作品文件）。
+- 历史复用 `cover_history`（`preview-*` 动作），管理员 `preview-history` / `preview/rollback`，脚本 `preview-history` / `preview-rollback`。无迁移、无新环境变量。详见 `docs/archive/2026-10-20-dots-preview-kme7kme7-prog.md`。
+
 ## 2026-10-20 · dots 令牌分权限、截图失败列表、封面替换（#19 的补充，合并后未部署）
 
 - 令牌改为逐项授权：`moderation`、`capture:read`、`cover:write`。脚本 `create <label> <scopes>` 指定，`grant` / `withdraw` 单项增减，`revoke` 整个作废，都立即生效。紧急开关 `DOTS_API=off`、`DOTS_DISABLED_SCOPES`。v49 迁移：`moderation_tokens.scopes`（已有令牌默认 `moderation`）和 `cover_history`，不改作品行。

@@ -10,6 +10,9 @@
 //   node scripts/moderation-token.mjs cover-history <work id>
 //   node scripts/moderation-token.mjs cover-rollback <work id> [history id]
 //                                                        point the work back at its previous cover
+//   node scripts/moderation-token.mjs preview-history <work id>
+//   node scripts/moderation-token.mjs preview-rollback <work id> [history id]
+//                                                        undo a dots preview upload (baked previews untouched)
 //   node scripts/moderation-token.mjs mode [machine|dots|dots-review-only|env]
 //                                                        show, or override MODERATION_MODE (env clears it)
 //   node scripts/moderation-token.mjs audit [limit]      recent token requests, newest first
@@ -19,6 +22,7 @@ import { config } from '../server/config.mjs';
 import { openDatabase } from '../server/db.mjs';
 import { MODERATION_MODES, TOKEN_SCOPES, createModerationMode, createModerationTokens } from '../server/dots-moderation.mjs';
 import { createCoverStore } from '../server/work-covers.mjs';
+import { createPreviewStore } from '../server/preview-uploads.mjs';
 
 const [command, value, extra] = process.argv.slice(2);
 const db = openDatabase(join(config.dataDir, 'platform.db'));
@@ -52,6 +56,18 @@ try {
       console.log(JSON.stringify(covers.rollback(work, extra ?? null, { id: operator, name: operator })));
       console.log('已回滚；服务进程按数据库版本号发现这次写入，bootstrap / catalog 缓存下一次请求即重建');
     }
+  } else if (command === 'preview-history' || command === 'preview-rollback') {
+    const row = db.prepare('SELECT id, task_id, cover FROM works WHERE id = ? AND deleted_at IS NULL').get(String(value ?? ''));
+    if (!row) throw new Error('作品不存在');
+    const previews = createPreviewStore({ db, library: { mediaDir: join(config.dataDir, 'media') } });
+    const work = { id: row.id, taskId: row.task_id, cover: row.cover, curated: false };
+    if (command === 'preview-history') {
+      const now = previews.current(work);
+      console.log(`当前预览：${now.kind === 'none' ? '(无)' : now.kind === 'foreign' ? '人工/烘焙预览（不归 dots 管）' : now.version}`);
+      for (const entry of previews.history(work)) console.log([entry.id, entry.at, entry.action, `${entry.previous ?? '(无)'} -> ${entry.next ?? '(无)'}`, entry.actor].join('  '));
+    } else {
+      console.log(JSON.stringify(previews.rollback(work, extra ?? null, { id: operator, name: operator })));
+    }
   } else if (command === 'revoke') {
     if (!value) throw new Error('用法：revoke <id>');
     console.log(tokens.revoke(value) ? `已吊销 ${value}` : `${value} 不存在或早已吊销`);
@@ -64,7 +80,7 @@ try {
       console.log([when(row.at), row.token_id, row.token_label, row.action, row.task_id ?? '-', row.work_id ?? '-', row.outcome, row.ip ?? '-', row.reason ?? ''].join('  '));
     }
   } else {
-    console.log(`用法：node scripts/moderation-token.mjs create <label> [${TOKEN_SCOPES.join(',')}] | list | grant <id> <scope> | withdraw <id> <scope> | revoke <id> | mode [${MODERATION_MODES.join('|')}|env] | audit [limit] | cover-history <work id> | cover-rollback <work id> [history id]`);
+    console.log(`用法：node scripts/moderation-token.mjs create <label> [${TOKEN_SCOPES.join(',')}] | list | grant <id> <scope> | withdraw <id> <scope> | revoke <id> | mode [${MODERATION_MODES.join('|')}|env] | audit [limit] | cover-history <work id> | cover-rollback <work id> [history id] | preview-history <work id> | preview-rollback <work id> [history id]`);
     process.exitCode = command ? 1 : 0;
   }
 } catch (error) {

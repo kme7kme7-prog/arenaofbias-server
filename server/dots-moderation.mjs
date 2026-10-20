@@ -2,13 +2,14 @@
 // Scope moderation: list the dots queue, view a queued work (metadata, files,
 // screenshots), approve, and reject with a reason. Scope capture:read: list works
 // whose screenshots failed (capture_incomplete or no first screen). Scope cover:write: replace a
-// work's cover. Every route below is the whole whitelist; the site dispatcher
-// refuses tokens everywhere else.
+// work's cover. Scope preview:write: upload a 3D card preview (.sbox). Every route
+// below is the whole whitelist; the site dispatcher refuses tokens everywhere else.
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { readdirSync, realpathSync, statSync } from 'node:fs';
 import { extname, join, relative, resolve, sep } from 'node:path';
 import { HttpError, clientIp, createRouter, fail, rateLimit, readBody, readJson, sendJson, streamFile } from './http.mjs';
 import { checkCover } from './work-covers.mjs';
+import { sanitizeSbox, webgpuSignals } from './preview-uploads.mjs';
 
 export const MODERATION_MODES = ['machine', 'dots', 'dots-review-only'];
 const validMode = (value) => MODERATION_MODES.includes(value);
@@ -43,7 +44,7 @@ export function createModerationMode(db, config) {
 }
 
 // Abilities a token may hold, each granted and withdrawn on its own.
-export const TOKEN_SCOPES = ['moderation', 'capture:read', 'cover:write'];
+export const TOKEN_SCOPES = ['moderation', 'capture:read', 'cover:write', 'preview:write'];
 export function parseScopes(value) {
   const list = [...new Set(String(value ?? '').split(/[\s,]+/).filter(Boolean))];
   const unknown = list.filter((scope) => !TOKEN_SCOPES.includes(scope));
@@ -111,7 +112,8 @@ export function createModerationTokens(db) {
 const IMAGE = /^[\w.-]{1,120}\.(?:jpe?g|png|webp)$/i;
 const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
 
-export function createDotsModeration({ db, config, library, mode, tokens, covers = null, coverBytes = 3 * 1024 * 1024, onChange = () => {} }) {
+export function createDotsModeration({ db, config, library, mode, tokens, covers = null, previews = null, coverBytes = 3 * 1024 * 1024,
+  categoryOf = () => '', tasksIn = () => [], onChange = () => {} }) {
   const switches = { off: Boolean(config.moderation?.dotsApiOff), scopesOff: new Set(config.moderation?.dotsDisabledScopes ?? []) };
   const perToken = rateLimit(60_000, config.moderation?.dotsRequestsPerMin ?? 120, '请求太频繁，请稍后再试', 'rate_limited');
   const failures = rateLimit(60_000, 20, '鉴权失败次数过多，请稍后再试', 'rate_limited');
@@ -128,6 +130,12 @@ export function createDotsModeration({ db, config, library, mode, tokens, covers
     // Covers named cover-* only come from a manual replacement (work-covers.mjs).
     captureGaps: Object.fromEntries(Object.entries({ all: '', exclude: "AND COALESCE(cover, '') NOT LIKE 'cover-%'", only: "AND cover LIKE 'cover-%'" })
       .map(([key, manual]) => [key, db.prepare(`SELECT id FROM works WHERE id > ? AND deleted_at IS NULL
+        AND (json_extract(moderation, '$.error') = 'capture_incomplete' OR COALESCE(json_extract(captures, '$.first'), '') = '')
+        ${manual} ORDER BY id LIMIT ?`)])),
+    // Same list limited to the tasks of one question category (task ids as a JSON array).
+    captureGapsIn: Object.fromEntries(Object.entries({ all: '', exclude: "AND COALESCE(cover, '') NOT LIKE 'cover-%'", only: "AND cover LIKE 'cover-%'" })
+      .map(([key, manual]) => [key, db.prepare(`SELECT id FROM works WHERE id > ? AND deleted_at IS NULL
+        AND task_id IN (SELECT value FROM json_each(?))
         AND (json_extract(moderation, '$.error') = 'capture_incomplete' OR COALESCE(json_extract(captures, '$.first'), '') = '')
         ${manual} ORDER BY id LIMIT ?`)])),
   };
@@ -284,7 +292,11 @@ export function createDotsModeration({ db, config, library, mode, tokens, covers
       after = Buffer.from(cursor, 'base64url').toString('utf8');
       if (!/^[\w-]{1,64}$/.test(after)) fail(400, 'cursor 无效', 'invalid_cursor');
     }
-    const rows = q.captureGaps[manualCover].all(after, limit + 1);
+    // category is the question's category; 3d / modeling are aliases of 建模 (三维建模).
+    const asked = url.searchParams.get('category');
+    const category = asked == null || asked === '' ? null : ({ '3d': '建模', modeling: '建模', 三维建模: '建模' }[asked] ?? asked);
+    const rows = category == null ? q.captureGaps[manualCover].all(after, limit + 1)
+      : q.captureGapsIn[manualCover].all(after, JSON.stringify(tasksIn(category)), limit + 1);
     const items = [];
     for (const row of rows.slice(0, limit)) {
       const work = library.uploadById(row.id);
@@ -294,10 +306,26 @@ export function createDotsModeration({ db, config, library, mode, tokens, covers
         reasons: [...(work.moderation.error === 'capture_incomplete' ? ['capture_incomplete'] : []), ...(captures.first ? [] : ['no_first_capture'])],
         screenshots: { first: Boolean(captures.first), mobile: Boolean(captures.mobile) },
         hasCover: Boolean(work.cover), hasManualCover: /^cover-/.test(work.cover ?? ''),
-        submittedAt: iso(work.createdAt) });
+        submittedAt: iso(work.createdAt),
+        ...(category != null ? { category: categoryOf(work.taskId) || '', ...webgpuOf(work) } : {}) });
     }
     const last = rows.length > limit ? rows[limit - 1] : null;
     return { items, nextCursor: last ? Buffer.from(last.id).toString('base64url') : null };
+  } });
+  // Only computed when a category is asked for, so the plain list keeps its old shape.
+  function webgpuOf(work) {
+    const signals = webgpuSignals(work);
+    return { webgpu: signals.length > 0, webgpuSignals: signals };
+  }
+  // Body is the raw .sbox. Only the preview files change; the poster is the manual cover.
+  router.on('PUT', '/api/dots/works/:task/:id/preview', { scope: 'preview:write', action: 'preview-replace', run: async ({ req, params, token }) => {
+    if (!previews) fail(404, '接口不存在', 'not_found');
+    const work = library.work(params.task, params.id);
+    if (!work || work.curated || !library.uploadById(work.id)) fail(404, '作品不存在', 'not_found');
+    const { buffer, stats } = sanitizeSbox(await readBody(req, 2 * 1024 * 1024));
+    const result = previews.replace(work, buffer, { id: `dots:${token.id}`, name: `dots:${token.label}` }, { source: 'dots', ...stats });
+    onChange();
+    return { result: { task: work.taskId, id: work.id, ...result, stats } };
   } });
   // Body is the raw image. Only works.cover changes: never the files, model or labels.
   router.on('PUT', '/api/dots/works/:task/:id/cover', { scope: 'cover:write', action: 'cover-replace', run: async ({ req, params, token }) => {

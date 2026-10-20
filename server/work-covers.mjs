@@ -68,8 +68,9 @@ export function createCoverStore({ db, library }) {
     swap: db.prepare('UPDATE works SET cover = ? WHERE id = ? AND cover IS ? AND deleted_at IS NULL'),
     history: db.prepare(`INSERT INTO cover_history (at, work_id, task_id, action, previous, next, snapshot, actor_id, actor_name, detail)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-    list: db.prepare('SELECT * FROM cover_history WHERE work_id = ? ORDER BY id DESC LIMIT 100'),
-    entry: db.prepare('SELECT * FROM cover_history WHERE id = ? AND work_id = ?'),
+    // Preview entries (preview-*) share the table; covers only see their own.
+    list: db.prepare("SELECT * FROM cover_history WHERE work_id = ? AND action LIKE 'cover-%' ORDER BY id DESC LIMIT 100"),
+    entry: db.prepare("SELECT * FROM cover_history WHERE id = ? AND work_id = ? AND action LIKE 'cover-%'"),
     audit: db.prepare('INSERT INTO audit (at, actor_id, actor_name, action, task_id, work_id, detail) VALUES (?, ?, ?, ?, ?, ?, ?)'),
   };
   const dirOf = (work) => join(library.mediaDir, work.id);

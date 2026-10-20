@@ -58,14 +58,18 @@ export function readWorkPreview(mediaDir, work) {
       ? { previewCapture: mediaUrl(work.id, FILES.capture, `${sourceDigest.slice(0, 12)}-${manifest.captureSha.slice(0, 12)}`) }
       : null;
 
-    if (manifest.mode === 'model' && manifest.model === FILES.model && manifest.poster === FILES.poster) {
-      const model = fileInside(directory, FILES.model), poster = fileInside(directory, FILES.poster);
+    // dots uploads (preview-uploads.mjs) use versioned model names and the manual cover as poster.
+    const dots = manifest.source === 'dots';
+    const modelOk = manifest.model === FILES.model || (dots && /^preview-[a-z0-9]{8,24}\.sbox$/.test(manifest.model ?? ''));
+    const posterOk = manifest.poster === FILES.poster || (dots && /^cover-[a-z0-9]{8,24}\.(?:png|jpg|webp)$/.test(manifest.poster ?? ''));
+    if (manifest.mode === 'model' && modelOk && posterOk) {
+      const model = fileInside(directory, manifest.model), poster = fileInside(directory, manifest.poster);
       if (!matchesHash(model, manifest.modelSha) || !matchesHash(poster, manifest.posterSha)) return null;
       const version = `${sourceDigest.slice(0, 12)}-${manifest.modelSha.slice(0, 12)}-${manifest.posterSha.slice(0, 12)}`;
       return {
         previewMode: 'model',
-        previewModel: mediaUrl(work.id, FILES.model, version),
-        previewPoster: mediaUrl(work.id, FILES.poster, version),
+        previewModel: mediaUrl(work.id, manifest.model, version),
+        previewPoster: mediaUrl(work.id, manifest.poster, version),
         ...capture,
       };
     }

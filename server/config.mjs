@@ -101,6 +101,10 @@ export const config = {
     mode: env.MODERATION_MODE || 'machine',
     dotsTimeoutMs: Math.max(60_000, int(env.DOTS_REVIEW_TIMEOUT_MS, 30 * 60_000)),
     dotsRequestsPerMin: Math.max(1, int(env.DOTS_REQUESTS_PER_MIN, 120)),
+    // Emergency switches: DOTS_API=off closes every dots route; DOTS_DISABLED_SCOPES
+    // (comma separated, e.g. cover:write) closes single abilities for all tokens.
+    dotsApiOff: env.DOTS_API === 'off',
+    dotsDisabledScopes: String(env.DOTS_DISABLED_SCOPES ?? '').split(',').map((scope) => scope.trim()).filter(Boolean),
   },
   secureCookies: env.COOKIE_SECURE === '1',
   cookieSameSite: env.COOKIE_SAME_SITE || 'Lax',

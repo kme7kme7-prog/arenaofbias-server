@@ -21,6 +21,7 @@ import { createComments } from './comments.mjs';
 import { createChangelog } from './changelog.mjs';
 import { createAnnouncements, retiredAnnouncementStream } from './announcements.mjs';
 import { createDotsModeration, createModerationMode, createModerationTokens } from './dots-moderation.mjs';
+import { createCoverStore } from './work-covers.mjs';
 import { AVATARS, EFFORTS, EMOJIS } from './config.mjs';
 import { createContentHandler } from './content.mjs';
 import { openDatabase, transaction } from './db.mjs';
@@ -87,8 +88,9 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const comments = createComments(db, library);
   const capturer = captureFactory({ config, library });
   const moderator = createModerator({ config, library, capturer, onChange: () => arena.invalidate(), routing: moderationMode });
+  const covers = createCoverStore({ db, library });
   const dots = createDotsModeration({ db, config, library, mode: moderationMode, tokens: createModerationTokens(db),
-    onChange: () => arena.invalidate() });
+    covers, coverBytes: limits.coverBytes, onChange: () => arena.invalidate() });
   const queueWork = (work) => {
     if (work.moderation.status === 'pending') moderator.enqueue(work);
     else void capturer.enqueue(work);
@@ -517,6 +519,20 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     moderator.sweep();
     return result;
   });
+  // Cover history and rollback (covers replaced by dots); old files are never deleted.
+  router.on('GET', '/api/works/:task/:id/cover-history', (ctx) => {
+    adminOnly(ctx);
+    const work = library.work(ctx.params.task, ctx.params.id);
+    if (!work || work.curated) fail(404, '作品不存在');
+    return { cover: work.cover ? `media/${work.id}/${work.cover}` : null, entries: covers.history(work) };
+  });
+  router.on('POST', '/api/works/:task/:id/cover/rollback', async (ctx) => {
+    const admin = adminOnly(ctx);
+    const body = await readJson(ctx.req);
+    const result = covers.rollback(library.work(ctx.params.task, ctx.params.id), body.historyId ?? null, { id: admin.id, name: admin.name });
+    arena.invalidate();
+    return result;
+  });
   router.on('POST', '/api/works/:task/:id/moderation/retry', (ctx) => {
     const admin = staffOnly(ctx);
     limit.write(admin.id);
@@ -877,7 +893,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         'Content-Security-Policy': "default-src 'none'",
       });
     }
-    const media = /^\/media\/(up-[a-z0-9]{8})\/(cover\.(?:png|jpg|webp)|first\.jpg|mobile\.jpg|preview\.(?:sbox|webp|jpg))$/.exec(pathname);
+    const media = /^\/media\/(up-[a-z0-9]{8})\/(cover(?:-[a-z0-9]{8,24})?\.(?:png|jpg|webp)|first\.jpg|mobile\.jpg|preview\.(?:sbox|webp|jpg))$/.exec(pathname);
     if (pathname.startsWith('/media/')) {
       const work = media && library.uploadById(media[1]);
       if (!library.canRead(work, auth.userFrom(req))) return sendJson(res, 404, { error: '文件不存在' });

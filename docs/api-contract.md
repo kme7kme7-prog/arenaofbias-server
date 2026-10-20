@@ -1291,3 +1291,14 @@ readyElapsedMs沿用该match首次有效选择时间（验证码等待/重试不
 | * | `/api/dots/moderation/*` | 只接受 `Authorization: Bearer` 审核令牌，详见 [dots 审核 API](dots-moderation-api.md) |
 
 其他 `/api/` 接口收到 `Authorization: Bearer` 一律 `403 token_forbidden`，不看 Cookie。
+
+### 令牌权限与封面替换（v49）
+
+v49 给 `moderation_tokens` 加 `scopes`（已有令牌默认 `moderation`），新增 `cover_history`。权限：`moderation`、`capture:read`（`GET /api/dots/captures/failed`）、`cover:write`（`PUT /api/dots/works/:task/:id/cover`），见 [dots 审核 API](dots-moderation-api.md)。
+
+封面替换只改 `works.cover`，文件名改为 `cover-<随机>.<ext>`，旧文件保留；`/media/<作品>/` 同时接受 `cover.<ext>` 和 `cover-<8–24 位小写字母数字>.<ext>`。改动触发目录修订号，未登录 bootstrap 与 catalog 下一次请求即重建。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/works/:task/:id/cover-history` | 仅 Lv3：`{cover, entries[]}`，最近 100 条 |
+| POST | `/api/works/:task/:id/cover/rollback` | 仅 Lv3：`{historyId?}`，把封面指回该条记录之前的文件；省略时撤销最近一次变更。回滚本身也记一条，可再回滚 |

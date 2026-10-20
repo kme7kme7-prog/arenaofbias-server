@@ -1,3 +1,11 @@
+## 2026-10-20 · dots 令牌分权限、截图失败列表、封面替换（#19 的补充，合并后未部署）
+
+- 令牌改为逐项授权：`moderation`、`capture:read`、`cover:write`。脚本 `create <label> <scopes>` 指定，`grant` / `withdraw` 单项增减，`revoke` 整个作废，都立即生效。紧急开关 `DOTS_API=off`、`DOTS_DISABLED_SCOPES`。v49 迁移：`moderation_tokens.scopes`（已有令牌默认 `moderation`）和 `cover_history`，不改作品行。
+- `GET /api/dots/captures/failed`：`capture_incomplete` 或无封面的上传作品，按时间 keyset 分页，只给任务、id、标题、审核状态、原因、截图有无、投稿时间。
+- `PUT /api/dots/works/:task/:id/cover`：按 magic bytes 只收 PNG/JPEG/WebP，3 MB、64–4096 像素；只改 `works.cover`，每次新文件名，旧封面和截图快照保留；条件更新防并发覆盖；审计写令牌审计、主审计和 `cover_history`。目录修订号随之变化，bootstrap/catalog 缓存下一次请求重建。
+- 回滚：管理员 `POST /api/works/:task/:id/cover/rollback` 或脚本 `cover-rollback`；dots 不给回滚权限。截图与审核流程从不写封面，重新截图不会覆盖人工封面。
+- `/media/` 路由放宽为也接受 `cover-<随机>.<ext>`。dots 通过与机器通过一样不直接公开作品（公开仍需人工），文档已写明。
+
 ## 2026-10-20 · dots 接入内容审核（方案 B，合并后未部署）
 
 - 新增审核令牌：只开放 `/api/dots/moderation/*` 白名单的列队列、看作品与截图、通过、打回（必须写理由）；其他 `/api/` 带 Bearer 一律 403。库里只存 SHA-256，可随时吊销，常量时间比较，按令牌和 IP 限流，每次请求写审计。运维脚本 `scripts/moderation-token.mjs` 生成/列出/吊销/切模式，明文只显示一次。

@@ -36,7 +36,7 @@ function fakeCapturer(library, captures = []) {
   }, async close() {} };
 }
 
-async function setup(run, { mode = 'machine', timeoutMs = 30 * 60_000, perMinute = 120 } = {}) {
+async function setup(run, { mode = 'machine', timeoutMs = 30 * 60_000, perMinute = 120, extra = {} } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'dots-moderation-'));
   const dist = join(root, 'dist');
   mkdirSync(dist);
@@ -55,7 +55,7 @@ async function setup(run, { mode = 'machine', timeoutMs = 30 * 60_000, perMinute
   const config = { dist, dataDir: join(root, 'state'), contentTemplate: 'http://{token}.localhost:9', siteOrigins: [], admins: ['admin'], cdn: [],
     capture: false, secureCookies: false,
     moderation: { enabled: true, apiKey: 'test-key', baseUrl: `http://127.0.0.1:${provider.address().port}/v1`, model: 'gpt-6-luna',
-      mode, dotsTimeoutMs: timeoutMs, dotsRequestsPerMin: perMinute } };
+      mode, dotsTimeoutMs: timeoutMs, dotsRequestsPerMin: perMinute, ...extra } };
   const captures = [];
   const platform = createPlatform({ config, limits, captureFactory: ({ library }) => fakeCapturer(library, captures) });
   const server = createServer(platform.handleSite);
@@ -69,16 +69,20 @@ async function setup(run, { mode = 'machine', timeoutMs = 30 * 60_000, perMinute
         ...(body !== undefined && !raw ? { 'Content-Type': 'application/json' } : {}) },
       body: body === undefined ? undefined : raw ? body : JSON.stringify(body) });
     if (response.headers.has('set-cookie')) cookies.set(who, response.headers.get('set-cookie').split(';')[0]);
-    const data = response.headers.get('content-type')?.includes('application/json') ? await response.json() : Buffer.from(await response.arrayBuffer());
+    const data = response.headers.get('content-type')?.includes('application/json') && method !== 'HEAD' ? await response.json() : Buffer.from(await response.arrayBuffer());
     return { status: response.status, data, headers: response.headers };
   }
   const dots = (token) => (method, path, body) => call(null, method, `/api/dots/moderation${path}`, body, { bearer: token });
-  async function submit(who = 'owner') {
+  async function raw(token, method, path, body, type = 'application/octet-stream') {
+    const response = await fetch(base + path, { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': type }, body });
+    return { status: response.status, data: await response.json(), headers: response.headers };
+  }
+  async function submit(who = 'owner', more = {}) {
     const draft = await call(who, 'POST', '/api/drafts?task=one&name=work.html', PAGE, { raw: true });
     assert.equal(draft.status, 200);
     const result = await call(who, 'POST', '/api/works', { draftId: draft.data.draft.id, confirmed: true, title: '测试作品',
       modelId: 'm', effort: 'Default', providerId: 'official', harnessOther: '测试工具', generationMode: 'single-turn', humanIntervention: 'none',
-      cover: `data:image/png;base64,${PNG.toString('base64')}` });
+      cover: `data:image/png;base64,${PNG.toString('base64')}`, ...more });
     assert.equal(result.status, 200);
     return result.data.work;
   }
@@ -89,7 +93,7 @@ async function setup(run, { mode = 'machine', timeoutMs = 30 * 60_000, perMinute
     platform.auth.bindEmail(admin.id, 'admin@example.test');
     await verifiedUser(platform.auth, 'owner', 'correct horse');
     for (const name of ['admin', 'owner']) assert.equal((await call(name, 'POST', '/api/auth/login', { name, password: 'correct horse' })).status, 200);
-    await run({ platform, call, dots, submit, received, captures, config, tokens, stored, root,
+    await run({ platform, call, dots, raw, submit, received, captures, config, tokens, stored, root,
       setResponse: (handler) => { respond = handler; } });
   } finally {
     await platform.close();
@@ -370,16 +374,16 @@ test('works queued before the switch keep the machine path; switching modes is a
   });
 });
 
-test('migration 48 adds tables to a populated v47 database without touching existing rows', async () => {
+test('migrations 48 and 49 add tables to a populated v47 database without touching existing rows', async () => {
   const root = mkdtempSync(join(tmpdir(), 'dots-v47-'));
   try {
-    assert.equal(MIGRATIONS.length, 48);
+    assert.equal(MIGRATIONS.length, 49);
     const file = join(root, 'platform.db');
     openDatabase(file).close();
     const now = Date.now();
     // Turn the fresh database back into v47 and fill works with every moderation shape.
     const raw = new DatabaseSync(file);
-    raw.exec('PRAGMA foreign_keys = OFF; DROP TABLE moderation_tokens; DROP TABLE moderation_token_audit; DROP TABLE moderation_settings; PRAGMA user_version = 47;');
+    raw.exec('PRAGMA foreign_keys = OFF; DROP TABLE moderation_tokens; DROP TABLE moderation_token_audit; DROP TABLE moderation_settings; DROP TABLE cover_history; PRAGMA user_version = 47;');
     let serial = 0;
     const fill = (table, fixed) => {
       const values = { ...fixed };
@@ -396,9 +400,9 @@ test('migration 48 adds tables to a populated v47 database without touching exis
     const before = raw.prepare('SELECT * FROM works ORDER BY id').all();
     raw.close();
     const upgraded = openDatabase(file);
-    assert.equal(upgraded.prepare('PRAGMA user_version').get().user_version, 48);
+    assert.equal(upgraded.prepare('PRAGMA user_version').get().user_version, 49);
     assert.deepEqual(upgraded.prepare('SELECT * FROM works ORDER BY id').all(), before);
-    for (const table of ['moderation_tokens', 'moderation_token_audit', 'moderation_settings']) {
+    for (const table of ['moderation_tokens', 'moderation_token_audit', 'moderation_settings', 'cover_history']) {
       assert.equal(upgraded.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = ?").get(table).n, 1);
     }
     assert.equal(upgraded.prepare('SELECT COUNT(*) AS n FROM moderation_settings').get().n, 0);
@@ -417,4 +421,229 @@ test('the per-token rate limit answers 429 with Retry-After', async () => {
     assert.equal(limited.status, 429);
     assert.ok(Number(limited.headers.get('retry-after')) > 0);
   }, { perMinute: 3 });
+});
+
+// A real, decodable PNG of the given size.
+import { deflateSync } from 'node:zlib';
+function png(width, height) {
+  const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  const crc = (buf) => { let c = 0xffffffff; for (const byte of buf) c = crcTable[(c ^ byte) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const chunk = (type, data) => {
+    const out = Buffer.alloc(12 + data.length);
+    out.writeUInt32BE(data.length, 0); out.write(type, 4, 'ascii'); data.copy(out, 8);
+    out.writeUInt32BE(crc(out.subarray(4, 8 + data.length)), 8 + data.length);
+    return out;
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0); ihdr.writeUInt32BE(height, 4); ihdr[8] = 8; ihdr[9] = 2;
+  const rows = Buffer.alloc((width * 3 + 1) * height, 0x80);
+  for (let y = 0; y < height; y++) rows[y * (width * 3 + 1)] = 0;
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(rows)), chunk('IEND', Buffer.alloc(0))]);
+}
+const JPEG = (width, height) => Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, ...Buffer.from('JFIF\0'), 1, 1, 0, 0, 1, 0, 1, 0, 0,
+  0xff, 0xc0, 0x00, 0x11, 0x08, height >> 8, height & 0xff, width >> 8, width & 0xff, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1, 0xff, 0xd9]);
+const WEBP = (width, height) => {
+  const b = Buffer.alloc(40);
+  b.write('RIFF', 0); b.writeUInt32LE(32, 4); b.write('WEBPVP8X', 8); b.writeUInt32LE(10, 16);
+  b.writeUIntLE(width - 1, 24, 3); b.writeUIntLE(height - 1, 27, 3);
+  return b;
+};
+
+test('scopes are granted per token, withdrawn one at a time, and closed by the emergency switches', async () => {
+  await setup(async ({ call, dots, raw, submit, tokens, platform }) => {
+    const work = await submit();
+    await platform.moderator.idle();
+    const mod = tokens.create('mod', 'test');
+    assert.deepEqual(mod.scopes, ['moderation']);
+    const cap = tokens.create('cap', 'test', 'capture:read,cover:write');
+    assert.equal((await call(null, 'GET', '/api/dots/captures/failed', undefined, { bearer: mod.token })).data.code, 'scope_required');
+    assert.equal((await raw(mod.token, 'PUT', `/api/dots/works/one/${work.id}/cover`, png(80, 80))).status, 403);
+    assert.equal((await dots(cap.token)('GET', '/queue')).data.code, 'scope_required');
+    assert.equal((await call(null, 'GET', '/api/dots/captures/failed', undefined, { bearer: cap.token })).status, 200);
+    // Scoped tokens still cannot reach anything outside the dots whitelist.
+    assert.equal((await call(null, 'GET', `/api/works/one/${work.id}/cover-history`, undefined, { bearer: cap.token })).status, 403);
+    assert.equal((await call(null, 'POST', `/api/works/one/${work.id}/cover/rollback`, {}, { bearer: cap.token })).status, 403);
+
+    assert.deepEqual(tokens.withdraw(cap.id, 'capture:read'), ['cover:write']);
+    assert.equal((await call(null, 'GET', '/api/dots/captures/failed', undefined, { bearer: cap.token })).status, 403);
+    assert.deepEqual(tokens.grant(cap.id, 'capture:read'), ['capture:read', 'cover:write']);
+    assert.equal((await call(null, 'GET', '/api/dots/captures/failed', undefined, { bearer: cap.token })).status, 200);
+    assert.throws(() => tokens.grant(cap.id, 'admin'), /未知权限/);
+    tokens.revoke(cap.id);
+    assert.equal((await call(null, 'GET', '/api/dots/captures/failed', undefined, { bearer: cap.token })).status, 401);
+    assert.throws(() => tokens.grant(cap.id, 'moderation'), /已吊销/);
+    const audit = platform.db.prepare("SELECT outcome FROM moderation_token_audit WHERE token_label = 'cap'").all().map((row) => row.outcome);
+    assert.ok(audit.includes('error:403:scope_required'));
+  });
+  await setup(async ({ call, raw, submit, tokens, platform }) => {
+    const work = await submit();
+    await platform.moderator.idle();
+    const all = tokens.create('all', 'test', 'moderation,capture:read,cover:write');
+    assert.equal((await call(null, 'GET', '/api/dots/captures/failed', undefined, { bearer: all.token })).status, 200);
+    const closed = await raw(all.token, 'PUT', `/api/dots/works/one/${work.id}/cover`, png(80, 80));
+    assert.equal(closed.status, 503);
+    assert.equal(closed.data.code, 'scope_disabled');
+  }, { extra: { dotsDisabledScopes: ['cover:write'] } });
+  await setup(async ({ dots, tokens }) => {
+    const all = tokens.create('all', 'test', 'moderation,capture:read,cover:write');
+    const closed = await dots(all.token)('GET', '/queue');
+    assert.equal(closed.status, 503);
+    assert.equal(closed.data.code, 'dots_disabled');
+  }, { extra: { dotsApiOff: true } });
+});
+
+test('capture:read lists failed captures and coverless works with paging and no private fields', async () => {
+  await setup(async ({ call, submit, tokens, platform, stored }) => {
+    const token = tokens.create('cap', 'test', 'capture:read').token;
+    const withCover = await submit();
+    const noCover = await submit('owner', { cover: null, note: '作者的私密备注' });
+    const failed = await submit();
+    await platform.moderator.idle();
+    platform.db.prepare('UPDATE works SET moderation = ? WHERE id = ?')
+      .run(JSON.stringify({ ...stored(failed.id), status: 'review', error: 'capture_incomplete' }), failed.id);
+    platform.db.prepare('UPDATE works SET created_at = created_at + 1000 WHERE id = ?').run(failed.id);
+    const seen = [];
+    let cursor = null;
+    let pages = 0;
+    do {
+      const page = await call(null, 'GET', `/api/dots/captures/failed?limit=1${cursor ? `&cursor=${cursor}` : ''}`, undefined, { bearer: token });
+      assert.equal(page.status, 200);
+      seen.push(...page.data.items);
+      cursor = page.data.nextCursor;
+      pages += 1;
+    } while (cursor && pages < 10);
+    assert.deepEqual(seen.map((item) => item.id), [noCover.id, failed.id]);
+    assert.deepEqual(seen[0].reasons, ['no_cover']);
+    assert.deepEqual(seen[1].reasons, ['capture_incomplete']);
+    assert.ok(!seen.some((item) => item.id === withCover.id));
+    for (const item of seen) assert.deepEqual(Object.keys(item).sort(), ['hasCover', 'id', 'reasons', 'screenshots', 'status', 'submittedAt', 'task', 'title']);
+    assert.doesNotMatch(JSON.stringify(seen), /owner|作者的私密备注|@/);
+    assert.equal((await call(null, 'GET', '/api/dots/captures/failed?cursor=bad', undefined, { bearer: token })).status, 400);
+  });
+});
+
+test('cover:write replaces only the cover, checks bytes not headers, keeps history and refreshes the public cache', async () => {
+  await setup(async ({ call, raw, submit, tokens, platform, root }) => {
+    const { token, id } = tokens.create('cover', 'test', 'cover:write');
+    const work = await submit();
+    await platform.moderator.idle();
+    let before = platform.db.prepare('SELECT * FROM works WHERE id = ?').get(work.id);
+    const filesBefore = platform.db.prepare('SELECT digest, file_count, bytes FROM works WHERE id = ?').get(work.id);
+    const path = `/api/dots/works/one/${work.id}/cover`;
+    // Automatic (and dots) approval only reaches previews; a manual approval publishes.
+    assert.equal((await call('admin', 'POST', `/api/works/one/${work.id}/moderation`, { status: 'approved' })).status, 200);
+    before = platform.db.prepare('SELECT * FROM works WHERE id = ?').get(work.id);
+    const publicCover = async () => (await call(null, 'GET', '/api/bootstrap')).data.works.find((item) => item.id === work.id)?.cover;
+    const original = await publicCover();
+    assert.ok(original, 'approved work is public');
+
+    // Rejected inputs, whatever the declared type says.
+    const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"/>');
+    assert.equal((await raw(token, 'PUT', path, svg, 'image/png')).data.code, 'unsupported_type');
+    assert.equal((await raw(token, 'PUT', path, Buffer.from('GIF89a' + '\0'.repeat(40)), 'image/png')).data.code, 'unsupported_type');
+    assert.equal((await raw(token, 'PUT', path, png(32, 32))).data.code, 'bad_dimensions');
+    assert.equal((await raw(token, 'PUT', path, png(5000, 64))).data.code, 'bad_dimensions');
+    assert.equal((await raw(token, 'PUT', path, Buffer.concat([png(80, 80), Buffer.alloc(3 * 1024 * 1024)]))).status, 413);
+    assert.equal((await raw(token, 'PUT', path, Buffer.alloc(0))).data.code, 'invalid_image');
+    // Trying to smuggle metadata changes is just a bad image.
+    const meta = await raw(token, 'PUT', path, JSON.stringify({ modelId: 'other', modelName: 'X', title: 'Y', files: {} }), 'application/json');
+    assert.equal(meta.status, 415);
+    assert.equal((await raw(token, 'PUT', `/api/dots/works/one/${work.id}/files`, png(80, 80))).status, 404);
+    assert.equal((await raw(token, 'PATCH', path, png(80, 80))).status, 405);
+    assert.deepEqual(platform.db.prepare('SELECT * FROM works WHERE id = ?').get(work.id), before);
+
+    for (const [image, type] of [[JPEG(640, 360), 'image/jpeg'], [WEBP(800, 450), 'image/webp'], [png(1200, 630), 'image/svg+xml']]) {
+      const done = await raw(token, 'PUT', path, image, type);
+      assert.equal(done.status, 200, JSON.stringify(done.data));
+      assert.equal(done.data.type, { 'image/svg+xml': 'image/png' }[type] ?? type);
+    }
+    const after = platform.db.prepare('SELECT * FROM works WHERE id = ?').get(work.id);
+    assert.match(after.cover, /^cover-[a-z0-9]+\.png$/);
+    // Nothing but the cover changed: files, model and labels are untouched.
+    const { cover: _a, ...restBefore } = before;
+    const { cover: _b, ...restAfter } = after;
+    assert.deepEqual(restAfter, restBefore);
+    assert.deepEqual(platform.db.prepare('SELECT digest, file_count, bytes FROM works WHERE id = ?').get(work.id), filesBefore);
+    const internal = platform.library.work('one', work.id);
+    assert.equal(internal.modelId, 'm');
+
+    // Public cache follows at once; the new file is served and the old ones stay on disk.
+    const current = await publicCover();
+    assert.notEqual(current, original);
+    assert.match(current, new RegExp(`${after.cover}$`));
+    assert.equal((await call(null, 'GET', `/${current.replace(/^\//, '')}`)).status, 200);
+    const mediaDir = join(root, 'state', 'media', work.id);
+    const { readdirSync, existsSync } = await import('node:fs');
+    const names = readdirSync(mediaDir);
+    assert.ok(names.includes(before.cover));
+    assert.equal(names.filter((name) => /^cover-/.test(name)).length, 3);
+
+    // History, audit and a screenshot snapshot per change.
+    const history = (await call('admin', 'GET', `/api/works/one/${work.id}/cover-history`)).data;
+    assert.equal(history.entries.length, 3);
+    assert.equal(history.entries[2].previous, before.cover);
+    assert.equal(history.entries[0].actor, 'dots:cover');
+    assert.ok(existsSync(join(mediaDir, history.entries[0].snapshot, 'first.jpg')));
+    const tokenAudit = platform.db.prepare("SELECT * FROM moderation_token_audit WHERE action = 'cover-replace' AND outcome = 'ok'").all();
+    assert.equal(tokenAudit.length, 3);
+    assert.equal(tokenAudit[0].token_id, id);
+    assert.equal(tokenAudit[0].work_id, work.id);
+    assert.ok(tokenAudit[0].ip);
+    assert.ok(platform.db.prepare("SELECT COUNT(*) AS n FROM moderation_token_audit WHERE action = 'cover-replace' AND outcome LIKE 'error:%'").get().n >= 6);
+    assert.equal(platform.db.prepare("SELECT COUNT(*) AS n FROM audit WHERE action = 'cover-replace' AND work_id = ?").get(work.id).n, 3);
+
+    // A re-capture rewrites screenshots but never the cover.
+    assert.equal((await call('admin', 'POST', `/api/works/one/${work.id}/moderation/retry`, {})).status, 200);
+    await platform.moderator.idle();
+    assert.equal(platform.db.prepare('SELECT cover FROM works WHERE id = ?').get(work.id).cover, after.cover);
+    assert.equal((await call('admin', 'POST', `/api/works/one/${work.id}/moderation`, { status: 'approved' })).status, 200);
+    assert.equal(await publicCover(), current);
+
+    // Rollback: admins only, back to the previous file, itself undoable.
+    assert.equal((await call('owner', 'POST', `/api/works/one/${work.id}/cover/rollback`, {})).status, 403);
+    const back = await call('admin', 'POST', `/api/works/one/${work.id}/cover/rollback`, { historyId: history.entries[2].id });
+    assert.equal(back.status, 200);
+    assert.equal(platform.db.prepare('SELECT cover FROM works WHERE id = ?').get(work.id).cover, before.cover);
+    assert.equal(await publicCover(), original);
+    assert.equal(platform.db.prepare("SELECT COUNT(*) AS n FROM audit WHERE action = 'cover-rollback'").get().n, 1);
+    const undo = await call('admin', 'POST', `/api/works/one/${work.id}/cover/rollback`, {});
+    assert.equal(undo.status, 200);
+    assert.equal(platform.db.prepare('SELECT cover FROM works WHERE id = ?').get(work.id).cover, after.cover);
+  });
+});
+
+test('a cover upload loses to a concurrent change instead of overwriting it', async () => {
+  await setup(async ({ raw, submit, tokens, platform }) => {
+    const token = tokens.create('cover', 'test', 'cover:write').token;
+    const work = await submit();
+    await platform.moderator.idle();
+    const results = await Promise.all([1, 2, 3].map(() => raw(token, 'PUT', `/api/dots/works/one/${work.id}/cover`, png(100, 100))));
+    const ok = results.filter((result) => result.status === 200).length;
+    assert.ok(ok >= 1);
+    const entries = platform.db.prepare('SELECT * FROM cover_history WHERE work_id = ? ORDER BY id').all(work.id);
+    assert.equal(entries.length, ok);
+    // Each accepted change starts from the cover the previous one left.
+    for (let i = 1; i < entries.length; i++) assert.equal(entries[i].previous, entries[i - 1].next);
+    assert.equal(platform.db.prepare('SELECT cover FROM works WHERE id = ?').get(work.id).cover, entries.at(-1).next);
+  });
+});
+
+test('migration 49 gives tokens created under v48 the moderation scope only', () => {
+  const root = mkdtempSync(join(tmpdir(), 'dots-v48-'));
+  try {
+    const file = join(root, 'platform.db');
+    const db = new DatabaseSync(file);
+    for (let step = 0; step < 48; step++) {
+      if (typeof MIGRATIONS[step] === 'function') MIGRATIONS[step](db); else db.exec(MIGRATIONS[step]);
+    }
+    db.exec('PRAGMA user_version = 48');
+    db.prepare("INSERT INTO moderation_tokens (id, label, token_hash, created_at, created_by) VALUES ('aaaaaaaaaaaa', 'old', ?, 1, 'cli')").run('0'.repeat(64));
+    db.close();
+    const upgraded = openDatabase(file);
+    try {
+      assert.equal(upgraded.prepare('PRAGMA user_version').get().user_version, 49);
+      assert.deepEqual(createModerationTokens(upgraded).list().map((row) => [row.id, row.scopes]), [['aaaaaaaaaaaa', ['moderation']]]);
+      MIGRATIONS[48](upgraded);
+    } finally { upgraded.close(); }
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

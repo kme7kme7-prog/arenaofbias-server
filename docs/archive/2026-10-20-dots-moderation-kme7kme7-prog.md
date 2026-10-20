@@ -38,3 +38,13 @@
 ## 下一步建议
 
 - 02:15 收尾检查之后再发布、切 `dots`；先观察审计表与超时回退次数。
+
+## 补充：令牌权限、截图失败列表、封面替换
+
+- #19 已合并后收到补充要求，另开后续 PR，基于合并后的 main。
+- 权限：`moderation` / `capture:read` / `cover:write`，存在 `moderation_tokens.scopes`（v49，旧令牌默认 `moderation`）。路由逐条标注所需权限；全局 `DOTS_API=off` 与 `DOTS_DISABLED_SCOPES` 为紧急开关。
+- 封面：新模块 `server/work-covers.mjs`。magic bytes 判类型并解析宽高（PNG IHDR、JPEG SOF、WebP VP8/VP8L/VP8X），每次新文件名，先写文件再条件更新 `works.cover`，失败删掉新文件。旧封面不删；截图在每次变更时复制到 `media/<id>/history/<stamp>/`。
+- 优先级：封面只有投稿、dots 替换和管理员回滚三处会写；截图队列只写 `captures` 和截图文件，所以重新截图不会盖掉人工封面。测试用管理员重试审核（会重新截图）验证。
+- 回滚不给 dots：dots 传错了可以再传一张，真正的“撤销”留给人，避免一个令牌能把封面在历史版本间来回切换而没人察觉。
+- 已知限制：只校验文件头和尺寸，不完整解码图片；截断但文件头正确的图片可能显示不出来，可用回滚恢复。
+

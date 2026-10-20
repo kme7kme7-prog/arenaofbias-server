@@ -249,7 +249,7 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
 
 ## 3. 端点
 
-约定：除注明外，请求体均为 JSON（`Content-Type: application/json`），响应均为 JSON 且 `Cache-Control: no-store`。GET 路由同时接受 HEAD。认证列中的「登录」指有效会话 Cookie；「管理员」指 `role === 'admin'`。
+约定：除注明外，请求体均为 JSON（`Content-Type: application/json`），响应均为 JSON 且 `Cache-Control: no-store`。GET 路由同时接受 HEAD。1 KiB 以上的 JSON 响应按 `Accept-Encoding` 用 br（优先）或 gzip 压缩，并带 `Vary: Accept-Encoding`；不接受压缩的请求照旧收到原文。认证列中的「登录」指有效会话 Cookie；「管理员」指 `role === 'admin'`。
 
 ### 3.0 Gallery 独立加载接口
 
@@ -267,7 +267,11 @@ v6 新增 `comments` 表：`id`（24 位十六进制）、`task_id`、`work_id`�
 
 目录缓存保存进程内公开序列化字节，相同版本的冷请求合并构建，每批序列化让出事件循环。包快照、题目/作品/覆盖/参考图变化和公开作者资料变化使缓存失效；外部 SQLite 连接提交通过 data_version 检测。构建完成后再次检查版本，避免并发撤下后发布旧快照。临时修订触发器不修改持久数据库 schema；会话续期不使目录失效。仅文件预览元信息的变化以最多30秒缓存周期补充检查，作品与媒体访问仍经过实时门禁。
 
-客户端每次复用都须重新验证，不设置允许脱离服务端确认的 max-age 或 stale-while-revalidate。支持 If-None-Match / 304 和 HEAD，304 前也检查当前目录版本；CORS 允许 If-None-Match，并暴露 ETag、Server-Timing。服务端用 Server-Timing 标记目录缓存命中及处理耗时。
+`GET /api/bootstrap` 仍返回完整聚合，旧客户端无需改动。`?lite=1` 省略 `works`，其余字段不变（`serverVersion`、`datapack`、`questions`、`site` 等照常），旧服务端忽略该参数返回完整内容，所以新客户端可直接使用。未登录（无会话或会话无效）的 bootstrap 完整版与 lite 版各按数据版本缓存一份序列化与压缩结果，失效条件为目录修订（同上）、截图/审核开关，以及投票、反应、精选表的写入；构建期间目录修订变化会重建，投票等高频写入只影响下一次读取；另有 `BOOTSTRAP_CACHE_MS`（默认 15 秒）兜底。未登录响应为 `private, no-cache` 加 ETag，支持 If-None-Match / 304，CDN 不得存储；登录用户的 bootstrap 每次按本人生成，`no-store`，不进缓存、不带 ETag。
+
+ETag 按表示区分：原文 `"<sha256>"`，压缩后 `"<sha256>-br"` / `"<sha256>-gzip"`。If-None-Match 比较时去掉 `W/` 前缀和编码后缀，所以 Nginx 弱化过的或另一种编码的验证器都能得到 304。
+
+客户端每次复用都须重新验证，不设置允许脱离服务端确认的 max-age 或 stale-while-revalidate。支持 If-None-Match / 304 和 HEAD，304 前也检查当前目录版本；CORS 允许 If-None-Match，`/api/catalog` 与 `/api/bootstrap` 暴露 ETag、Server-Timing。服务端用 Server-Timing 标记目录缓存命中及处理耗时。
 
 Nginx 的动态 API 代理 location 必须包含 `deploy/nginx/api-proxy.conf`，显式关闭继承的 proxy_cache。否则即使响应为 no-cache，代理仍可能清除传给应用的条件请求头，导致同一 ETag 重复返回完整200。公开目录缓存由应用维护，媒体 location 的既有缓存策略独立保留。API 使用gzip第6级减小首次目录传输。
 

@@ -4,6 +4,7 @@ import { createReadStream, statSync } from 'node:fs';
 import { extname, resolve, sep } from 'node:path';
 import { isIP } from 'node:net';
 import { pipeline } from 'node:stream/promises';
+import { MIN_COMPRESS_BYTES, compress, pickEncoding, withVary } from './compress.mjs';
 
 export class HttpError extends Error {
   constructor(status, message, code = '') {
@@ -14,16 +15,28 @@ export class HttpError extends Error {
 }
 export const fail = (status, message, code) => { throw new HttpError(status, message, code); };
 
+// Bodies of 1 KB or more are compressed when the request accepts it; the write then
+// happens after compression, so callers that need to wait can await the result.
 export function sendJson(res, status, data, headers = {}) {
-  const body = JSON.stringify(data);
-  res.writeHead(status, {
+  const body = Buffer.from(JSON.stringify(data));
+  const base = {
     'Content-Type': 'application/json; charset=utf-8',
-    'Content-Length': Buffer.byteLength(body),
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
     ...headers,
-  });
-  res.end(body);
+  };
+  const large = body.length >= MIN_COMPRESS_BYTES;
+  const encoding = large ? pickEncoding(res.req?.headers?.['accept-encoding']) : null;
+  const plain = () => {
+    res.writeHead(status, { ...base, 'Content-Length': body.length, ...(large ? { Vary: withVary(res, 'Accept-Encoding') } : {}) });
+    res.end(body);
+  };
+  if (!encoding) return plain();
+  return compress(body, encoding).then((encoded) => {
+    if (res.headersSent || res.destroyed) return;
+    res.writeHead(status, { ...base, 'Content-Encoding': encoding, 'Content-Length': encoded.length, Vary: withVary(res, 'Accept-Encoding') });
+    res.end(encoded);
+  }, () => { if (!res.headersSent && !res.destroyed) plain(); });
 }
 
 export async function readBody(req, limit) {

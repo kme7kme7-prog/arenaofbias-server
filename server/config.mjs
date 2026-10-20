@@ -106,6 +106,8 @@ export const config = {
     files: Math.max(1, int(env.READ_FILES_PER_MIN, 1200)),
     pages: Math.max(1, int(env.READ_PAGES_PER_MIN, 60)),
   },
+  // Longest a cached signed-out bootstrap outlives changes no write counter sees.
+  bootstrapCacheMs: Math.max(1000, int(env.BOOTSTRAP_CACHE_MS, 15_000)),
 };
 
 export const limits = {

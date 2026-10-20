@@ -1,3 +1,10 @@
+## 2026-10-20 · bootstrap 压缩、未登录缓存与 lite（PR，未部署）
+
+- 1 KiB 以上 JSON 按 `Accept-Encoding` 用 br（质量 5）/ gzip（级别 6）异步压缩，带 `Vary: Accept-Encoding`。`/api/catalog` 和未登录 `/api/bootstrap` 共用 `createSharedJson`：序列化、哈希和压缩每个数据版本只做一次，ETag 按编码区分，比较时忽略 `W/` 和编码后缀，支持 304。
+- 未登录 bootstrap 失效：目录修订（包版本、题目/作品/覆盖/参考图/公开作者、外部提交）、截图/审核开关、新的投票/反应/精选临时触发器，外加 `BOOTSTRAP_CACHE_MS`（默认 15 秒）兜底。登录用户照旧每次生成，`no-store`，不进缓存。未登录头为 `private, no-cache`，CDN 不存。
+- `?lite=1` 省略 `works`，保留 `serverVersion`、`datapack` 等；管理端改用 lite。旧前端不受影响，新管理端遇到旧后端时拿到完整内容。Gallery 已用 catalog/session/activity，Show1 和门户不读 bootstrap，前端不需要改。
+- 不改 Nginx / EdgeOne：Nginx gzip 跳过已有 Content-Encoding 的响应，EO 透传。无迁移、无依赖。数据与验证见归档：[bootstrap 减负](docs/archive/2026-10-20-bootstrap-cache-kme7kme7-prog.md)。
+
 ## 2026-10-20 · 网站公告 API（已授权推送 GitHub，未部署）
 
 - v47 幂等迁移新增 `announcements`；新模块 `server/announcements.mjs` 提供公开全量历史、管理员即时发布与 SSE 广播。仅 Lv3 能发布；标题和 Markdown 正文有长度及控制字符校验，公告不可编辑/删除。

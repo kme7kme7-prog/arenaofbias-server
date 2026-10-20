@@ -43,6 +43,21 @@ cp -a "$conf" "$conf.bak-$(date -u +%Y%m%dT%H%M%SZ)"
 
 API HTTPS `server` 块包含 `include /www/wwwroot/arenaofbias-server/deploy/nginx/upload-timeout.conf;`，将上传请求体的空闲等待设为24小时，取消默认60秒断开。该时间按相邻两次读取计算，不是上传总时长；`0` 不是关闭开关。更改后备份、`nginx -t`、reload，并验证暂停超过60秒后仍可继续发送。文件大小上限及其他站点的超时保持原配置。
 
+### API 压缩与缓存头（无需改 Nginx / EdgeOne）
+
+后端用 `node:zlib` 自行压缩 1 KiB 以上的 JSON：请求接受 br 时用 br（质量 5），否则 gzip（级别 6），压缩放在 libuv 线程池中，不占事件循环。响应带 `Content-Encoding` 与 `Vary: Accept-Encoding`（与 CORS 的 `Vary: Origin` 合并）。Nginx 的 gzip 过滤器遇到已有 `Content-Encoding` 的响应直接跳过，`deploy/nginx/api-proxy.conf` 的 `gzip_comp_level 6` 保留给小响应和静态文件即可；EdgeOne 原样透传已压缩的回源。不要再给 API 打开 Nginx `gunzip` 或 EdgeOne「回源解压后再压缩」类选项。
+
+`/api/catalog` 保持 `public, no-cache`，`/api/bootstrap` 未登录为 `private, no-cache`、登录为 `no-store`。两者都要求每次回源验证，EdgeOne 当前对 API 不缓存（`eo-cache-status: MISS`），无需新增规则。若以后要让 CDN 缓存 catalog，缓存键必须包含 `Accept-Encoding` 与 `Origin`，并且只对 `/api/catalog` 生效，绝不覆盖 bootstrap、session、activity 的缓存头。
+
+上线后验收：
+
+```bash
+curl -sS -o /dev/null -D - -H 'Accept-Encoding: br' https://api.arenaofbias.icu/api/bootstrap | grep -i -E 'content-encoding|vary|etag|cache-control'
+curl -fsS -H 'Accept-Encoding: gzip' --compressed 'https://api.arenaofbias.icu/api/bootstrap?lite=1' | grep -o '"serverVersion":"[^"]*"'
+```
+
+第一条应看到 `content-encoding: br`、`vary` 含 `Accept-Encoding`、`cache-control: private, no-cache` 和 ETag；带该 ETag 的 `If-None-Match` 请求返回 304。
+
 ## 公开读取与反爬配置
 
 2026-09-30 已记录在四个正式 HTTPS vhost 安装并验收本节规则，详见 [gallery-protection-deploy 归档](archive/2026-09-30-gallery-protection-deploy-wsnxxxs.md)。提交配置文件本身不代表部署；后续操作仍先完成第 0 节现场核对，再备份 Nginx 主配置与四个 vhost。

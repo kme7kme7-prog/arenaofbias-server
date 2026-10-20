@@ -105,7 +105,7 @@ test('public catalog revalidates one anonymous snapshot without touching session
     }
     assert.equal((await call('/api/catalog', { headers: { 'if-none-match': first.headers.get('etag') } })).status, 304,
       'session last_seen writes do not invalidate the public snapshot');
-    const head = await call('/api/catalog', { method: 'HEAD' });
+    const head = await call('/api/catalog', { method: 'HEAD', headers: { 'accept-encoding': 'identity' } });
     assert.equal(head.status, 200);
     assert.equal(head.text, '');
     assert.equal(Number(head.headers.get('content-length')), Buffer.byteLength(first.text));

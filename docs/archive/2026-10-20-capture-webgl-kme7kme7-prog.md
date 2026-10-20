@@ -33,9 +33,9 @@
 ## 验证
 
 - `npm run check`：144 个文件，0 错误。
-- `node --test --test-concurrency=1 test/*.test.mjs`：408/408（这次 blind-pool 那条也过了）。
+- `node --test --test-concurrency=1 test/*.test.mjs`：跑两次，408/408 和 407/408。失败的是已知的 blind-pool「same package content follows registration and provenance changes」，main 上同样时过时不过。
 - `test/capture.test.mjs` 新增：远程端点缺失和连接失败时等待重试、不冷却、日志不含端点 token；长时间中断后返回 unavailable，恢复后继续；中途断线后等端点重新出现并重做；WebGL 页面截图上限放宽，每次截图和鼠标操作前后暂停/恢复；WebGL 扩展总时长让第二个视口能跑完；load 不触发时照常截图；frameGuard 限帧、暂停、取消；超大入口页不进队列、审核记 `page_too_large` / `page_missing` 且不调用截图；审核把 unavailable 记成 `capture_unavailable`。
-- `a hung goto/screenshot fails inside the task budget` 两条单独反复跑偶尔失败（`launches.length >= 2`），未改动的 main 上同样会，是旧测试的时序问题。
+- `a hung goto/screenshot fails inside the task budget` 两条在 main 上就偶发失败（PR 第一次 CI 也挂在这里）：分步计时器和单件计时器同时到点时，若分步先触发，单件计时器随即被清掉，连接没有被丢弃。现在分步因单件到点而失败时也丢弃连接，和单件计时器一致；两条各连跑 15 次全部通过。
 - 本机真实 Chrome 155 + Playwright 1.63，`taskset -c 0` 限一个 CPU，渲染器确认是 SwiftShader，全屏重着色器约 0.5 fps：
   - 直接截图 35.0 秒；加 frameGuard 并暂停后 0.1 秒。
   - 完整 `createCapturer` 流程：改前（只限帧不暂停鼠标）两档延迟截图都在鼠标操作处超时，和线上 `截图步骤超时（input）` 一样；最终版本两件都拿到 4 张图，每件 67–78 秒。

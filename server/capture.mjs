@@ -279,7 +279,11 @@ export function createCapturer({ config, library, loadChromium = async () => (aw
         aborted,
       ]), limit, name);
     } catch (error) {
-      if (activeBudget && activeBudget.remaining() <= 0) throw new CaptureTimeout('task');
+      if (activeBudget && activeBudget.remaining() <= 0) {
+        // Same as the job timer, which may not have fired yet: drop the stuck connection.
+        discardBrowser(browser);
+        throw new CaptureTimeout('task');
+      }
       throw error;
     } finally {
       if (failActiveStep !== previous) failActiveStep = previous;

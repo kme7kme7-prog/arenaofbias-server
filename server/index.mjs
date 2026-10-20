@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import { createPlatform } from './app.mjs';
 import { config, limits } from './config.mjs';
 import { drainServers } from './shutdown.mjs';
+import { withRobots } from './robots.mjs';
 
 let platform;
 try {
@@ -12,8 +13,8 @@ try {
   process.exit(1);
 }
 
-const site = createServer(platform.handleSite);
-const content = createServer(platform.handleContent);
+const site = createServer(withRobots(platform.handleSite));
+const content = createServer(withRobots(platform.handleContent));
 let ready = 0;
 const started = async () => {
   if (++ready < 2) return;

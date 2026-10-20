@@ -113,6 +113,7 @@ npm start
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
+| GET | `/robots.txt` | 站点端口与作品端口都返回 `Disallow: /`（`server/robots.mjs`），API 与作品沙盒不进搜索结果 |
 | GET | `/api/bootstrap` | 首屏聚合：当前用户、站点配置、作品列表、反应汇总、各题对战池、排行榜总计、我的投票/待审数、管理员待审计数 |
 | GET | `/api/prompts` | Show1 共用与历史题库，长短原文通过同题 `promptVariants` 返回 |
 | POST | `/api/auth/register` | 凭注册邮箱验证码创建账号并建立会话（限流） |

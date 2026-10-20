@@ -146,7 +146,9 @@ function inputFor(work, library, capture, maxPageBytes = MAX_PAGE_BYTES) {
   return input;
 }
 
-export function createModerator({ config, library, capturer, onChange = () => {} }) {
+// routing: { current, timeoutMs } from createModerationMode. Without it every
+// pending work is the machine's, exactly as before routing existed.
+export function createModerator({ config, library, capturer, onChange = () => {}, routing = null }) {
   const settings = config.moderation ?? {};
   const maxPageBytes = config.captureOptions?.maxPageBytes ?? MAX_PAGE_BYTES;
   let closed = false;
@@ -154,6 +156,17 @@ export function createModerator({ config, library, capturer, onChange = () => {}
   let controller = null;
   const queue = [];
   const queued = new Set();
+  const capturing = new Set();
+  // A new submission routed to dots waits for dots while dots mode is on and its
+  // deadline (from the persisted queue time, so restarts keep it) has not passed.
+  const heldForDots = (work) => Boolean(routing) && work?.moderation.status === 'pending' && work.moderation.route === 'dots'
+    && routing.current === 'dots' && Date.now() - (work.moderation.at ?? 0) < routing.timeoutMs;
+  // dots reviews from the same screenshots; take them without asking the model.
+  function captureForDots(work) {
+    if (capturing.has(work.id) || Object.keys(work.captures ?? {}).length) return;
+    capturing.add(work.id);
+    void Promise.resolve(capturer.enqueue(work)).catch(() => null).finally(() => capturing.delete(work.id));
+  }
 
   // A rule hit is final, so the text never reaches the model.
   function ruleRejection(work, capture) {
@@ -222,9 +235,16 @@ export function createModerator({ config, library, capturer, onChange = () => {}
       queued.delete(id);
       const work = library.uploadById(id);
       if (!work || work.moderation.status !== 'pending') continue;
+      if (heldForDots(work)) continue;
       let result;
       try { result = await check(work); }
       catch (error) { result = failed(error); }
+      // dots-review-only: what the machine sends to people is also offered to dots.
+      if (result && work.moderation.route === 'dots-review-only' && result.status === 'review') result = { ...result, route: 'dots-review-only' };
+      // A dots submission the machine decided after the deadline says so in its record.
+      if (result && work.moderation.route === 'dots') {
+        result = { ...result, fallback: Date.now() - (work.moderation.at ?? 0) >= (routing?.timeoutMs ?? 0) ? 'dots-timeout' : 'mode-change' };
+      }
       if (!closed && result && library.finishModeration(work, result)) onChange();
     }
   }
@@ -233,13 +253,20 @@ export function createModerator({ config, library, capturer, onChange = () => {}
     get enabled() { return Boolean(settings.enabled); },
     enqueue(work) {
       if (closed || !settings.enabled || work?.moderation.status !== 'pending' || queued.has(work.id)) return;
+      if (heldForDots(work)) return captureForDots(work);
       queued.add(work.id);
       queue.push(work.id);
       if (!running) running = drain().finally(() => { running = null; });
     },
     async idle() { await running; },
+    // Picks up dots submissions whose deadline passed or whose mode changed.
+    sweep() {
+      if (closed || !settings.enabled) return;
+      for (const id of library.pendingModerationIds?.() ?? []) service.enqueue(library.uploadById(id));
+    },
     async close() {
       closed = true;
+      clearInterval(sweeper);
       queue.length = 0;
       controller?.abort();
       await running;
@@ -250,5 +277,7 @@ export function createModerator({ config, library, capturer, onChange = () => {}
   setImmediate(() => {
     if (!closed && settings.enabled) for (const work of library.uploads()) service.enqueue(work);
   }).unref();
+  const sweeper = routing ? setInterval(() => service.sweep(), Math.min(60_000, routing.timeoutMs)) : null;
+  sweeper?.unref();
   return service;
 }

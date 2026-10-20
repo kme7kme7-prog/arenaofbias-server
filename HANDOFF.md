@@ -1,3 +1,11 @@
+## 2026-10-20 · dots 接入内容审核（方案 B，合并后未部署）
+
+- 新增审核令牌：只开放 `/api/dots/moderation/*` 白名单的列队列、看作品与截图、通过、打回（必须写理由）；其他 `/api/` 带 Bearer 一律 403。库里只存 SHA-256，可随时吊销，常量时间比较，按令牌和 IP 限流，每次请求写审计。运维脚本 `scripts/moderation-token.mjs` 生成/列出/吊销/切模式，明文只显示一次。
+- `MODERATION_MODE`：`machine`（默认，原机器审核）/ `dots`（新投稿交 dots）/ `dots-review-only`（机器先审，转人工的再给 dots）。管理员可经 `/api/admin/moderation-mode` 热切换。机器审核代码、配置和人工通道一行未删。
+- dots 超时（`DOTS_REVIEW_TIMEOUT_MS`，默认 30 分钟）从入队时间算，重启不影响：`dots` 模式转机器；`dots-review-only` 模式留在人工队列。dots、机器、人工的决定都走同一个条件更新，先写入者生效。
+- v48 只新增三张表，不改已有行；部署时已在队列中的作品不带 `route`，照旧走机器。默认 `machine`，上线时由运维设 `dots`，建议在 02:15 收尾检查之后。
+- API 文档：[dots 审核 API](docs/dots-moderation-api.md)。归档：[dots 接入审核](docs/archive/2026-10-20-dots-moderation-kme7kme7-prog.md)。
+
 ## 2026-10-20 · bootstrap 压缩、未登录缓存与 lite（#17，晚于 #18 合并，未部署）
 
 - 1 KiB 以上 JSON 按 `Accept-Encoding` 用 br（质量 5）/ gzip（级别 6）异步压缩，带 `Vary: Accept-Encoding`。`/api/catalog` 和未登录 `/api/bootstrap` 共用 `createSharedJson`：序列化、哈希和压缩每个数据版本只做一次，ETag 按编码区分，比较时忽略 `W/` 和编码后缀，支持 304。

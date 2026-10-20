@@ -1279,3 +1279,15 @@ readyElapsedMs沿用该match首次有效选择时间（验证码等待/重试不
 | POST | `/api/admin/announcements` | `{entry}`，仅 Lv3，发布后立即出现在列表中 |
 
 条目字段为 `id`（递增整数）、`title`、`body`（Markdown 原文）、`publishedAt`（ISO 8601）。POST 请求体 `{title,body}`：标题去空白后 1–100 字，正文去空白、规范换行后 1–20000 字，拒绝控制字符；校验失败 400。写入由平台同源校验保护。客户端在页面可见时每 60 秒读取列表，切回前台立即读取一次，页面隐藏时暂停；已读状态由 Gallery 浏览器本地保存。
+
+## dots 审核令牌与模式（v48）
+
+追加幂等迁移 v48，仅新增 `moderation_tokens`（只存 SHA-256）、`moderation_token_audit`、`moderation_settings` 三张表，不改已有行。`MODERATION_MODE` 非 `machine` 时，新投稿与作者改送审信息产生的 pending 额外带 `route`（`dots` / `dots-review-only`）；状态值含义不变，无 `route` 的 pending（包括迁移前已排队的）照旧走机器。机器对 `dots-review-only` 作品给出 review 时结果带 `route`，dots 截止前可决定；dots 决定写 `source: "dots"`、`reviewer: "dots:<标签>"`；机器在 dots 超时后接手时写 `fallback: "dots-timeout"`（切换模式后接手为 `mode-change`）。所有决定仍经同一个条件更新，先写入者生效。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/admin/moderation-mode` | 仅 Lv3：`{mode, env, override, timeoutMs, updatedAt, updatedBy}` |
+| POST | `/api/admin/moderation-mode` | 仅 Lv3：`{mode}`，取 `machine` / `dots` / `dots-review-only`；`null` 或 `"env"` 清除覆盖、回到环境变量。写审计 `moderation-mode`，立即生效 |
+| * | `/api/dots/moderation/*` | 只接受 `Authorization: Bearer` 审核令牌，详见 [dots 审核 API](dots-moderation-api.md) |
+
+其他 `/api/` 接口收到 `Authorization: Bearer` 一律 `403 token_forbidden`，不看 Cookie。

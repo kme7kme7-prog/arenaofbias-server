@@ -96,6 +96,11 @@ export const config = {
     apiKey: env.MODERATION_API_KEY || env.OPENAI_API_KEY || '',
     baseUrl: env.MODERATION_BASE_URL || 'https://api.openai.com/v1',
     model: env.MODERATION_MODEL || 'gpt-6-luna',
+    // Who decides new submissions: machine (default), dots, or dots-review-only.
+    // An admin override stored in the database takes precedence (scripts/moderation-token.mjs mode).
+    mode: env.MODERATION_MODE || 'machine',
+    dotsTimeoutMs: Math.max(60_000, int(env.DOTS_REVIEW_TIMEOUT_MS, 30 * 60_000)),
+    dotsRequestsPerMin: Math.max(1, int(env.DOTS_REQUESTS_PER_MIN, 120)),
   },
   secureCookies: env.COOKIE_SECURE === '1',
   cookieSameSite: env.COOKIE_SAME_SITE || 'Lax',

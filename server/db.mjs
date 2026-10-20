@@ -681,6 +681,37 @@ const MIGRATIONS = [
     published_at INTEGER NOT NULL,
     created_by TEXT NOT NULL
   );`),
+  // External moderation (dots): bearer tokens stored as SHA-256 only, an audit trail
+  // of every token request, and an optional runtime override of MODERATION_MODE.
+  // New tables only; existing works and their moderation JSON are not touched.
+  (db) => db.exec(`CREATE TABLE IF NOT EXISTS moderation_tokens (
+    id TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL,
+    created_by TEXT NOT NULL,
+    revoked_at INTEGER,
+    last_used_at INTEGER
+  );
+  CREATE TABLE IF NOT EXISTS moderation_token_audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at INTEGER NOT NULL,
+    token_id TEXT NOT NULL,
+    token_label TEXT NOT NULL,
+    action TEXT NOT NULL,
+    task_id TEXT,
+    work_id TEXT,
+    reason TEXT,
+    ip TEXT,
+    outcome TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS moderation_token_audit_time ON moderation_token_audit(at);
+  CREATE TABLE IF NOT EXISTS moderation_settings (
+    id INTEGER PRIMARY KEY CHECK(id = 1),
+    mode TEXT,
+    updated_at INTEGER NOT NULL,
+    updated_by TEXT NOT NULL
+  );`),
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

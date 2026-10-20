@@ -22,7 +22,10 @@ const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
 const clip = (value, max) => String(value ?? '').normalize('NFKC').trim().slice(0, max);
 const defaultTitle = (modelName, effort) => [modelName, effort].filter(Boolean).join(' · ').slice(0, 40);
 const plainObject = (value) => value && typeof value === 'object' && !Array.isArray(value);
-const pendingModeration = () => ({ status: 'pending', revision: token('r'), at: Date.now() });
+// route records who should decide a new submission (dots / dots-review-only); rows
+// without it, including everything queued before routing existed, stay machine-only.
+const pendingModeration = (route = 'machine') => ({ status: 'pending', revision: token('r'), at: Date.now(),
+  ...(route && route !== 'machine' ? { route } : {}) });
 const moderationText = (work) => JSON.stringify([work.title, work.summary, work.modelName, work.modelId ? '' : work.vendor, work.effort, work.note,
   work.harnessOther, work.providerOther, ...GENERATION_FIELDS.map((key) => work[key])]);
 // Only a human's reason reaches the author; model text could carry what an injected upload asked for.
@@ -59,7 +62,7 @@ function writeTree(target, files) {
   }
 }
 
-export function createLibrary({ db, catalog, config, limits, legacyRounds = new Set() }) {
+export function createLibrary({ db, catalog, config, limits, legacyRounds = new Set(), moderationRoute = () => 'machine' }) {
   const contentAllowedEffective = (work) => Boolean(work && !work.curatedAs && catalog.task(work.taskId) &&
     (work.curated || ['legacy', 'approved'].includes(work.moderation?.status)));
   const contentAllowed = (work) => contentAllowedEffective(withDisplay(work));
@@ -156,6 +159,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     captures: db.prepare('UPDATE works SET captures = ? WHERE id = ?'),
     moderation: db.prepare('UPDATE works SET moderation = ? WHERE id = ? AND deleted_at IS NULL'),
     moderationResult: db.prepare('UPDATE works SET moderation = ? WHERE id = ? AND moderation = ? AND deleted_at IS NULL'),
+    pendingModeration: db.prepare("SELECT id FROM works WHERE deleted_at IS NULL AND json_extract(moderation, '$.status') = 'pending' ORDER BY created_at, id"),
     calibration: db.prepare('UPDATE works SET trial = ?, updated_at = ? WHERE id = ?'),
     arenaCalibration: db.prepare('UPDATE works SET calibration_arena = ?, updated_at = ? WHERE id = ?'),
     faceSettings: db.prepare(`UPDATE works SET show_gallery = ?, show_arena = ?, show_entertainment = ?,
@@ -545,6 +549,10 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       // Package works preview from the datapack directory; uploads from their own dir.
       return this.work(value.task, value.id);
     },
+    // Uploads waiting for an automatic decision, for the moderation sweep.
+    pendingModerationIds() {
+      return q.pendingModeration.all().map((row) => row.id);
+    },
     uploadById(id) {
       const row = q.work.get(id);
       return row ? fromRow(row) : null;
@@ -901,7 +909,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
             draft.bytes, draft.digest, draft.checks, JSON.stringify(sanitizeTrial(body.trial)), coverName, now, now,
             ...GENERATION_FIELDS.map((key) => generation[key]), JSON.stringify(isStaff(user)
               ? { status: 'approved', source: 'human', reviewer: user.nickname || user.name, reason: '管理员发布', at: now }
-              : config.moderation?.enabled ? pendingModeration() : { status: 'legacy' }), promptVariant, roleOf(user.role));
+              : config.moderation?.enabled ? pendingModeration(moderationRoute()) : { status: 'legacy' }), promptVariant, roleOf(user.role));
           q.deleteDraft.run(draft.id);
           q.audit.run(now, user.id, user.name, 'submit', taskId, id, `${who.modelName}${effortOf(body.effort) ? ` · ${effortOf(body.effort)}` : ''}`);
           if (cover) renameSync(pendingCover, join(media, coverName));
@@ -973,7 +981,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
           ...GENERATION_FIELDS.map((key) => generation[key]), promptVariant, note, Date.now(), id);
         audit(actor, 'meta', work, `编辑信息${generationAudit(work, generation)}${moved ? `；归属题目 ${moved.from} → ${moved.to}` : ''}`);
         const next = upload(moved ? moved.to : taskId, id);
-        if (author && !isStaff(actor) && config.moderation?.enabled && moderationText(work) !== moderationText(next)) q.moderation.run(JSON.stringify(pendingModeration()), id);
+        if (author && !isStaff(actor) && config.moderation?.enabled && moderationText(work) !== moderationText(next)) q.moderation.run(JSON.stringify(pendingModeration(moderationRoute())), id);
       };
       if (inTransaction) apply();
       else transaction(db, apply);

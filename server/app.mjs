@@ -20,6 +20,7 @@ import { createSharedRead } from './shared-read.mjs';
 import { createComments } from './comments.mjs';
 import { createChangelog } from './changelog.mjs';
 import { createAnnouncements, retiredAnnouncementStream } from './announcements.mjs';
+import { createDotsModeration, createModerationMode, createModerationTokens } from './dots-moderation.mjs';
 import { AVATARS, EFFORTS, EMOJIS } from './config.mjs';
 import { createContentHandler } from './content.mjs';
 import { openDatabase, transaction } from './db.mjs';
@@ -66,7 +67,9 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const emailAuth = createEmailAuth(db, auth, { mailer });
   // Show1 娱乐面兼容层（fusion/show1-adapter/DESIGN.md）：快照 + live 合并的同形状端点。
   const show1Snapshot = JSON.parse(readFileSync(new URL('./show1/compat-data.json', import.meta.url), 'utf8'));
-  const library = createLibrary({ db, catalog, config, limits, legacyRounds: new Set(show1Snapshot.works.map((work) => work.promptId)) });
+  const moderationMode = createModerationMode(db, config);
+  const library = createLibrary({ db, catalog, config, limits, legacyRounds: new Set(show1Snapshot.works.map((work) => work.promptId)),
+    moderationRoute: () => moderationMode.current });
   const adminService = createAdmin({ db, catalog, library });
   const inbox = createInbox({ library, config, limits });
   const catalogRevision = createCatalogRevision(db);
@@ -83,7 +86,9 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const featured = createFeatured({ db, catalog, library, arena });
   const comments = createComments(db, library);
   const capturer = captureFactory({ config, library });
-  const moderator = createModerator({ config, library, capturer, onChange: () => arena.invalidate() });
+  const moderator = createModerator({ config, library, capturer, onChange: () => arena.invalidate(), routing: moderationMode });
+  const dots = createDotsModeration({ db, config, library, mode: moderationMode, tokens: createModerationTokens(db),
+    onChange: () => arena.invalidate() });
   const queueWork = (work) => {
     if (work.moderation.status === 'pending') moderator.enqueue(work);
     else void capturer.enqueue(work);
@@ -500,6 +505,17 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     const work = library.reviewContent(admin, ctx.params.task, ctx.params.id, await readJson(ctx.req));
     arena.invalidate();
     return { work: library.adminWork(work, admin) };
+  });
+  // Who decides new submissions: machine, dots or dots-review-only (null returns to MODERATION_MODE).
+  router.on('GET', '/api/admin/moderation-mode', (ctx) => { adminOnly(ctx); return moderationMode.describe(); });
+  router.on('POST', '/api/admin/moderation-mode', async (ctx) => {
+    const admin = adminOnly(ctx);
+    const body = await readJson(ctx.req);
+    const result = moderationMode.set(body.mode === 'env' ? null : body.mode ?? null, admin.name);
+    db.prepare('INSERT INTO audit (at, actor_id, actor_name, action, task_id, work_id, detail) VALUES (?, ?, ?, ?, NULL, NULL, ?)')
+      .run(Date.now(), admin.id, admin.name, 'moderation-mode', JSON.stringify({ mode: body.mode ?? null }));
+    moderator.sweep();
+    return result;
   });
   router.on('POST', '/api/works/:task/:id/moderation/retry', (ctx) => {
     const admin = staffOnly(ctx);
@@ -946,6 +962,9 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         if (req.method !== 'GET' && req.method !== 'HEAD') fail(405, '不支持这个操作');
         return serveSite(req, res, url.pathname);
       }
+      // Moderation tokens open only the dots whitelist; every other API refuses them.
+      if (url.pathname.startsWith('/api/dots/')) return dots.handle(req, res, url);
+      if (/^bearer\s/i.test(String(req.headers.authorization ?? ''))) fail(403, '审核令牌不能访问此接口', 'token_forbidden');
       if (req.method === 'GET' || req.method === 'HEAD') readGuard.api(req, url.pathname);
       if (['GET', 'HEAD'].includes(req.method)
         && ['/api/bootstrap', '/api/catalog', '/api/show1/works', '/api/works', '/api/prompts', '/api/votes', '/api/ratings'].includes(url.pathname)

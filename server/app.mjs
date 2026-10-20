@@ -19,6 +19,7 @@ import { createCatalogResponse, createCatalogRevision } from './catalog-response
 import { createSharedRead } from './shared-read.mjs';
 import { createComments } from './comments.mjs';
 import { createChangelog } from './changelog.mjs';
+import { createAnnouncements } from './announcements.mjs';
 import { AVATARS, EFFORTS, EMOJIS } from './config.mjs';
 import { createContentHandler } from './content.mjs';
 import { openDatabase, transaction } from './db.mjs';
@@ -50,6 +51,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   })();
   const db = openDatabase(join(config.dataDir, 'platform.db'));
   const changelog = createChangelog(db);
+  const announcements = createAnnouncements(db);
   const references = createReferences({ db, config, limits });
   const questions = createQuestions(db, { references });
   references.bindQuestions(questions);
@@ -249,6 +251,12 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   }
 
   const router = createRouter();
+  router.on('GET', '/api/announcements', ctx => sendJson(ctx.res, 200, announcements.published(), { 'Cache-Control': 'no-cache' }));
+  router.on('GET', '/api/announcements/events', ctx => announcements.subscribe(ctx.req, ctx.res));
+  router.on('POST', '/api/admin/announcements', async ctx => {
+    const actor = adminOnly(ctx);
+    return announcements.create(actor, await readJson(ctx.req));
+  });
   router.on('GET', '/api/changelog', ctx => sendJson(ctx.res, 200, changelog.published(ctx.url.searchParams.get('limit')), { 'Cache-Control': 'no-cache' }));
   router.on('GET', '/api/admin/changelog', ctx => { adminOnly(ctx); return changelog.all(); });
   router.on('POST', '/api/admin/changelog', async ctx => {
@@ -956,6 +964,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     handleSite,
     handleContent: createContentHandler({ config, library, arena, qualification, catalog, siteOrigins: config.siteOrigins, readGuard }),
     async close() {
+      announcements.close();
       guessRooms.close();
       clearInterval(matchCleanup);
       clearInterval(referenceCleanup);

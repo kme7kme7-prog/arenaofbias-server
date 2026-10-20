@@ -673,6 +673,14 @@ const MIGRATIONS = [
     created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS changelog_published ON changelog_entries(status,published_on DESC,id DESC);`),
+  // Published announcements are pushed to visitors and stay available in the history.
+  (db) => db.exec(`CREATE TABLE IF NOT EXISTS announcements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    published_at INTEGER NOT NULL,
+    created_by TEXT NOT NULL
+  );`),
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

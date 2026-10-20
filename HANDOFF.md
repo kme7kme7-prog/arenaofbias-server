@@ -1,3 +1,10 @@
+## 2026-10-20 · 网站公告 API（已授权推送 GitHub，未部署）
+
+- v47 幂等迁移新增 `announcements`；新模块 `server/announcements.mjs` 提供公开全量历史、管理员即时发布与 SSE 广播。仅 Lv3 能发布；标题和 Markdown 正文有长度及控制字符校验，公告不可编辑/删除。
+- API 契约已追加到 `docs/api-contract.md`。Gallery 前端使用其列表与 SSE，已读进度留在浏览器本地。无种子生产公告、无新依赖。开发预览使用父工作区 `.local/` 内独立数据库，原有 2 条示例公告已清空且启动脚本不再播种。
+- 新增 4 条公告测试覆盖迁移、权限/历史、实时广播与输入校验；与更新日志测试定点共 8/8。旧更新日志测试硬编码版本 46 已改为检查最新迁移数；截图限时测试首次全量并行时偶发失败，单独执行 27/27、最终全量 412/412 通过。check 146/0，未部署。
+- 本轮归档：[网站公告 API](docs/archive/2026-10-20-announcements-atmeplz.md)。
+
 ## 2026-10-20 · WebGL 截图限帧、放宽时限，截图服务断线等待重试，超大入口页转人工（PR，未部署）
 
 - 截图机上 WebGL 作品走 SwiftShader 软件渲染，本身就慢。截图 context 注入脚本：页面请求 WebGL 上下文后 `requestAnimationFrame` 限到 `CAPTURE_WEBGL_FPS`（默认 8），截图和鼠标操作期间暂停。探测到 WebGL 时单件总时长放宽到 300 秒、单张截图 120 秒。导航改等 `domcontentloaded`，load 到点未完成按当前画面截图。

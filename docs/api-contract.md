@@ -1263,3 +1263,15 @@ readyElapsedMs沿用该match首次有效选择时间（验证码等待/重试不
 公开条目字段：`id`（整数）、`kind`、`title`、`body`、`titleEn`、`bodyEn`、`link`、`publishedOn`。后台条目另含 `status`、`createdAt`、`updatedAt`（ISO 8601 时间字符串），不返回维护者账号。所有列表按 `publishedOn DESC, id DESC`。公开接口 `Cache-Control: no-cache`，后台沿用 `no-store`。`limit` 仅在为 1–100 的整数时截断，否则返回全部。
 
 两个 POST 均接收 `{kind,title,body,titleEn,bodyEn,link,publishedOn,status}`：kind 为 feature/improve/fix/rule；中文标题去首尾空白后 1–60 字符；正文 1–4000 字符；英文标题最多 120、英文正文最多 8000 字符，二者同时填或同时空；link 为空或以 `#/`、`https://` 开头且最多 300 字符；publishedOn 为合法 `YYYY-MM-DD`（缺省为当天 UTC 日期，可回填）；status 为 draft/published。英文与链接缺省为空。校验失败 400，`error` 为可展示的中文。复用 `adminOnly`：已登录非 Lv3 返回 403，未登录沿用 401；写请求沿用平台同源校验。
+
+### 网站公告（schema v47）
+
+迁移 v47 幂等创建 `announcements`，不插入初始公告。空库时列表为 `{entries:[]}`，SSE 初始事件为 `{id:0}`；客户端不得据此弹出空白公告。公告发布后立即公开，不设草稿、编辑或删除；公开记录按 ID 倒序保留全部历史。
+
+| 方法 | 路径 | 响应 |
+| --- | --- | --- |
+| GET | `/api/announcements` | `{entries}`，无需登录，`Cache-Control: no-cache` |
+| GET | `/api/announcements/events` | SSE `announcement` 事件，数据为 `{id}`；连接时先发当前最新 ID，发布后广播新 ID，25 秒心跳；无需登录 |
+| POST | `/api/admin/announcements` | `{entry}`，仅 Lv3，发布后立即广播 |
+
+条目字段为 `id`（递增整数）、`title`、`body`（Markdown 原文）、`publishedAt`（ISO 8601）。POST 请求体 `{title,body}`：标题去空白后 1–100 字，正文去空白、规范换行后 1–20000 字，拒绝控制字符；校验失败 400。写入由平台同源校验保护。SSE 设置 `X-Accel-Buffering: no`，客户端收到事件后重取列表；已读状态由 Gallery 浏览器本地保存。

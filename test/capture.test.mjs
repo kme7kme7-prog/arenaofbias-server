@@ -4,7 +4,19 @@ import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { captureTimeoutConfig } from '../server/config.mjs';
 import { createCapturer } from '../server/capture.mjs';
+import { createModerator } from '../server/moderation.mjs';
+
+function consumeHang(options, step) {
+  if (options.hang !== step) return false;
+  const used = options.hangs ?? 0;
+  const limit = options.hangCount ?? Number.POSITIVE_INFINITY;
+  if (used >= limit) return false;
+  options.hangs = used + 1;
+  options.onHang?.(step);
+  return true;
+}
 
 function fixture(t, options = {}) {
   // Keep routine capability logs out of the concurrent test runner's output.
@@ -14,18 +26,29 @@ function fixture(t, options = {}) {
   const saved = [];
   const browser = new EventEmitter();
   browser.newContext = async (settings) => {
+    if (consumeHang(options, 'newContext')) return new Promise((resolve) => { (options.pendingContexts ??= []).push(resolve); });
     const context = { settings, closed: false, scripts: [], route: async () => {}, routeWebSocket: async () => {},
-      addInitScript: async (script) => { context.scripts.push(script); }, close: async () => { context.closed = true; } };
+      addInitScript: async (script) => { context.scripts.push(script); }, close: async () => {
+        context.closed = true;
+        if (consumeHang(options, 'close')) await new Promise(() => {});
+      } };
     const attempt = contexts.filter((item) => item.settings.isMobile === settings.isMobile).length;
     contexts.push(context);
     const text = settings.isMobile ? 'mobile text' : 'desktop text';
     const frame = (value) => ({ locator: () => ({ innerText: async () => value }) });
     context.newPage = async () => ({
-      goto: async () => {
+      goto: async (_url, navigation) => {
+        context.navigation = navigation;
+        if (consumeHang(options, 'goto')) await new Promise(() => {});
         if (options.fail?.(settings, attempt)) throw new Error('page failed');
         return { ok: () => true };
       },
-      waitForTimeout: async () => {}, screenshot: async ({ path }) => { context.shots = [...(context.shots ?? []), path]; },
+      waitForTimeout: async () => {},
+      screenshot: async ({ path, timeout }) => {
+        context.screenshotTimeout = timeout;
+        if (consumeHang(options, 'screenshot')) await new Promise(() => {});
+        context.shots = [...(context.shots ?? []), path];
+      },
       mouse: { move: async () => {}, wheel: async () => {},
         click: async () => { if (options.lateFail) throw new Error('click failed'); } },
       frames: () => [frame(text), ...(options.frameText ? [frame(options.frameText)] : [])],
@@ -36,7 +59,7 @@ function fixture(t, options = {}) {
   const library = { mediaDir, publicContent: () => true, originOf: () => 'http://work.localhost',
     hasDirectory: () => true, setCaptures: (id, captures) => saved.push({ id, captures }) };
   let f;
-  const capturer = createCapturer({ config: { capture: true, cdn: [], ...options.config }, library,
+  const capturer = createCapturer({ config: { capture: true, cdn: [], ...options.config, ...(options.timeouts ? { captureTimeouts: options.timeouts } : {}) }, library,
     loadChromium: options.loadChromium ?? (async () => ({ launch: async (settings) => { f.launches.push(settings); return browser; } })), now: options.now });
   t.after(async () => { await capturer.close(); rmSync(mediaDir, { recursive: true, force: true }); });
   f = { capturer, browser, mediaDir, contexts, saved, launches: [], work: { id: 'work', contentKey: 'key' } };
@@ -193,3 +216,136 @@ for (const failure of ['missing endpoint', 'connection']) {
     assert.doesNotMatch(warn.mock.calls[0].arguments[0], /private-token/);
   });
 }
+
+test('capture timeout configuration keeps positive overrides and falls back otherwise', () => {
+  assert.deepEqual(captureTimeoutConfig({}), {
+    task: 180_000, newContext: 45_000, newPage: 30_000, goto: 45_000, screenshot: 60_000, close: 15_000, connect: 30_000,
+  });
+  assert.equal(captureTimeoutConfig({ CAPTURE_TASK_TIMEOUT_MS: '0' }).task, 180_000);
+  assert.equal(captureTimeoutConfig({ CAPTURE_GOTO_TIMEOUT_MS: 'soon' }).goto, 45_000);
+  assert.equal(captureTimeoutConfig({ CAPTURE_SCREENSHOT_TIMEOUT_MS: '90000' }).screenshot, 90_000);
+  assert.equal(captureTimeoutConfig({ CAPTURE_NEW_CONTEXT_TIMEOUT_MS: '' }).newContext, 45_000);
+});
+
+test('navigation and screenshot calls receive the configured timeouts', async (t) => {
+  const f = fixture(t, { timeouts: { goto: 12345, screenshot: 23456 } });
+  await f.capturer.enqueue(f.work);
+  assert.ok(f.contexts.length >= 2);
+  assert.ok(f.contexts.every((context) => context.navigation.timeout === 12345 && context.screenshotTimeout === 23456));
+});
+
+test('a hung newContext drops the connection, rereads the endpoint and the queue continues', async (t) => {
+  t.mock.method(console, 'warn', () => {});
+  const directory = mkdtempSync(join(tmpdir(), 'capture-endpoint-'));
+  const endpointFile = join(directory, 'endpoint');
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  writeFileSync(endpointFile, 'ws://127.0.0.1:1234/first-token\n');
+  const connections = [];
+  const pendingContexts = [];
+  let browser;
+  const f = fixture(t, {
+    hang: 'newContext', hangCount: 1, pendingContexts,
+    onHang: () => writeFileSync(endpointFile, 'ws://127.0.0.1:2345/second-token\n'),
+    timeouts: { task: 10_000, newContext: 40, close: 40, connect: 1000, newPage: 1000, goto: 1000, screenshot: 1000, route: 1000, input: 1000, text: 1000 },
+    config: { captureEndpointFile: endpointFile },
+    loadChromium: async () => ({
+      launch: async () => assert.fail('remote capture must not launch locally'),
+      connect: async (endpoint) => { connections.push(endpoint); return browser; },
+    }),
+  });
+  browser = f.browser;
+  const started = Date.now();
+  const [first, second] = await Promise.all([
+    f.capturer.enqueue(f.work),
+    f.capturer.enqueue({ ...f.work, id: 'next' }),
+  ]);
+  assert.ok(Date.now() - started < 5000);
+  assert.equal(first.captures.first, 'first.jpg');
+  assert.equal(second.captures.mobile, 'mobile.jpg');
+  assert.deepEqual(connections, ['ws://127.0.0.1:1234/first-token', 'ws://127.0.0.1:2345/second-token']);
+  const leaked = { closed: false, close: async () => { leaked.closed = true; } };
+  pendingContexts[0](leaked);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(leaked.closed, true);
+});
+
+test('a disconnect during navigation fails that attempt and the retry reconnects', async (t) => {
+  t.mock.method(console, 'warn', () => {});
+  let f;
+  f = fixture(t, {
+    hang: 'goto', hangCount: 1,
+    onHang: () => setImmediate(() => f.browser.emit('disconnected')),
+    timeouts: { task: 10_000, goto: 5000, newContext: 1000, newPage: 1000, screenshot: 1000, close: 100, connect: 1000, route: 1000, input: 1000, text: 1000 },
+  });
+  const started = Date.now();
+  const result = await f.capturer.enqueue(f.work);
+  assert.ok(Date.now() - started < 3000);
+  assert.equal(result.captures.first, 'first.jpg');
+  assert.equal(result.captures.mobile, 'mobile.jpg');
+  assert.equal(f.launches.length, 2);
+  assert.ok(f.contexts.every((context) => context.closed));
+});
+
+for (const step of ['goto', 'screenshot']) {
+  test(`a hung ${step} fails inside the task budget and the next item still runs`, async (t) => {
+    t.mock.method(console, 'warn', () => {});
+    const started = Date.now();
+    const f = fixture(t, {
+      hang: step,
+      timeouts: { task: 180, screenshot: 5000, goto: 5000, newContext: 500, newPage: 500, close: 40, connect: 500, route: 500, input: 500, text: 500 },
+    });
+    const [first, second] = await Promise.all([
+      f.capturer.enqueue(f.work),
+      f.capturer.enqueue({ ...f.work, id: 'next' }),
+    ]);
+    assert.ok(Date.now() - started < 2000, `took ${Date.now() - started}ms`);
+    assert.deepEqual(first.captures, {});
+    assert.deepEqual(second.captures, {});
+    assert.ok(f.launches.length >= 2);
+    assert.ok(f.contexts.every((context) => context.closed));
+  });
+}
+
+test('a hung context close is abandoned and later work reconnects', async (t) => {
+  t.mock.method(console, 'warn', () => {});
+  const started = Date.now();
+  const f = fixture(t, {
+    hang: 'close', hangCount: 1,
+    timeouts: { task: 10_000, close: 50, newContext: 1000, newPage: 1000, goto: 1000, screenshot: 1000, connect: 1000, route: 1000, input: 1000, text: 1000 },
+  });
+  const result = await f.capturer.enqueue(f.work);
+  const next = await f.capturer.enqueue({ ...f.work, id: 'next' });
+  assert.ok(Date.now() - started < 3000);
+  assert.equal(result.captures.first, 'first.jpg');
+  assert.equal(result.captures.mobile, 'mobile.jpg');
+  assert.equal(next.captures.first, 'first.jpg');
+  assert.ok(f.launches.length >= 2);
+  assert.ok(f.contexts.every((context) => context.closed));
+});
+
+test('moderation records an incomplete capture and continues when the browser hangs', async (t) => {
+  t.mock.method(console, 'warn', () => {});
+  const f = fixture(t, {
+    hang: 'newContext',
+    timeouts: { task: 200, newContext: 40, close: 40, connect: 200, newPage: 200, goto: 200, screenshot: 200, route: 200, input: 200, text: 200 },
+  });
+  const works = ['a', 'b'].map((id) => ({
+    id, moderation: { status: 'pending' }, title: '标题', summary: '', note: '', modelName: '', modelId: 'm',
+    vendor: '', effort: '', harnessOther: '', providerOther: '', dir: f.mediaDir, entry: 'missing.html', contentKey: 'key',
+  }));
+  const results = [];
+  const moderator = createModerator({
+    config: { moderation: { enabled: true, apiKey: 'test-key', baseUrl: 'http://127.0.0.1:9/v1', model: 'gpt-6-luna' } },
+    library: {
+      uploads: () => works,
+      uploadById: (id) => works.find((work) => work.id === id),
+      finishModeration: (work, result) => { results.push({ id: work.id, status: result.status, error: result.error }); return true; },
+    },
+    capturer: f.capturer,
+  });
+  t.after(() => moderator.close());
+  await new Promise((resolve) => setImmediate(resolve));
+  await moderator.idle();
+  assert.deepEqual(results.map((item) => item.error), ['capture_incomplete', 'capture_incomplete']);
+  assert.ok(results.every((item) => item.status === 'review'));
+});

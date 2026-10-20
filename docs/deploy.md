@@ -378,6 +378,18 @@ Environment="MODERATION_API_KEY=<server-only-key>"
 
 浏览器启动失败后 `site.capture=false`，冷却五分钟后的下一件作品再尝试启动，恢复成功后变回 true；单个视口截图失败会用新 context 重试一次，两档仍需齐备才能送 Luna。`CAPTURE=0` 始终关闭截图。配置后 daemon-reload 并重启，在 bootstrap 同时核对 `site.capture`、`site.contentModeration` 和 `site.autoModeration`：后者只有审核开启、密钥已配置且截图当前可用时才为 true。审核开启但自动能力为 false 时，新作品转人工，前端应提示「管理员检查内容」。
 
+`newContext` 没有 Playwright 自带超时。单件截图另有总时长和分步上限，超时后这一件按失败结束（该视口仍重试一次；材料不齐则审核记 `capture_incomplete` 并转人工），关闭 context 与 page，截图队列和审核队列都继续下一件。这些调用无响应，或浏览器连接断开时，平台丢弃当前连接，下一件重新连接；配置了 `CAPTURE_ENDPOINT_FILE` 时会重新读取端点。这种丢弃不进入五分钟冷却。浏览器进程启动失败或独立服务连不上，仍沿用原来的五分钟冷却。`0`、空值和非法值都退回默认值，不能把上限关掉。加载后 3.5 秒和延迟截图前 8.5 秒是固定等待，不是这些上限。路由安装、鼠标操作和页面文字还有内部上限（15 秒、10 秒、45 秒），同样受单件总时长约束。
+
+| 变量 | 默认 | 含义 |
+| --- | --- | --- |
+| `CAPTURE_TASK_TIMEOUT_MS` | `180000` | 单件截图总时长，约 3 分钟 |
+| `CAPTURE_NEW_CONTEXT_TIMEOUT_MS` | `45000` | `browser.newContext` |
+| `CAPTURE_NEW_PAGE_TIMEOUT_MS` | `30000` | `context.newPage` |
+| `CAPTURE_GOTO_TIMEOUT_MS` | `45000` | 作品页导航 |
+| `CAPTURE_SCREENSHOT_TIMEOUT_MS` | `60000` | 单张截图。正常约 25–30 秒，不要设到这个附近 |
+| `CAPTURE_CLOSE_TIMEOUT_MS` | `15000` | 关闭 page、context 或浏览器连接 |
+| `CAPTURE_CONNECT_TIMEOUT_MS` | `30000` | 连接独立截图服务，或本地启动浏览器 |
+
 先在隔离环境确认两档截图及 Responses API 的 Flex 结构化响应；真实调用会计费，本地回归可使用模拟接口。用测试投稿确认公开列表/原作品源/媒体均被限制，作者与管理员可预览，自动通过后公开，疑似与错误转人工。后台人工通过内容理由选填，空白保存「人工复核通过」；拒绝理由必填。
 
 管理员直传与收件箱「登记并发布」视为管理员已完成人工内容审核：保存 approved / human、管理员名与「管理员上传」理由，写审计后一步核验发布，不送 Luna。仅登记收件箱仍走自动内容审核。普通作品核验接口在内容未放行时返回 409「请先完成内容审核」。

@@ -66,6 +66,13 @@ npm start
 | `CONTENT_CDN_ALLOWLIST` | `cdn.jsdelivr.net,unpkg.com,cdnjs.cloudflare.com,esm.sh,fonts.googleapis.com,fonts.gstatic.com,registry.npmmirror.com` | 作品允许加载脚本/样式/字体/数据的公共 CDN 白名单；npmmirror 仅允许 `/three/0.170.0/files/` |
 | `CAPTURE` | 开（`0` 关闭） | 投稿作品的无头截图（预配置 Playwright ≥ 1.48 + 本地 Chrome）；文档只访问当前作品源，资源只访问作品源和 HTTPS CDN 白名单，逐跳检查重定向，禁用 Service Worker / WebSocket |
 | `CAPTURE_BROWSER` | `chrome` | 截图所用浏览器通道 |
+| `CAPTURE_TASK_TIMEOUT_MS` | `180000` | 单件截图总时长上限。超时后该件按失败结束，队列继续下一件 |
+| `CAPTURE_NEW_CONTEXT_TIMEOUT_MS` | `45000` | `browser.newContext` 上限。此调用本身没有 Playwright 超时 |
+| `CAPTURE_NEW_PAGE_TIMEOUT_MS` | `30000` | `context.newPage` 上限 |
+| `CAPTURE_GOTO_TIMEOUT_MS` | `45000` | 作品页 `goto` 上限 |
+| `CAPTURE_SCREENSHOT_TIMEOUT_MS` | `60000` | 单张 `screenshot` 上限。正常一张截图约 25–30 秒 |
+| `CAPTURE_CLOSE_TIMEOUT_MS` | `15000` | 关闭 page、context 或浏览器连接的上限 |
+| `CAPTURE_CONNECT_TIMEOUT_MS` | `30000` | 连接独立截图服务或本地启动浏览器的上限 |
 | `CONTENT_MODERATION` | 关（`1` 开启） | 新投稿先保持私密，异步审查文字、封面及桌面/手机首屏；异常转人工 |
 | `MODERATION_API_KEY` / `OPENAI_API_KEY` | 未配置 | 服务器审核 API 密钥，前者优先；不下发至浏览器 |
 | `MODERATION_BASE_URL` | `https://api.openai.com/v1` | Responses API 根地址；SSH relay 部署见部署文档 6.1，密钥只配置在服务器 |
@@ -94,7 +101,7 @@ npm start
 
 ## 自动内容审查
 
-服务器设置 `CONTENT_MODERATION=1`，在服务器环境中配置 `MODERATION_API_KEY` 或 `OPENAI_API_KEY`，并启用已有截图环境（`CAPTURE=1`、预配置 Playwright 与 Chrome）。默认调用 OpenAI Responses API 的 GPT-6 Luna Flex；不新增 npm 依赖。缺少密钥、截图不完整、超时或 Flex 容量不足时保留私密状态，转人工复核；不自动改用标准档。
+服务器设置 `CONTENT_MODERATION=1`，在服务器环境中配置 `MODERATION_API_KEY` 或 `OPENAI_API_KEY`，并启用已有截图环境（`CAPTURE=1`、预配置 Playwright 与 Chrome）。默认调用 OpenAI Responses API 的 GPT-6 Luna Flex；不新增 npm 依赖。缺少密钥、截图不完整、超时或 Flex 容量不足时保留私密状态，转人工复核；不自动改用标准档。上表 `CAPTURE_*_TIMEOUT_MS` 为 `0`、空或非数字时保持默认值，不能关掉上限。分步超时或连接断开会丢弃当前浏览器连接并在下一件重建；浏览器启动或连接失败仍冷却五分钟。细节见部署文档。
 
 内容状态独立于 `unverified / verified / questioned`：`pending` 等待自动审查，`approved` 可公开，`review` 等人工，`rejected` 不公开。公开门面开关仍生效；只有核验为 `verified` 的作品才能进盲评。作者和管理员响应中会发放有效一小时的随机预览地址，地址本身具有预览能力，不应转发；封面和截图仍校验作者/管理员会话。后台支持人工通过、拒绝和重新自动审查，并记录审计。修改送审文字后重新进入 `pending`，启动时恢复尚未处理的队列。
 

@@ -129,3 +129,21 @@ test('SSE is private, capped, uncached, and revoked after session logout', async
     assert.equal((await call('alice', `${room.code}/state`)).status, 401);
   } finally { for (const controller of controllers) controller.abort(); }
 });
+
+test('friend room streams send a keepalive within 10 seconds and end when the platform closes streams', async t => {
+  const { call, platform, cookies, base } = await fixture(t);
+  const { room } = await (await call('alice', 'create', { difficulty: 2 })).json();
+  const response = await fetch(`${base}/api/guess/friends/${room.code}/events`, { headers: { origin: base, cookie: cookies.alice } });
+  assert.equal(response.status, 200);
+  const reader = response.body.getReader(), decoder = new TextDecoder();
+  const started = Date.now();
+  let text = '';
+  while (!text.includes(': keepalive')) {
+    const chunk = await reader.read();
+    assert.equal(chunk.done, false);
+    text += decoder.decode(chunk.value);
+  }
+  assert.ok(Date.now() - started <= 11_500, 'heartbeat arrives before the 15-second edge timeout');
+  platform.closeStreams();
+  for (;;) if ((await reader.read()).done) break;
+});

@@ -50,6 +50,19 @@ test('a vanished file returns 404 without crashing the server', async () => {
   }
 });
 
+test('shutdown closes a response that never ends once the grace period passes', async () => {
+  const server = createServer((req, res) => { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.write(': open\n\n'); })
+    .listen(0, '127.0.0.1');
+  await new Promise((resolve) => server.once('listening', resolve));
+  const response = await fetch(`http://127.0.0.1:${server.address().port}/`);
+  const reader = response.body.getReader();
+  await reader.read();
+  const started = Date.now();
+  await drainServers([server], { forceAfterMs: 100 });
+  assert.ok(Date.now() - started < 2000);
+  await assert.rejects(async () => { for (;;) if ((await reader.read()).done) return; });
+});
+
 test('shutdown waits for an active HTTP response', async () => {
   let started;
   const began = new Promise((resolve) => { started = resolve; });

@@ -85,7 +85,15 @@ export function registerGuessRooms(router, { db, auth, config }) {
   const timer = setInterval(() => {
     try {
       rooms.tick();
-      if (++pulse % 5 !== 0) return;
+      // A comment line every 10 seconds keeps idle rooms under the 15-second
+      // EdgeOne origin response timeout.
+      if (++pulse % 10 === 0) {
+        for (const stream of streams) {
+          if (stream.res.writableLength > 65536) stream.close();
+          else stream.res.write(': keepalive\n\n');
+        }
+      }
+      if (pulse % 5 !== 0) return;
       const touched = new Set();
       for (const stream of streams) {
         const user = auth.userFrom(stream.req);
@@ -99,6 +107,7 @@ export function registerGuessRooms(router, { db, auth, config }) {
   }, 1000);
   timer.unref();
   return {
+    closeStreams() { for (const stream of streams) stream.close(); },
     close() { clearInterval(timer); unsubscribe(); for (const stream of streams) stream.close(); },
   };
 }

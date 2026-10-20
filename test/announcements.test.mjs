@@ -68,18 +68,17 @@ test('only Lv3 can publish; public history keeps Markdown and orders newest firs
   });
 });
 
-test('new publications reach already connected visitors', async () => {
+test('the retired event stream answers 204 so old pages stop reconnecting, and polling sees new entries', async () => {
   await fixture(async ({ call, base }) => {
-    const controller = new AbortController();
-    const response = await fetch(`${base}/api/announcements/events`, { signal: controller.signal });
-    assert.equal(response.status, 200);
-    assert.match(response.headers.get('content-type'), /text\/event-stream/);
-    const reader = response.body.getReader(), decoder = new TextDecoder();
-    try {
-      assert.match(decoder.decode((await reader.read()).value), /"id":0/);
-      const published = await call('POST', '/api/admin/announcements', { title: '实时', body: '公告正文' });
-      assert.match(decoder.decode((await reader.read()).value), new RegExp(`"id":${published.data.entry.id}`));
-    } finally { controller.abort(); await reader.cancel().catch(() => {}); }
+    const response = await fetch(`${base}/api/announcements/events`, { headers: { origin: base, accept: 'text/event-stream' } });
+    assert.equal(response.status, 204);
+    assert.equal(await response.text(), '');
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.equal(response.headers.get('content-type'), null);
+    assert.equal(response.headers.get('access-control-allow-origin'), base);
+    const published = await call('POST', '/api/admin/announcements', { title: '轮询', body: '公告正文' });
+    assert.equal(published.status, 200);
+    assert.equal((await call('GET', '/api/announcements', undefined, 'guest')).data.entries[0].id, published.data.entry.id);
   });
 });
 

@@ -1296,6 +1296,8 @@ readyElapsedMs沿用该match首次有效选择时间（验证码等待/重试不
 
 v49 给 `moderation_tokens` 加 `scopes`（已有令牌默认 `moderation`），新增 `cover_history`。权限：`moderation`、`capture:read`（`GET /api/dots/captures/failed`）、`cover:write`（`PUT /api/dots/works/:task/:id/cover`），见 [dots 审核 API](dots-moderation-api.md)。
 
+`GET /api/dots/captures/failed` 的筛选口径：`json_extract(moderation, '$.error') = 'capture_incomplete'` 或 `json_extract(captures, '$.first')` 为空；不看 `works.cover`。按 `id` keyset 分页（主键索引），`manualCover=all|exclude|only` 按是否已人工替换封面（文件名 `cover-*`）筛选。
+
 封面替换只改 `works.cover`，文件名改为 `cover-<随机>.<ext>`，旧文件保留；`/media/<作品>/` 同时接受 `cover.<ext>` 和 `cover-<8–24 位小写字母数字>.<ext>`。改动触发目录修订号，未登录 bootstrap 与 catalog 下一次请求即重建。
 
 | 方法 | 路径 | 说明 |

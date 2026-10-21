@@ -1,4 +1,12 @@
-## 2026-10-21 · 公开作品浏览器私有缓存（已授权提交/部署）
+## 2026-10-21 · 作品缓存上线与 CDN 验收（源站通过，公网未通过）
+
+- 运行代码 `699601fb91f589c6164b7c39dcd82dfe759ba2cb` 已推 main，只移植 content.mjs 与新增 content-cache.mjs 到生产。现场其余 79 个运行文件保留，schema 49 不变。重启约 5 秒；随后配置验收期间未再次重启。源站直连条件请求 304，公开 HTTPS 经 EdgeOne 仍 200/全量，不能宣称已减少公网重复下载。
+- 用户另行授权后，在作品域 Nginx location / 增加唯一一行 `proxy_cache off;`，消除全局继承代理缓存对 If-None-Match 的吞头影响；nginx -t 与平滑 reload 通过。代码与配置备份在 `/root/aob-content-cache-20261021/before/`。没有调整 EdgeOne 缓存时长或开启共享缓存。
+- 用户批准尝试公开作品限定的回源头转发，并要求无效撤回。实测规则命中（静态诊断头到源站），但实际校验变量大小写两种均为空，标准头与自定义头两条路径均不能恢复；新增规则已删除，刷新控制台确认规则数恢复 0，源站抓包无诊断头。严禁继续留下空值覆盖规则，或用固定 ETag / CDN 强缓存冒充修复。
+- 最终 Tabbit：浏览器重复打开确实带 If-None-Match，但公网两次仍 200，脚本错误 0、opaque sandbox 保留。公开 w/c HTTP 均 200 带私有强制验证头；无效 p/d/m/e 为 410/no-store/无 ETag，外壳仍 no-store。四站健康 200，81 个运行文件指纹符合本轮清单，公开作品由 2137 自然增至 2138，题目仍 98。
+- 任务部分完成，尚需 EdgeOne 支持确认条件头透传方式。父 Show1 `.local/content-revalidation-20261021/report.md`、`completion.json`、`edgeone-support.md` 和 final-health/public-http/browser-final-live 记录真实结果；completion 不标记全量完成。生产 `.server-version` 未更新为此次增量补丁，核对运行版本须使用 installed.json/manifest 的文件指纹，不能仅信旧版本字符串。未操作生产作品下架或测试写入。
+
+## 2026-10-21 · 公开作品浏览器私有缓存（原始实施与发布准备）
 
 - 用户本轮明确授权提交、推送与部署。英文简单提交，唯一身份 kme7kme7-prog，不加联合署名。发布准备记录见 [归档](docs/archive/2026-10-21-content-revalidation-kme7kme7-prog.md)；最终线上结果以父 Show1 `.local/content-revalidation-20261021/completion.json` 为准，未生成成功结果前不能当作已部署。
 

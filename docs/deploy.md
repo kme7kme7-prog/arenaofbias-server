@@ -43,6 +43,14 @@ cp -a "$conf" "$conf.bak-$(date -u +%Y%m%dT%H%M%SZ)"
 
 API HTTPS `server` 块包含 `include /www/wwwroot/arenaofbias-server/deploy/nginx/upload-timeout.conf;`，将上传请求体的空闲等待设为24小时，取消默认60秒断开。该时间按相邻两次读取计算，不是上传总时长；`0` 不是关闭开关。更改后备份、`nginx -t`、reload，并验证暂停超过60秒后仍可继续发送。文件大小上限及其他站点的超时保持原配置。
 
+### 公开作品浏览器验证与代理层
+
+公开 `w/c` 内容可用 `private, no-cache, max-age=0, must-revalidate` 和 ETag 让浏览器每次确认当前公开门禁后复用相同字节；私看、草稿、正式盲测、考试及可信外壳仍 `no-store`。这不是共享 CDN 缓存，不允许将公开资源设置为不经门禁即可复用的强缓存。
+
+作品域反代 `location /` 必须显式设置 `proxy_cache off;`：若继承全局 `proxy_cache`，Nginx 会抑制浏览器条件请求头，后端无法 304。2026-10-21 生产仅为 `/www/server/panel/vhost/nginx/w.arenaofbias.icu.conf` 的既有代理加了这一行，备份在 `/root/aob-content-cache-20261021/before/nginx/`，经语法测试及平滑重载后直连 HTTPS 条件请求可 304。
+
+验收需分别比较本机后端、直连源站 HTTPS 与 CDN 公网，再用真实 iframe 浏览器确认请求携带 If-None-Match、网络响应为 304。仅见 ETag 或浏览器渲染成功不能算复用。当天实测 EdgeOne 公网仍返回 200，实际条件头未到源站；限定公开路径的回源头转发规则虽然命中，动态校验值仍为空，已按授权撤回，规则数恢复 0。未改变 CDN 时长或缓存权限，不能称公网缓存已修复。后续应先由 CDN 支持确认条件头的处理阶段，勿直接留下空头覆盖或为解决此问题放开私密内容缓存。
+
 ### API 压缩与缓存头（无需改 Nginx / EdgeOne）
 
 后端用 `node:zlib` 自行压缩 1 KiB 以上的 JSON：请求接受 br 时用 br（质量 5），否则 gzip（级别 6），压缩放在 libuv 线程池中，不占事件循环。响应带 `Content-Encoding` 与 `Vary: Accept-Encoding`（与 CORS 的 `Vary: Origin` 合并）。Nginx 的 gzip 过滤器遇到已有 `Content-Encoding` 的响应直接跳过，`deploy/nginx/api-proxy.conf` 的 `gzip_comp_level 6` 保留给小响应和静态文件即可；EdgeOne 原样透传已压缩的回源。不要再给 API 打开 Nginx `gunzip` 或 EdgeOne「回源解压后再压缩」类选项。

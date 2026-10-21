@@ -249,3 +249,69 @@ test('activity rebuilds after withdrawal during an in-flight shared pool calcula
     for (const result of results) { assert.equal(result.status, 200); assert.equal(result.data.arena.one.works, 0); }
   } finally { platform.library.eligible = eligible; }
 }));
+
+test('review reads repeated-task works without repeating question queries per work', async () => fixture(async ({ platform, call, data, dist, admin }) => {
+  data.tasks[0].results = Array.from({ length: 100 }, (_, i) => ({ ...data.tasks[0].results[0], id: `pack-${i}` }));
+  writeFileSync(join(dist, 'data.json'), JSON.stringify(data));
+  const expected = platform.library.allWorks().map(work => platform.library.adminWork(work, admin));
+  const statements = Object.getPrototypeOf(platform.db.prepare('SELECT 1'));
+  const get = statements.get;
+  let questionReads = 0;
+  statements.get = function (...args) {
+    if (/FROM (?:questions|question_overrides)\b/.test(this.sourceSQL)) questionReads++;
+    return Reflect.apply(get, this, args);
+  };
+  try {
+    const response = await call('/api/review', { who: 'admin' });
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.data.works, expected, 'the complete work DTOs and order stay unchanged');
+    assert.deepEqual(response.data.audit, platform.library.auditLog());
+    assert.equal(response.data.questions.length, 1);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.ok(questionReads <= 8, `100 works of one task performed ${questionReads} question reads`);
+  } finally { statements.get = get; }
+}));
+
+test('review reads keep staff boundaries and observe decisions and removals on the next request', async () => fixture(async ({ platform, call, member, admin }) => {
+  assert.equal((await call('/api/review')).status, 401);
+  assert.equal((await call('/api/review', { who: 'member' })).status, 403);
+  const question = await call('/api/questions', { who: 'member', method: 'POST', body: {
+    title: 'Pending question', summary: 'Private until approved', prompt: 'Build a page', category: '静态网页', templates: ['static'], tags: [],
+  } });
+  assert.equal(question.status, 200, question.text);
+  const draft = await call('/api/drafts?task=one&name=work.html', { who: 'member', method: 'POST', raw: true,
+    body: '<!doctype html><title>Upload</title><h1>Pending work</h1>' });
+  assert.equal(draft.status, 200, draft.text);
+  const submitted = await call('/api/works', { who: 'member', method: 'POST', body: {
+    draftId: draft.data.draft.id, confirmed: true, title: 'Pending upload', modelId: 'model', effort: 'Default',
+    providerId: 'official', harnessOther: 'Test', generationMode: 'single-turn', humanIntervention: 'none',
+  } });
+  assert.equal(submitted.status, 200, submitted.text);
+  const id = submitted.data.work.id;
+  const first = (await call('/api/review', { who: 'admin' })).data;
+  assert.equal(first.works.find(work => work.id === id).status, 'unverified');
+  assert.ok(first.questions.some(item => item.id === question.data.question.id));
+  const publicBefore = (await call('/api/catalog')).data;
+  assert.ok(!publicBefore.works.some(work => work.id === id));
+  assert.ok(!publicBefore.questions.some(item => item.id === question.data.question.id));
+
+  platform.auth.promote(member.name, 'moderator');
+  const moderator = await call('/api/review', { who: 'member' });
+  assert.equal(moderator.status, 200);
+  assert.deepEqual(moderator.data.questions, []);
+  assert.equal(moderator.data.works.find(work => work.id === id).mine, true);
+
+  const decided = await call(`/api/works/one/${id}/review`, { who: 'admin', method: 'POST', body: { status: 'verified' } });
+  assert.equal(decided.status, 200, decided.text);
+  const after = (await call('/api/review', { who: 'admin' })).data.works.find(work => work.id === id);
+  assert.equal(after.status, 'verified');
+  assert.ok(after.reviewed.gallery);
+  assert.equal(after.mine, false);
+  assert.deepEqual(after, platform.library.adminWork(platform.library.work('one', id), admin));
+
+  const removed = await call(`/api/works/one/${id}`, { who: 'admin', method: 'DELETE' });
+  assert.equal(removed.status, 200, removed.text);
+  assert.ok(!(await call('/api/review', { who: 'admin' })).data.works.some(work => work.id === id));
+  platform.auth.promote(member.name, 1);
+  assert.equal((await call('/api/review', { who: 'member' })).status, 403, 'revoking staff access applies to the existing session');
+}));

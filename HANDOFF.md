@@ -1,3 +1,15 @@
+## 2026-10-21 · 审核页重复查询优化（已授权提交/部署）
+
+- 用户确认发布审核与首页两项修复。各仓仅一条英文提交，身份 kme7kme7-prog，无联合署名。以生产 app 为底只替换审核路由这一个同步批次，不整仓覆盖后台，不变更 schema/依赖/配置；保留回滚副本，再重启并公网验收。归档见 [本轮发布](docs/archive/2026-10-21-review-query-kme7kme7-prog.md)。本条为发布准备记录，实际部署结果以父 Show1 工作区 `.local/gallery-perf-release-20261021/` 为准。
+- 发布前再次运行语法检查 152/0 和低并发全量测试 438/438，0 取消/跳过。线上 app 哈希与前轮只读对照基线一致；实际公网已登录审核请求发布前约 4.76 秒，后续同一账号对照另录。
+
+- 用户授权修改审核页加载慢的问题；本轮只在 `GET /api/review` 内用现有 `catalog.withSnapshot()` 复用同步批次中的题目查询。权限检查仍在读取前执行，响应字段/排序、审核规则、私密数据 `no-store` 不变；没有跨请求缓存、异步读取重排、分页重构或数据库迁移。
+- 主工作区 `C:/Users/hyc/Documents/Show2/fusion/arenaofbias-server` 仍在历史基线且有其他任务遗留，本轮使用基于最新 `origin/main` 014e076 的独立 detached worktree：`C:/Users/hyc/Documents/Show1/.local/review-query-fix-20261021/server`。不要把主工作区遗留纳入本次，也不要将该候选整仓覆盖生产。
+- `test/catalog-http.test.mjs` 新增两项回归：100 件同题作品的完整 DTO/顺序一致且题目查询不随作品逐件重复；匿名/成员/审核员/高级管理员范围、私密作品/题目、核验与删除即时反映、撤销权限立即生效。旧代码下定点测试实测 902 次题目查询而失败，新代码通过。
+- `npm run check`：152 文件/0错误。默认 `npm test` 首轮416通过/22取消，两组旧 HTTP 套件在登录钩子遭本机 ECONNRESET；单独串行复跑27/27通过，随后 `node --test --test-concurrency=2 test/*.test.mjs` 全量438/438通过、0取消/跳过。`git diff --check` 通过。未改前端，未做新 UI 浏览器回归；前一轮已用 Tabbit 复现线上页面。
+- 实际候选路由与线上原路由在 VPS 独立低优先级进程、同一只读 SQLite 事务中对照：2411 件作品/103题，三份完整返回 JSON SHA256 一致。旧路由4.19秒/28675次SQL；候选首次2.52秒、热态0.46秒/1398次SQL。首次仍有预览文件校验/哈希开销，不承诺整页固定0.46秒；5.7MB全量响应的按需加载留待后续。
+- 证据及补丁在上级 `.local/review-query-fix-20261021/`：before/after-targeted.log、syntax.log、tests.log、retry-http.log、tests-bounded.log、profile-result.json、candidate.json。`runtime-candidate/server/app.mjs` 只在上一轮下载的生产 app 上应用当前审核路由补丁，保留其余生产差异；真正部署前须重新确认生产哈希和活动任务，再备份、做当前运行组合验证。此次没有写生产数据、更新线上文件、重启服务、commit或push。
+
 ## 2026-10-20 · dots 令牌分权限、截图失败列表、封面替换（#19 的补充，合并后未部署）
 
 - 令牌改为逐项授权：`moderation`、`capture:read`、`cover:write`。脚本 `create <label> <scopes>` 指定，`grant` / `withdraw` 单项增减，`revoke` 整个作废，都立即生效。紧急开关 `DOTS_API=off`、`DOTS_DISABLED_SCOPES`。v49 迁移：`moderation_tokens.scopes`（已有令牌默认 `moderation`）和 `cover_history`，不改作品行。

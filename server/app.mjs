@@ -601,8 +601,11 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   });
   router.on('GET', '/api/review', (ctx) => {
     const admin = staffOnly(ctx);
-    return { works: library.allWorks().map((work) => library.adminWork(work, admin)), audit: library.auditLog(),
-      questions: isSenior(admin) ? questions.adminAll(admin) : [] };
+    // Reuse question lookups within this response only; the next request reads current decisions.
+    return catalog.withSnapshot(() => ({
+      works: library.allWorks().map((work) => library.adminWork(work, admin)), audit: library.auditLog(),
+      questions: isSenior(admin) ? questions.adminAll(admin) : [],
+    }));
   });
 
   // Account administration for Gallery's member list and the admin web app (the CLI in server/cli.mjs does the same).

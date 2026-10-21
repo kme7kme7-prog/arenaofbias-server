@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { extname } from 'node:path';
 import { contentRoute, shellResponse, pathDocument, pathPolicy, rebaseCss, contentRuntime, contentRuntimePath } from './content-path.mjs';
 import { entertainmentProbeTag } from './work-ready.mjs';
+import { CONTENT_REVALIDATE, sendRevalidatedBody, streamRevalidatedFile } from './content-cache.mjs';
 import { THREE_MIRROR_PATH } from './config.mjs';
 import { HttpError, resolveInside, streamFile } from './http.mjs';
 import { createReadGuard } from './read-guard.mjs';
@@ -99,13 +100,13 @@ export function createContentHandler({ config, library, arena, qualification, ca
       if (library.isEligible(work)) target = { dir: work.dir, entry: work.entry ?? 'index.html' };
     } else if (key[0] === 'c') {
       work = library.curatedByKey(key);
-      if (library.publicCuratedContent(work)) target = { dir: work.dir, entry: work.entry ?? 'index.html', private: true };
+      if (library.publicCuratedContent(work)) target = { dir: work.dir, entry: work.entry ?? 'index.html' };
     } else if (key[0] === 'p') {
       work = library.previewByKey(key);
       if (work) target = { dir: work.dir, entry: work.entry ?? 'index.html', private: true };
     } else {
       work = library.byContentKey(key);
-      if (library.publicContent(work)) target = { dir: work.dir, entry: work.entry, private: work.moderation.status !== 'legacy' };
+      if (library.publicContent(work)) target = { dir: work.dir, entry: work.entry };
     }
     if (!target) return errorPage(res, 410, '作品已不可用', blind ? '这一组比较已经结束，请开始新的一组。' : '作品尚未公开、已被删除，或预览地址已过期。');
 
@@ -113,11 +114,18 @@ export function createContentHandler({ config, library, arena, qualification, ca
     const pathname = route?.path ?? url.pathname;
     const playground = !target.draft && !blind && url.searchParams.getAll('aob').includes('playground');
     const stageParent = playground && siteOrigins.includes(url.searchParams.get('parent')) ? url.searchParams.get('parent') : null;
+    const revalidate = !target.draft && !target.private && !blind && !route?.shell;
     const headers = {
       'Content-Security-Policy': route ? pathPolicy(route, cdn, siteOrigins) : policy,
       'Referrer-Policy': 'no-referrer',
       'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=()',
-      'Cache-Control': target.draft || target.private || blind ? 'no-store' : 'private, max-age=600',
+      'Cache-Control': revalidate ? CONTENT_REVALIDATE : 'no-store',
+    };
+    const send = (body, extra) => {
+      const responseHeaders = { ...headers, ...extra };
+      if (revalidate) return sendRevalidatedBody(req, res, body, responseHeaders);
+      res.writeHead(200, { ...responseHeaders, 'Content-Length': body.length });
+      return res.end(req.method === 'HEAD' ? undefined : body);
     };
     if (route?.shell) {
       // Only the inner work consumes the expensive HTML-rendering budget. The
@@ -147,42 +155,36 @@ export function createContentHandler({ config, library, arena, qualification, ca
         return res.end();
       }
       if (pathname === '/__content-runtime.js') {
-        res.writeHead(200, { ...headers, 'Content-Type': 'text/javascript; charset=utf-8', 'Content-Length': contentRuntime.length });
-        return res.end(req.method === 'HEAD' ? undefined : contentRuntime);
+        return send(contentRuntime, { 'Content-Type': 'text/javascript; charset=utf-8' });
       }
     }
     if (pathname === '/__playground.js' && !target.draft) {
-      res.writeHead(200, { ...headers, 'Content-Type': 'text/javascript; charset=utf-8', 'Content-Length': stageBridge.length });
-      return res.end(req.method === 'HEAD' ? undefined : stageBridge);
+      return send(stageBridge, { 'Content-Type': 'text/javascript; charset=utf-8' });
     }
     const fold = blind || (!target.draft && url.searchParams.getAll('aob').includes('fold'));
     const arenaFold = !target.draft && url.searchParams.getAll('aob').includes('arena-fold');
     const inject = pathname === SCRIPTS.arena.path ? SCRIPTS.arena : pathname === SCRIPTS.match.path ? SCRIPTS.match : target.draft ? SCRIPTS.draft : null;
     if (inject && pathname === inject.path) {
-      res.writeHead(200, { ...headers, 'Content-Type': 'text/javascript; charset=utf-8', 'Content-Length': inject.body.length });
-      return res.end(req.method === 'HEAD' ? undefined : inject.body);
+      return send(inject.body, { 'Content-Type': 'text/javascript; charset=utf-8' });
     }
     // A pinned bundled work adapter is served dynamically; stored assets stay intact.
     if (!target.draft && pathname === APEX_CAMERA_PATH) {
       const asset = resolveInside(target.dir, APEX_ASSET);
       const body = asset && adaptApexCamera(readFileSync(asset.file));
       if (!body) return errorPage(res, 404, '取景适配不可用', '作品版本已变化，请使用原作预览。');
-      res.writeHead(200, { ...headers, 'Cache-Control': 'no-store', 'Content-Type': 'text/javascript; charset=utf-8', 'Content-Length': body.length });
-      return res.end(req.method === 'HEAD' ? undefined : body);
+      return send(body, { 'Content-Type': 'text/javascript; charset=utf-8' });
     }
     // Bridge forwarding modules for rewritten importmaps, ahead of any real file lookup.
     if (!target.draft && pathname === TESSERA_CAMERA_PATH) {
       const asset = resolveInside(target.dir, TESSERA_ASSET);
       const body = asset && adaptTesseraCamera(readFileSync(asset.file));
       if (!body) return errorPage(res, 404, '取景适配不可用', '作品版本已变化，请使用原作预览。');
-      res.writeHead(200, { ...headers, 'Cache-Control': 'no-store', 'Content-Type': 'text/javascript; charset=utf-8', 'Content-Length': body.length });
-      return res.end(req.method === 'HEAD' ? undefined : body);
+      return send(body, { 'Content-Type': 'text/javascript; charset=utf-8' });
     }
     const virtual = serveBridgeVirtual(pathname, url.searchParams);
     if (virtual) {
       if (virtual.error) return errorPage(res, virtual.error, '作品地址无效', '转发目标无法解析。');
-      res.writeHead(200, { ...headers, 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache', 'Content-Length': Buffer.byteLength(virtual.body) });
-      return res.end(req.method === 'HEAD' ? undefined : virtual.body);
+      return send(Buffer.from(virtual.body), { 'Content-Type': 'text/javascript; charset=utf-8' });
     }
     const found = resolveInside(target.dir, pathname === '/' ? `/${target.entry}` : pathname);
     if (!found) return errorPage(res, 404, '找不到文件', pathname.slice(0, 120));
@@ -193,8 +195,7 @@ export function createContentHandler({ config, library, arena, qualification, ca
         body = stageRender(Buffer.from(source, 'latin1'));
       }
       if (body) {
-        res.writeHead(200, { ...headers, 'Cache-Control': 'no-store', 'Content-Type': 'text/javascript; charset=utf-8', 'Content-Length': body.length });
-        return res.end(req.method === 'HEAD' ? undefined : body);
+        return send(body, { 'Content-Type': 'text/javascript; charset=utf-8' });
       }
     }
     if (/\.html?$/i.test(found.file)) {
@@ -248,14 +249,20 @@ export function createContentHandler({ config, library, arena, qualification, ca
       }
       if (head.length) body = withHeadTags(body, head.join(''));
       if (route) body = pathDocument(body, route, pathname);
-      res.writeHead(200, { ...headers, 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': body.length, 'X-Content-Type-Options': 'nosniff' });
-      return res.end(req.method === 'HEAD' ? undefined : body);
+      return send(body, { 'Content-Type': 'text/html; charset=utf-8', 'X-Content-Type-Options': 'nosniff' });
     }
     if (route && extname(found.file).toLowerCase() === '.css') {
       const body = Buffer.from(rebaseCss(readFileSync(found.file, 'utf8'), route.prefix));
-      res.writeHead(200, { ...headers, 'Content-Type': 'text/css; charset=utf-8', 'Content-Length': body.length, 'X-Content-Type-Options': 'nosniff' });
-      return res.end(req.method === 'HEAD' ? undefined : body);
+      return send(body, { 'Content-Type': 'text/css; charset=utf-8', 'X-Content-Type-Options': 'nosniff' });
     }
+    if (revalidate) return streamRevalidatedFile(req, res, found, headers, () => {
+      const check = () => {
+        const current = key[0] === 'c' ? library.curatedByKey(key) : library.byContentKey(key);
+        return current && current.dir === target.dir && (current.entry ?? 'index.html') === (target.entry ?? 'index.html') &&
+          (key[0] === 'c' ? library.publicCuratedContent(current) : library.publicContent(current));
+      };
+      return catalog ? catalog.withSnapshot(check) : check();
+    });
     return streamFile(req, res, found, headers);
   }
 

@@ -1,3 +1,15 @@
+## 2026-10-21 · 公开作品浏览器私有缓存（已授权提交/部署）
+
+- 用户本轮明确授权提交、推送与部署。英文简单提交，唯一身份 kme7kme7-prog，不加联合署名。发布准备记录见 [归档](docs/archive/2026-10-21-content-revalidation-kme7kme7-prog.md)；最终线上结果以父 Show1 `.local/content-revalidation-20261021/completion.json` 为准，未生成成功结果前不能当作已部署。
+
+- 用户同意谨慎实施浏览器私有、每次强制验证的第一阶段方案。基于当前已发布 `origin/main` ff83853 的独立 detached worktree：父 Show1 `.local/content-revalidation-20261021/server`；不包含主后端工作区遗留。
+- `server/content-cache.mjs` 新增最终字节 SHA-256 弱 ETag 与条件 GET/HEAD。`content.mjs` 仅将当前公开 `w/c` 内容设为 `private, no-cache, max-age=0, must-revalidate`；每次先走实时门禁，文件异步哈希后再检查一次，下架优先返回 410/no-store，不能返回 304。普通大文件流式哈希，不常驻整份文件；HTML 沿用既有转换后计算指纹，作品源文件不修改。
+- `d/p/m/e` 和可信 `/v/` 外壳继续 no-store，无 ETag；通用哈希运行时代码保留既有长期缓存。无共享 CDN 缓存、Nginx/部署配置、CSP/沙盒、数据库、依赖或前端变更。契约见 docs/api-contract.md 3.12。
+- 验证：语法 154 文件/0 错误；定点 13/13；全量低并发 `node --test --test-concurrency=2 test/*.test.mjs` 442/442，0 失败/取消/跳过。覆盖文件/校准变更、同大小同时间戳文件变更、HEAD、私密与盲评 no-store、下架及异步期间下架优先于 304、真实 curated library 重建后验证器一致。
+- Tabbit 本地真实双层沙盒：公开 HTML 第二次打开及刷新父页后均带 If-None-Match，返回 304；撤下后 410；文件和取景变更后 200 新内容；私看与正式盲测两次打开始终 200/no-store，无页面脚本错误。内层仍无 allow-same-origin。本机 fixture 的独立 work.js 在新 opaque frame 中仍是全量 200：已证实大 HTML 复用，不声称所有子资源均命中或首次加载提速。
+- 浏览器 fixture 使用临时作品与内存门禁，不操作线上数据；现有 Windows checkout 的可信 shell CRLF 导致原有 CSP 哈希不匹配，验证时只将忽略目录中的运行副本 content-shell.js 规范为 LF，未改受版本管理的 shell 或安全策略。发布前须在生产原始文件组合复核，不整仓覆盖现场补丁。
+- 证据在父 Show1 `.local/content-revalidation-20261021/`（browser-probe-04.json、browser-regression.json、browser-curated.json、report.md）；测试日志在候选 worktree（cache-targeted.log、full-tests.log、syntax.log）。发布仅替换 content.mjs、新增 content-cache.mjs，不更新数据库、作品或配置，保留回滚副本；本地撤下/更新验证不等同于线上修改真实作品。
+
 ## 2026-10-21 · 审核页重复查询优化（已授权提交/部署）
 
 - 用户确认发布审核与首页两项修复。各仓仅一条英文提交，身份 kme7kme7-prog，无联合署名。以生产 app 为底只替换审核路由这一个同步批次，不整仓覆盖后台，不变更 schema/依赖/配置；保留回滚副本，再重启并公网验收。归档见 [本轮发布](docs/archive/2026-10-21-review-query-kme7kme7-prog.md)。本条为发布准备记录，实际部署结果以父 Show1 工作区 `.local/gallery-perf-release-20261021/` 为准。

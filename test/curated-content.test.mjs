@@ -28,8 +28,8 @@ test('public curated indexes survive restart, respect current gates, and never e
   const content = createServer((req, res) => platform.handleContent(req, res));
   const site = createServer((req, res) => platform.handleSite(req, res));
   await Promise.all([new Promise(resolve => content.listen(0, '127.0.0.1', resolve)), new Promise(resolve => site.listen(0, '127.0.0.1', resolve))]);
-  const read = (key, path = '/') => new Promise((resolve, reject) => {
-    const req = request({ host: '127.0.0.1', port: content.address().port, path, headers: { Host: `${key}.localhost` } }, res => {
+  const read = (key, path = '/', headers = {}) => new Promise((resolve, reject) => {
+    const req = request({ host: '127.0.0.1', port: content.address().port, path, headers: { Host: `${key}.localhost`, ...headers } }, res => {
       let body = ''; res.on('data', chunk => body += chunk); res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body }));
     });
     req.on('error', reject); req.end();
@@ -47,7 +47,9 @@ test('public curated indexes survive restart, respect current gates, and never e
     assert.equal(page.status, 200);
     assert.match(page.body, /data-aob-probe/);
     assert.match(page.body, /<body>one<\/body>/);
-    assert.equal(page.headers['cache-control'], 'no-store');
+    assert.equal(page.headers['cache-control'], 'private, no-cache, max-age=0, must-revalidate');
+    const conditional = { 'If-None-Match': page.headers.etag };
+    assert.equal((await read(key, '/', conditional)).status, 304);
     assert.match((await read(other)).body, /<body>two<\/body>/);
     let list = await roster();
     assert.match(list.works.find(row => row.id === 'dp-090-same-id').content, new RegExp(key));
@@ -55,7 +57,10 @@ test('public curated indexes survive restart, respect current gates, and never e
     platform.db.prepare(`INSERT INTO work_overrides (task_id, work_id, status, updated_by, updated_at)
       VALUES ('one', 'same-id', 'unverified', 'admin', 1)`).run();
     assert.equal(platform.library.curatedContentKey(work), null);
-    assert.equal((await read(key)).status, 410);
+    const withdrawn = await read(key, '/', conditional);
+    assert.equal(withdrawn.status, 410);
+    assert.equal(withdrawn.headers['cache-control'], 'no-store');
+    assert.equal(withdrawn.headers.etag, undefined);
     assert.equal((await roster()).works.some(row => row.id === 'dp-090-same-id'), false);
     platform.db.prepare("UPDATE work_overrides SET status = 'questioned' WHERE task_id = 'one'").run();
     assert.equal(platform.library.curatedContentKey(work), null);
@@ -65,7 +70,10 @@ test('public curated indexes survive restart, respect current gates, and never e
     assert.equal((await read(key)).status, 410);
     platform.db.prepare("DELETE FROM work_overrides WHERE task_id = 'one'").run();
     const preview = new URL(platform.library.previewOrigin(work)).hostname.split('.')[0];
-    assert.equal((await read(preview)).status, 200);
+    const privatePreview = await read(preview, '/', conditional);
+    assert.equal(privatePreview.status, 200);
+    assert.equal(privatePreview.headers['cache-control'], 'no-store');
+    assert.equal(privatePreview.headers.etag, undefined);
     assert.match((await read(preview, '/?aob=prev')).body, /data-aob-probe/);
     const now = Date.now;
     try { Date.now = () => now() + 3600e3 + 1; assert.equal((await read(preview)).status, 410); assert.equal((await read(key)).status, 200); }
@@ -75,7 +83,7 @@ test('public curated indexes survive restart, respect current gates, and never e
     platform = createPlatform({ config, limits });
     assert.equal(platform.db.prepare('PRAGMA user_version').get().user_version, MIGRATIONS.length);
     assert.equal(platform.library.curatedContentKey(platform.library.work('one', 'same-id')), key);
-    assert.equal((await read(key)).status, 200);
+    assert.equal((await read(key, '/', conditional)).status, 304);
     assert.equal((await read(pendingPreview)).status, 410);
     platform.db.prepare(`INSERT INTO work_overrides (task_id, work_id, show_gallery, show_arena, show_entertainment, updated_by, updated_at)
       VALUES ('one', 'same-id', 0, 0, 0, 'admin', 1)`).run();

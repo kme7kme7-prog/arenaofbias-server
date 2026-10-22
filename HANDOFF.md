@@ -1,3 +1,9 @@
+## 2026-10-22 · dots preview 海报补齐（PR，未合并，未部署）
+
+- 在 #23 已合入的 `preview:write` 底座上补齐：投稿自带的 `cover.<ext>` 也可作海报；同一 `PUT /api/dots/works/:task/:id/preview` 可再传 ≤2 MB WebP `preview.webp`（只换预览海报、不改作品封面）；`.sbox` 索引限制为单分量无符号整数，`groups.materialIndex` 校验不越界；`/media/` 放行 `preview-*.webp`。
+- 无迁移、无新环境变量、无新 npm 依赖。历史仍走 `cover_history`（`preview-*`），管理员/脚本回滚不变。不覆盖运维烘焙预览，不碰作品文件与作品行。
+- 验证：`npm run check` 157/0；`npm test` 459/459（Node v22.21.1，`/workspace/tools/node-v22.21.1-linux-x64/bin`）。未合并、未部署。详见 `docs/dots-moderation-api.md` 第 9 节。
+
 ## 2026-10-22 · dots 作品完善默认权限（A′+F′，未部署）
 
 - kme7 已批准实现。默认档是 `moderation + capture:read + cover:write + works:read + meta:write + preview:write + captures:write`。封面仍只用已有 `cover:write`；截图 first/mobile 用新的 `captures:write`，没有并进封面。
@@ -52,9 +58,9 @@
 - 实际候选路由与线上原路由在 VPS 独立低优先级进程、同一只读 SQLite 事务中对照：2411 件作品/103题，三份完整返回 JSON SHA256 一致。旧路由4.19秒/28675次SQL；候选首次2.52秒、热态0.46秒/1398次SQL。首次仍有预览文件校验/哈希开销，不承诺整页固定0.46秒；5.7MB全量响应的按需加载留待后续。
 - 证据及补丁在上级 `.local/review-query-fix-20261021/`：before/after-targeted.log、syntax.log、tests.log、retry-http.log、tests-bounded.log、profile-result.json、candidate.json。`runtime-candidate/server/app.mjs` 只在上一轮下载的生产 app 上应用当前审核路由补丁，保留其余生产差异；真正部署前须重新确认生产哈希和活动任务，再备份、做当前运行组合验证。此次没有写生产数据、更新线上文件、重启服务、commit或push。
 
-## 2026-10-20 · dots 3D 预览上传接口（PR，未合并，未部署）
+## 2026-10-20 · dots 3D 预览上传接口（底座已随 #23 合入 main；海报补齐见顶部 2026-10-22 条）
 
-- 新权限 `preview:write`（单独授权、撤权，`DOTS_DISABLED_SCOPES=preview:write` 全局关闭）：`PUT /api/dots/works/:task/:id/preview` 收 ≤2 MB 的 gzip `.sbox`，服务器按白名单校验并重建后存为 `preview-<stamp>.sbox` + 清单，激活为 `preview.json`，海报是当前人工封面；不碰作品文件和作品行，不覆盖烘焙预览。
+- 新权限 `preview:write`（单独授权、撤权，`DOTS_DISABLED_SCOPES=preview:write` 全局关闭）：`PUT /api/dots/works/:task/:id/preview` 收 ≤2 MB 的 gzip `.sbox`，服务器按白名单校验并重建后存为 `preview-<stamp>.sbox` + 清单，激活为 `preview.json`；海报默认用作品自己的封面（投稿 `cover.<ext>` 或 `cover:write` 的 `cover-*.<ext>`），也可在同一接口再传 ≤2 MB 的 WebP `preview.webp`，只换预览海报、不覆盖封面。旧版本保留，不碰作品文件和作品行，不覆盖烘焙预览。
 - `GET /api/dots/captures/failed?category=建模`（别名 `3d`）：只列三维建模题的作品，每项带 `category`、`webgpu`、`webgpuSignals`（静态扫描作品文件）。
 - 历史复用 `cover_history`（`preview-*` 动作），管理员 `preview-history` / `preview/rollback`，脚本 `preview-history` / `preview-rollback`。无迁移、无新环境变量。详见 `docs/archive/2026-10-20-dots-preview-kme7kme7-prog.md`。
 

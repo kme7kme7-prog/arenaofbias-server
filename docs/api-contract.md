@@ -1299,7 +1299,7 @@ readyElapsedMs沿用该match首次有效选择时间（验证码等待/重试不
 
 ### 令牌权限与封面替换（v49）
 
-v49 给 `moderation_tokens` 加 `scopes`（已有令牌默认 `moderation`），新增 `cover_history`。权限：`moderation`、`capture:read`（`GET /api/dots/captures/failed`）、`cover:write`（`PUT /api/dots/works/:task/:id/cover`），见 [dots 审核 API](dots-moderation-api.md)。
+v49 给 `moderation_tokens` 加 `scopes`（已有令牌默认 `moderation`），新增 `cover_history`。权限：`moderation`、`capture:read`（`GET /api/dots/captures/failed`）、`cover:write`（`PUT /api/dots/works/:task/:id/cover`）、`preview:write`（`PUT /api/dots/works/:task/:id/preview`），见 [dots 审核 API](dots-moderation-api.md)。
 
 `GET /api/dots/captures/failed` 的筛选口径：`json_extract(moderation, '$.error') = 'capture_incomplete'` 或 `json_extract(captures, '$.first')` 为空；不看 `works.cover`。按 `id` keyset 分页（主键索引），`manualCover=all|exclude|only` 按是否已人工替换封面（文件名 `cover-*`）筛选。
 
@@ -1312,9 +1312,9 @@ v49 给 `moderation_tokens` 加 `scopes`（已有令牌默认 `moderation`），
 
 ### dots 3D 预览（无迁移）
 
-新权限 `preview:write`（`PUT /api/dots/works/:task/:id/preview`，请求体是 `.sbox`），见 [dots 审核 API](dots-moderation-api.md) 第 9 节。`scopes` 是文本列，不需要迁移；历史复用 `cover_history`，动作记为 `preview-replace` / `preview-rollback`，封面历史只看 `cover-*` 动作。
+新权限 `preview:write`（`PUT /api/dots/works/:task/:id/preview`；请求体是 gzip `.sbox` 模型，或当前 dots 预览的 WebP 海报），见 [dots 审核 API](dots-moderation-api.md) 第 9 节。`scopes` 是文本列，不需要迁移；历史复用 `cover_history`，动作记为 `preview-replace` / `preview-rollback`，封面历史只看 `cover-*` 动作。
 
-文件：`media/<作品>/preview-<stamp>.sbox` 与清单 `preview-<stamp>.json`（`source: "dots"`、`version`、`sourceDigest`、`model`、`modelSha`、`poster`＝当前人工封面 `cover-*`、`posterSha`），激活时把清单原子复制为 `preview.json`，由原有 `readWorkPreview` 读出 `previewMode: "model"`、`previewModel`、`previewPoster`。没有 `source: "dots"` 的 `preview.json`（运维烘焙）不会被覆盖或回滚。`/media/<作品>/` 新接受 `preview-<8–24 位小写字母数字>.sbox`。
+文件：`media/<作品>/preview-<stamp>.sbox`（可另有 `preview-<stamp>.webp` 海报）与清单 `preview-<stamp>.json`（`source: "dots"`、`version`、`sourceDigest`、`model`、`modelSha`、`poster`＝作品封面 `cover.<ext>` / `cover-*.<ext>` 或 `preview-<stamp>.webp`、`posterSha`），激活时把清单原子复制为 `preview.json`，由原有 `readWorkPreview` 读出 `previewMode: "model"`、`previewModel`、`previewPoster`。没有 `source: "dots"` 的 `preview.json`（运维烘焙）不会被覆盖或回滚。`/media/<作品>/` 新接受 `preview-<8–24 位小写字母数字>.sbox` 和 `.webp`。
 
 `GET /api/dots/captures/failed` 新增可选 `category`（题目分类，`3d` / `modeling` / `三维建模` 是 `建模` 的别名），带上时每项加 `category`、`webgpu`、`webgpuSignals`（静态扫描作品文件）。
 

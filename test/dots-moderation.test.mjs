@@ -699,7 +699,7 @@ const headerOf = (gz) => { const raw = gunzipTest(gz); return JSON.parse(raw.sub
 test('preview:write uploads a sanitized .sbox, keeps versions, never replaces a baked preview, and admins roll back', async () => {
   await setup(async ({ call, raw, submit, tokens, platform, root }) => {
     const { token, id } = tokens.create('dots-3d', 'test', 'cover:write,preview:write');
-    const work = await submit('owner', { task: 'model3d' });
+    const work = await submit('owner', { task: 'model3d', cover: null });
     await platform.moderator.idle();
     assert.equal((await call('admin', 'POST', `/api/works/model3d/${work.id}/moderation`, { status: 'approved' })).status, 200);
     const path = `/api/dots/works/model3d/${work.id}/preview`;
@@ -799,9 +799,59 @@ test('preview:write uploads a sanitized .sbox, keeps versions, never replaces a 
   });
 });
 
+test('preview:write uses the work cover or a separate preview.webp poster without changing either', async () => {
+  await setup(async ({ call, raw, submit, tokens, platform, root }) => {
+    const token = tokens.create('dots-3d', 'test', 'preview:write').token;
+    const work = await submit('owner', { task: 'model3d' });
+    await platform.moderator.idle();
+    assert.equal((await call('admin', 'POST', `/api/works/model3d/${work.id}/moderation`, { status: 'approved' })).status, 200);
+    const path = `/api/dots/works/model3d/${work.id}/preview`;
+    const before = platform.db.prepare('SELECT * FROM works WHERE id = ?').get(work.id);
+    assert.equal(before.cover, 'cover.png', 'submission cover is cover.<ext>, not cover-<stamp>.<ext>');
+
+    // The author's own cover is a valid poster; no cover:write needed.
+    const first = await raw(token, 'PUT', path, sbox());
+    assert.equal(first.status, 200, JSON.stringify(first.data));
+    assert.match(first.data.previewPoster, new RegExp(`^media/${work.id}/cover\\.png$`));
+    const shown = (await call(null, 'GET', '/api/bootstrap')).data.works.find((item) => item.id === work.id);
+    assert.equal(shown.previewMode, 'model');
+    assert.match(shown.previewPoster, new RegExp(`^media/${work.id}/cover\\.png\\?v=`));
+
+    // A raw WebP poster uses the existing preview.webp convention and keeps the model.
+    const poster = WEBP(400, 300);
+    assert.equal((await raw(token, 'PUT', path, png(400, 300))).data.code, 'unsupported_type', 'poster must be WebP');
+    const second = await raw(token, 'PUT', path, poster);
+    assert.equal(second.status, 200, JSON.stringify(second.data));
+    assert.match(second.data.previewPoster, new RegExp(`^media/${work.id}/preview-[a-z0-9]+\\.webp$`));
+    assert.equal(second.data.previewModel, first.data.previewModel);
+    const withPoster = (await call(null, 'GET', '/api/bootstrap')).data.works.find((item) => item.id === work.id);
+    assert.equal(withPoster.previewPoster.split('?')[0], second.data.previewPoster);
+    assert.equal((await call(null, 'GET', `/${second.data.previewPoster.split('?')[0]}`)).status, 200);
+
+    // Replacing the model keeps the dots poster; the cover and the work row never change.
+    const third = await raw(token, 'PUT', path, sbox({ bounds: { min: [0, 0, 0], max: [4, 4, 4] } }));
+    assert.equal(third.status, 200);
+    assert.equal(third.data.previewPoster, second.data.previewPoster);
+    assert.notEqual(third.data.previewModel, first.data.previewModel);
+    assert.deepEqual(platform.db.prepare('SELECT * FROM works WHERE id = ?').get(work.id), before);
+    const { readFileSync } = await import('node:fs');
+    assert.equal(readFileSync(join(root, 'state', 'media', work.id, 'cover.png')).length, PNG.length);
+
+    const history = (await call('admin', 'GET', `/api/works/model3d/${work.id}/preview-history`)).data;
+    assert.equal(history.entries.length, 3);
+    assert.equal(history.entries.every((entry) => entry.action === 'preview-replace'), true);
+
+    // A poster before any model is refused without touching the work.
+    const other = await submit('owner', { task: 'model3d' });
+    const early = await raw(token, 'PUT', `/api/dots/works/model3d/${other.id}/preview`, poster);
+    assert.equal(early.status, 409);
+    assert.equal(early.data.code, 'preview_required');
+  });
+});
+
 test('preview:write is its own scope: granted, withdrawn and switched off independently', async () => {
   await setup(async ({ raw, submit, tokens, platform }) => {
-    const work = await submit('owner', { task: 'model3d' });
+    const work = await submit('owner', { task: 'model3d', cover: null });
     await platform.moderator.idle();
     const cover = tokens.create('cover', 'test', 'cover:write');
     assert.equal((await raw(cover.token, 'PUT', `/api/dots/works/model3d/${work.id}/preview`, sbox())).data.code, 'scope_required');

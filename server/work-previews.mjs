@@ -58,10 +58,12 @@ export function readWorkPreview(mediaDir, work) {
       ? { previewCapture: mediaUrl(work.id, FILES.capture, `${sourceDigest.slice(0, 12)}-${manifest.captureSha.slice(0, 12)}`) }
       : null;
 
-    // dots uploads (preview-uploads.mjs) use versioned model names and the manual cover as poster.
+    // dots uploads (preview-uploads.mjs) use versioned model/poster names; the poster may
+    // also be the work's own cover (submission cover.<ext> or cover:write cover-<stamp>.<ext>).
     const dots = manifest.source === 'dots';
     const modelOk = manifest.model === FILES.model || (dots && /^preview-[a-z0-9]{8,24}\.sbox$/.test(manifest.model ?? ''));
-    const posterOk = manifest.poster === FILES.poster || (dots && /^cover-[a-z0-9]{8,24}\.(?:png|jpg|webp)$/.test(manifest.poster ?? ''));
+    const posterOk = manifest.poster === FILES.poster
+      || (dots && /^(?:cover(?:-[a-z0-9]{8,24})?\.(?:png|jpg|webp)|preview-[a-z0-9]{8,24}\.webp)$/.test(manifest.poster ?? ''));
     if (manifest.mode === 'model' && modelOk && posterOk) {
       const model = fileInside(directory, manifest.model), poster = fileInside(directory, manifest.poster);
       if (!matchesHash(model, manifest.modelSha) || !matchesHash(poster, manifest.posterSha)) return null;

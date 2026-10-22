@@ -10,7 +10,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { readdirSync, realpathSync, statSync } from 'node:fs';
 import { extname, join, relative, resolve, sep } from 'node:path';
 import { HttpError, clientIp, createRouter, fail, rateLimit, readBody, readJson, sendJson, streamFile } from './http.mjs';
-import { sanitizeSbox, webgpuSignals } from './preview-uploads.mjs';
+import { checkPreviewPoster, sanitizeSbox, webgpuSignals } from './preview-uploads.mjs';
 import { CAPTURE_SLOTS, checkCapture } from './work-captures.mjs';
 import { checkCover } from './work-covers.mjs';
 import { readWorkPreview } from './work-previews.mjs';
@@ -325,13 +325,23 @@ export function createDotsModeration({ db, config, library, mode, tokens, covers
     const signals = webgpuSignals(work);
     return { webgpu: signals.length > 0, webgpuSignals: signals };
   }
-  // Body is the raw .sbox. Only the preview files change; the poster is the manual cover.
+  // Body is the raw .sbox model, or a raw WebP poster for the current dots preview.
+  // Only preview files change; the work, its cover and any baked preview stay as they are.
   router.on('PUT', '/api/dots/works/:task/:id/preview', { scope: 'preview:write', action: 'preview-replace', run: async ({ req, params, token }) => {
     if (!previews) fail(404, '接口不存在', 'not_found');
     const work = library.work(params.task, params.id);
     if (!work || work.curated || !library.uploadById(work.id)) fail(404, '作品不存在', 'not_found');
-    const { buffer, stats } = sanitizeSbox(await readBody(req, 2 * 1024 * 1024));
-    const result = previews.replace(work, buffer, { id: `dots:${token.id}`, name: `dots:${token.label}` }, { source: 'dots', ...stats });
+    const body = await readBody(req, 2 * 1024 * 1024);
+    const actor = { id: `dots:${token.id}`, name: `dots:${token.label}` };
+    // WebP posters use the existing preview.webp convention; everything else is a model.
+    if (body.length >= 12 && body.toString('ascii', 0, 4) === 'RIFF' && body.toString('ascii', 8, 12) === 'WEBP') {
+      const image = checkPreviewPoster(body);
+      const result = previews.replacePoster(work, body, image, actor, { source: 'dots' });
+      onChange();
+      return { result: { task: work.taskId, id: work.id, ...result } };
+    }
+    const { buffer, stats } = sanitizeSbox(body);
+    const result = previews.replace(work, buffer, actor, { source: 'dots', ...stats });
     onChange();
     return { result: { task: work.taskId, id: work.id, ...result, stats } };
   } });

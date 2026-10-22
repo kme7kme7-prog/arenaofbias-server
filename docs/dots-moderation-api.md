@@ -202,17 +202,19 @@ curl -sS -X PUT https://<API 域名>/api/dots/works/one/up-abc123/cover \
 
 ### 9. 上传或替换 3D 预览 `PUT /api/dots/works/:task/:id/preview`（`preview:write`）
 
-公开列表卡片先显示海报图，卡片滚到视口附近才加载小模型并在原地转动（Gallery 现有机制，`IntersectionObserver` 提前 180px）。这个接口让 dots 为作品提供这份小模型；海报图就是作品当前的人工封面。
+公开列表卡片先显示海报图，卡片滚到视口附近才加载小模型并在原地转动（Gallery 现有机制，`IntersectionObserver` 提前 180px）。这个接口让 dots 为作品提供这份小模型；海报默认用作品提交时或第 8 节 `cover:write` 留下的封面，也可以再传一张独立的 `preview.webp` 覆盖海报（不影响封面）。
 
-请求体就是 `.sbox` 文件本身：
+同一个接口按请求体内容区分：gzip 的 `.sbox` 是模型，`RIFF....WEBP` 是海报。也可以只传模型，沿用作品现有封面：
 
 ```bash
-# 先传海报（第 8 节，cover:write），再传模型
-curl -sS -X PUT https://<API 域名>/api/dots/works/q-model/up-abc123/cover \
-  -H "Authorization: Bearer $TOKEN" --data-binary @poster.webp
+# 传模型（海报默认用作品当前封面）
 curl -sS -X PUT https://<API 域名>/api/dots/works/q-model/up-abc123/preview \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/octet-stream" \
   --data-binary @preview.sbox
+# 可选：再传一张 preview.webp 海报，只改预览海报，不改作品封面
+curl -sS -X PUT https://<API 域名>/api/dots/works/q-model/up-abc123/preview \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: image/webp" \
+  --data-binary @preview.webp
 ```
 
 ```json
@@ -223,7 +225,7 @@ curl -sS -X PUT https://<API 域名>/api/dots/works/q-model/up-abc123/preview \
              "inflated": 183224, "droppedBytes": 0, "dropped": ["extras"] } }
 ```
 
-**只接受 `.sbox`，不接受 glb。** 理由：公开站的预览加载器（Gallery `site/preview-model.js` 的 `readModel`）只读 `.sbox`，站点自带的 three 也没有 GLTFLoader；`.sbox` 的每个字段服务器都能不依赖 three 按白名单逐项重建，而 glb 要处理 JSON/BIN chunk、几十种扩展、外部 URI、内嵌图片和动画，攻击面大得多，前端还要另加一个加载器。dots 生成模型时直接导出 `.sbox` 即可（three 场景 → 下面的格式）。
+**模型只接受 `.sbox`，不接受 glb。** 理由：公开站的预览加载器（Gallery `site/preview-model.js` 的 `readModel`）只读 `.sbox`，站点自带的 three 也没有 GLTFLoader；`.sbox` 的每个字段服务器都能不依赖 three 按白名单逐项重建，而 glb 要处理 JSON/BIN chunk、几十种扩展、外部 URI、内嵌图片和动画，攻击面大得多，前端还要另加一个加载器。dots 生成模型时直接导出 `.sbox` 即可（three 场景 → 下面的格式）。
 
 **格式**：gzip 压缩的 `[u32 小端 头部长度][UTF-8 JSON 头部][补零到 8 字节对齐][数据区]`，`version: 2`（也接受旧版 1：数据区紧跟头部、不对齐）。头部：
 
@@ -251,19 +253,19 @@ curl -sS -X PUT https://<API 域名>/api/dots/works/q-model/up-abc123/preview \
 
 - 大小：上传的 gzip 不超过 2 MB（`413 too_large`）；解压上限 24 MB，超过即停止解压（`413`，防压缩炸弹）；JSON 头部不超过 1 MB。
 - 类型按内容判断：前 3 字节必须是 gzip 魔数 `1f 8b 08`，解压后头部长度、JSON、`version` 都要对上；glb（`glTF`）、zip、纯文本等返回 `415 unsupported_type`，结构不对返回 `422 invalid_model`。
-- 数组：`type` 只能是 `Float32Array` `Float64Array` `Uint8Array` `Uint8ClampedArray` `Uint16Array` `Uint32Array` `Int8Array` `Int16Array` `Int32Array`；`offset + length × 元素字节数` 不能超出数据区。属性名只能是字母数字下划线（每个几何体最多 16 个），`itemSize` 1–16。实例矩阵和实例颜色必须是 `Float32Array`，长度分别等于 `count × 16`、`count × 3`。
-- 网格的 `geometry` / `material` 下标必须存在；`matrix` 是 16 个有限数字；至少一个网格；必须有 `bounds` 且 min ≤ max。
+- 数组：`type` 只能是 `Float32Array` `Float64Array` `Uint8Array` `Uint8ClampedArray` `Uint16Array` `Uint32Array` `Int8Array` `Int16Array` `Int32Array`；`offset + length × 元素字节数` 不能超出数据区。属性名只能是字母数字下划线（每个几何体最多 16 个），`itemSize` 1–16。索引必须是单分量的 `Uint8Array` / `Uint16Array` / `Uint32Array`。实例矩阵和实例颜色必须是 `Float32Array`，长度分别等于 `count × 16`、`count × 3`。
+- 网格的 `geometry` / `material` 下标必须存在；`groups.materialIndex` 不能越界；`matrix` 是 16 个有限数字；至少一个网格；必须有 `bounds` 且 min ≤ max。
 - 材质类型白名单：`MeshStandardMaterial` `MeshPhysicalMaterial` `MeshBasicMaterial` `MeshLambertMaterial` `MeshPhongMaterial` `MeshToonMaterial` `MeshMatcapMaterial` `MeshNormalMaterial`。`ShaderMaterial`、`RawShaderMaterial` 等一律拒绝。材质里只保留白名单里的数值、布尔、颜色（0–0xFFFFFF 整数）和贴图引用；`userData`、`defines`、`uniforms`、`onBeforeCompile`、着色器源码等其他字段全部丢掉。
 - 图片只能内嵌：`url` 必须是 `data:image/png|jpeg|webp;base64,...`，服务器按 magic bytes 核对内容与声明类型一致，单张解码后不超过 1 MB、宽高不超过 4096，最多 32 张。外部 URL、`blob:`、SVG、像素数组一律拒绝。贴图必须引用存在的图片，只保留白名单字段。
 - 数量上限：几何体 4096、网格 8192、材质 1024、贴图 64、单网格实例 100 万。
 - 清洗：服务器用通过校验的字段**重新生成**头部（顶层只剩 `version normalized clip bounds geometries materials meshes images textures`），数据区也只复制被引用的字节段并重新排布，再重新 gzip。顶层 `extras`、`userData`、未知键和数据区里没被引用的字节都会被去掉，丢掉的顶层键名和字节数在 `stats.dropped` / `stats.droppedBytes` 里返回。存下来的永远是重建后的文件，不是你上传的原件。
 
-**海报图**：不在这个接口里传。海报就是作品当前的**人工封面**（第 8 节 `cover:write` 上传的 `cover-*` 文件，已经过那里的 PNG/JPEG/WebP、大小、尺寸校验）。作品还没有人工封面时返回 `409 poster_required`，先传封面再传模型。之后换封面不会自动改预览的海报；想让海报跟着换，换完封面后再传一次模型。
+**海报图**：模型上传时如果还没传过独立的 `preview.webp`，海报就是作品当前的封面（投稿时上传的 `cover.<ext>`，或第 8 节 `cover:write` 上传的 `cover-*.<ext>`；两者都已按图片规则校验）。作品连封面都没有时返回 `409 poster_required`，先传封面或海报。独立的 `preview.webp` 只接受 WebP、不超过 2 MB、宽高 64–4096；它必须在一个 dots 模型之后上传（否则 `409 preview_required`），只替换预览海报，**不修改作品封面**；之后换模型会保留这张海报。之后换封面也不会自动改预览海报；想让海报跟着新封面走，用 `cover:write` 换封面后重新上传模型，或直接上传新的 `preview.webp`。
 
 **只换预览，不动作品**：
 
 - 只写 `media/<作品>/` 下的预览文件。作品文件、模型标签、封面、截图、审核状态和作品记录都不变。公开页和目录缓存立即更新。
-- 每次上传换一个新文件名（`preview-<stamp>.sbox` 加同名清单 `preview-<stamp>.json`），旧版本全部保留，管理员可以回滚。
+- 每次上传换一个新文件名（`preview-<stamp>.sbox` 或 `preview-<stamp>.webp`，加同名清单 `preview-<stamp>.json`），旧版本全部保留，管理员可以回滚。
 - 作品已经有运维流程烘焙的预览（不是 dots 传的）时返回 `409 preview_exists`，不会覆盖；dots 自己传的预览可以反复替换。
 - 并发上传同一作品时后到的可能返回 `409 conflict`，重新上传即可。
 - 回滚由管理员（后台 `POST /api/works/:task/:id/preview/rollback`）或运维脚本（`preview-rollback`）完成，dots 没有回滚权限；传错了就再传一个正确的。回滚到第一次上传之前会把预览整个撤掉，卡片回到只显示封面。
@@ -356,9 +358,9 @@ curl -sS -X PUT https://<API 域名>/api/dots/works/one/up-abc123/captures/first
 | 409 | `stale` | 带的 `version` 不是当前版本：作者改过作品，重新查看 |
 | 409 | `conflict` | 决定、封面、预览、信息或截图刚好被修改，重新获取后再写 |
 | 409 | `not_resubmittable` | 数据包作品不能重新送审 |
-| 409 | `poster_required` | 传预览前作品还没有人工封面 |
+| 409 | `poster_required` / `preview_required` | 传预览前作品还没有可用封面 / 还没上传模型就传海报 |
 | 409 | `preview_exists` | 作品已有不是 dots 上传的预览，不覆盖 |
-| 413 / 415 | — / `too_large` / `unsupported_type` | 请求体太大（审核与 meta 8 KiB，封面和截图 3 MB，预览 2 MB / 解压 24 MB）/ 审核或 meta 请求不是 `application/json`，封面不是 PNG/JPEG/WebP，截图不是 JPEG，或预览不是 gzip 的 `.sbox` |
+| 413 / 415 | — / `too_large` / `unsupported_type` | 请求体太大（审核与 meta 8 KiB，封面和截图 3 MB，预览模型/海报各 2 MB，模型解压 24 MB）/ 审核或 meta 请求不是 `application/json`，封面不是 PNG/JPEG/WebP，截图不是 JPEG，预览不是 gzip 的 `.sbox`，或海报不是 WebP |
 | 422 | `invalid_model` | 预览包结构或内容不符合上面的白名单 |
 | 429 | `rate_limited` | 限流，看 `Retry-After` 头或 `retryAfter` 字段（秒） |
 

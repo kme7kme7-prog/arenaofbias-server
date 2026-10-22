@@ -3,7 +3,8 @@
 // screenshots), approve, and reject with a reason. Scope capture:read: list works
 // whose screenshots failed (capture_incomplete or no first screen). Scope cover:write: replace a
 // work's cover. Scope preview:write: upload a 3D card preview (.sbox).
-// Scope works:read: a safe view of one work outside the queue. Scope meta:write: declaration
+// Scope works:read: a safe view of one work outside the queue, plus its existing
+// screenshots and (upload works only) package files. Scope meta:write: declaration
 // fields, not the task. Scope captures:write: replace a first or mobile JPEG.
 // Every route below is the whole whitelist; the site dispatcher refuses tokens everywhere else.
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
@@ -168,6 +169,7 @@ export function createDotsModeration({ db, config, library, mode, tokens, covers
     return mode.current !== 'machine' ? where : null;
   }
   const base = (work) => `/api/dots/moderation/works/${encodeURIComponent(work.taskId)}/${encodeURIComponent(work.id)}`;
+  const readBase = (work) => `/api/dots/works/${encodeURIComponent(work.taskId)}/${encodeURIComponent(work.id)}`;
   function images(work) {
     try { return readdirSync(join(library.mediaDir, work.id)).filter((name) => IMAGE.test(name)).sort(); } catch { return []; }
   }
@@ -376,6 +378,8 @@ export function createDotsModeration({ db, config, library, mode, tokens, covers
       submittedAt: work.curated ? (work.addedAt ?? null) : iso(work.createdAt),
       updatedAt: stampOf(work),
       curated: Boolean(work.curated),
+      entry: work.curated ? null : (work.entry ?? null),
+      images: images(work).map((name) => ({ name, url: `${readBase(work)}/images/${encodeURIComponent(name)}` })),
       ...(work.curated ? {} : { fileCount: work.files ?? 0, bytes: work.bytes ?? 0 }),
       ...(listFiles && !work.curated ? { files: files(work) } : {}),
     };
@@ -383,6 +387,23 @@ export function createDotsModeration({ db, config, library, mode, tokens, covers
   router.on('GET', '/api/dots/works/:task/:id', { scope: 'works:read', action: 'work-get', run: ({ params, url }) => {
     const work = uploadWork(params);
     return { work: safeWork(work, { files: url.searchParams.get('files') === '1' }) };
+  } });
+  // Same bytes as the in-queue image route, for works that are no longer queued.
+  router.on('GET', '/api/dots/works/:task/:id/images/:name', { scope: 'works:read', action: 'work-image', run: async ({ req, res, params }) => {
+    const work = uploadWork(params);
+    let name = '';
+    try { name = decodeURIComponent(params.name); } catch { /* rejected below */ }
+    if (!IMAGE.test(name) || !images(work).includes(name)) fail(404, '截图不存在', 'not_found');
+    const file = join(library.mediaDir, work.id, name);
+    await streamFile(req, res, { file, size: statSync(file).size }, { 'Cache-Control': 'no-store', 'Content-Security-Policy': "sandbox; default-src 'none'" });
+  } });
+  // Upload packages only. Curated datapack files stay unserved, matching the DTO.
+  router.on('GET', '/api/dots/works/:task/:id/file', { scope: 'works:read', action: 'work-file', run: async ({ req, res, params, url }) => {
+    const work = library.work(params.task, params.id);
+    if (!work || work.curated || !library.uploadById(work.id)) fail(404, '作品不存在', 'not_found');
+    const found = fileOf(work, url.searchParams.get('path'));
+    await streamFile(req, res, found, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'attachment',
+      'Cache-Control': 'no-store', 'Content-Security-Policy': "sandbox; default-src 'none'" });
   } });
   // Admin-style partial update. Task moves, faces and review stay closed. No re-queue
   // unless the body asks for it, and only when the moderated text actually changes.

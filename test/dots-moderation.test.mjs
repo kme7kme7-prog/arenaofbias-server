@@ -14,6 +14,8 @@ import { createModerationTokens } from '../server/dots-moderation.mjs';
 import { createModerator } from '../server/moderation.mjs';
 
 const PAGE = '<!doctype html><html><body><h1>作品正文</h1><p>正常页面文字</p></body></html>';
+// The secret is base64url, so it can contain underscores. Take everything after aobd_<id>_.
+const tokenSecret = (token) => token.slice(token.indexOf('_', 5) + 1);
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j2ioAAAAASUVORK5CYII=', 'base64');
 const reply = (decision = 'approved', reason = '内容正常') => ({ id: 'resp_test', model: 'gpt-6-luna', status: 'completed', service_tier: 'flex',
   output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify({ decision, reason, categories: [] }) }] }],
@@ -36,11 +38,11 @@ function fakeCapturer(library, captures = []) {
   }, async close() {} };
 }
 
-async function setup(run, { mode = 'machine', timeoutMs = 30 * 60_000, perMinute = 120, extra = {} } = {}) {
+async function setup(run, { mode = 'machine', timeoutMs = 30 * 60_000, perMinute = 120, extra = {}, data = null } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'dots-moderation-'));
   const dist = join(root, 'dist');
   mkdirSync(dist);
-  writeFileSync(join(dist, 'data.json'), JSON.stringify({ title: '测试', models: [{ id: 'm', name: '模型', vendor: '测试' }],
+  writeFileSync(join(dist, 'data.json'), JSON.stringify(data ?? { title: '测试', models: [{ id: 'm', name: '模型', vendor: '测试' }],
     tasks: [{ id: 'one', title: '题目', promptPending: false, results: [] }, { id: 'model3d', title: '建模题', category: '建模', promptPending: false, results: [] }] }));
   const received = [];
   let respond = async () => ({ status: 200, body: reply() });
@@ -136,7 +138,7 @@ test('only the SHA-256 hash is stored, revocation is immediate and audit rows ne
     const created = tokens.create('dots-test', 'test');
     const row = platform.db.prepare('SELECT * FROM moderation_tokens WHERE id = ?').get(created.id);
     assert.equal(row.token_hash, createHash('sha256').update(created.token).digest('hex'));
-    assert.doesNotMatch(JSON.stringify(platform.db.prepare('SELECT * FROM moderation_tokens').all()), new RegExp(created.token.split('_')[2]));
+    assert.doesNotMatch(JSON.stringify(platform.db.prepare('SELECT * FROM moderation_tokens').all()), new RegExp(tokenSecret(created.token)));
     assert.equal(tokens.list().some((item) => 'token_hash' in item || 'token' in item), false);
     const api = dots(created.token);
     assert.equal((await api('GET', '/queue')).status, 200);
@@ -144,7 +146,7 @@ test('only the SHA-256 hash is stored, revocation is immediate and audit rows ne
     assert.equal(tokens.revoke(created.id), true);
     assert.equal((await api('GET', '/queue')).status, 401);
     const dump = JSON.stringify(platform.db.prepare('SELECT * FROM moderation_token_audit').all());
-    assert.doesNotMatch(dump, new RegExp(created.token.split('_')[2]));
+    assert.doesNotMatch(dump, new RegExp(tokenSecret(created.token)));
   });
 });
 
@@ -844,6 +846,205 @@ test('capture gaps can be limited to 三维建模 works and flag WebGPU from the
     assert.equal(paged.data.items.length, 1);
     assert.ok(paged.data.nextCursor);
   });
+});
+
+test('works:read returns a safe view outside the queue and keeps the file list off', async () => {
+  await setup(async ({ call, submit, tokens, platform }) => {
+    const { token } = tokens.create('read', 'test', 'works:read');
+    const mod = tokens.create('mod', 'test', 'moderation');
+    const work = await submit('owner', { summary: '简介', note: '作者的私密备注' });
+    await platform.moderator.idle();
+    assert.equal((await call(null, 'GET', `/api/dots/moderation/works/one/${work.id}`, undefined, { bearer: token })).data.code, 'scope_required');
+    assert.equal((await call(null, 'GET', `/api/dots/works/one/${work.id}`, undefined, { bearer: mod.token })).data.code, 'scope_required');
+    assert.equal((await call(null, 'GET', '/api/dots/works/one/missing', undefined, { bearer: token })).status, 404);
+    const view = await call(null, 'GET', `/api/dots/works/one/${work.id}`, undefined, { bearer: token });
+    assert.equal(view.status, 200);
+    assert.equal(view.data.work.title, '测试作品');
+    assert.equal(view.data.work.summary, '简介');
+    assert.equal(view.data.work.note, '作者的私密备注');
+    assert.equal(view.data.work.author, 'owner');
+    assert.equal(view.data.work.moderationStatus, 'approved');
+    assert.equal(view.data.work.status, 'unverified');
+    assert.equal(view.data.work.curated, false);
+    assert.equal(typeof view.data.work.updatedAt, 'number');
+    assert.equal(Object.hasOwn(view.data.work, 'files'), false);
+    assert.equal(view.data.work.fileCount, 1);
+    const body = JSON.stringify(view.data);
+    assert.doesNotMatch(body, /owner@example\.test|email|digest|contentKey|127\.0\.0\.1/i);
+    const listed = await call(null, 'GET', `/api/dots/works/one/${work.id}?files=1`, undefined, { bearer: token });
+    assert.deepEqual(listed.data.work.files, [{ path: 'index.html', bytes: Buffer.byteLength(PAGE) }]);
+    assert.equal((await call(null, 'GET', '/api/bootstrap')).data.works.some((item) => item.id === work.id), false);
+  });
+});
+
+test('meta:write edits the declaration, refuses task changes, and does not re-queue unless asked', async () => {
+  await setup(async ({ call, submit, tokens, platform, stored }) => {
+    const { token, id } = tokens.create('meta', 'test', 'works:read,meta:write');
+    const work = await submit();
+    await platform.moderator.idle();
+    const before = platform.db.prepare('SELECT * FROM works WHERE id = ?').get(work.id);
+    const read = await call(null, 'GET', `/api/dots/works/one/${work.id}`, undefined, { bearer: token });
+    const path = `/api/dots/works/one/${work.id}/meta`;
+    assert.equal((await call(null, 'PATCH', path, { task: 'other', title: '改题' }, { bearer: token })).data.code, 'task_forbidden');
+    assert.equal((await call(null, 'PATCH', path, { show_gallery: false }, { bearer: token })).data.code, 'invalid_field');
+    assert.equal((await call(null, 'PATCH', path, { status: 'verified' }, { bearer: token })).data.code, 'invalid_field');
+    assert.equal((await call(null, 'PATCH', path, { owner_id: 'x' }, { bearer: token })).data.code, 'invalid_field');
+    assert.equal((await call(null, 'PATCH', path, {}, { bearer: token })).data.code, 'invalid_field');
+    const modeOnly = await call(null, 'PATCH', path, { generationMode: 'multi-turn', updatedAt: read.data.work.updatedAt }, { bearer: token });
+    assert.equal(modeOnly.status, 200, JSON.stringify(modeOnly.data));
+    assert.equal(modeOnly.data.resubmitted, false);
+    assert.equal(modeOnly.data.work.generationMode, 'multi-turn');
+    assert.equal(stored(work.id).status, 'approved');
+    const stale = await call(null, 'PATCH', path, { title: '过期', updatedAt: read.data.work.updatedAt }, { bearer: token });
+    assert.equal(stale.data.code, 'conflict');
+    assert.equal(platform.db.prepare('SELECT title FROM works WHERE id = ?').get(work.id).title, '测试作品');
+    const renamed = await call(null, 'PATCH', path, { title: '新标题', summary: '新简介', updatedAt: modeOnly.data.work.updatedAt }, { bearer: token });
+    assert.equal(renamed.status, 200, JSON.stringify(renamed.data));
+    assert.equal(renamed.data.resubmitted, false);
+    assert.equal(renamed.data.work.title, '新标题');
+    assert.equal(stored(work.id).status, 'approved');
+    assert.equal(platform.library.work('one', work.id).status, 'unverified');
+    const again = await call(null, 'PATCH', path, { title: '再改', resubmitModeration: true, updatedAt: renamed.data.work.updatedAt }, { bearer: token });
+    assert.equal(again.data.resubmitted, true);
+    assert.equal(stored(work.id).status, 'pending');
+    assert.notEqual(stored(work.id).revision, before.moderation && JSON.parse(before.moderation).revision);
+    const row = platform.db.prepare('SELECT owner_id, digest, cover, status FROM works WHERE id = ?').get(work.id);
+    assert.equal(row.owner_id, before.owner_id);
+    assert.equal(row.digest, before.digest);
+    assert.equal(row.cover, before.cover);
+    assert.equal(row.status, 'unverified');
+    const audit = platform.db.prepare("SELECT * FROM moderation_token_audit WHERE action = 'meta' AND outcome = 'ok'").all();
+    assert.ok(audit.length >= 3);
+    assert.equal(audit[0].token_id, id);
+    assert.doesNotMatch(JSON.stringify(audit), new RegExp(tokenSecret(token)));
+    assert.equal((await call(null, 'GET', '/api/bootstrap')).data.works.some((item) => item.id === work.id), false);
+  });
+});
+
+test('meta:write updates a packaged work through the display override and rejects a stale stamp', async () => {
+  const data = { title: '测试', models: [{ id: 'm', name: '模型', vendor: '测试' }],
+    tasks: [{ id: 'one', title: '题目', promptPending: false, category: '建模',
+      results: [{ id: 'pk-1', model: 'm', title: '包内作品', summary: '旧简介', effort: 'Default' }] }] };
+  await setup(async ({ call, tokens, platform }) => {
+    const { token } = tokens.create('meta', 'test', 'works:read,meta:write');
+    const view = await call(null, 'GET', '/api/dots/works/one/pk-1', undefined, { bearer: token });
+    assert.equal(view.status, 200, JSON.stringify(view.data));
+    assert.equal(view.data.work.curated, true);
+    assert.equal(view.data.work.title, '包内作品');
+    assert.equal(view.data.work.captures, null);
+    assert.equal(Object.hasOwn(view.data.work, 'files'), false);
+    assert.equal(view.data.work.updatedAt, null);
+    const patched = await call(null, 'PATCH', '/api/dots/works/one/pk-1/meta', { title: '覆盖标题', summary: '新简介', updatedAt: null }, { bearer: token });
+    assert.equal(patched.status, 200, JSON.stringify(patched.data));
+    assert.equal(patched.data.work.title, '覆盖标题');
+    assert.equal(patched.data.resubmitted, false);
+    assert.equal(typeof patched.data.work.updatedAt, 'number');
+    const row = platform.db.prepare('SELECT display_json FROM work_overrides WHERE work_id = ?').get('pk-1');
+    assert.match(row.display_json, /覆盖标题/);
+    assert.equal(platform.db.prepare('SELECT COUNT(*) AS n FROM works WHERE id = ?').get('pk-1').n, 0);
+    assert.equal((await call(null, 'PATCH', '/api/dots/works/one/pk-1/meta', { title: '过期', updatedAt: null }, { bearer: token })).data.code, 'conflict');
+    assert.equal((await call(null, 'PATCH', '/api/dots/works/one/pk-1/meta', { title: '不行', resubmitModeration: true, updatedAt: patched.data.work.updatedAt }, { bearer: token })).data.code, 'not_resubmittable');
+    assert.equal(platform.library.work('one', 'pk-1').title, '覆盖标题');
+  }, { data });
+});
+
+test('captures:write replaces one JPEG slot, leaves moderation and the other slot alone', async () => {
+  await setup(async ({ call, raw, submit, tokens, platform, root, stored }) => {
+    const { token, id } = tokens.create('shots', 'test', 'captures:write,capture:read');
+    const cover = tokens.create('cover', 'test', 'cover:write');
+    const work = await submit();
+    await platform.moderator.idle();
+    const late = join(root, 'state', 'media', work.id, 'first-late.jpg');
+    const lateBefore = (await import('node:fs')).readFileSync(late);
+    platform.db.prepare('UPDATE works SET moderation = ? WHERE id = ?')
+      .run(JSON.stringify({ ...stored(work.id), error: 'capture_incomplete' }), work.id);
+    const before = platform.db.prepare('SELECT moderation, cover, digest, owner_id, status, captures FROM works WHERE id = ?').get(work.id);
+    const path = `/api/dots/works/one/${work.id}/captures/first`;
+    assert.equal((await raw(cover.token, 'PUT', path, JPEG(640, 360))).data.code, 'scope_required');
+    assert.equal((await raw(token, 'PUT', `/api/dots/works/one/${work.id}/cover`, JPEG(640, 360))).data.code, 'scope_required');
+    assert.equal((await raw(token, 'PUT', `/api/dots/works/one/${work.id}/captures/late`, JPEG(640, 360))).data.code, 'invalid_slot');
+    assert.equal((await raw(token, 'PUT', path, png(640, 360), 'image/jpeg')).data.code, 'unsupported_type');
+    assert.equal((await raw(token, 'PUT', path, JPEG(32, 32))).data.code, 'bad_dimensions');
+    assert.equal((await raw(token, 'PUT', path, Buffer.alloc(0))).data.code, 'invalid_image');
+    const done = await raw(token, 'PUT', path, JPEG(1440, 900), 'image/png');
+    assert.equal(done.status, 200, JSON.stringify(done.data));
+    assert.equal(done.data.type, 'image/jpeg');
+    assert.equal(done.data.slot, 'first');
+    assert.match(done.data.file, /\/first-[a-z0-9]+\.jpg$/);
+    assert.equal(Object.hasOwn(done.data, 'moderation'), false);
+    assert.equal(Object.hasOwn(done.data, 'status'), false);
+    const after = platform.db.prepare('SELECT moderation, cover, digest, owner_id, status, captures FROM works WHERE id = ?').get(work.id);
+    assert.equal(after.moderation, before.moderation);
+    assert.equal(after.cover, before.cover);
+    assert.equal(after.digest, before.digest);
+    assert.equal(after.owner_id, before.owner_id);
+    assert.equal(after.status, before.status);
+    const captures = JSON.parse(after.captures);
+    assert.equal(`media/${work.id}/${captures.first}`, done.data.file);
+    assert.equal(captures.mobile, 'mobile.jpg');
+    const { readFileSync, existsSync } = await import('node:fs');
+    assert.deepEqual(readFileSync(late), lateBefore);
+    assert.equal(existsSync(join(root, 'state', 'media', work.id, 'first.jpg')), true);
+    assert.equal((await call('owner', 'GET', `/${done.data.file}`)).status, 200);
+    const gaps = await call(null, 'GET', '/api/dots/captures/failed', undefined, { bearer: token });
+    const item = gaps.data.items.find((entry) => entry.id === work.id);
+    assert.ok(item, 'capture_incomplete stays listed');
+    assert.deepEqual(item.reasons, ['capture_incomplete']);
+    assert.equal(item.screenshots.first, true);
+    const audit = JSON.stringify(platform.db.prepare("SELECT * FROM moderation_token_audit WHERE action = 'capture-replace'").all());
+    assert.match(audit, /"outcome":"ok"/);
+    assert.doesNotMatch(audit, new RegExp(tokenSecret(token)));
+    assert.equal(platform.db.prepare("SELECT COUNT(*) AS n FROM audit WHERE action = 'capture-replace' AND work_id = ?").get(work.id).n, 1);
+    const cleared = await submit();
+    await platform.moderator.idle();
+    platform.library.setCaptures(cleared.id, { mobile: 'mobile.jpg' });
+    assert.equal((await raw(token, 'PUT', `/api/dots/works/one/${cleared.id}/captures/first`, JPEG(640, 360))).status, 200);
+    const left = await call(null, 'GET', '/api/dots/captures/failed?limit=100', undefined, { bearer: token });
+    assert.equal(left.data.items.some((entry) => entry.id === cleared.id), false);
+  });
+});
+
+test('a capture upload loses to a concurrent change instead of mixing the two files', async () => {
+  await setup(async ({ raw, submit, tokens, platform }) => {
+    const token = tokens.create('shots', 'test', 'captures:write').token;
+    const work = await submit();
+    await platform.moderator.idle();
+    const before = platform.db.prepare('SELECT moderation, cover FROM works WHERE id = ?').get(work.id);
+    const results = await Promise.all([1, 2, 3].map(() => raw(token, 'PUT', `/api/dots/works/one/${work.id}/captures/mobile`, JPEG(390, 844))));
+    assert.ok(results.every((result) => result.status === 200 || result.data.code === 'conflict'));
+    assert.ok(results.some((result) => result.status === 200));
+    const captures = JSON.parse(platform.db.prepare('SELECT captures FROM works WHERE id = ?').get(work.id).captures);
+    assert.match(captures.mobile, /^mobile-[a-z0-9]+\.jpg$/);
+    assert.equal(captures.first, 'first.jpg');
+    const after = platform.db.prepare('SELECT moderation, cover FROM works WHERE id = ?').get(work.id);
+    assert.equal(after.moderation, before.moderation);
+    assert.equal(after.cover, before.cover);
+  });
+});
+
+test('captures:write can be switched off without closing cover replacement', async () => {
+  await setup(async ({ raw, submit, tokens, platform }) => {
+    const { token } = tokens.create('both', 'test', 'cover:write,captures:write');
+    const work = await submit();
+    await platform.moderator.idle();
+    assert.equal((await raw(token, 'PUT', `/api/dots/works/one/${work.id}/captures/first`, JPEG(640, 360))).data.code, 'scope_disabled');
+    assert.equal((await raw(token, 'PUT', `/api/dots/works/one/${work.id}/cover`, png(80, 80))).status, 200);
+  }, { extra: { dotsDisabledScopes: ['captures:write'] } });
+});
+
+test('dots write routes share a separate per-minute limit', async () => {
+  await setup(async ({ call, raw, submit, tokens, platform }) => {
+    const { token } = tokens.create('both', 'test', 'works:read,captures:write');
+    const work = await submit();
+    await platform.moderator.idle();
+    const path = `/api/dots/works/one/${work.id}/captures/first`;
+    assert.equal((await raw(token, 'PUT', path, JPEG(640, 360))).status, 200);
+    assert.equal((await raw(token, 'PUT', path, JPEG(640, 360))).status, 200);
+    const blocked = await raw(token, 'PUT', path, JPEG(640, 360));
+    assert.equal(blocked.status, 429);
+    assert.equal(blocked.data.code, 'rate_limited');
+    assert.equal((await call(null, 'GET', `/api/dots/works/one/${work.id}`, undefined, { bearer: token })).status, 200);
+  }, { extra: { dotsWritesPerMin: 2 } });
 });
 
 test('the .sbox data area is rebuilt from referenced ranges only', async () => {

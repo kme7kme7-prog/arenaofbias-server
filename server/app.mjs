@@ -21,6 +21,7 @@ import { createComments } from './comments.mjs';
 import { createChangelog } from './changelog.mjs';
 import { createAnnouncements, retiredAnnouncementStream } from './announcements.mjs';
 import { createDotsModeration, createModerationMode, createModerationTokens } from './dots-moderation.mjs';
+import { createCaptureStore } from './work-captures.mjs';
 import { createCoverStore } from './work-covers.mjs';
 import { createPreviewStore } from './preview-uploads.mjs';
 import { AVATARS, EFFORTS, EMOJIS } from './config.mjs';
@@ -91,8 +92,9 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const moderator = createModerator({ config, library, capturer, onChange: () => arena.invalidate(), routing: moderationMode });
   const covers = createCoverStore({ db, library });
   const previews = createPreviewStore({ db, library });
+  const captureStore = createCaptureStore({ db, library });
   const dots = createDotsModeration({ db, config, library, mode: moderationMode, tokens: createModerationTokens(db),
-    covers, previews, coverBytes: limits.coverBytes, onChange: () => arena.invalidate(),
+    covers, previews, captureStore, coverBytes: limits.coverBytes, onChange: () => arena.invalidate(),
     categoryOf: (taskId) => catalog.task(taskId)?.category ?? '', tasksIn: (category) => catalog.tasks().filter((task) => task.category === category).map((task) => task.id) });
   const queueWork = (work) => {
     if (work.moderation.status === 'pending') moderator.enqueue(work);
@@ -913,7 +915,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         'Content-Security-Policy': "default-src 'none'",
       });
     }
-    const media = /^\/media\/(up-[a-z0-9]{8})\/(cover(?:-[a-z0-9]{8,24})?\.(?:png|jpg|webp)|first\.jpg|mobile\.jpg|preview\.(?:sbox|webp|jpg)|preview-[a-z0-9]{8,24}\.sbox)$/.exec(pathname);
+    const media = /^\/media\/(up-[a-z0-9]{8})\/(cover(?:-[a-z0-9]{8,24})?\.(?:png|jpg|webp)|first(?:-[a-z0-9]{8,24})?\.jpg|mobile(?:-[a-z0-9]{8,24})?\.jpg|preview\.(?:sbox|webp|jpg)|preview-[a-z0-9]{8,24}\.sbox)$/.exec(pathname);
     if (pathname.startsWith('/media/')) {
       const work = media && library.uploadById(media[1]);
       if (!library.canRead(work, auth.userFrom(req))) return sendJson(res, 404, { error: '文件不存在' });

@@ -1,3 +1,10 @@
+## 2026-10-22 · dots 作品完善默认权限（A′+F′，未部署）
+
+- kme7 已批准实现。默认档是 `moderation + capture:read + cover:write + works:read + meta:write + preview:write + captures:write`。封面仍只用已有 `cover:write`；截图 first/mobile 用新的 `captures:write`，没有并进封面。
+- `feat/dots-preview`（PR #22）已 rebase 到当前 main。预览 API 仍是那一笔提交。本轮在其上增加：`GET /api/dots/works/:task/:id`（`works:read`，无邮箱/IP，文件列表默认关）、`PATCH …/meta`（`meta:write`，完整声明字段，不含改题；默认不重送审）、`PUT …/captures/:slot`（`captures:write`，只替换 first 或 mobile 的 JPEG，只改 captures 对应键，不改审核状态）。
+- 无迁移、无新 npm 依赖。写操作另有每分钟 30 次上限（`DOTS_WRITES_PER_MIN`）。dots 仍不能回滚封面或预览，也不能删库、改题、拨门面、核验公开。新建令牌不写权限时仍只有 `moderation`；完善作品要按上面的默认档显式授予。
+- 验证：`npm run check` 157/0；`node --test --test-concurrency=2 test/*.test.mjs` 458/458。未部署，未改线上令牌。详见 [归档](docs/archive/2026-10-22-dots-works-ops-kme7kme7-prog.md)。
+
 ## 2026-10-22 · EdgeOne 公开作品条件代理上线
 
 - 用户授权正式实施与每月额外 10 元警戒预算；不是云平台自动硬封顶，也没有配置后台定期监控。新增 `deploy/edgeone/public-content-proxy.js`、上线/回退说明与 5 项定点测试。只改独立候选中的本轮文件；本轮 VPS 运行代码、Nginx、数据库和作品均未改动，服务 PID 18076 不变，81 个已部署运行文件指纹无变化。

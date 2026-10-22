@@ -6,10 +6,15 @@
 |---|---|---|
 | `moderation` | 列待审队列、看作品内容和截图、通过、打回（必须写理由） | `/api/dots/moderation/*` |
 | `capture:read` | 只读列出截图失败（`capture_incomplete` 或没有桌面首屏截图）的作品 | `GET /api/dots/captures/failed` |
-| `cover:write` | 给作品上传或替换封面 | `PUT /api/dots/works/:task/:id/cover` |
+| `cover:write` | 给作品上传或替换封面（作品页封面图，不是截图） | `PUT /api/dots/works/:task/:id/cover` |
+| `works:read` | 按 task/id 读一件作品的安全声明（队列外也可以） | `GET /api/dots/works/:task/:id` |
+| `meta:write` | 改作品声明。不能改归属题目、门面或核验 | `PATCH /api/dots/works/:task/:id/meta` |
 | `preview:write` | 给作品上传或替换列表卡片的 3D 小模型预览（`.sbox`） | `PUT /api/dots/works/:task/:id/preview` |
+| `captures:write` | 替换桌面或手机首屏截图（`first` / `mobile`，仅 JPEG） | `PUT /api/dots/works/:task/:id/captures/:slot` |
 
 缺某项权限时返回 `403 {"code":"scope_required"}`。权限由运维逐项开关，去掉某项或整个令牌作废都在下一个请求生效。
+
+完善作品信息时，一次授予：`moderation,capture:read,cover:write,works:read,meta:write,preview:write,captures:write`。封面和截图是两项权限，不要把截图并进 `cover:write`。新建令牌不写权限时仍然只有 `moderation`。
 
 站点：`https://<API 域名>`（与管理端同一 API 域名）。下文 `$TOKEN` 是运维发给你的令牌，形如 `aobd_<12 位 id>_<43 位随机串>`；文中的示例全是假的。
 
@@ -263,25 +268,97 @@ curl -sS -X PUT https://<API 域名>/api/dots/works/q-model/up-abc123/preview \
 - 并发上传同一作品时后到的可能返回 `409 conflict`，重新上传即可。
 - 回滚由管理员（后台 `POST /api/works/:task/:id/preview/rollback`）或运维脚本（`preview-rollback`）完成，dots 没有回滚权限；传错了就再传一个正确的。回滚到第一次上传之前会把预览整个撤掉，卡片回到只显示封面。
 
+### 10. 读取作品 `GET /api/dots/works/:task/:id`（`works:read`）
+
+不要求作品在审核队列里。上传作品和数据包作品都能读。
+
+```bash
+curl -sS "https://<API 域名>/api/dots/works/one/up-abc123?files=1" -H "Authorization: Bearer $TOKEN"
+```
+
+```json
+{ "work": { "task": "one", "id": "up-abc123", "title": "作品标题", "summary": "", "note": "",
+  "modelId": "m", "modelName": "模型", "vendor": "测试", "effort": "Default",
+  "harnessId": null, "harnessOther": "测试工具", "providerId": "official",
+  "generationMode": "single-turn", "humanIntervention": "none", "promptVariant": "",
+  "status": "unverified", "moderationStatus": "approved", "moderationError": null,
+  "cover": "media/up-abc123/cover.png", "hasManualCover": false,
+  "captures": { "first": "media/up-abc123/first.jpg", "mobile": "media/up-abc123/mobile.jpg" },
+  "preview": null, "author": "作者名", "submittedAt": "2026-10-22T00:00:00.000Z",
+  "updatedAt": 1761000000000, "curated": false, "fileCount": 1, "bytes": 1200,
+  "files": [{ "path": "index.html", "bytes": 1200 }] } }
+```
+
+- 不返回邮箱、IP、内容密钥、预览地址、摘要哈希或作品包本身。`author` 只是显示名。
+- `files` 默认不出现。只有 `?files=1` 才列上传包里的相对路径和字节数（最多 2000 个）。数据包作品没有这项。
+- `moderationStatus` 是内容审核状态，不是“已公开”。内容通过之后作品仍要等人审才会公开。
+- `updatedAt` 给第 11 节做并发校验。作品不存在返回 `404 not_found`。
+
+### 11. 修改作品信息 `PATCH /api/dots/works/:task/:id/meta`（`meta:write`）
+
+部分更新。可改：`title` `summary` `note` `modelId` `modelName` `vendor` `effort` `promptVariant` `harnessId` `harnessOther` `providerId` `generationMode` `humanIntervention`。
+
+不能改：`task`（归属题目，`400 task_forbidden`）、门面、核验、封面、预览、截图、文件包、`owner`。其他未知字段 `400 invalid_field`。
+
+```bash
+curl -sS -X PATCH https://<API 域名>/api/dots/works/one/up-abc123/meta \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"title":"新标题","updatedAt":1761000000000}'
+```
+
+```json
+{ "work": { "title": "新标题", "updatedAt": 1761000001000, "...": "同第 10 节" }, "resubmitted": false }
+```
+
+- 语义与管理员改信息相同：**默认不重新送审**。`resubmitted` 为 false，内容审核状态不变，作品也不会因此公开。
+- 需要重新送审时加 `"resubmitModeration": true`。只有送审文本变了（标题、简介、模型、档位、说明、Harness/服务商补充，以及生成方式、人工介入），并且内容审核开着，才会回到 pending，此时 `resubmitted` 为 true。没变的字段不会重送。数据包作品不能重送（`409 not_resubmittable`）。
+- 带上一次读到的 `updatedAt`。中间被人改过则 `409 conflict`，不会覆盖。不带也可以，但并发写入仍可能 409。
+- 数据包作品写入展示覆盖，不改数据包文件。
+
+### 12. 替换截图 `PUT /api/dots/works/:task/:id/captures/:slot`（`captures:write`）
+
+`slot` 只能是 `first`（桌面首屏）或 `mobile`（手机首屏）。请求体是 JPEG 本身。这不是封面：封面仍走第 8 节的 `cover:write`。
+
+```bash
+curl -sS -X PUT https://<API 域名>/api/dots/works/one/up-abc123/captures/first \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/octet-stream" \
+  --data-binary @first.jpg
+```
+
+```json
+{ "task": "one", "id": "up-abc123", "slot": "first",
+  "file": "media/up-abc123/first-mgz3k1a2b3c4d5e6.jpg",
+  "previous": "media/up-abc123/first.jpg",
+  "type": "image/jpeg", "width": 1440, "height": 900 }
+```
+
+- 类型按文件内容判断，只收 JPEG。PNG、WebP、GIF 返回 `415 unsupported_type`。大小不超过 3 MB，宽高 64–4096 且不超过 1677 万像素。
+- 只改 `works.captures` 里这一个键，并写成新文件名。另一个槽、`*-late.jpg`、封面、作品文件、审核状态都不变。
+- **不会**把 `capture_incomplete` 清掉，也不会把作品标成已通过或已取景。缺首屏的作品换上 `first` 之后不再因为“没有 first”出现在截图失败列表里；若审核错误仍是 `capture_incomplete`，它还在列表里。
+- 截图服务以后重跑会再写 `first.jpg` / `mobile.jpg` 并盖掉这个键。人工封面不会被这里或重跑截图改掉。
+- 没有回滚接口。传错了再传一张。并发时后到的可能 `409 conflict`。
+- 其它 slot（包括 `first-late`）返回 `400 invalid_slot`。
+
 ## 状态码
 
 | 状态码 | `code` | 含义 |
 |---|---|---|
 | 200 | — | 成功 |
-| 400 | `reason_required` / `invalid_path` / `invalid_filter` / `invalid_cursor` / — | 打回缺理由、缺 path、请求体不是 JSON 对象 |
+| 400 | `reason_required` / `invalid_path` / `invalid_filter` / `invalid_cursor` / `invalid_field` / `task_forbidden` / `invalid_slot` / — | 打回缺理由、缺 path、请求体不是 JSON 对象、meta 字段不允许、试图改题、截图槽不是 first/mobile |
 | 401 | `unauthorized` | 缺令牌、令牌错或已吊销 |
 | 403 | `token_forbidden` | 用令牌访问了 dots 以外的接口 |
 | 403 | `scope_required` | 令牌没有这项权限 |
-| 422 | `bad_dimensions` | 封面尺寸不在允许范围 |
+| 422 | `bad_dimensions` | 封面或截图尺寸不在允许范围 |
 | 503 | `dots_disabled` / `scope_disabled` | 运维临时关闭了整个 dots 接口或这项能力 |
-| 404 | `not_found` | 接口不存在，或作品不在 dots 队列里 |
+| 404 | `not_found` | 接口不存在，作品不存在，或作品不在 dots 队列里（队列接口） |
 | 405 | `method_not_allowed` | 方法不对 |
 | 409 | `not_in_queue` | 作品已经被别人（机器、管理员）决定，或已超时转走；返回体 `current.status` 是当前状态 |
 | 409 | `stale` | 带的 `version` 不是当前版本：作者改过作品，重新查看 |
-| 409 | `conflict` | 决定时作品刚好被修改，或同一作品并发上传，重新取队列或重新上传 |
+| 409 | `conflict` | 决定、封面、预览、信息或截图刚好被修改，重新获取后再写 |
+| 409 | `not_resubmittable` | 数据包作品不能重新送审 |
 | 409 | `poster_required` | 传预览前作品还没有人工封面 |
 | 409 | `preview_exists` | 作品已有不是 dots 上传的预览，不覆盖 |
-| 413 / 415 | — / `too_large` / `unsupported_type` | 请求体太大（审核 8 KiB，封面 3 MB，预览 2 MB / 解压 24 MB）/ 审核请求不是 `application/json`，封面不是 PNG/JPEG/WebP，或预览不是 gzip 的 `.sbox` |
+| 413 / 415 | — / `too_large` / `unsupported_type` | 请求体太大（审核与 meta 8 KiB，封面和截图 3 MB，预览 2 MB / 解压 24 MB）/ 审核或 meta 请求不是 `application/json`，封面不是 PNG/JPEG/WebP，截图不是 JPEG，或预览不是 gzip 的 `.sbox` |
 | 422 | `invalid_model` | 预览包结构或内容不符合上面的白名单 |
 | 429 | `rate_limited` | 限流，看 `Retry-After` 头或 `retryAfter` 字段（秒） |
 
@@ -290,6 +367,7 @@ curl -sS -X PUT https://<API 域名>/api/dots/works/q-model/up-abc123/preview \
 ## 限流
 
 - 每个令牌每分钟 120 次（运维可用 `DOTS_REQUESTS_PER_MIN` 调整）。
+- 写操作（封面、预览、信息、截图）另计每分钟 30 次（`DOTS_WRITES_PER_MIN`）。读队列和读作品不占这个额度。
 - 同一 IP 鉴权失败每分钟 20 次。
 
 建议每 30–60 秒拉一次队列，不要更频繁。
@@ -305,7 +383,8 @@ curl -sS -X PUT https://<API 域名>/api/dots/works/q-model/up-abc123/preview \
 - 写入是条件更新：只有作品仍处于你看到的待审状态时才会生效。dots、机器、管理员同时决定时，第一个写入的生效，后面的返回 409 `not_in_queue`，不会覆盖。
 - 同一个决定重复提交返回 200 `applied: false`。网络超时后可以放心重试同一请求。
 - 作者在审核期间改了送审信息时，作品会以新版本重新排队（`version` 改变）。带了旧 `version` 的决定返回 409 `stale`，请重新查看。
+- 改信息和换截图同样是条件更新：用读到的 `updatedAt` 或当时的截图记录做比较，先写入的生效，后到的 `409 conflict`。
 
 ## 审计
 
-每个通过鉴权的请求都会记录：令牌 id 和标签、动作（list / view / view-image / view-file / approve / reject / list-capture-gaps / cover-replace / preview-replace）、作品、理由、时间、IP、结果。作品的审核记录里决定人显示为 `dots:<令牌标签>`。
+每个通过鉴权的请求都会记录：令牌 id 和标签、动作（list / view / view-image / view-file / approve / reject / list-capture-gaps / cover-replace / preview-replace / work-get / meta / capture-replace）、作品、理由、时间、IP、结果。不记录令牌明文。作品的审核记录里决定人显示为 `dots:<令牌标签>`。meta 的理由是改了哪些字段名；截图的理由是 `first` 或 `mobile`。

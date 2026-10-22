@@ -86,6 +86,7 @@ npm start
 | `MODERATION_MODE` | `machine` | 新投稿由谁审：`machine` 机器、`dots` 交 dots、`dots-review-only` 机器先审、转人工的再给 dots；需 `CONTENT_MODERATION=1`。管理员可热切换覆盖，见 [dots 审核 API](docs/dots-moderation-api.md) |
 | `DOTS_REVIEW_TIMEOUT_MS` | `1800000`（30 分钟，最少 60 秒） | dots 未决定的截止时间，从入队时间算；`dots` 模式超时转机器，`dots-review-only` 超时留人工 |
 | `DOTS_REQUESTS_PER_MIN` | `120` | 每个审核令牌每分钟请求上限 |
+| `DOTS_WRITES_PER_MIN` | `30` | 每个令牌每分钟封面、预览、作品信息和截图写入上限，与上面的总次数分开计 |
 | `DOTS_API` | 开（`off` 关闭） | 紧急开关：`off` 时所有 `/api/dots/` 返回 503，需重启生效 |
 | `DOTS_DISABLED_SCOPES` | 空 | 紧急开关：逗号分隔，如 `cover:write` 或 `cover:write,preview:write`，对所有令牌关闭这些能力，需重启生效；单个令牌用脚本 `withdraw` 即时生效 |
 | `COOKIE_SECURE` | 关（`1` 开启） | session cookie 改名 `__Host-sp_session`，加 Secure 标记，Path=/ 且不带 Domain；本地未开启时仍为 `sp_session` |

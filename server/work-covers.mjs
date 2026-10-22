@@ -11,7 +11,8 @@ import { HttpError, fail } from './http.mjs';
 
 export const COVER_LIMITS = { minSide: 64, maxSide: 4096, maxPixels: 16_777_216 };
 export const COVER_FILE = /^cover(?:-[a-z0-9]{8,24})?\.(?:png|jpg|webp)$/;
-const SHOTS = /^(?:first|mobile)(?:-late)?\.jpg$/;
+// Fixed names are the capture service. first-<stamp>.jpg / mobile-<stamp>.jpg are dots replacements.
+const SHOTS = /^(?:first|mobile)(?:-[a-z0-9]{8,24})?\.jpg$|^(?:first|mobile)-late\.jpg$/;
 
 // Type and pixel size from the bytes themselves; the declared Content-Type is ignored.
 export function sniffImage(buffer) {

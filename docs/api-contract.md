@@ -1309,3 +1309,20 @@ v49 给 `moderation_tokens` 加 `scopes`（已有令牌默认 `moderation`），
 |---|---|---|
 | GET | `/api/works/:task/:id/cover-history` | 仅 Lv3：`{cover, entries[]}`，最近 100 条 |
 | POST | `/api/works/:task/:id/cover/rollback` | 仅 Lv3：`{historyId?}`，把封面指回该条记录之前的文件；省略时撤销最近一次变更。回滚本身也记一条，可再回滚 |
+
+### dots 3D 预览（无迁移）
+
+新权限 `preview:write`（`PUT /api/dots/works/:task/:id/preview`，请求体是 `.sbox`），见 [dots 审核 API](dots-moderation-api.md) 第 9 节。`scopes` 是文本列，不需要迁移；历史复用 `cover_history`，动作记为 `preview-replace` / `preview-rollback`，封面历史只看 `cover-*` 动作。
+
+文件：`media/<作品>/preview-<stamp>.sbox` 与清单 `preview-<stamp>.json`（`source: "dots"`、`version`、`sourceDigest`、`model`、`modelSha`、`poster`＝当前人工封面 `cover-*`、`posterSha`），激活时把清单原子复制为 `preview.json`，由原有 `readWorkPreview` 读出 `previewMode: "model"`、`previewModel`、`previewPoster`。没有 `source: "dots"` 的 `preview.json`（运维烘焙）不会被覆盖或回滚。`/media/<作品>/` 新接受 `preview-<8–24 位小写字母数字>.sbox`。
+
+`GET /api/dots/captures/failed` 新增可选 `category`（题目分类，`3d` / `modeling` / `三维建模` 是 `建模` 的别名），带上时每项加 `category`、`webgpu`、`webgpuSignals`（静态扫描作品文件）。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/works/:task/:id/preview-history` | 仅 Lv3：`{current, entries[]}`，`current` 是当前 dots 清单名或 null，最近 100 条 |
+| POST | `/api/works/:task/:id/preview/rollback` | 仅 Lv3：`{historyId?}`，指回该条记录之前的清单（为空则撤下预览）；省略时撤销最近一次变更；当前预览不是 dots 的返回 409 `preview_exists` |
+
+### 作品声明、读取与截图替换（无迁移）
+
+`scopes` 仍是文本。新增 `works:read`（`GET /api/dots/works/:task/:id`，安全声明，文件列表默认关，`?files=1` 才列路径）、`meta:write`（`PATCH /api/dots/works/:task/:id/meta`，完整声明字段，不含 `task`；默认不重送审，`resubmitModeration: true` 才在送审文本变化时重送；条件更新，冲突 409）、`captures:write`（`PUT /api/dots/works/:task/:id/captures/:slot`，`slot` 为 `first` 或 `mobile`，只收 JPEG，新文件名，只改 `captures` 的对应键）。不提供 dots 回滚，不清审核错误，不改封面。`/media/<作品>/` 同时接受 `first.jpg`、`mobile.jpg` 和 `first-<8–24 位>.jpg`、`mobile-<8–24 位>.jpg`。详见 [dots 审核 API](dots-moderation-api.md) 第 10–12 节。写操作另有 `DOTS_WRITES_PER_MIN`（默认 30）。

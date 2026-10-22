@@ -455,6 +455,8 @@ sudo -u <服务用户> DATA_DIR=<服务的 DATA_DIR> node scripts/moderation-tok
 ```
 
   `create dots moderation,capture:read,cover:write` 一次给多项权限（默认只有 `moderation`）；`grant <id> <scope>` / `withdraw <id> <scope>` 单项增减，`revoke <id>` 整个作废，都在下一个请求生效。紧急情况下 `DOTS_API=off` 关闭全部 dots 接口，`DOTS_DISABLED_SCOPES=cover:write` 对所有令牌关闭某项（改环境变量需重启）。
+  完善作品信息的默认权限是 `moderation,capture:read,cover:write,works:read,meta:write,preview:write,captures:write`（封面走 `cover:write`，截图走 `captures:write`，不要并成一项）。已有令牌用 `grant` 逐项补，不要整仓覆盖或改线上令牌明文。`DOTS_WRITES_PER_MIN` 默认 30，只限制封面 / 预览 / 信息 / 截图写入。
+  3D 预览（`preview:write`，需单独 `grant <id> preview:write`，可用 `DOTS_DISABLED_SCOPES=preview:write` 全局关闭）：`preview-history <作品 id>` 查看，`preview-rollback <作品 id> [记录 id]` 指回旧版本或撤下；运维烘焙的 `preview.json` 不受影响。管理员也可调用 `POST /api/works/:task/:id/preview/rollback`。旧版本 `preview-*.sbox/json` 不会被自动删除。
   封面回滚：`cover-history <作品 id>` 查看，`cover-rollback <作品 id> [记录 id]` 指回旧文件；管理员也可调用 `POST /api/works/:task/:id/cover/rollback`。旧封面文件和截图快照（`media/<作品>/history/`）不会被自动删除。
   `mode` 命令输出里的 `env` 是当前 shell 的环境变量，服务实际值以管理端 `GET /api/admin/moderation-mode` 为准。明文只打印一次，库里只存哈希。不要贴进聊天记录、工单或日志；交给 dots 的使用者走端到端加密的一次性渠道，或由他本人在服务器上生成。丢失即吊销重发。
 - 部署时已在队列里的作品不受影响：它们的 pending 不带 `route`，照旧走机器；状态值含义不变。

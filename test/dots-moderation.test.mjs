@@ -14,6 +14,8 @@ import { createModerationTokens } from '../server/dots-moderation.mjs';
 import { createModerator } from '../server/moderation.mjs';
 
 const PAGE = '<!doctype html><html><body><h1>作品正文</h1><p>正常页面文字</p></body></html>';
+// The secret is base64url, so it can contain underscores. Take everything after aobd_<id>_.
+const tokenSecret = (token) => token.slice(token.indexOf('_', 5) + 1);
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j2ioAAAAASUVORK5CYII=', 'base64');
 const reply = (decision = 'approved', reason = '内容正常') => ({ id: 'resp_test', model: 'gpt-6-luna', status: 'completed', service_tier: 'flex',
   output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify({ decision, reason, categories: [] }) }] }],
@@ -36,12 +38,12 @@ function fakeCapturer(library, captures = []) {
   }, async close() {} };
 }
 
-async function setup(run, { mode = 'machine', timeoutMs = 30 * 60_000, perMinute = 120, extra = {} } = {}) {
+async function setup(run, { mode = 'machine', timeoutMs = 30 * 60_000, perMinute = 120, extra = {}, data = null } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'dots-moderation-'));
   const dist = join(root, 'dist');
   mkdirSync(dist);
-  writeFileSync(join(dist, 'data.json'), JSON.stringify({ title: '测试', models: [{ id: 'm', name: '模型', vendor: '测试' }],
-    tasks: [{ id: 'one', title: '题目', promptPending: false, results: [] }] }));
+  writeFileSync(join(dist, 'data.json'), JSON.stringify(data ?? { title: '测试', models: [{ id: 'm', name: '模型', vendor: '测试' }],
+    tasks: [{ id: 'one', title: '题目', promptPending: false, results: [] }, { id: 'model3d', title: '建模题', category: '建模', promptPending: false, results: [] }] }));
   const received = [];
   let respond = async () => ({ status: 200, body: reply() });
   const provider = createServer(async (req, res) => {
@@ -77,8 +79,8 @@ async function setup(run, { mode = 'machine', timeoutMs = 30 * 60_000, perMinute
     const response = await fetch(base + path, { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': type }, body });
     return { status: response.status, data: await response.json(), headers: response.headers };
   }
-  async function submit(who = 'owner', more = {}) {
-    const draft = await call(who, 'POST', '/api/drafts?task=one&name=work.html', PAGE, { raw: true });
+  async function submit(who = 'owner', { task = 'one', page = PAGE, ...more } = {}) {
+    const draft = await call(who, 'POST', `/api/drafts?task=${task}&name=work.html`, page, { raw: true });
     assert.equal(draft.status, 200);
     const result = await call(who, 'POST', '/api/works', { draftId: draft.data.draft.id, confirmed: true, title: '测试作品',
       modelId: 'm', effort: 'Default', providerId: 'official', harnessOther: '测试工具', generationMode: 'single-turn', humanIntervention: 'none',
@@ -136,7 +138,7 @@ test('only the SHA-256 hash is stored, revocation is immediate and audit rows ne
     const created = tokens.create('dots-test', 'test');
     const row = platform.db.prepare('SELECT * FROM moderation_tokens WHERE id = ?').get(created.id);
     assert.equal(row.token_hash, createHash('sha256').update(created.token).digest('hex'));
-    assert.doesNotMatch(JSON.stringify(platform.db.prepare('SELECT * FROM moderation_tokens').all()), new RegExp(created.token.split('_')[2]));
+    assert.doesNotMatch(JSON.stringify(platform.db.prepare('SELECT * FROM moderation_tokens').all()), new RegExp(tokenSecret(created.token)));
     assert.equal(tokens.list().some((item) => 'token_hash' in item || 'token' in item), false);
     const api = dots(created.token);
     assert.equal((await api('GET', '/queue')).status, 200);
@@ -144,7 +146,7 @@ test('only the SHA-256 hash is stored, revocation is immediate and audit rows ne
     assert.equal(tokens.revoke(created.id), true);
     assert.equal((await api('GET', '/queue')).status, 401);
     const dump = JSON.stringify(platform.db.prepare('SELECT * FROM moderation_token_audit').all());
-    assert.doesNotMatch(dump, new RegExp(created.token.split('_')[2]));
+    assert.doesNotMatch(dump, new RegExp(tokenSecret(created.token)));
   });
 });
 
@@ -671,4 +673,387 @@ test('migration 49 gives tokens created under v48 the moderation scope only', ()
       MIGRATIONS[48](upgraded);
     } finally { upgraded.close(); }
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// A minimal Gallery .sbox: gzip([u32 header size][JSON header][pad to 8][body]).
+import { gunzipSync as gunzipTest, gzipSync as gzipTest } from 'node:zlib';
+function sbox(header = {}, { body = null, raw = false } = {}) {
+  const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1]);
+  const index = new Uint16Array([0, 1, 2, 0, 2, 3]);
+  const instances = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 2, 0, 0, 1]);
+  const bytes = body ?? Buffer.concat([Buffer.from(positions.buffer), Buffer.from(index.buffer), Buffer.alloc(4), Buffer.from(instances.buffer)]);
+  const data = { version: 2, normalized: false, clip: false, bounds: { min: [0, 0, 0], max: [2, 1, 1] },
+    geometries: [{ attributes: { position: { type: 'Float32Array', offset: 0, length: 12, itemSize: 3 } }, index: { type: 'Uint16Array', offset: 48, length: 6, itemSize: 1 }, groups: [] }],
+    materials: [{ uuid: 'm1', type: 'MeshStandardMaterial', color: 0xff8800, roughness: 0.5 }],
+    meshes: [{ geometry: 0, material: 0, matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] },
+      { geometry: 0, material: 0, matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], count: 1, instances: { type: 'Float32Array', offset: 64, length: 16 } }],
+    ...header };
+  const json = Buffer.from(JSON.stringify(data));
+  const prefix = Buffer.alloc(4); prefix.writeUInt32LE(json.length, 0);
+  const start = Math.ceil((4 + json.length) / 8) * 8;
+  const packed = Buffer.concat([prefix, json, Buffer.alloc(start - 4 - json.length), bytes]);
+  return raw ? packed : gzipTest(packed);
+}
+const headerOf = (gz) => { const raw = gunzipTest(gz); return JSON.parse(raw.subarray(4, 4 + raw.readUInt32LE(0)).toString('utf8')); };
+
+test('preview:write uploads a sanitized .sbox, keeps versions, never replaces a baked preview, and admins roll back', async () => {
+  await setup(async ({ call, raw, submit, tokens, platform, root }) => {
+    const { token, id } = tokens.create('dots-3d', 'test', 'cover:write,preview:write');
+    const work = await submit('owner', { task: 'model3d' });
+    await platform.moderator.idle();
+    assert.equal((await call('admin', 'POST', `/api/works/model3d/${work.id}/moderation`, { status: 'approved' })).status, 200);
+    const path = `/api/dots/works/model3d/${work.id}/preview`;
+    const mediaDir = join(root, 'state', 'media', work.id);
+    const { readdirSync, readFileSync, writeFileSync: write, existsSync } = await import('node:fs');
+
+    // Poster first: the preview poster is the manual cover from cover:write.
+    const noPoster = await raw(token, 'PUT', path, sbox());
+    assert.equal(noPoster.status, 409);
+    assert.equal(noPoster.data.code, 'poster_required');
+    assert.equal((await raw(token, 'PUT', `/api/dots/works/model3d/${work.id}/cover`, png(400, 300))).status, 200);
+    const before = platform.db.prepare('SELECT * FROM works WHERE id = ?').get(work.id);
+
+    // Rejected packages.
+    const glb = Buffer.concat([Buffer.from('glTF'), Buffer.alloc(16)]);
+    const cases = [
+      [glb, 415, 'unsupported_type'],
+      [Buffer.from('not gzip at all, just text'), 415, 'unsupported_type'],
+      [sbox({ materials: [{ type: 'ShaderMaterial', vertexShader: 'void main(){}', fragmentShader: 'void main(){}' }] }), 422, 'invalid_model'],
+      [sbox({ images: [{ uuid: 'i1', url: 'https://evil.example/x.png' }] }), 422, 'invalid_model'],
+      [sbox({ images: [{ uuid: 'i1', url: `data:image/png;base64,${Buffer.from('<svg/>').toString('base64')}` }] }), 422, 'invalid_model'],
+      [sbox({ geometries: [{ attributes: { position: { type: 'Float32Array', offset: 0, length: 999999, itemSize: 3 } } }] }), 422, 'invalid_model'],
+      [sbox({ meshes: [{ geometry: 5, material: 0, matrix: Array(16).fill(0) }] }), 422, 'invalid_model'],
+      [sbox({ version: 9 }), 422, 'invalid_model'],
+      [gzipTest(Buffer.alloc(30 * 1024 * 1024)), 413, 'too_large'],
+    ];
+    for (const [body, status, code] of cases) {
+      const response = await raw(token, 'PUT', path, body);
+      assert.equal(response.status, status, code);
+      if (response.data.code) assert.equal(response.data.code, code);
+    }
+    assert.equal((await raw(token, 'PUT', path, Buffer.alloc(2 * 1024 * 1024 + 10))).status, 413);
+    assert.ok(!existsSync(join(mediaDir, 'preview.json')));
+
+    // A valid package with extras: stored rebuilt, extras gone, files untouched.
+    const dirty = sbox({ extras: { evil: true }, scripts: ['alert(1)'],
+      materials: [{ uuid: 'm1', type: 'MeshStandardMaterial', color: 0xff8800, userData: { x: 1 }, onBeforeCompile: 'steal()', defines: { A: 1 } }],
+      meshes: [{ geometry: 0, material: 0, matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], userData: { y: 2 }, extras: { z: 3 } }] });
+    const first = await raw(token, 'PUT', path, dirty, 'image/png');
+    assert.equal(first.status, 200, JSON.stringify(first.data));
+    assert.deepEqual(first.data.stats.dropped.sort(), ['extras', 'scripts']);
+    const stored = readFileSync(join(root, 'state', first.data.previewModel));
+    const header = headerOf(stored);
+    assert.deepEqual(Object.keys(header).sort(), ['bounds', 'clip', 'geometries', 'materials', 'meshes', 'normalized', 'version']);
+    assert.deepEqual(header.materials[0], { type: 'MeshStandardMaterial', uuid: 'm1', color: 0xff8800 });
+    assert.deepEqual(Object.keys(header.meshes[0]).sort(), ['geometry', 'material', 'matrix']);
+    assert.doesNotMatch(gunzipTest(stored).toString('latin1'), /evil|alert|steal|userData/);
+    assert.deepEqual(platform.db.prepare('SELECT * FROM works WHERE id = ?').get(work.id), before);
+
+    // Visible through the existing preview mechanism, poster first, model served.
+    const listed = async () => (await call(null, 'GET', '/api/bootstrap')).data.works.find((item) => item.id === work.id);
+    const shown = await listed();
+    assert.equal(shown.previewMode, 'model');
+    assert.match(shown.previewModel, new RegExp(`^media/${work.id}/preview-[a-z0-9]+\\.sbox\\?v=`));
+    assert.match(shown.previewPoster, new RegExp(`^media/${work.id}/cover-[a-z0-9]+\\.png\\?v=`));
+    assert.equal((await call(null, 'GET', `/${shown.previewModel.split('?')[0]}`)).status, 200);
+
+    // A second version, then history and rollback (admins only, versions kept).
+    const second = await raw(token, 'PUT', path, sbox({ bounds: { min: [0, 0, 0], max: [3, 3, 3] } }));
+    assert.equal(second.status, 200);
+    assert.notEqual((await listed()).previewModel, shown.previewModel);
+    const history = (await call('admin', 'GET', `/api/works/model3d/${work.id}/preview-history`)).data;
+    assert.equal(history.entries.length, 2);
+    assert.equal(history.entries[0].actor, 'dots:dots-3d');
+    assert.equal((await call('admin', 'GET', `/api/works/model3d/${work.id}/cover-history`)).data.entries.length, 1, 'cover history only lists covers');
+    assert.equal((await call('owner', 'POST', `/api/works/model3d/${work.id}/preview/rollback`, {})).status, 403);
+    assert.equal((await call(null, 'POST', `/api/works/model3d/${work.id}/preview/rollback`, {}, { bearer: token })).status, 403);
+    assert.equal((await call('admin', 'POST', `/api/works/model3d/${work.id}/preview/rollback`, {})).status, 200);
+    assert.equal((await listed()).previewModel, shown.previewModel);
+    assert.equal((await call('admin', 'POST', `/api/works/model3d/${work.id}/preview/rollback`, { historyId: history.entries[1].id })).status, 200);
+    assert.equal((await listed()).previewModel, undefined);
+    assert.equal(readdirSync(mediaDir).filter((name) => /^preview-.*\.sbox$/.test(name)).length, 2, 'old versions stay on disk');
+    assert.equal(platform.db.prepare("SELECT COUNT(*) AS n FROM audit WHERE action IN ('preview-replace', 'preview-rollback') AND work_id = ?").get(work.id).n, 4);
+    const tokenAudit = platform.db.prepare("SELECT outcome FROM moderation_token_audit WHERE action = 'preview-replace' AND token_id = ?").all(id).map((row) => row.outcome);
+    assert.equal(tokenAudit.filter((outcome) => outcome === 'ok').length, 2);
+    assert.ok(tokenAudit.includes('error:422:invalid_model'));
+
+    // A baked (operator-made) preview is never replaced or rolled over.
+    const baked = '{"schemaVersion":1,"mode":"screenshot","capture":"preview.jpg"}\n';
+    write(join(mediaDir, 'preview.json'), baked);
+    const refused = await raw(token, 'PUT', path, sbox());
+    assert.equal(refused.status, 409);
+    assert.equal(refused.data.code, 'preview_exists');
+    assert.equal((await call('admin', 'POST', `/api/works/model3d/${work.id}/preview/rollback`, {})).status, 409);
+    assert.equal(readFileSync(join(mediaDir, 'preview.json'), 'utf8'), baked);
+
+    // The ops script reads the same history and rolls back the same way.
+    const { rmSync } = await import('node:fs');
+    rmSync(join(mediaDir, 'preview.json'));
+    assert.equal((await raw(token, 'PUT', path, sbox())).status, 200);
+    const { execFileSync } = await import('node:child_process');
+    const cli = (...args) => execFileSync(process.execPath, ['scripts/moderation-token.mjs', ...args],
+      { env: { ...process.env, DATA_DIR: join(root, 'state') }, encoding: 'utf8' });
+    assert.match(cli('preview-history', work.id), /当前预览：preview-[0-9a-z]+\.json[\s\S]*preview-replace/);
+    assert.match(cli('preview-rollback', work.id), /"historyId"/);
+    assert.equal((await listed()).previewModel, undefined);
+  });
+});
+
+test('preview:write is its own scope: granted, withdrawn and switched off independently', async () => {
+  await setup(async ({ raw, submit, tokens, platform }) => {
+    const work = await submit('owner', { task: 'model3d' });
+    await platform.moderator.idle();
+    const cover = tokens.create('cover', 'test', 'cover:write');
+    assert.equal((await raw(cover.token, 'PUT', `/api/dots/works/model3d/${work.id}/preview`, sbox())).data.code, 'scope_required');
+    tokens.grant(cover.id, 'preview:write');
+    assert.equal((await raw(cover.token, 'PUT', `/api/dots/works/model3d/${work.id}/preview`, sbox())).data.code, 'poster_required');
+    tokens.withdraw(cover.id, 'preview:write');
+    assert.equal((await raw(cover.token, 'PUT', `/api/dots/works/model3d/${work.id}/preview`, sbox())).status, 403);
+    assert.equal((await raw(cover.token, 'PUT', `/api/dots/works/model3d/${work.id}/cover`, png(100, 100))).status, 200);
+  });
+  await setup(async ({ raw, submit, tokens, platform }) => {
+    const work = await submit('owner', { task: 'model3d' });
+    await platform.moderator.idle();
+    const all = tokens.create('all', 'test', 'cover:write,preview:write');
+    assert.equal((await raw(all.token, 'PUT', `/api/dots/works/model3d/${work.id}/preview`, sbox())).data.code, 'scope_disabled');
+    assert.equal((await raw(all.token, 'PUT', `/api/dots/works/model3d/${work.id}/cover`, png(100, 100))).status, 200);
+  }, { extra: { dotsDisabledScopes: ['preview:write'] } });
+});
+
+test('capture gaps can be limited to 三维建模 works and flag WebGPU from the work files', async () => {
+  await setup(async ({ call, submit, tokens, platform }) => {
+    const token = tokens.create('cap', 'test', 'capture:read').token;
+    const plain = await submit('owner', { task: 'model3d' });
+    const gpu = await submit('owner', { task: 'model3d', page: '<!doctype html><script type="module">import * as T from "three/webgpu"; if (navigator.gpu) new T.WebGPURenderer();</script>' });
+    const other = await submit('owner', { task: 'one' });
+    await platform.moderator.idle();
+    for (const work of [plain, gpu, other]) platform.library.setCaptures(work.id, {});
+    const get = async (query) => (await call(null, 'GET', `/api/dots/captures/failed?limit=100${query}`, undefined, { bearer: token })).data;
+    assert.equal((await get('')).items.length, 3);
+    assert.equal((await get('')).items[0].webgpu, undefined, 'plain list keeps its shape');
+    for (const query of ['&category=建模', '&category=3d', `&category=${encodeURIComponent('三维建模')}`]) {
+      const items = (await get(query)).items;
+      assert.deepEqual(items.map((item) => item.id).sort(), [plain.id, gpu.id].sort(), query);
+      const byId = Object.fromEntries(items.map((item) => [item.id, item]));
+      assert.equal(byId[plain.id].category, '建模');
+      assert.equal(byId[plain.id].webgpu, false);
+      assert.deepEqual(byId[plain.id].webgpuSignals, []);
+      assert.equal(byId[gpu.id].webgpu, true);
+      assert.deepEqual(byId[gpu.id].webgpuSignals, ['navigator.gpu', 'WebGPURenderer', 'three/webgpu']);
+    }
+    assert.deepEqual((await get('&category=文学')).items, []);
+    const paged = await call(null, 'GET', '/api/dots/captures/failed?limit=1&category=3d', undefined, { bearer: token });
+    assert.equal(paged.data.items.length, 1);
+    assert.ok(paged.data.nextCursor);
+  });
+});
+
+test('works:read returns a safe view outside the queue and keeps the file list off', async () => {
+  await setup(async ({ call, submit, tokens, platform }) => {
+    const { token } = tokens.create('read', 'test', 'works:read');
+    const mod = tokens.create('mod', 'test', 'moderation');
+    const work = await submit('owner', { summary: '简介', note: '作者的私密备注' });
+    await platform.moderator.idle();
+    assert.equal((await call(null, 'GET', `/api/dots/moderation/works/one/${work.id}`, undefined, { bearer: token })).data.code, 'scope_required');
+    assert.equal((await call(null, 'GET', `/api/dots/works/one/${work.id}`, undefined, { bearer: mod.token })).data.code, 'scope_required');
+    assert.equal((await call(null, 'GET', '/api/dots/works/one/missing', undefined, { bearer: token })).status, 404);
+    const view = await call(null, 'GET', `/api/dots/works/one/${work.id}`, undefined, { bearer: token });
+    assert.equal(view.status, 200);
+    assert.equal(view.data.work.title, '测试作品');
+    assert.equal(view.data.work.summary, '简介');
+    assert.equal(view.data.work.note, '作者的私密备注');
+    assert.equal(view.data.work.author, 'owner');
+    assert.equal(view.data.work.moderationStatus, 'approved');
+    assert.equal(view.data.work.status, 'unverified');
+    assert.equal(view.data.work.curated, false);
+    assert.equal(typeof view.data.work.updatedAt, 'number');
+    assert.equal(Object.hasOwn(view.data.work, 'files'), false);
+    assert.equal(view.data.work.fileCount, 1);
+    const body = JSON.stringify(view.data);
+    assert.doesNotMatch(body, /owner@example\.test|email|digest|contentKey|127\.0\.0\.1/i);
+    const listed = await call(null, 'GET', `/api/dots/works/one/${work.id}?files=1`, undefined, { bearer: token });
+    assert.deepEqual(listed.data.work.files, [{ path: 'index.html', bytes: Buffer.byteLength(PAGE) }]);
+    assert.equal((await call(null, 'GET', '/api/bootstrap')).data.works.some((item) => item.id === work.id), false);
+  });
+});
+
+test('meta:write edits the declaration, refuses task changes, and does not re-queue unless asked', async () => {
+  await setup(async ({ call, submit, tokens, platform, stored }) => {
+    const { token, id } = tokens.create('meta', 'test', 'works:read,meta:write');
+    const work = await submit();
+    await platform.moderator.idle();
+    const before = platform.db.prepare('SELECT * FROM works WHERE id = ?').get(work.id);
+    const read = await call(null, 'GET', `/api/dots/works/one/${work.id}`, undefined, { bearer: token });
+    const path = `/api/dots/works/one/${work.id}/meta`;
+    assert.equal((await call(null, 'PATCH', path, { task: 'other', title: '改题' }, { bearer: token })).data.code, 'task_forbidden');
+    assert.equal((await call(null, 'PATCH', path, { show_gallery: false }, { bearer: token })).data.code, 'invalid_field');
+    assert.equal((await call(null, 'PATCH', path, { status: 'verified' }, { bearer: token })).data.code, 'invalid_field');
+    assert.equal((await call(null, 'PATCH', path, { owner_id: 'x' }, { bearer: token })).data.code, 'invalid_field');
+    assert.equal((await call(null, 'PATCH', path, {}, { bearer: token })).data.code, 'invalid_field');
+    const modeOnly = await call(null, 'PATCH', path, { generationMode: 'multi-turn', updatedAt: read.data.work.updatedAt }, { bearer: token });
+    assert.equal(modeOnly.status, 200, JSON.stringify(modeOnly.data));
+    assert.equal(modeOnly.data.resubmitted, false);
+    assert.equal(modeOnly.data.work.generationMode, 'multi-turn');
+    assert.equal(stored(work.id).status, 'approved');
+    const stale = await call(null, 'PATCH', path, { title: '过期', updatedAt: read.data.work.updatedAt }, { bearer: token });
+    assert.equal(stale.data.code, 'conflict');
+    assert.equal(platform.db.prepare('SELECT title FROM works WHERE id = ?').get(work.id).title, '测试作品');
+    const renamed = await call(null, 'PATCH', path, { title: '新标题', summary: '新简介', updatedAt: modeOnly.data.work.updatedAt }, { bearer: token });
+    assert.equal(renamed.status, 200, JSON.stringify(renamed.data));
+    assert.equal(renamed.data.resubmitted, false);
+    assert.equal(renamed.data.work.title, '新标题');
+    assert.equal(stored(work.id).status, 'approved');
+    assert.equal(platform.library.work('one', work.id).status, 'unverified');
+    const again = await call(null, 'PATCH', path, { title: '再改', resubmitModeration: true, updatedAt: renamed.data.work.updatedAt }, { bearer: token });
+    assert.equal(again.data.resubmitted, true);
+    assert.equal(stored(work.id).status, 'pending');
+    assert.notEqual(stored(work.id).revision, before.moderation && JSON.parse(before.moderation).revision);
+    const row = platform.db.prepare('SELECT owner_id, digest, cover, status FROM works WHERE id = ?').get(work.id);
+    assert.equal(row.owner_id, before.owner_id);
+    assert.equal(row.digest, before.digest);
+    assert.equal(row.cover, before.cover);
+    assert.equal(row.status, 'unverified');
+    const audit = platform.db.prepare("SELECT * FROM moderation_token_audit WHERE action = 'meta' AND outcome = 'ok'").all();
+    assert.ok(audit.length >= 3);
+    assert.equal(audit[0].token_id, id);
+    assert.doesNotMatch(JSON.stringify(audit), new RegExp(tokenSecret(token)));
+    assert.equal((await call(null, 'GET', '/api/bootstrap')).data.works.some((item) => item.id === work.id), false);
+  });
+});
+
+test('meta:write updates a packaged work through the display override and rejects a stale stamp', async () => {
+  const data = { title: '测试', models: [{ id: 'm', name: '模型', vendor: '测试' }],
+    tasks: [{ id: 'one', title: '题目', promptPending: false, category: '建模',
+      results: [{ id: 'pk-1', model: 'm', title: '包内作品', summary: '旧简介', effort: 'Default' }] }] };
+  await setup(async ({ call, tokens, platform }) => {
+    const { token } = tokens.create('meta', 'test', 'works:read,meta:write');
+    const view = await call(null, 'GET', '/api/dots/works/one/pk-1', undefined, { bearer: token });
+    assert.equal(view.status, 200, JSON.stringify(view.data));
+    assert.equal(view.data.work.curated, true);
+    assert.equal(view.data.work.title, '包内作品');
+    assert.equal(view.data.work.captures, null);
+    assert.equal(Object.hasOwn(view.data.work, 'files'), false);
+    assert.equal(view.data.work.updatedAt, null);
+    const patched = await call(null, 'PATCH', '/api/dots/works/one/pk-1/meta', { title: '覆盖标题', summary: '新简介', updatedAt: null }, { bearer: token });
+    assert.equal(patched.status, 200, JSON.stringify(patched.data));
+    assert.equal(patched.data.work.title, '覆盖标题');
+    assert.equal(patched.data.resubmitted, false);
+    assert.equal(typeof patched.data.work.updatedAt, 'number');
+    const row = platform.db.prepare('SELECT display_json FROM work_overrides WHERE work_id = ?').get('pk-1');
+    assert.match(row.display_json, /覆盖标题/);
+    assert.equal(platform.db.prepare('SELECT COUNT(*) AS n FROM works WHERE id = ?').get('pk-1').n, 0);
+    assert.equal((await call(null, 'PATCH', '/api/dots/works/one/pk-1/meta', { title: '过期', updatedAt: null }, { bearer: token })).data.code, 'conflict');
+    assert.equal((await call(null, 'PATCH', '/api/dots/works/one/pk-1/meta', { title: '不行', resubmitModeration: true, updatedAt: patched.data.work.updatedAt }, { bearer: token })).data.code, 'not_resubmittable');
+    assert.equal(platform.library.work('one', 'pk-1').title, '覆盖标题');
+  }, { data });
+});
+
+test('captures:write replaces one JPEG slot, leaves moderation and the other slot alone', async () => {
+  await setup(async ({ call, raw, submit, tokens, platform, root, stored }) => {
+    const { token, id } = tokens.create('shots', 'test', 'captures:write,capture:read');
+    const cover = tokens.create('cover', 'test', 'cover:write');
+    const work = await submit();
+    await platform.moderator.idle();
+    const late = join(root, 'state', 'media', work.id, 'first-late.jpg');
+    const lateBefore = (await import('node:fs')).readFileSync(late);
+    platform.db.prepare('UPDATE works SET moderation = ? WHERE id = ?')
+      .run(JSON.stringify({ ...stored(work.id), error: 'capture_incomplete' }), work.id);
+    const before = platform.db.prepare('SELECT moderation, cover, digest, owner_id, status, captures FROM works WHERE id = ?').get(work.id);
+    const path = `/api/dots/works/one/${work.id}/captures/first`;
+    assert.equal((await raw(cover.token, 'PUT', path, JPEG(640, 360))).data.code, 'scope_required');
+    assert.equal((await raw(token, 'PUT', `/api/dots/works/one/${work.id}/cover`, JPEG(640, 360))).data.code, 'scope_required');
+    assert.equal((await raw(token, 'PUT', `/api/dots/works/one/${work.id}/captures/late`, JPEG(640, 360))).data.code, 'invalid_slot');
+    assert.equal((await raw(token, 'PUT', path, png(640, 360), 'image/jpeg')).data.code, 'unsupported_type');
+    assert.equal((await raw(token, 'PUT', path, JPEG(32, 32))).data.code, 'bad_dimensions');
+    assert.equal((await raw(token, 'PUT', path, Buffer.alloc(0))).data.code, 'invalid_image');
+    const done = await raw(token, 'PUT', path, JPEG(1440, 900), 'image/png');
+    assert.equal(done.status, 200, JSON.stringify(done.data));
+    assert.equal(done.data.type, 'image/jpeg');
+    assert.equal(done.data.slot, 'first');
+    assert.match(done.data.file, /\/first-[a-z0-9]+\.jpg$/);
+    assert.equal(Object.hasOwn(done.data, 'moderation'), false);
+    assert.equal(Object.hasOwn(done.data, 'status'), false);
+    const after = platform.db.prepare('SELECT moderation, cover, digest, owner_id, status, captures FROM works WHERE id = ?').get(work.id);
+    assert.equal(after.moderation, before.moderation);
+    assert.equal(after.cover, before.cover);
+    assert.equal(after.digest, before.digest);
+    assert.equal(after.owner_id, before.owner_id);
+    assert.equal(after.status, before.status);
+    const captures = JSON.parse(after.captures);
+    assert.equal(`media/${work.id}/${captures.first}`, done.data.file);
+    assert.equal(captures.mobile, 'mobile.jpg');
+    const { readFileSync, existsSync } = await import('node:fs');
+    assert.deepEqual(readFileSync(late), lateBefore);
+    assert.equal(existsSync(join(root, 'state', 'media', work.id, 'first.jpg')), true);
+    assert.equal((await call('owner', 'GET', `/${done.data.file}`)).status, 200);
+    const gaps = await call(null, 'GET', '/api/dots/captures/failed', undefined, { bearer: token });
+    const item = gaps.data.items.find((entry) => entry.id === work.id);
+    assert.ok(item, 'capture_incomplete stays listed');
+    assert.deepEqual(item.reasons, ['capture_incomplete']);
+    assert.equal(item.screenshots.first, true);
+    const audit = JSON.stringify(platform.db.prepare("SELECT * FROM moderation_token_audit WHERE action = 'capture-replace'").all());
+    assert.match(audit, /"outcome":"ok"/);
+    assert.doesNotMatch(audit, new RegExp(tokenSecret(token)));
+    assert.equal(platform.db.prepare("SELECT COUNT(*) AS n FROM audit WHERE action = 'capture-replace' AND work_id = ?").get(work.id).n, 1);
+    const cleared = await submit();
+    await platform.moderator.idle();
+    platform.library.setCaptures(cleared.id, { mobile: 'mobile.jpg' });
+    assert.equal((await raw(token, 'PUT', `/api/dots/works/one/${cleared.id}/captures/first`, JPEG(640, 360))).status, 200);
+    const left = await call(null, 'GET', '/api/dots/captures/failed?limit=100', undefined, { bearer: token });
+    assert.equal(left.data.items.some((entry) => entry.id === cleared.id), false);
+  });
+});
+
+test('a capture upload loses to a concurrent change instead of mixing the two files', async () => {
+  await setup(async ({ raw, submit, tokens, platform }) => {
+    const token = tokens.create('shots', 'test', 'captures:write').token;
+    const work = await submit();
+    await platform.moderator.idle();
+    const before = platform.db.prepare('SELECT moderation, cover FROM works WHERE id = ?').get(work.id);
+    const results = await Promise.all([1, 2, 3].map(() => raw(token, 'PUT', `/api/dots/works/one/${work.id}/captures/mobile`, JPEG(390, 844))));
+    assert.ok(results.every((result) => result.status === 200 || result.data.code === 'conflict'));
+    assert.ok(results.some((result) => result.status === 200));
+    const captures = JSON.parse(platform.db.prepare('SELECT captures FROM works WHERE id = ?').get(work.id).captures);
+    assert.match(captures.mobile, /^mobile-[a-z0-9]+\.jpg$/);
+    assert.equal(captures.first, 'first.jpg');
+    const after = platform.db.prepare('SELECT moderation, cover FROM works WHERE id = ?').get(work.id);
+    assert.equal(after.moderation, before.moderation);
+    assert.equal(after.cover, before.cover);
+  });
+});
+
+test('captures:write can be switched off without closing cover replacement', async () => {
+  await setup(async ({ raw, submit, tokens, platform }) => {
+    const { token } = tokens.create('both', 'test', 'cover:write,captures:write');
+    const work = await submit();
+    await platform.moderator.idle();
+    assert.equal((await raw(token, 'PUT', `/api/dots/works/one/${work.id}/captures/first`, JPEG(640, 360))).data.code, 'scope_disabled');
+    assert.equal((await raw(token, 'PUT', `/api/dots/works/one/${work.id}/cover`, png(80, 80))).status, 200);
+  }, { extra: { dotsDisabledScopes: ['captures:write'] } });
+});
+
+test('dots write routes share a separate per-minute limit', async () => {
+  await setup(async ({ call, raw, submit, tokens, platform }) => {
+    const { token } = tokens.create('both', 'test', 'works:read,captures:write');
+    const work = await submit();
+    await platform.moderator.idle();
+    const path = `/api/dots/works/one/${work.id}/captures/first`;
+    assert.equal((await raw(token, 'PUT', path, JPEG(640, 360))).status, 200);
+    assert.equal((await raw(token, 'PUT', path, JPEG(640, 360))).status, 200);
+    const blocked = await raw(token, 'PUT', path, JPEG(640, 360));
+    assert.equal(blocked.status, 429);
+    assert.equal(blocked.data.code, 'rate_limited');
+    assert.equal((await call(null, 'GET', `/api/dots/works/one/${work.id}`, undefined, { bearer: token })).status, 200);
+  }, { extra: { dotsWritesPerMin: 2 } });
+});
+
+test('the .sbox data area is rebuilt from referenced ranges only', async () => {
+  const { sanitizeSbox } = await import('../server/preview-uploads.mjs');
+  const arrays = Buffer.concat([Buffer.from(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1]).buffer), Buffer.from(new Uint16Array([0, 1, 2, 0, 2, 3]).buffer),
+    Buffer.alloc(4), Buffer.from(new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 2, 0, 0, 1]).buffer)]);
+  const clean = sanitizeSbox(sbox({}, { body: arrays }));
+  const padded = sanitizeSbox(sbox({}, { body: Buffer.concat([arrays, Buffer.from('<script>alert(1)</script>'.repeat(40))]) }));
+  assert.equal(padded.stats.droppedBytes, 1000);
+  assert.deepEqual(gunzipTest(padded.buffer), gunzipTest(clean.buffer));
+  assert.doesNotMatch(gunzipTest(padded.buffer).toString('latin1'), /script/);
 });

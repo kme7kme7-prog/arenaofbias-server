@@ -2,13 +2,18 @@
 // Scope moderation: list the dots queue, view a queued work (metadata, files,
 // screenshots), approve, and reject with a reason. Scope capture:read: list works
 // whose screenshots failed (capture_incomplete or no first screen). Scope cover:write: replace a
-// work's cover. Every route below is the whole whitelist; the site dispatcher
-// refuses tokens everywhere else.
+// work's cover. Scope preview:write: upload a 3D card preview (.sbox).
+// Scope works:read: a safe view of one work outside the queue. Scope meta:write: declaration
+// fields, not the task. Scope captures:write: replace a first or mobile JPEG.
+// Every route below is the whole whitelist; the site dispatcher refuses tokens everywhere else.
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { readdirSync, realpathSync, statSync } from 'node:fs';
 import { extname, join, relative, resolve, sep } from 'node:path';
 import { HttpError, clientIp, createRouter, fail, rateLimit, readBody, readJson, sendJson, streamFile } from './http.mjs';
+import { sanitizeSbox, webgpuSignals } from './preview-uploads.mjs';
+import { CAPTURE_SLOTS, checkCapture } from './work-captures.mjs';
 import { checkCover } from './work-covers.mjs';
+import { readWorkPreview } from './work-previews.mjs';
 
 export const MODERATION_MODES = ['machine', 'dots', 'dots-review-only'];
 const validMode = (value) => MODERATION_MODES.includes(value);
@@ -43,7 +48,8 @@ export function createModerationMode(db, config) {
 }
 
 // Abilities a token may hold, each granted and withdrawn on its own.
-export const TOKEN_SCOPES = ['moderation', 'capture:read', 'cover:write'];
+export const TOKEN_SCOPES = ['moderation', 'capture:read', 'cover:write', 'works:read', 'meta:write', 'preview:write', 'captures:write'];
+const META_FIELDS = ['title', 'summary', 'note', 'modelId', 'modelName', 'vendor', 'effort', 'promptVariant', 'harnessId', 'harnessOther', 'providerId', 'generationMode', 'humanIntervention'];
 export function parseScopes(value) {
   const list = [...new Set(String(value ?? '').split(/[\s,]+/).filter(Boolean))];
   const unknown = list.filter((scope) => !TOKEN_SCOPES.includes(scope));
@@ -111,11 +117,15 @@ export function createModerationTokens(db) {
 const IMAGE = /^[\w.-]{1,120}\.(?:jpe?g|png|webp)$/i;
 const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
 
-export function createDotsModeration({ db, config, library, mode, tokens, covers = null, coverBytes = 3 * 1024 * 1024, onChange = () => {} }) {
+export function createDotsModeration({ db, config, library, mode, tokens, covers = null, previews = null, captureStore = null, coverBytes = 3 * 1024 * 1024,
+  categoryOf = () => '', tasksIn = () => [], onChange = () => {} }) {
   const switches = { off: Boolean(config.moderation?.dotsApiOff), scopesOff: new Set(config.moderation?.dotsDisabledScopes ?? []) };
   const perToken = rateLimit(60_000, config.moderation?.dotsRequestsPerMin ?? 120, '请求太频繁，请稍后再试', 'rate_limited');
+  const writes = rateLimit(60_000, config.moderation?.dotsWritesPerMin ?? 30, '写入太频繁，请稍后再试', 'rate_limited');
   const failures = rateLimit(60_000, 20, '鉴权失败次数过多，请稍后再试', 'rate_limited');
   const q = {
+    updatedAt: db.prepare('SELECT updated_at FROM works WHERE id = ? AND deleted_at IS NULL'),
+    overrideStamp: db.prepare('SELECT updated_at FROM work_overrides WHERE task_id = ? AND work_id = ?'),
     audit: db.prepare(`INSERT INTO moderation_token_audit (at, token_id, token_label, action, task_id, work_id, reason, ip, outcome)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
     routed: db.prepare(`SELECT id FROM works WHERE deleted_at IS NULL
@@ -128,6 +138,12 @@ export function createDotsModeration({ db, config, library, mode, tokens, covers
     // Covers named cover-* only come from a manual replacement (work-covers.mjs).
     captureGaps: Object.fromEntries(Object.entries({ all: '', exclude: "AND COALESCE(cover, '') NOT LIKE 'cover-%'", only: "AND cover LIKE 'cover-%'" })
       .map(([key, manual]) => [key, db.prepare(`SELECT id FROM works WHERE id > ? AND deleted_at IS NULL
+        AND (json_extract(moderation, '$.error') = 'capture_incomplete' OR COALESCE(json_extract(captures, '$.first'), '') = '')
+        ${manual} ORDER BY id LIMIT ?`)])),
+    // Same list limited to the tasks of one question category (task ids as a JSON array).
+    captureGapsIn: Object.fromEntries(Object.entries({ all: '', exclude: "AND COALESCE(cover, '') NOT LIKE 'cover-%'", only: "AND cover LIKE 'cover-%'" })
+      .map(([key, manual]) => [key, db.prepare(`SELECT id FROM works WHERE id > ? AND deleted_at IS NULL
+        AND task_id IN (SELECT value FROM json_each(?))
         AND (json_extract(moderation, '$.error') = 'capture_incomplete' OR COALESCE(json_extract(captures, '$.first'), '') = '')
         ${manual} ORDER BY id LIMIT ?`)])),
   };
@@ -284,7 +300,11 @@ export function createDotsModeration({ db, config, library, mode, tokens, covers
       after = Buffer.from(cursor, 'base64url').toString('utf8');
       if (!/^[\w-]{1,64}$/.test(after)) fail(400, 'cursor 无效', 'invalid_cursor');
     }
-    const rows = q.captureGaps[manualCover].all(after, limit + 1);
+    // category is the question's category; 3d / modeling are aliases of 建模 (三维建模).
+    const asked = url.searchParams.get('category');
+    const category = asked == null || asked === '' ? null : ({ '3d': '建模', modeling: '建模', 三维建模: '建模' }[asked] ?? asked);
+    const rows = category == null ? q.captureGaps[manualCover].all(after, limit + 1)
+      : q.captureGapsIn[manualCover].all(after, JSON.stringify(tasksIn(category)), limit + 1);
     const items = [];
     for (const row of rows.slice(0, limit)) {
       const work = library.uploadById(row.id);
@@ -294,10 +314,26 @@ export function createDotsModeration({ db, config, library, mode, tokens, covers
         reasons: [...(work.moderation.error === 'capture_incomplete' ? ['capture_incomplete'] : []), ...(captures.first ? [] : ['no_first_capture'])],
         screenshots: { first: Boolean(captures.first), mobile: Boolean(captures.mobile) },
         hasCover: Boolean(work.cover), hasManualCover: /^cover-/.test(work.cover ?? ''),
-        submittedAt: iso(work.createdAt) });
+        submittedAt: iso(work.createdAt),
+        ...(category != null ? { category: categoryOf(work.taskId) || '', ...webgpuOf(work) } : {}) });
     }
     const last = rows.length > limit ? rows[limit - 1] : null;
     return { items, nextCursor: last ? Buffer.from(last.id).toString('base64url') : null };
+  } });
+  // Only computed when a category is asked for, so the plain list keeps its old shape.
+  function webgpuOf(work) {
+    const signals = webgpuSignals(work);
+    return { webgpu: signals.length > 0, webgpuSignals: signals };
+  }
+  // Body is the raw .sbox. Only the preview files change; the poster is the manual cover.
+  router.on('PUT', '/api/dots/works/:task/:id/preview', { scope: 'preview:write', action: 'preview-replace', run: async ({ req, params, token }) => {
+    if (!previews) fail(404, '接口不存在', 'not_found');
+    const work = library.work(params.task, params.id);
+    if (!work || work.curated || !library.uploadById(work.id)) fail(404, '作品不存在', 'not_found');
+    const { buffer, stats } = sanitizeSbox(await readBody(req, 2 * 1024 * 1024));
+    const result = previews.replace(work, buffer, { id: `dots:${token.id}`, name: `dots:${token.label}` }, { source: 'dots', ...stats });
+    onChange();
+    return { result: { task: work.taskId, id: work.id, ...result, stats } };
   } });
   // Body is the raw image. Only works.cover changes: never the files, model or labels.
   router.on('PUT', '/api/dots/works/:task/:id/cover', { scope: 'cover:write', action: 'cover-replace', run: async ({ req, params, token }) => {
@@ -307,6 +343,82 @@ export function createDotsModeration({ db, config, library, mode, tokens, covers
     const buffer = await readBody(req, coverBytes);
     const image = checkCover(buffer, coverBytes);
     const result = covers.replace(work, buffer, image, { id: `dots:${token.id}`, name: `dots:${token.label}` }, 'dots');
+    onChange();
+    return { result: { task: work.taskId, id: work.id, ...result, type: image.mime, width: image.width, height: image.height } };
+  } });
+  const actorOf = (token) => ({ id: `dots:${token.id}`, name: `dots:${token.label}` });
+  const stampOf = (work) => work.curated
+    ? (q.overrideStamp.get(work.taskId, work.id)?.updated_at ?? null)
+    : (q.updatedAt.get(work.id)?.updated_at ?? null);
+  const uploadWork = (params) => {
+    const work = library.work(params.task, params.id);
+    if (!work || (!work.curated && !library.uploadById(work.id))) fail(404, '作品不存在', 'not_found');
+    return work;
+  };
+  // Declaration and media pointers. No email, IP, content key, scene URL or digest.
+  function safeWork(work, { files: listFiles = false } = {}) {
+    const captures = work.captures ?? {};
+    const media = (name) => (name ? `media/${work.id}/${name}` : null);
+    return {
+      task: work.taskId, id: work.id, title: work.title ?? '', summary: work.summary ?? '', note: work.note ?? '',
+      modelId: work.modelId ?? null, modelName: work.modelName ?? '', vendor: work.vendor ?? '', effort: work.effort ?? '',
+      harnessId: work.harnessId ?? null, harnessOther: work.harnessOther ?? '', providerId: work.providerId ?? null,
+      generationMode: work.generationMode ?? '', humanIntervention: work.humanIntervention ?? '',
+      promptVariant: work.promptVariant ?? '', tool: work.tool ?? '',
+      status: work.status ?? null,
+      moderationStatus: work.curated ? (work.moderation?.status ?? 'approved') : (work.moderation?.status ?? null),
+      moderationError: work.curated ? null : (work.moderation?.error ?? null),
+      cover: work.curated ? (work.cover ?? null) : media(work.cover),
+      hasManualCover: /^cover-/.test(work.cover ?? ''),
+      captures: work.curated ? null : { first: media(captures.first), mobile: media(captures.mobile) },
+      preview: work.curated ? null : (readWorkPreview(library.mediaDir, work) ?? null),
+      author: work.ownerName ?? null,
+      submittedAt: work.curated ? (work.addedAt ?? null) : iso(work.createdAt),
+      updatedAt: stampOf(work),
+      curated: Boolean(work.curated),
+      ...(work.curated ? {} : { fileCount: work.files ?? 0, bytes: work.bytes ?? 0 }),
+      ...(listFiles && !work.curated ? { files: files(work) } : {}),
+    };
+  }
+  router.on('GET', '/api/dots/works/:task/:id', { scope: 'works:read', action: 'work-get', run: ({ params, url }) => {
+    const work = uploadWork(params);
+    return { work: safeWork(work, { files: url.searchParams.get('files') === '1' }) };
+  } });
+  // Admin-style partial update. Task moves, faces and review stay closed. No re-queue
+  // unless the body asks for it, and only when the moderated text actually changes.
+  router.on('PATCH', '/api/dots/works/:task/:id/meta', { scope: 'meta:write', action: 'meta', run: async ({ req, params, token, note }) => {
+    const body = await readJson(req, 8 * 1024);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) fail(400, '请求体须为 JSON 对象', 'invalid_body');
+    if (Object.hasOwn(body, 'task')) fail(400, '不能通过这个接口改归属题目', 'task_forbidden');
+    const unknown = Object.keys(body).filter((key) => !META_FIELDS.includes(key) && key !== 'resubmitModeration' && key !== 'updatedAt');
+    if (unknown.length) fail(400, `不能修改：${unknown.join('、')}`, 'invalid_field');
+    if (Object.hasOwn(body, 'resubmitModeration') && typeof body.resubmitModeration !== 'boolean') fail(400, 'resubmitModeration 须为布尔值', 'invalid_field');
+    if (Object.hasOwn(body, 'updatedAt') && body.updatedAt !== null && !Number.isInteger(body.updatedAt)) fail(400, 'updatedAt 无效', 'invalid_field');
+    const fields = Object.fromEntries(META_FIELDS.filter((key) => Object.hasOwn(body, key)).map((key) => [key, body[key]]));
+    if (!Object.keys(fields).length) fail(400, '没有可修改的内容', 'invalid_field');
+    const work = uploadWork(params);
+    const stamp = stampOf(work);
+    if (Object.hasOwn(body, 'updatedAt') && body.updatedAt !== stamp) fail(409, '作品信息刚刚被修改，请重新获取后再试', 'conflict');
+    if (work.curated && body.resubmitModeration) fail(409, '数据包作品不能重新送审', 'not_resubmittable');
+    const before = work.moderation?.revision ?? null;
+    note.reason = [...Object.keys(fields).sort(), ...(body.resubmitModeration ? ['resubmit'] : [])].join(',');
+    library.setMeta(actorOf(token), work.taskId, work.id, fields, {
+      asStaff: true, resubmitModeration: body.resubmitModeration === true, guard: true, expectUpdatedAt: stamp,
+    });
+    onChange();
+    const next = library.work(work.taskId, work.id);
+    return { work: safeWork(next), resubmitted: Boolean(body.resubmitModeration) && !work.curated && (next.moderation?.revision ?? null) !== before };
+  } });
+  // JPEG only, one slot. Does not clear capture_incomplete or any other moderation field.
+  router.on('PUT', '/api/dots/works/:task/:id/captures/:slot', { scope: 'captures:write', action: 'capture-replace', run: async ({ req, params, token, note }) => {
+    if (!captureStore) fail(404, '接口不存在', 'not_found');
+    if (!CAPTURE_SLOTS.includes(params.slot)) fail(400, '截图位置只能是 first 或 mobile', 'invalid_slot');
+    const work = library.work(params.task, params.id);
+    if (!work || work.curated || !library.uploadById(work.id)) fail(404, '作品不存在', 'not_found');
+    const buffer = await readBody(req, coverBytes);
+    const image = checkCapture(buffer, coverBytes);
+    note.reason = params.slot;
+    const result = captureStore.replace(work, params.slot, buffer, image, actorOf(token));
     onChange();
     return { result: { task: work.taskId, id: work.id, ...result, type: image.mime, width: image.width, height: image.height } };
   } });
@@ -329,6 +441,7 @@ export function createDotsModeration({ db, config, library, mode, tokens, covers
         ({ action } = route.handler);
         if (switches.scopesOff.has(route.handler.scope)) fail(503, '这项能力已被运维临时关闭', 'scope_disabled');
         if (!storedScopes(token.scopes).includes(route.handler.scope)) fail(403, `令牌没有 ${route.handler.scope} 权限`, 'scope_required');
+        if (req.method === 'PUT' || req.method === 'PATCH') writes(token.id);
         params = route.params;
         tokens.touch(token.id);
         const note = {};

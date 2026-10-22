@@ -11,7 +11,8 @@ import { HttpError, fail } from './http.mjs';
 
 export const COVER_LIMITS = { minSide: 64, maxSide: 4096, maxPixels: 16_777_216 };
 export const COVER_FILE = /^cover(?:-[a-z0-9]{8,24})?\.(?:png|jpg|webp)$/;
-const SHOTS = /^(?:first|mobile)(?:-late)?\.jpg$/;
+// Fixed names are the capture service. first-<stamp>.jpg / mobile-<stamp>.jpg are dots replacements.
+const SHOTS = /^(?:first|mobile)(?:-[a-z0-9]{8,24})?\.jpg$|^(?:first|mobile)-late\.jpg$/;
 
 // Type and pixel size from the bytes themselves; the declared Content-Type is ignored.
 export function sniffImage(buffer) {
@@ -68,8 +69,9 @@ export function createCoverStore({ db, library }) {
     swap: db.prepare('UPDATE works SET cover = ? WHERE id = ? AND cover IS ? AND deleted_at IS NULL'),
     history: db.prepare(`INSERT INTO cover_history (at, work_id, task_id, action, previous, next, snapshot, actor_id, actor_name, detail)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-    list: db.prepare('SELECT * FROM cover_history WHERE work_id = ? ORDER BY id DESC LIMIT 100'),
-    entry: db.prepare('SELECT * FROM cover_history WHERE id = ? AND work_id = ?'),
+    // Preview entries (preview-*) share the table; covers only see their own.
+    list: db.prepare("SELECT * FROM cover_history WHERE work_id = ? AND action LIKE 'cover-%' ORDER BY id DESC LIMIT 100"),
+    entry: db.prepare("SELECT * FROM cover_history WHERE id = ? AND work_id = ? AND action LIKE 'cover-%'"),
     audit: db.prepare('INSERT INTO audit (at, actor_id, actor_name, action, task_id, work_id, detail) VALUES (?, ?, ?, ?, ?, ?, ?)'),
   };
   const dirOf = (work) => join(library.mediaDir, work.id);

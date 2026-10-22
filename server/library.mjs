@@ -168,6 +168,10 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       harness_id = ?, harness_other = ?, provider_id = ?, provider_other = ?,
       generation_mode = ?, human_intervention = ?,
       prompt_variant = ?, note = ?, updated_at = ? WHERE id = ?`),
+    metaIf: db.prepare(`UPDATE works SET title = ?, summary = ?, model_id = ?, model_other = ?, model_vendor = ?, effort = ?,
+      harness_id = ?, harness_other = ?, provider_id = ?, provider_other = ?,
+      generation_mode = ?, human_intervention = ?,
+      prompt_variant = ?, note = ?, updated_at = ? WHERE id = ? AND updated_at = ? AND deleted_at IS NULL`),
     votesOfWork: db.prepare('SELECT COUNT(*) AS n FROM votes WHERE task_id = ? AND (a_work = ? OR b_work = ?)'),
     override: db.prepare(`SELECT work_overrides.*, COALESCE(NULLIF(reviewer.nickname, ''), reviewer.name) AS reviewer_name
       FROM work_overrides LEFT JOIN users reviewer ON reviewer.id = work_overrides.reviewer_id WHERE task_id = ? AND work_id = ?`),
@@ -178,6 +182,10 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     setDisplay: db.prepare(`INSERT INTO work_overrides (task_id, work_id, display_json, updated_by, updated_at)
       VALUES (?, ?, ?, ?, ?) ON CONFLICT(task_id, work_id) DO UPDATE SET
       display_json = excluded.display_json, updated_by = excluded.updated_by, updated_at = excluded.updated_at`),
+    setDisplayIf: db.prepare(`UPDATE work_overrides SET display_json = ?, updated_by = ?, updated_at = ?
+      WHERE task_id = ? AND work_id = ? AND updated_at = ?`),
+    insertDisplayIf: db.prepare(`INSERT INTO work_overrides (task_id, work_id, display_json, updated_by, updated_at)
+      SELECT ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM work_overrides WHERE task_id = ? AND work_id = ?)`),
     reviewPack: db.prepare(`INSERT INTO work_overrides (task_id, work_id, status, reason, reviewer_id, reviewed_at, updated_by, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(task_id, work_id) DO UPDATE SET status = excluded.status,
       reason = excluded.reason, reviewer_id = excluded.reviewer_id, reviewed_at = excluded.reviewed_at,
@@ -923,11 +931,11 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     },
 
     // Admins edit any upload; authors edit their own until it has been reviewed.
-    setMeta(actor, taskId, id, body, { author = false, inTransaction = false } = {}) {
+    setMeta(actor, taskId, id, body, { author = false, inTransaction = false, asStaff = false, resubmitModeration = false, guard = false, expectUpdatedAt } = {}) {
       const work = this.work(taskId, id);
       if (!work) fail(404, '作品不存在', 'not_found');
       const admin = !author;
-      if (admin) requireStaff(actor, work, false);
+      if (admin && !asStaff) requireStaff(actor, work, false);
       if (!admin && work.ownerId !== actor.id) fail(403, '只能修改自己上传的作品');
       if (!admin && work.status !== 'unverified') fail(409, '作品已核验，信息不能再修改；如有错误请删除后重新上传');
       if (!plainObject(body) || !Object.keys(body).length ||
@@ -965,7 +973,14 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
           const patch = { title, summary, modelId: who.modelId, modelName: who.modelName, vendor: who.vendor, effort,
             harnessId: source.harnessId, harnessOther: source.harnessOther, providerId: source.providerId,
             ...generation, promptVariant, note: note ?? '' };
-          q.setDisplay.run(taskId, id, JSON.stringify(patch), actor.id, Date.now());
+          const json = JSON.stringify(patch);
+          const at = Date.now();
+          if (guard) {
+            const changed = expectUpdatedAt == null
+              ? q.insertDisplayIf.run(taskId, id, json, actor.id, at, taskId, id).changes
+              : q.setDisplayIf.run(json, actor.id, at, taskId, id, expectUpdatedAt).changes;
+            if (!changed) fail(409, '作品信息刚刚被修改，请重新获取后再试', 'conflict');
+          } else q.setDisplay.run(taskId, id, json, actor.id, at);
           audit(actor, 'meta', work, `编辑信息${generationAudit(work, generation)}`);
           return;
         }
@@ -976,12 +991,16 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
           q.moveComments.run(moved.to, moved.from, id);
           q.moveReactions.run(moved.to, moved.from, id);
         }
-        q.meta.run(title, summary, who.modelId, who.modelId ? '' : who.modelName, who.modelId ? '' : who.vendor, effort,
+        const metaValues = [title, summary, who.modelId, who.modelId ? '' : who.modelName, who.modelId ? '' : who.vendor, effort,
           source.harnessId, source.harnessOther, source.providerId, source.providerOther,
-          ...GENERATION_FIELDS.map((key) => generation[key]), promptVariant, note, Date.now(), id);
+          ...GENERATION_FIELDS.map((key) => generation[key]), promptVariant, note, Date.now(), id];
+        if (guard) {
+          if (!q.metaIf.run(...metaValues, expectUpdatedAt).changes) fail(409, '作品信息刚刚被修改，请重新获取后再试', 'conflict');
+        } else q.meta.run(...metaValues);
         audit(actor, 'meta', work, `编辑信息${generationAudit(work, generation)}${moved ? `；归属题目 ${moved.from} → ${moved.to}` : ''}`);
         const next = upload(moved ? moved.to : taskId, id);
-        if (author && !isStaff(actor) && config.moderation?.enabled && moderationText(work) !== moderationText(next)) q.moderation.run(JSON.stringify(pendingModeration(moderationRoute())), id);
+        const requeue = Boolean(resubmitModeration) || (author && !isStaff(actor));
+        if (requeue && config.moderation?.enabled && moderationText(work) !== moderationText(next)) q.moderation.run(JSON.stringify(pendingModeration(moderationRoute())), id);
       };
       if (inTransaction) apply();
       else transaction(db, apply);

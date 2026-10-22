@@ -21,7 +21,9 @@ import { createComments } from './comments.mjs';
 import { createChangelog } from './changelog.mjs';
 import { createAnnouncements, retiredAnnouncementStream } from './announcements.mjs';
 import { createDotsModeration, createModerationMode, createModerationTokens } from './dots-moderation.mjs';
+import { createCaptureStore } from './work-captures.mjs';
 import { createCoverStore } from './work-covers.mjs';
+import { createPreviewStore } from './preview-uploads.mjs';
 import { AVATARS, EFFORTS, EMOJIS } from './config.mjs';
 import { createContentHandler } from './content.mjs';
 import { openDatabase, transaction } from './db.mjs';
@@ -89,8 +91,11 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const capturer = captureFactory({ config, library });
   const moderator = createModerator({ config, library, capturer, onChange: () => arena.invalidate(), routing: moderationMode });
   const covers = createCoverStore({ db, library });
+  const previews = createPreviewStore({ db, library });
+  const captureStore = createCaptureStore({ db, library });
   const dots = createDotsModeration({ db, config, library, mode: moderationMode, tokens: createModerationTokens(db),
-    covers, coverBytes: limits.coverBytes, onChange: () => arena.invalidate() });
+    covers, previews, captureStore, coverBytes: limits.coverBytes, onChange: () => arena.invalidate(),
+    categoryOf: (taskId) => catalog.task(taskId)?.category ?? '', tasksIn: (category) => catalog.tasks().filter((task) => task.category === category).map((task) => task.id) });
   const queueWork = (work) => {
     if (work.moderation.status === 'pending') moderator.enqueue(work);
     else void capturer.enqueue(work);
@@ -526,6 +531,20 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     if (!work || work.curated) fail(404, '作品不存在');
     return { cover: work.cover ? `media/${work.id}/${work.cover}` : null, entries: covers.history(work) };
   });
+  // Previews uploaded by dots: history and rollback; baked previews are never touched.
+  router.on('GET', '/api/works/:task/:id/preview-history', (ctx) => {
+    adminOnly(ctx);
+    const work = library.work(ctx.params.task, ctx.params.id);
+    if (!work || work.curated) fail(404, '作品不存在');
+    return { current: previews.current(work).version, entries: previews.history(work) };
+  });
+  router.on('POST', '/api/works/:task/:id/preview/rollback', async (ctx) => {
+    const admin = adminOnly(ctx);
+    const body = await readJson(ctx.req);
+    const result = previews.rollback(library.work(ctx.params.task, ctx.params.id), body.historyId ?? null, { id: admin.id, name: admin.name });
+    arena.invalidate();
+    return result;
+  });
   router.on('POST', '/api/works/:task/:id/cover/rollback', async (ctx) => {
     const admin = adminOnly(ctx);
     const body = await readJson(ctx.req);
@@ -896,7 +915,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         'Content-Security-Policy': "default-src 'none'",
       });
     }
-    const media = /^\/media\/(up-[a-z0-9]{8})\/(cover(?:-[a-z0-9]{8,24})?\.(?:png|jpg|webp)|first\.jpg|mobile\.jpg|preview\.(?:sbox|webp|jpg))$/.exec(pathname);
+    const media = /^\/media\/(up-[a-z0-9]{8})\/(cover(?:-[a-z0-9]{8,24})?\.(?:png|jpg|webp)|first(?:-[a-z0-9]{8,24})?\.jpg|mobile(?:-[a-z0-9]{8,24})?\.jpg|preview\.(?:sbox|webp|jpg)|preview-[a-z0-9]{8,24}\.sbox)$/.exec(pathname);
     if (pathname.startsWith('/media/')) {
       const work = media && library.uploadById(media[1]);
       if (!library.canRead(work, auth.userFrom(req))) return sendJson(res, 404, { error: '文件不存在' });

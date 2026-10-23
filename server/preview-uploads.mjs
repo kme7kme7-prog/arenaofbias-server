@@ -1,11 +1,12 @@
 // 3D card previews supplied by dots (scope preview:write). The model is outside data:
 // only the Gallery's own .sbox package is accepted, decoded and rebuilt here from a
 // whitelist, so nothing the Gallery would not draw (scripts, shaders, external URLs,
-// extras) reaches visitors. The poster is the work's current manual cover (#20,
-// cover:write), already checked by the image rules there.
+// extras) reaches visitors. The poster is either the upload's own cover (the one
+// chosen at submission or by cover:write) or a separate preview-<stamp>.webp sent
+// through the same endpoint.
 //
-// Storage keeps every version: preview-<stamp>.sbox and a matching manifest
-// preview-<stamp>.json next to the active media/<id>/preview.json that
+// Storage keeps every version: preview-<stamp>.sbox (or .webp poster) and a matching
+// manifest preview-<stamp>.json next to the active media/<id>/preview.json that
 // work-previews.mjs reads. History lives in cover_history (actions preview-*), so
 // admins roll back the same way as covers. A preview.json not written here (baked
 // by the operators' pipeline) is never replaced.
@@ -15,7 +16,7 @@ import { join, relative, resolve, sep } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { transaction } from './db.mjs';
 import { HttpError, fail } from './http.mjs';
-import { sniffImage } from './work-covers.mjs';
+import { COVER_LIMITS, sniffImage } from './work-covers.mjs';
 
 export const PREVIEW_LIMITS = {
   bytes: 2 * 1024 * 1024, // compressed upload
@@ -44,6 +45,19 @@ const NAME = /^[A-Za-z_][A-Za-z0-9_]{0,40}$/;
 const UUID = /^[A-Za-z0-9-]{1,64}$/;
 
 const bad = (message) => fail(422, `预览模型无效：${message}`, 'invalid_model');
+
+// A separate poster upload is always WebP, matching the existing preview.webp file.
+export function checkPreviewPoster(buffer) {
+  if (!buffer.length) fail(400, '预览海报内容为空', 'invalid_image');
+  if (buffer.length > PREVIEW_LIMITS.bytes) fail(413, '预览海报不能超过 2 MB', 'too_large');
+  const image = sniffImage(buffer);
+  if (!image || image.mime !== 'image/webp') fail(415, '预览海报只接受 WebP（按文件内容判断）', 'unsupported_type');
+  const { minSide, maxSide, maxPixels } = COVER_LIMITS;
+  if (image.width < minSide || image.height < minSide || image.width > maxSide || image.height > maxSide || image.width * image.height > maxPixels) {
+    fail(422, `预览海报尺寸须在 ${minSide}–${maxSide} 像素之间`, 'bad_dimensions');
+  }
+  return image;
+}
 const finite = (value) => typeof value === 'number' && Number.isFinite(value);
 const int = (value, min, max) => Number.isInteger(value) && value >= min && value <= max;
 function numbers(value, length, label) {
@@ -100,7 +114,10 @@ export function sanitizeSbox(upload) {
     const names = Object.keys(spec.attributes);
     if (!names.length || names.length > 16 || !names.every((name) => NAME.test(name))) bad(`${label} 属性名无效`);
     const out = { attributes: Object.fromEntries(names.map((name) => [name, attribute(spec.attributes[name], `${label}.${name}`)])) };
-    if (spec.index !== undefined && spec.index !== null) out.index = attribute(spec.index, `${label}.index`);
+    if (spec.index !== undefined && spec.index !== null) {
+      out.index = attribute(spec.index, `${label}.index`);
+      if (!['Uint8Array', 'Uint16Array', 'Uint32Array'].includes(out.index.type) || out.index.itemSize !== 1) bad(`${label}.index 必须是单分量无符号整数数组`);
+    }
     out.groups = list(spec.groups, PREVIEW_LIMITS.groups, `${label}.groups`).map((group) => {
       if (!int(group?.start, 0, 2 ** 31) || !int(group?.count, 0, 2 ** 31) || !(group.materialIndex === undefined || int(group.materialIndex, 0, 1024))) bad(`${label}.groups 无效`);
       return { start: group.start, count: group.count, ...(group.materialIndex !== undefined ? { materialIndex: group.materialIndex } : {}) };
@@ -154,12 +171,18 @@ export function sanitizeSbox(upload) {
     if (spec.normalMapType !== undefined) { if (!int(spec.normalMapType, 0, 1)) bad(`${label}.normalMapType 无效`); out.normalMapType = spec.normalMapType; }
     return out;
   });
-
   const meshes = list(data.meshes, PREVIEW_LIMITS.meshes, 'meshes').map((spec, i) => {
     const label = `meshes[${i}]`;
     if (!int(spec?.geometry, 0, geometries.length - 1)) bad(`${label}.geometry 越界`);
     const materialOk = (id) => int(id, 0, materials.length - 1);
     if (!(Array.isArray(spec.material) ? spec.material.length && spec.material.length <= 64 && spec.material.every(materialOk) : materialOk(spec.material))) bad(`${label}.material 越界`);
+    // Gallery maps global material IDs to this mesh's local slots. Three ignores
+    // geometry groups for a scalar material; shared geometry keeps its groups.
+    if (Array.isArray(spec.material)) {
+      for (const group of geometries[spec.geometry].groups) {
+        if (group.materialIndex !== undefined && group.materialIndex >= spec.material.length) bad(`${label}.groups.materialIndex 越界`);
+      }
+    }
     const out = { geometry: spec.geometry, material: Array.isArray(spec.material) ? [...spec.material] : spec.material, matrix: numbers(spec.matrix, 16, `${label}.matrix`) };
     if (spec.count !== undefined && spec.count !== null && spec.count !== 0) {
       if (!int(spec.count, 1, PREVIEW_LIMITS.instances)) bad(`${label}.count 无效`);
@@ -244,7 +267,12 @@ export function webgpuSignals(work) {
 }
 
 const STAMPED = /^preview-[a-z0-9]{8,24}\.json$/;
+const STAMPED_MODEL = /^preview-[a-z0-9]{8,24}\.sbox$/;
+const STAMPED_POSTER = /^preview-[a-z0-9]{8,24}\.webp$/;
+// Submission covers are cover.<ext>; cover:write and admin rollback use cover-<stamp>.<ext>.
+const COVER = /^cover(?:-[a-z0-9]{8,24})?\.(?:png|jpg|webp)$/;
 export const PREVIEW_MODEL_FILE = /^preview(?:-[a-z0-9]{8,24})?\.sbox$/;
+export const PREVIEW_POSTER_FILE = /^preview(?:-[a-z0-9]{8,24})?\.webp$/;
 
 export function createPreviewStore({ db, library }) {
   const q = {
@@ -288,17 +316,45 @@ export function createPreviewStore({ db, library }) {
     });
   }
 
+  // Prefer a poster previously uploaded for a dots preview, then the work's own cover.
+  function posterFor(work, now) {
+    const custom = now.kind === 'dots' ? now.manifest.poster : '';
+    if (STAMPED_POSTER.test(custom ?? '') && existsSync(join(dirOf(work), custom))) return custom;
+    const cover = work.cover ?? '';
+    if (COVER.test(cover) && existsSync(join(dirOf(work), cover))) return cover;
+    return null;
+  }
+
+  // Writes a new manifest beside the versioned media, switches preview.json, then records it.
+  function publish(work, now, files, manifest, actor, detail) {
+    const names = [...files.map(([name]) => name), manifest.version];
+    mkdirSync(dirOf(work), { recursive: true });
+    for (const [name, buffer] of files) writeFileSync(join(dirOf(work), name), buffer);
+    writeFileSync(join(dirOf(work), manifest.version), `${JSON.stringify(manifest)}\n`);
+    // Re-check right before switching: synchronous from here on, so nothing interleaves.
+    const again = current(work);
+    if (again.kind !== now.kind || again.version !== now.version) {
+      for (const name of names) rmSync(join(dirOf(work), name), { force: true });
+      throw new HttpError(409, '预览刚刚被修改，请重新上传', 'conflict');
+    }
+    activate(work, manifest.version);
+    try {
+      return record(work, 'preview-replace', now.version, manifest.version, actor, detail);
+    } catch (error) {
+      activate(work, now.version);
+      throw error;
+    }
+  }
+
   return {
     current,
-    // model: sanitized .sbox bytes; the poster is the work's current manual cover.
+    // model: sanitized .sbox bytes. The poster is a dots poster or the work's own cover.
     replace(work, model, actor, detail = {}) {
       if (!work || work.curated) fail(404, '作品不存在', 'not_found');
       const now = current(work);
       if (now.kind === 'foreign') fail(409, '这件作品已有人工制作的预览，不能覆盖', 'preview_exists');
-      const poster = work.cover ?? '';
-      if (!/^cover-[a-z0-9]{8,24}\.(?:png|jpg|webp)$/.test(poster) || !existsSync(join(dirOf(work), poster))) {
-        fail(409, '请先用 cover:write 上传海报（作品当前封面不是人工上传的）', 'poster_required');
-      }
+      const poster = posterFor(work, now);
+      if (!poster) fail(409, '作品还没有可用的封面：请先通过 cover:write 上传封面，再上传 .sbox 模型，之后可选上传 preview.webp 海报', 'poster_required');
       const entry = resolve(work.dir, work.entry ?? '');
       if (!work.entry || !entry.startsWith(`${resolve(work.dir)}${sep}`)) fail(409, '作品入口文件缺失', 'entry_missing');
       let sourceDigest;
@@ -307,23 +363,27 @@ export function createPreviewStore({ db, library }) {
       const modelName = `preview-${stamp}.sbox`, manifestName = `preview-${stamp}.json`;
       const manifest = { schemaVersion: 1, source: 'dots', version: manifestName, sourceDigest, mode: 'model',
         model: modelName, modelSha: sha256(model), poster, posterSha: sha256(readFileSync(join(dirOf(work), poster))) };
-      mkdirSync(dirOf(work), { recursive: true });
-      writeFileSync(join(dirOf(work), modelName), model);
-      writeFileSync(join(dirOf(work), manifestName), `${JSON.stringify(manifest)}\n`);
-      // Re-check right before switching: synchronous from here on, so nothing interleaves.
-      const again = current(work);
-      if (again.kind !== now.kind || again.version !== now.version) {
-        for (const name of [modelName, manifestName]) rmSync(join(dirOf(work), name), { force: true });
-        throw new HttpError(409, '预览刚刚被修改，请重新上传', 'conflict');
+      const historyId = publish(work, now, [[modelName, model]], manifest, actor, { ...detail, bytes: model.length, poster });
+      return { historyId, previewModel: `media/${work.id}/${modelName}`, previewPoster: `media/${work.id}/${poster}`, previous: now.version };
+    },
+    // A separate preview.webp poster, without changing the work's cover.
+    replacePoster(work, poster, image, actor, detail = {}) {
+      if (!work || work.curated) fail(404, '作品不存在', 'not_found');
+      const now = current(work);
+      if (now.kind === 'foreign') fail(409, '这件作品已有人工制作的预览，不能覆盖', 'preview_exists');
+      if (now.kind !== 'dots') fail(409, '请先上传 .sbox 模型，再上传 preview.webp 海报', 'preview_required');
+      const model = now.manifest.model ?? '';
+      let modelBytes;
+      try { modelBytes = readFileSync(join(dirOf(work), model)); } catch { modelBytes = null; }
+      if (!STAMPED_MODEL.test(model) || !modelBytes || sha256(modelBytes) !== now.manifest.modelSha) {
+        fail(409, '当前预览模型文件缺失或已改变，请重新上传模型', 'missing_file');
       }
-      activate(work, manifestName);
-      try {
-        const historyId = record(work, 'preview-replace', now.version, manifestName, actor, { ...detail, bytes: model.length, poster });
-        return { historyId, previewModel: `media/${work.id}/${modelName}`, previewPoster: `media/${work.id}/${poster}`, previous: now.version };
-      } catch (error) {
-        activate(work, now.version);
-        throw error;
-      }
+      const stamp = `${Date.now().toString(36)}${randomBytes(4).toString('hex')}`;
+      const posterName = `preview-${stamp}.webp`, manifestName = `preview-${stamp}.json`;
+      const manifest = { ...now.manifest, version: manifestName, poster: posterName, posterSha: sha256(poster) };
+      const historyId = publish(work, now, [[posterName, poster]], manifest, actor,
+        { ...detail, bytes: poster.length, poster: posterName, width: image.width, height: image.height });
+      return { historyId, previewModel: `media/${work.id}/${model}`, previewPoster: `media/${work.id}/${posterName}`, previous: now.version };
     },
     history(work) {
       return q.list.all(work.id).map((row) => ({ id: row.id, at: new Date(row.at).toISOString(), action: row.action, previous: row.previous,

@@ -696,10 +696,60 @@ function sbox(header = {}, { body = null, raw = false } = {}) {
 }
 const headerOf = (gz) => { const raw = gunzipTest(gz); return JSON.parse(raw.subarray(4, 4 + raw.readUInt32LE(0)).toString('utf8')); };
 
+test('preview groups keep the single-material BoxGeometry contract', async () => {
+  const { sanitizeSbox } = await import('../server/preview-uploads.mjs');
+  // BoxGeometry has four vertices and one group per face even with one material.
+  // Gallery packPreview copies these groups and stores a scalar mesh material.
+  const positions = new Float32Array([
+    .5, .5, .5, .5, .5, -.5, .5, -.5, .5, .5, -.5, -.5,
+    -.5, .5, -.5, -.5, .5, .5, -.5, -.5, -.5, -.5, -.5, .5,
+    -.5, .5, -.5, .5, .5, -.5, -.5, .5, .5, .5, .5, .5,
+    -.5, -.5, .5, .5, -.5, .5, -.5, -.5, -.5, .5, -.5, -.5,
+    -.5, .5, .5, .5, .5, .5, -.5, -.5, .5, .5, -.5, .5,
+    .5, .5, -.5, -.5, .5, -.5, .5, -.5, -.5, -.5, -.5, -.5,
+  ]);
+  const indices = new Uint16Array(Array.from({ length: 6 }, (_, i) => {
+    const at = i * 4; return [at, at + 2, at + 1, at + 2, at + 3, at + 1];
+  }).flat());
+  const groups = Array.from({ length: 6 }, (_, materialIndex) => ({ start: materialIndex * 6, count: 6, materialIndex }));
+  const geometry = { attributes: { position: { type: 'Float32Array', offset: 0, length: positions.length, itemSize: 3 } },
+    index: { type: 'Uint16Array', offset: positions.byteLength, length: indices.length, itemSize: 1 }, groups };
+  const mesh = { geometry: 0, material: 0, matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] };
+  const model = sbox({ bounds: { min: [-.5, -.5, -.5], max: [.5, .5, .5] }, geometries: [geometry], meshes: [mesh] },
+    { body: Buffer.concat([Buffer.from(positions.buffer), Buffer.from(indices.buffer)]) });
+  const clean = headerOf(sanitizeSbox(model).buffer);
+  assert.equal(clean.materials.length, 1);
+  assert.equal(clean.meshes[0].material, 0);
+  assert.deepEqual(clean.geometries[0].groups, groups, 'scalar material does not rewrite shared geometry groups');
+  for (const index of [{ ...geometry.index, type: 'Int16Array' }, { ...geometry.index, itemSize: 2 }]) {
+    assert.throws(() => sanitizeSbox(sbox({ geometries: [{ ...geometry, index }], meshes: [mesh] },
+      { body: Buffer.concat([Buffer.from(positions.buffer), Buffer.from(indices.buffer)]) })), /单分量无符号整数数组/);
+  }
+  assert.throws(() => sanitizeSbox(sbox({ geometries: [{ ...geometry, groups: [{ start: 0, count: 6, materialIndex: -1 }] }], meshes: [mesh] },
+    { body: Buffer.concat([Buffer.from(positions.buffer), Buffer.from(indices.buffer)]) })), /groups 无效/);
+});
+
+test('preview groups use each mesh local material slots with shared geometry', async () => {
+  const { sanitizeSbox } = await import('../server/preview-uploads.mjs');
+  const groups = [{ start: 0, count: 3, materialIndex: 0 }, { start: 3, count: 3, materialIndex: 1 }];
+  const geometry = { attributes: { position: { type: 'Float32Array', offset: 0, length: 12, itemSize: 3 } }, groups };
+  const mesh = { geometry: 0, material: [4, 2], matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] };
+  const materials = Array.from({ length: 5 }, () => ({ type: 'MeshStandardMaterial' }));
+  const header = { geometries: [geometry], materials, meshes: [mesh, { ...mesh, material: [0, 3] }] };
+  assert.deepEqual(headerOf(sanitizeSbox(sbox(header)).buffer).meshes.map((item) => item.material), [[4, 2], [0, 3]]);
+  assert.throws(() => sanitizeSbox(sbox({ ...header, meshes: [mesh, { ...mesh, material: [0] }] })), /meshes\[1\]\.groups\.materialIndex 越界/,
+    'a different mesh cannot borrow slots from the global materials or the first mesh');
+  assert.equal(headerOf(sanitizeSbox(sbox({ ...header, meshes: [{ ...mesh, material: 0 }, mesh] })).buffer).meshes.length, 2);
+  assert.throws(() => sanitizeSbox(sbox({ ...header, meshes: [{ ...mesh, material: 0 }, { ...mesh, material: [2] }] })), /meshes\[1\]\.groups\.materialIndex 越界/);
+  const omitted = { ...geometry, groups: [{ start: 0, count: 3 }] };
+  assert.deepEqual(headerOf(sanitizeSbox(sbox({ ...header, geometries: [omitted] })).buffer).geometries[0].groups, omitted.groups,
+    'an omitted materialIndex keeps the existing loader behavior');
+});
+
 test('preview:write uploads a sanitized .sbox, keeps versions, never replaces a baked preview, and admins roll back', async () => {
   await setup(async ({ call, raw, submit, tokens, platform, root }) => {
     const { token, id } = tokens.create('dots-3d', 'test', 'cover:write,preview:write');
-    const work = await submit('owner', { task: 'model3d' });
+    const work = await submit('owner', { task: 'model3d', cover: null });
     await platform.moderator.idle();
     assert.equal((await call('admin', 'POST', `/api/works/model3d/${work.id}/moderation`, { status: 'approved' })).status, 200);
     const path = `/api/dots/works/model3d/${work.id}/preview`;
@@ -799,9 +849,68 @@ test('preview:write uploads a sanitized .sbox, keeps versions, never replaces a 
   });
 });
 
+test('preview:write uses the work cover or a separate preview.webp poster without changing either', async () => {
+  await setup(async ({ call, raw, submit, tokens, platform, root }) => {
+    const token = tokens.create('dots-3d', 'test', 'preview:write').token;
+    const work = await submit('owner', { task: 'model3d' });
+    await platform.moderator.idle();
+    assert.equal((await call('admin', 'POST', `/api/works/model3d/${work.id}/moderation`, { status: 'approved' })).status, 200);
+    const path = `/api/dots/works/model3d/${work.id}/preview`;
+    const before = platform.db.prepare('SELECT * FROM works WHERE id = ?').get(work.id);
+    assert.equal(before.cover, 'cover.png', 'submission cover is cover.<ext>, not cover-<stamp>.<ext>');
+
+    // The author's own cover is a valid poster; no cover:write needed.
+    const first = await raw(token, 'PUT', path, sbox());
+    assert.equal(first.status, 200, JSON.stringify(first.data));
+    assert.match(first.data.previewPoster, new RegExp(`^media/${work.id}/cover\\.png$`));
+    const shown = (await call(null, 'GET', '/api/bootstrap')).data.works.find((item) => item.id === work.id);
+    assert.equal(shown.previewMode, 'model');
+    assert.match(shown.previewPoster, new RegExp(`^media/${work.id}/cover\\.png\\?v=`));
+
+    // A raw WebP poster uses the existing preview.webp convention and keeps the model.
+    const poster = WEBP(400, 300);
+    assert.equal((await raw(token, 'PUT', path, png(400, 300))).data.code, 'unsupported_type', 'poster must be WebP');
+    const second = await raw(token, 'PUT', path, poster);
+    assert.equal(second.status, 200, JSON.stringify(second.data));
+    assert.match(second.data.previewPoster, new RegExp(`^media/${work.id}/preview-[a-z0-9]+\\.webp$`));
+    assert.equal(second.data.previewModel, first.data.previewModel);
+    const withPoster = (await call(null, 'GET', '/api/bootstrap')).data.works.find((item) => item.id === work.id);
+    assert.equal(withPoster.previewPoster.split('?')[0], second.data.previewPoster);
+    assert.equal((await call(null, 'GET', `/${second.data.previewPoster.split('?')[0]}`)).status, 200);
+
+    // Replacing the model keeps the dots poster; the cover and the work row never change.
+    const third = await raw(token, 'PUT', path, sbox({ bounds: { min: [0, 0, 0], max: [4, 4, 4] } }));
+    assert.equal(third.status, 200);
+    assert.equal(third.data.previewPoster, second.data.previewPoster);
+    assert.notEqual(third.data.previewModel, first.data.previewModel);
+    assert.deepEqual(platform.db.prepare('SELECT * FROM works WHERE id = ?').get(work.id), before);
+    const { readFileSync } = await import('node:fs');
+    assert.equal(readFileSync(join(root, 'state', 'media', work.id, 'cover.png')).length, PNG.length);
+
+    const history = (await call('admin', 'GET', `/api/works/model3d/${work.id}/preview-history`)).data;
+    assert.equal(history.entries.length, 3);
+    assert.equal(history.entries.every((entry) => entry.action === 'preview-replace'), true);
+    const posterHistory = history.entries.find((entry) => entry.detail.poster === second.data.previewPoster.split('/').at(-1) && entry.detail.width === 400);
+    assert.equal(posterHistory.detail.bytes, poster.length);
+    assert.equal(posterHistory.detail.width, 400);
+    assert.equal(posterHistory.detail.height, 300);
+    assert.equal(JSON.stringify(posterHistory.detail).length < 256, true, 'history records the filename, not image bytes');
+    const posterAudit = platform.db.prepare("SELECT detail FROM audit WHERE action = 'preview-replace' AND work_id = ? ORDER BY id").all(work.id)
+      .map((row) => JSON.parse(row.detail)).find((detail) => detail.poster === posterHistory.detail.poster && detail.width === 400);
+    assert.equal(posterAudit.poster, posterHistory.detail.poster);
+    assert.equal(JSON.stringify(posterAudit).length < 512, true, 'audit also excludes image bytes');
+
+    // A poster before any model is refused without touching the work.
+    const other = await submit('owner', { task: 'model3d' });
+    const early = await raw(token, 'PUT', `/api/dots/works/model3d/${other.id}/preview`, poster);
+    assert.equal(early.status, 409);
+    assert.equal(early.data.code, 'preview_required');
+  });
+});
+
 test('preview:write is its own scope: granted, withdrawn and switched off independently', async () => {
   await setup(async ({ raw, submit, tokens, platform }) => {
-    const work = await submit('owner', { task: 'model3d' });
+    const work = await submit('owner', { task: 'model3d', cover: null });
     await platform.moderator.idle();
     const cover = tokens.create('cover', 'test', 'cover:write');
     assert.equal((await raw(cover.token, 'PUT', `/api/dots/works/model3d/${work.id}/preview`, sbox())).data.code, 'scope_required');

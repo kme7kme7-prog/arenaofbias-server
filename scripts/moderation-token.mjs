@@ -2,7 +2,8 @@
 // the service environment (DATA_DIR). The plaintext token is printed once and never stored.
 //   node scripts/moderation-token.mjs create <label> [scopes]   new token; prints it once.
 //                                                        scopes: comma separated, default moderation;
-//                                                        moderation, capture:read, cover:write
+//                                                        moderation, capture:read, cover:write, works:read,
+//                                                        meta:write, preview:write, captures:write
 //   node scripts/moderation-token.mjs list               ids, labels, scopes, created/revoked/last used
 //   node scripts/moderation-token.mjs grant <id> <scope>     add one scope
 //   node scripts/moderation-token.mjs withdraw <id> <scope>  remove one scope (next request)

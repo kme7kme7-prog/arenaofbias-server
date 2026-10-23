@@ -973,7 +973,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         'Content-Security-Policy': "default-src 'none'",
       });
     }
-    const media = /^\/media\/(up-[a-z0-9]{8})\/(cover(?:-[a-z0-9]{8,24})?\.(?:png|jpg|webp)|first(?:-[a-z0-9]{8,24})?\.jpg|mobile(?:-[a-z0-9]{8,24})?\.jpg|preview\.(?:sbox|webp|jpg)|preview-[a-z0-9]{8,24}\.sbox)$/.exec(pathname);
+    const media = /^\/media\/(up-[a-z0-9]{8})\/(cover(?:-[a-z0-9]{8,24})?\.(?:png|jpg|webp)|first(?:-[a-z0-9]{8,24})?\.jpg|mobile(?:-[a-z0-9]{8,24})?\.jpg|preview\.(?:sbox|webp|jpg)|preview-[a-z0-9]{8,24}\.(?:sbox|webp))$/.exec(pathname);
     if (pathname.startsWith('/media/')) {
       const work = media && library.uploadById(media[1]);
       if (!library.canRead(work, auth.userFrom(req))) return sendJson(res, 404, { error: '文件不存在' });

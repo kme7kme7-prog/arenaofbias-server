@@ -7,6 +7,8 @@ import { test } from 'node:test';
 import { compress } from '../server/compress.mjs';
 import { createPlatform } from '../server/app.mjs';
 import { limits } from '../server/config.mjs';
+import { entityKey } from '../server/catalog.mjs';
+import { isAiJudgedTask } from '../server/categories.mjs';
 import { verifiedUser } from './helpers/email.mjs';
 
 async function fixture(run, options = {}) {
@@ -317,4 +319,81 @@ test('deleting a non-first package work removes it from management without break
   assert.equal(result.status, 200);
   assert.deepEqual(result.data.works.map(work => work.id), ['pack']);
   assert.deepEqual(platform.library.allWorks().map(work => work.id), ['pack']);
+}));
+
+test('curated summaries reuse one synchronous visibility read and keep full public/admin DTOs', async t => fixture(async ({ platform, call, member, admin, packageData, dist }) => {
+  packageData.models.push({ id: 'second-model', name: 'Second model', vendor: 'Vendor' });
+  packageData.tasks[0].results = Array.from({ length: 60 }, (_, n) => ({ id: `curated-${n}`, title: `Curated ${n}`, model: n % 2 ? 'second-model' : 'model', scene: './', generationMode: 'single-turn', humanIntervention: 'none' }));
+  writeFileSync(join(dist, 'data.json'), JSON.stringify(packageData));
+  const { question } = (await call('/api/admin/questions', 'admin', { title: 'Private title', summary: 'Private summary', prompt: 'Private prompt', category: '建模', domains: ['物理'], templates: ['static'] })).data;
+  platform.db.exec('DELETE FROM curated_questions');
+  const section = platform.db.prepare('SELECT id FROM curated_sections ORDER BY sort_order,id').get().id;
+  platform.db.prepare('INSERT INTO curated_questions VALUES(?,?,?,?)').run('one', section, member.id, Date.now());
+  const publicView = (await call('/api/curated', null)).data;
+  const expected = (await call('/api/admin/curated')).data;
+  assert.equal(publicView.sections.find(s => s.id === section).questionCount, 1);
+  assert.equal(expected.questions.find(q => q.taskId === 'one').available, true);
+  assert.equal(expected.questions.find(q => q.taskId === question.id).available, false);
+  assert.equal(expected.questions.find(q => q.taskId === question.id).title, 'Private title');
+  const prototype = Object.getPrototypeOf(platform.db.prepare('SELECT 1')), all = prototype.all, get = prototype.get;
+  const eligible = platform.library.eligible, visits = new Map();
+  let queries = 0;
+  prototype.all = function (...args) { queries++; return Reflect.apply(all, this, args); };
+  prototype.get = function (...args) { queries++; return Reflect.apply(get, this, args); };
+  platform.library.eligible = function (id, ...args) { visits.set(id, (visits.get(id) ?? 0) + 1); return eligible.call(this, id, ...args); };
+  let response;
+  try { response = await call('/api/admin/curated'); }
+  finally { prototype.all = all; prototype.get = get; platform.library.eligible = eligible; }
+  t.diagnostic(JSON.stringify({ queries, visits: [...visits], publicView, adminView: response.data }));
+  assert.deepEqual(response.data, expected);
+  assert.equal(visits.get('one'), 1, 'section and question summary share the same fresh eligibility read');
+  assert.ok(queries <= 200, `summary SQL must not repeatedly rebuild each work/question (${queries})`);
+  for (const work of packageData.tasks[0].results) platform.library.setFaceSettings(admin, 'one', work.id, { show_arena: false });
+  const hidden = (await call('/api/curated', null)).data;
+  assert.equal(hidden.sections.find(s => s.id === section).questionCount, 0, 'a new request must observe withdrawal');
+}));
+
+test('curated summary DTOs match the legacy projection for hidden/deleted/AI/arena-only and missing selections', async () => fixture(async ({ platform, call, member, admin, packageData, dist }) => {
+  packageData.models.push({ id: 'second-model', name: 'Second model' });
+  const works = ['model', 'second-model'].map((model, n) => ({ id: `compare-${n}`, title: `Compare ${n}`, model, scene: './', generationMode: 'single-turn', humanIntervention: 'none' }));
+  packageData.tasks = ['one', 'insufficient', 'arena-only', 'ai-judged', 'private', 'rejected', 'deleted'].map(id => ({
+    id, title: `Title ${id}`, prompt: `Prompt ${id}`, category: id === 'ai-judged' ? '推理' : '建模', domains: ['物理'], templates: ['static'],
+    tags: id === 'arena-only' ? ['arena-only'] : [], results: id === 'insufficient' ? [works[0]] : works,
+  }));
+  writeFileSync(join(dist, 'data.json'), JSON.stringify(packageData));
+  const override = platform.db.prepare('INSERT INTO question_overrides(task_id,moderation,deleted_at,updated_by,updated_at)VALUES(?,?,?,?,?)');
+  for (const [id, status, deleted] of [['private', 'pending', null], ['rejected', 'rejected', null], ['deleted', 'approved', Date.now()]]) override.run(id, JSON.stringify({ status }), deleted, admin.id, Date.now());
+  const privateQuestion = (await call('/api/admin/questions', 'admin', { title: 'Private database question', summary: 'Summary', prompt: 'Secret', category: '建模', domains: ['物理'], templates: ['static'] })).data.question;
+  const sections = platform.db.prepare('SELECT * FROM curated_sections ORDER BY sort_order,id').all();
+  platform.db.exec('DELETE FROM curated_questions');
+  const add = platform.db.prepare('INSERT INTO curated_questions VALUES(?,?,?,?)');
+  for (const [n, id] of [...packageData.tasks.map(q => q.id), 'missing', privateQuestion.id].entries()) add.run(id, sections[n % sections.length].id, member.id, Date.now());
+  for (const withdrawn of [false, true]) {
+    if (withdrawn) for (const work of works) platform.library.setFaceSettings(admin, 'one', work.id, { show_arena: false });
+    const publicQuestions = new Map((await call('/api/catalog', null)).data.questions.map(q => [q.id, q]));
+    const selected = platform.db.prepare('SELECT task_id,section_id FROM curated_questions ORDER BY task_id').all();
+    const all = (await call('/api/admin/questions')).data.questions;
+    const indexed = new Map(all.map(q => [q.id, q]));
+    for (const { task_id: id } of selected) if (!indexed.has(id)) indexed.set(id, { id, title: id });
+    const available = id => {
+      const task = publicQuestions.get(id);
+      return Boolean(task && !isAiJudgedTask(task) && !task.tags?.includes('arena-only') && new Set(platform.library.eligible(id).map(entityKey)).size >= 2);
+    };
+    const settings = platform.db.prepare('SELECT counting_started_at,revision FROM curated_settings WHERE id=1').get();
+    const reference = adminView => ({ countingStartedAt: new Date(settings.counting_started_at).toISOString(), revision: settings.revision, includesStaffHistory: true,
+      sections: sections.map(section => {
+        const taskIds = selected.filter(q => q.section_id === section.id && available(q.task_id)).map(q => q.task_id);
+        return { id: section.id, name: section.name, order: section.sort_order, questionCount: taskIds.length, taskIds, ...(adminView ? { selectedQuestionCount: taskIds.length } : {}) };
+      }), ...(adminView ? { questions: [...indexed.values()].map(q => ({ taskId: q.id, title: q.title, category: q.category,
+        selected: selected.some(s => s.task_id === q.id), sectionId: selected.find(s => s.task_id === q.id)?.section_id ?? null,
+        available: available(q.id), ...(!available(q.id) ? { unavailableReason: '题目未公开、由AI评分或缺少可比较作品' } : {}) })) } : {}) });
+    const publicView = await call('/api/curated', null), adminView = await call('/api/admin/curated');
+    assert.deepEqual(publicView.data, JSON.parse(JSON.stringify(reference(false))));
+    assert.deepEqual(adminView.data, JSON.parse(JSON.stringify(reference(true))));
+    assert.ok(!JSON.stringify(publicView.data).includes('Secret'));
+    assert.equal(adminView.data.questions.find(q => q.taskId === 'one').available, !withdrawn);
+    for (const q of adminView.data.questions.filter(q => q.taskId !== 'one')) assert.equal(q.available, false, q.taskId);
+    assert.equal(adminView.data.questions.find(q => q.taskId === 'deleted').title, 'deleted');
+  }
+  assert.equal((await call('/api/admin/curated', 'moderator')).status, 403);
 }));

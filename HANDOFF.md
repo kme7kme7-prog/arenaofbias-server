@@ -1,3 +1,10 @@
+## 2026-10-23 · 精选摘要与好友房响应边界（第四轮，已上线）
+
+- 精选摘要用轻量题目索引及本次调用内可用性复用，原资格/DTO保持；房间私密JSON发送前核身份/role/level，SSE原认证/心跳/限制保持。readJson空值原本400，未加重复防御或改旧limit契约。
+- 本地/Linux check160/0、481/481，42生产只读完整DTO相同。精选管理19185B相同，SQL2625→599，暖态542.75→191.52ms；公开971B、367→255SQL、92.91→89.47ms。3采样DTO/SQL/文件/JSON，非HTTP。真实临时API4场、最终7公网通过，schema49ok/FK0/3服务active。
+- 3模块保留现场补丁增量上线，reads4.36a0aac582c2，重启2.30秒。回滚/root/aob-performance-round4-20261023/backend-backup只恢复代码/版本/对应服务版本配置，保留最新业务SQLite。无迁移、新依赖、Nginx/CDN或原作变化。
+- 用户授权本轮一条英文提交推送，wsnxxxs noreply身份；实际SHA/CI和私有证据见父工作区.local/performance-round4-20261023/。[本轮归档](docs/archive/2026-10-23-demand-loading-boundaries.md)。
+
 ## 2026-10-23 · 成员摘要、投稿状态与读取边界（第三轮，已上线）
 
 - 成员导航用轻量状态批量投影，共用审核分类器；生产只读副本50人页SQL632→11、JSON23002B相同，暖态DTO/SQL/文件/JSON中位数279.49→118.76ms（3次采样，不含HTTP/网络/压缩）。40项完整旧新DTO比较一致，仅规范随机短期p能力token。反应映射请求内复用，无跨请求私密缓存；真实空反应样本不宣称生产提速。

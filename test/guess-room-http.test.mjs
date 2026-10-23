@@ -6,13 +6,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createPlatform } from '../server/app.mjs';
 import { limits } from '../server/config.mjs';
+import { compress } from '../server/compress.mjs';
 
-async function fixture(t) {
+async function fixture(t, options = {}) {
   const root = mkdtempSync(join(tmpdir(), 'guess-friend-http-'));
   const dist = join(root, 'dist');
   mkdirSync(dist);
   writeFileSync(join(dist, 'data.json'), JSON.stringify({ title: 'Test', tasks: [], models: [] }));
-  const platform = createPlatform({ config: { dist, dataDir: join(root, 'data'), contentTemplate: '', siteOrigins: [], admins: [], cdn: [], capture: false, secureCookies: false, trustProxy: false }, limits });
+  const platform = createPlatform({ config: { dist, dataDir: join(root, 'data'), contentTemplate: '', siteOrigins: [], admins: [], cdn: [], capture: false, secureCookies: false, trustProxy: false }, limits, ...options });
   const server = createServer(platform.handleSite);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -146,4 +147,52 @@ test('friend room streams send a keepalive within 10 seconds and end when the pl
   assert.ok(Date.now() - started <= 11_500, 'heartbeat arrives before the 15-second edge timeout');
   platform.closeStreams();
   for (;;) if ((await reader.read()).done) break;
+});
+
+test('friend private JSON rechecks logout and identity/permission changes after compression success or failure', async t => {
+  for (const failed of [false, true]) for (const change of ['logout', 'switch', 'role', 'level']) {
+    let begin, finish, reject, source, encoding, armed = false;
+    const began = new Promise(resolve => { begin = resolve; });
+    const { call, platform } = await fixture(t, { compressBody(body, used) {
+      if (!armed) return compress(body, used);
+      armed = false; source = body; encoding = used; begin();
+      return new Promise((yes, no) => { finish = yes; reject = no; });
+    } });
+    const alice = platform.db.prepare("SELECT id FROM users WHERE name='alice'").get().id;
+    const bob = platform.db.prepare("SELECT id FROM users WHERE name='bob'").get().id;
+    const { room } = await (await call('alice', 'create', { difficulty: 2 })).json();
+    await call('bob', 'join', { code: room.code });
+    await call('alice', `${room.code}/ready`, { ready: true });
+    await call('bob', `${room.code}/ready`, { ready: true });
+    armed = true;
+    const reading = call('alice', 'catalog', undefined, { 'accept-encoding': 'gzip' });
+    await began;
+    if (change === 'logout') platform.db.prepare('DELETE FROM sessions WHERE user_id=?').run(alice);
+    if (change === 'switch') platform.db.prepare('UPDATE sessions SET user_id=? WHERE user_id=?').run(bob, alice);
+    if (change === 'role') platform.db.prepare("UPDATE users SET role='moderator' WHERE id=?").run(alice);
+    if (change === 'level') platform.db.prepare('UPDATE users SET member_level=1 WHERE id=?').run(alice);
+    if (failed) reject(new Error('controlled room compression failure'));
+    else finish(await compress(source, encoding));
+    const response = await reading;
+    assert.equal(response.status, ['logout', 'switch'].includes(change) ? 401 : 403, `${failed}/${change}`);
+    assert.deepEqual(Object.keys(await response.json()), ['error']);
+    if (change === 'role' || change === 'level') assert.equal((await call('alice', 'catalog')).status, 200, 'the new permission level retains normal room access');
+  }
+});
+
+test('friend small JSON reads use the same send guard and malformed command objects stay 400', async t => {
+  const { call, platform } = await fixture(t);
+  const { room } = await (await call('alice', 'create', { difficulty: 2 })).json();
+  const userFrom = platform.auth.userFrom;
+  try {
+    for (const path of ['current', `${room.code}/state`]) {
+      let reads = 0;
+      platform.auth.userFrom = (...args) => ++reads === 1 ? userFrom.apply(platform.auth, args) : null;
+      assert.equal((await call('alice', path, undefined, { 'accept-encoding': 'identity' })).status, 401, path);
+    }
+  } finally { platform.auth.userFrom = userFrom; }
+  for (const body of [null, [], 42, 'invalid']) assert.equal((await call('alice', `${room.code}/leave`, body)).status, 400, JSON.stringify(body));
+  assert.equal((await call('alice', `${room.code}/state`)).status, 200, 'invalid leave commands must not change membership');
+  const anonymous = await call(null, 'current');
+  assert.equal(anonymous.status, 401); assert.equal((await anonymous.json()).code, 'login_required');
 });

@@ -15,17 +15,24 @@ export function createCurated({ db, catalog, library, questions }) {
     return Boolean(task && !isAiJudgedTask(task) && !task.tags?.includes('arena-only') &&
       new Set(library.eligible(id).map(work => entityKey(work))).size >= 2);
   };
-  const sectionDto = (row, rows, admin = false) => {
+  const availability = () => {
+    const seen = new Map();
+    return id => {
+      if (!seen.has(id)) seen.set(id, available(id));
+      return seen.get(id);
+    };
+  };
+  const sectionDto = (row, rows, admin = false, isAvailable = available) => {
     const selected = rows.filter(q => q.section_id === row.id);
-    const taskIds = selected.filter(q => available(q.task_id)).map(q => q.task_id);
+    const taskIds = selected.filter(q => isAvailable(q.task_id)).map(q => q.task_id);
     return { id: row.id, name: row.name, order: row.sort_order, questionCount: taskIds.length, taskIds,
       ...(admin ? { selectedQuestionCount: taskIds.length } : {}) };
   };
-  const info = (admin = false) => {
+  const info = (admin = false, isAvailable = availability()) => catalog.withSnapshot(() => {
     const s = settings(), rows = assignments();
     return { countingStartedAt: new Date(s.counting_started_at).toISOString(), revision: s.revision, includesStaffHistory: true,
-      sections: sections().map(row => sectionDto(row, rows, admin)) };
-  };
+      sections: sections().map(row => sectionDto(row, rows, admin, isAvailable)) };
+  });
   const checkName = value => {
     if (typeof value !== 'string' || !value.trim() || value.trim().length > 40) fail(400, '分区名称为1至40字');
     return value.trim();
@@ -53,13 +60,16 @@ export function createCurated({ db, catalog, library, questions }) {
     contains: id => Boolean(db.prepare('SELECT 1 FROM curated_questions WHERE task_id=?').get(id)) && available(id),
     info,
     adminInfo(actor) {
-      const all = questions ? questions.adminAll(actor) : catalog.tasks();
-      const selected = new Map(assignments().map(q => [q.task_id, q.section_id]));
-      const indexed = new Map(all.map(q => [q.id, q]));
-      for (const id of selected.keys()) if (!indexed.has(id)) indexed.set(id, { id, title: id });
-      return { ...info(true), questions: [...indexed.values()].map(q => ({ taskId: q.id, title: q.title,
-        category: q.category, selected: selected.has(q.id), sectionId: selected.get(q.id) ?? null,
-        available: available(q.id), ...(!available(q.id) ? { unavailableReason: '题目未公开、由AI评分或缺少可比较作品' } : {}) })) };
+      return catalog.withSnapshot(() => {
+        const all = questions ? questions.adminIndex(actor) : catalog.tasks();
+        const selected = new Map(assignments().map(q => [q.task_id, q.section_id]));
+        const indexed = new Map(all.map(q => [q.id, q]));
+        const isAvailable = availability();
+        for (const id of selected.keys()) if (!indexed.has(id)) indexed.set(id, { id, title: id });
+        return { ...info(true, isAvailable), questions: [...indexed.values()].map(q => ({ taskId: q.id, title: q.title,
+          category: q.category, selected: selected.has(q.id), sectionId: selected.get(q.id) ?? null,
+          available: isAvailable(q.id), ...(!isAvailable(q.id) ? { unavailableReason: '题目未公开、由AI评分或缺少可比较作品' } : {}) })) };
+      });
     },
     createSection(actor, body) {
       return mutate(actor, body.revision, 'curated-section-create', () => {

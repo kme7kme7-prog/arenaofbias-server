@@ -1,7 +1,7 @@
 import { assertSameOrigin, fail, rateLimit, readJson } from '../http.mjs';
 import { createGuessRooms } from './guess-rooms.mjs';
 
-export function registerGuessRooms(router, { db, auth, config }) {
+export function registerGuessRooms(router, { db, auth, config, requireUser }) {
   const rooms = createGuessRooms({ db });
   const streams = new Set();
   const createUser = rateLimit(600000, 6, '创建房间太频繁，请稍后再试。');
@@ -11,7 +11,10 @@ export function registerGuessRooms(router, { db, auth, config }) {
   const commandUser = rateLimit(60000, 60);
   const commandIp = rateLimit(60000, 180);
   const readUser = rateLimit(60000, 90);
-  const userOf = ctx => ctx.user ?? fail(401, '登录后才能进入好友房。', 'login_required');
+  const userOf = ctx => {
+    if (!ctx.user) fail(401, '登录后才能进入好友房。', 'login_required');
+    return requireUser(ctx);
+  };
   function readGate(ctx) {
     const user = userOf(ctx);
     if (ctx.req.headers.origin) assertSameOrigin(ctx.req, config);

@@ -866,6 +866,9 @@ test('works:read returns a safe view outside the queue and keeps the file list o
     assert.equal(view.data.work.moderationStatus, 'approved');
     assert.equal(view.data.work.status, 'unverified');
     assert.equal(view.data.work.curated, false);
+    assert.equal(view.data.work.entry, 'index.html');
+    assert.ok(view.data.work.images.some((image) => image.name === 'first.jpg'
+      && image.url === `/api/dots/works/one/${work.id}/images/first.jpg`));
     assert.equal(typeof view.data.work.updatedAt, 'number');
     assert.equal(Object.hasOwn(view.data.work, 'files'), false);
     assert.equal(view.data.work.fileCount, 1);
@@ -875,6 +878,63 @@ test('works:read returns a safe view outside the queue and keeps the file list o
     assert.deepEqual(listed.data.work.files, [{ path: 'index.html', bytes: Buffer.byteLength(PAGE) }]);
     assert.equal((await call(null, 'GET', '/api/bootstrap')).data.works.some((item) => item.id === work.id), false);
   });
+});
+
+test('works:read streams screenshots and upload files outside the queue', async () => {
+  await setup(async ({ call, submit, tokens, platform }) => {
+    const { token, id } = tokens.create('read', 'test', 'works:read,moderation');
+    const denied = tokens.create('mod', 'test', 'moderation').token;
+    const work = await submit();
+    await platform.moderator.idle();
+    const imagePath = `/api/dots/works/one/${work.id}/images/first.jpg`;
+    const filePath = `/api/dots/works/one/${work.id}/file?path=index.html`;
+    assert.equal((await call(null, 'GET', `/api/dots/moderation/works/one/${work.id}/images/first.jpg`, undefined, { bearer: token })).data.code, 'not_in_queue');
+    assert.equal((await call(null, 'GET', imagePath, undefined, { bearer: denied })).data.code, 'scope_required');
+    assert.equal((await call(null, 'GET', filePath, undefined, { bearer: denied })).data.code, 'scope_required');
+    const image = await call(null, 'GET', imagePath, undefined, { bearer: token });
+    assert.equal(image.status, 200);
+    assert.deepEqual(image.data, PNG);
+    assert.equal(image.headers.get('cache-control'), 'no-store');
+    assert.match(image.headers.get('content-security-policy'), /sandbox/);
+    assert.match(image.headers.get('content-security-policy'), /default-src 'none'/);
+    assert.equal((await call(null, 'GET', `/api/dots/works/one/${work.id}/images/..%2Fplatform.db`, undefined, { bearer: token })).status, 404);
+    assert.equal((await call(null, 'GET', `/api/dots/works/one/${work.id}/images/missing.jpg`, undefined, { bearer: token })).status, 404);
+    const file = await call(null, 'GET', filePath, undefined, { bearer: token });
+    assert.equal(file.status, 200);
+    assert.equal(file.data.toString(), PAGE);
+    assert.equal(file.headers.get('content-type'), 'application/octet-stream');
+    assert.equal(file.headers.get('content-disposition'), 'attachment');
+    assert.equal(file.headers.get('cache-control'), 'no-store');
+    assert.match(file.headers.get('content-security-policy'), /sandbox/);
+    assert.equal((await call(null, 'GET', `/api/dots/works/one/${work.id}/file?path=../../platform.db`, undefined, { bearer: token })).status, 404);
+    assert.equal((await call(null, 'GET', `/api/dots/works/one/${work.id}/file?path=..%2F..%2Fplatform.db`, undefined, { bearer: token })).status, 404);
+    const audit = platform.db.prepare('SELECT action, outcome FROM moderation_token_audit WHERE token_id = ?').all(id);
+    assert.ok(audit.some((row) => row.action === 'work-image' && row.outcome === 'ok'));
+    assert.ok(audit.some((row) => row.action === 'work-file' && row.outcome === 'ok'));
+    assert.doesNotMatch(JSON.stringify(audit), new RegExp(tokenSecret(token)));
+  });
+});
+
+test('works:read does not serve datapack package files', async () => {
+  const data = { title: '测试', models: [{ id: 'm', name: '模型', vendor: '测试' }],
+    tasks: [{ id: 'one', title: '题目', promptPending: false, category: '建模',
+      results: [{ id: 'pk-1', model: 'm', title: '包内作品', scene: 'pkg/pk-1', summary: '旧简介', effort: 'Default' }] }] };
+  await setup(async ({ call, tokens, config }) => {
+    const { mkdirSync, writeFileSync } = await import('node:fs');
+    mkdirSync(join(config.dist, 'pkg/pk-1'), { recursive: true });
+    writeFileSync(join(config.dist, 'pkg/pk-1', 'index.html'), '<p>secret package</p>');
+    const { token } = tokens.create('read', 'test', 'works:read');
+    const view = await call(null, 'GET', '/api/dots/works/one/pk-1', undefined, { bearer: token });
+    assert.equal(view.status, 200, JSON.stringify(view.data));
+    assert.equal(view.data.work.entry, null);
+    assert.deepEqual(view.data.work.images, []);
+    assert.equal(Object.hasOwn(view.data.work, 'files'), false);
+    assert.doesNotMatch(JSON.stringify(view.data), /secret package|scene|contentKey|digest/i);
+    const file = await call(null, 'GET', '/api/dots/works/one/pk-1/file?path=index.html', undefined, { bearer: token });
+    assert.equal(file.status, 404);
+    assert.equal(file.data.code, 'not_found');
+    assert.doesNotMatch(JSON.stringify(file.data), /secret package/);
+  }, { data });
 });
 
 test('meta:write edits the declaration, refuses task changes, and does not re-queue unless asked', async () => {
@@ -932,6 +992,8 @@ test('meta:write updates a packaged work through the display override and reject
     assert.equal(view.data.work.curated, true);
     assert.equal(view.data.work.title, '包内作品');
     assert.equal(view.data.work.captures, null);
+    assert.equal(view.data.work.entry, null);
+    assert.deepEqual(view.data.work.images, []);
     assert.equal(Object.hasOwn(view.data.work, 'files'), false);
     assert.equal(view.data.work.updatedAt, null);
     const patched = await call(null, 'PATCH', '/api/dots/works/one/pk-1/meta', { title: '覆盖标题', summary: '新简介', updatedAt: null }, { bearer: token });

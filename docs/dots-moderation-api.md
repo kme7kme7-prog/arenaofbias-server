@@ -7,14 +7,14 @@
 | `moderation` | 列待审队列、看作品内容和截图、通过、打回（必须写理由） | `/api/dots/moderation/*` |
 | `capture:read` | 只读列出截图失败（`capture_incomplete` 或没有桌面首屏截图）的作品 | `GET /api/dots/captures/failed` |
 | `cover:write` | 给作品上传或替换封面（作品页封面图，不是截图） | `PUT /api/dots/works/:task/:id/cover` |
-| `works:read` | 按 task/id 读一件作品的安全声明（队列外也可以） | `GET /api/dots/works/:task/:id` |
+| `works:read` | 按 task/id 读一件作品的安全声明（队列外也可以），并下载已有截图和上传包内文件 | `GET /api/dots/works/:task/:id`、`…/images/:name`、`…/file?path=` |
 | `meta:write` | 改作品声明。不能改归属题目、门面或核验 | `PATCH /api/dots/works/:task/:id/meta` |
 | `preview:write` | 给作品上传或替换列表卡片的 3D 小模型预览（`.sbox`） | `PUT /api/dots/works/:task/:id/preview` |
 | `captures:write` | 替换桌面或手机首屏截图（`first` / `mobile`，仅 JPEG） | `PUT /api/dots/works/:task/:id/captures/:slot` |
 
 缺某项权限时返回 `403 {"code":"scope_required"}`。权限由运维逐项开关，去掉某项或整个令牌作废都在下一个请求生效。
 
-完善作品信息时，一次授予：`moderation,capture:read,cover:write,works:read,meta:write,preview:write,captures:write`。封面和截图是两项权限，不要把截图并进 `cover:write`。新建令牌不写权限时仍然只有 `moderation`。
+完善作品信息时，一次授予：`moderation,capture:read,cover:write,works:read,meta:write,preview:write,captures:write`。封面和截图是两项权限，不要把截图并进 `cover:write`。新建令牌不写权限时仍然只有 `moderation`。`works:read` 含队列外截图和上传包文件的只读流；已经有这项权限的令牌不用再授新权限。数据包作品本批不提供包内文件。
 
 站点：`https://<API 域名>`（与管理端同一 API 域名）。下文 `$TOKEN` 是运维发给你的令牌，形如 `aobd_<12 位 id>_<43 位随机串>`；文中的示例全是假的。
 
@@ -285,14 +285,46 @@ curl -sS "https://<API 域名>/api/dots/works/one/up-abc123?files=1" -H "Authori
   "cover": "media/up-abc123/cover.png", "hasManualCover": false,
   "captures": { "first": "media/up-abc123/first.jpg", "mobile": "media/up-abc123/mobile.jpg" },
   "preview": null, "author": "作者名", "submittedAt": "2026-10-22T00:00:00.000Z",
-  "updatedAt": 1761000000000, "curated": false, "fileCount": 1, "bytes": 1200,
+  "updatedAt": 1761000000000, "curated": false,
+  "entry": "index.html",
+  "images": [
+    { "name": "first.jpg", "url": "/api/dots/works/one/up-abc123/images/first.jpg" },
+    { "name": "mobile.jpg", "url": "/api/dots/works/one/up-abc123/images/mobile.jpg" }
+  ],
+  "fileCount": 1, "bytes": 1200,
   "files": [{ "path": "index.html", "bytes": 1200 }] } }
 ```
 
-- 不返回邮箱、IP、内容密钥、预览地址、摘要哈希或作品包本身。`author` 只是显示名。
-- `files` 默认不出现。只有 `?files=1` 才列上传包里的相对路径和字节数（最多 2000 个）。数据包作品没有这项。
+- 不返回邮箱、IP、内容密钥、scene URL、摘要哈希或令牌。这条 JSON 也不带作品包字节。`author` 只是显示名。
+- `entry` 是上传包入口的相对路径（通常 `index.html`）。数据包作品为 `null`。
+- `images` 列出 `media/<作品>/` 下符合图片白名单的文件（JPEG、PNG、WebP，含 `first.jpg`、`mobile.jpg`、`*-late.jpg`、封面和 `first-<stamp>.jpg`）。`url` 指向第 10.1 节。`captures.first` / `captures.mobile` 仍是存储指针字符串，下载以 `images[].url` 为准。没有这类文件时 `images` 为 `[]`。
+- `files` 默认不出现。只有 `?files=1` 才列上传包里的相对路径和字节数（最多 2000 个）。数据包作品没有这项，本批也不提供包内文件下载。
 - `moderationStatus` 是内容审核状态，不是“已公开”。内容通过之后作品仍要等人审才会公开。
 - `updatedAt` 给第 11 节做并发校验。作品不存在返回 `404 not_found`。
+
+已有 `works:read` 的令牌可以直接用下面两个接口，不必新授权。它们计入每令牌每分钟 120 次，不占写入额度。
+
+### 10.1 已有截图 `GET /api/dots/works/:task/:id/images/:name`（`works:read`）
+
+不要求作品在审核队列里。队内的 `…/moderation/works/…/images/:name` 只对队列中的作品有效；队列外用这一条。
+
+```bash
+curl -sS "https://<API 域名>/api/dots/works/one/up-abc123/images/first.jpg" -H "Authorization: Bearer $TOKEN" -o first.jpg
+```
+
+文件名须匹配图片白名单（JPEG、PNG、WebP），并且必须出现在 `media/<作品>/` 的目录列表里。返回图片字节，`Cache-Control: no-store`，`Content-Security-Policy: sandbox; default-src 'none'`。作品不存在，或文件名不在目录里（含 `..` 一类越界），返回 `404 not_found`。
+
+### 10.2 上传包文件 `GET /api/dots/works/:task/:id/file?path=<相对路径>`（`works:read`）
+
+只提供上传作品。数据包作品返回 `404 not_found`，即使包里有这个文件。
+
+```bash
+curl -sS "https://<API 域名>/api/dots/works/one/up-abc123/file?path=index.html" -H "Authorization: Bearer $TOKEN" -o index.html
+```
+
+入口页的 `path` 用第 10 节的 `entry`。其余资源用 `?files=1` 列出的相对路径，逐个拉取。不做整包 zip。
+
+路径经 realpath 限制在作品目录内。缺 `path` 返回 `400 invalid_path`；含 `..`、越界或不是普通文件返回 `404 not_found`。响应固定 `Content-Type: application/octet-stream`、`Content-Disposition: attachment`、`Cache-Control: no-store`、`Content-Security-Policy: sandbox; default-src 'none'`，不在 API 域名上渲染。
 
 ### 11. 修改作品信息 `PATCH /api/dots/works/:task/:id/meta`（`meta:write`）
 
@@ -350,7 +382,7 @@ curl -sS -X PUT https://<API 域名>/api/dots/works/one/up-abc123/captures/first
 | 403 | `scope_required` | 令牌没有这项权限 |
 | 422 | `bad_dimensions` | 封面或截图尺寸不在允许范围 |
 | 503 | `dots_disabled` / `scope_disabled` | 运维临时关闭了整个 dots 接口或这项能力 |
-| 404 | `not_found` | 接口不存在，作品不存在，或作品不在 dots 队列里（队列接口） |
+| 404 | `not_found` | 接口不存在，作品不存在，作品不在 dots 队列里（队列接口），截图或包内文件不存在，或数据包作品请求了包内文件 |
 | 405 | `method_not_allowed` | 方法不对 |
 | 409 | `not_in_queue` | 作品已经被别人（机器、管理员）决定，或已超时转走；返回体 `current.status` 是当前状态 |
 | 409 | `stale` | 带的 `version` 不是当前版本：作者改过作品，重新查看 |
@@ -366,8 +398,8 @@ curl -sS -X PUT https://<API 域名>/api/dots/works/one/up-abc123/captures/first
 
 ## 限流
 
-- 每个令牌每分钟 120 次（运维可用 `DOTS_REQUESTS_PER_MIN` 调整）。
-- 写操作（封面、预览、信息、截图）另计每分钟 30 次（`DOTS_WRITES_PER_MIN`）。读队列和读作品不占这个额度。
+- 每个令牌每分钟 120 次（运维可用 `DOTS_REQUESTS_PER_MIN` 调整）。队列外截图和上传包文件计入这 120 次，不另开更严的读桶。
+- 写操作（封面、预览、信息、截图）另计每分钟 30 次（`DOTS_WRITES_PER_MIN`）。读队列、读作品、下截图和包内文件不占这个额度。
 - 同一 IP 鉴权失败每分钟 20 次。
 
 建议每 30–60 秒拉一次队列，不要更频繁。
@@ -387,4 +419,4 @@ curl -sS -X PUT https://<API 域名>/api/dots/works/one/up-abc123/captures/first
 
 ## 审计
 
-每个通过鉴权的请求都会记录：令牌 id 和标签、动作（list / view / view-image / view-file / approve / reject / list-capture-gaps / cover-replace / preview-replace / work-get / meta / capture-replace）、作品、理由、时间、IP、结果。不记录令牌明文。作品的审核记录里决定人显示为 `dots:<令牌标签>`。meta 的理由是改了哪些字段名；截图的理由是 `first` 或 `mobile`。
+每个通过鉴权的请求都会记录：令牌 id 和标签、动作（list / view / view-image / view-file / approve / reject / list-capture-gaps / cover-replace / preview-replace / work-get / work-image / work-file / meta / capture-replace）、作品、理由、时间、IP、结果。不记录令牌明文。作品的审核记录里决定人显示为 `dots:<令牌标签>`。meta 的理由是改了哪些字段名；截图写入的理由是 `first` 或 `mobile`。`work-image` 和 `work-file` 是队列外的只读拉取，与队内的 `view-image`、`view-file` 分开计。

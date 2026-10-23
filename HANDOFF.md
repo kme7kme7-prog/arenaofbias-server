@@ -37,6 +37,12 @@
 - 仅app/library/catalog-response三个运行模块上线，保留arena-only与新题提示词版本校验等现场差异；重启2.32秒。备份/root/aob-performance-20261023/backend-backup；回滚代码/版本配置，不覆盖当前业务数据库。无迁移、新依赖、Nginx/CDN变更。
 - 四仓先同步，原未提交内容完整保留并完善；用户已授权四仓分别一条英文提交并推送 main，身份 wsnxxxs / 269096463+wsnxxxs@users.noreply.github.com。本条记录推送准备，实际 SHA 与远端核对结果见父工作区私有 receipts。完整验证、真实测量限制与未执行项见[2026-10-23-performance-demand-loading.md](docs/archive/2026-10-23-performance-demand-loading.md)，私有发布证据与报告在父工作区.local/performance-20261023/。
 
+## 2026-10-22 · dots 队列外只读资产（`works:read`，未部署）
+
+- 按 `dots-read-assets-proposal-20261022.md` 第 2 节扩现有 `works:read`，不新建 scope。`GET /api/dots/works/:task/:id` 增加 `entry` 与 `images[{name,url}]`。新增 `GET …/images/:name`（`work-image`）和 `GET …/file?path=`（`work-file`）。上传作品可下已有截图和包内文件；数据包作品的包内文件返回 404。不返回邮箱、IP、digest、内容密钥、scene URL 或令牌。
+- 无迁移、无新 npm 依赖、无服务端重截图。已有 `works:read` 的令牌自动拥有新只读流。未部署，未改线上令牌。
+- 验证：`npm run check` 157/0；`node --test --test-concurrency=2 test/*.test.mjs` 460/460。`test/dots-moderation.test.mjs` 30/30。详见 [归档](docs/archive/2026-10-22-dots-read-assets-kme7kme7-prog.md)。
+
 ## 2026-10-22 · dots 作品完善默认权限（A′+F′，未部署）
 
 - kme7 已批准实现。默认档是 `moderation + capture:read + cover:write + works:read + meta:write + preview:write + captures:write`。封面仍只用已有 `cover:write`；截图 first/mobile 用新的 `captures:write`，没有并进封面。

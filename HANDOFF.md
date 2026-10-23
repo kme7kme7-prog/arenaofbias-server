@@ -1,3 +1,19 @@
+## 2026-10-24 · Kimi 正式数据包上线与结果下线（已完成）
+
+- 用户授权本轮提交推送、生成正式包上线，随后要求下线15题对应17件结果但保留收录。已通过现场library.review单事务关闭Gallery/Arena开关，娱乐开关保持0；status=verified、deleted_at=null、Kimi K3.1 Pro / Max / Kimi Code与原文件/digest保持。没有删除作品、模型或历史票。下节原公开状态为下线前时点，由本节覆盖。
+- 数据源已提交推送，main CI成功发布不可变正式Git包，后端pin/current与Gallery buildInfo已同步；公网核对正式来源、前后端版本/digest一致、模型仍登记、公开作品0件。正式包按既有CRLF方式检出：2293文件规范化后与Git原始内容一致，993文本文件保持现场换行，未把工作树原始字节宣称为全量LF归档逐字节一致。LF直接试切会改变636侧旧归属，门禁已阻止；保留换行后60138侧逐票归属0变化。
+- Gallery只更新data.json版本信息，保留现场目录投影和全部其他静态资源；后端运行源码及服务配置不变，无重启。包切换前30211票、2575作品逐行保持，schema52/quick_check ok/外键0，三服务active。原公开结果已在包切换前关闭展示，正式包没有重新开启。
+- 本地数据check33/0、test9/9、intake176件/0错/7既有提示；Gallery check112/0、142/142、正式包隔离严格build176件/91site及intake0错/7提示；后端check168/0、534/534。没有把隔离Gallery构建或此前手机目检称为本次全量生产交互验收。
+- 本轮各涉及仓一条英文提交，wsnxxxs / 269096463+wsnxxxs@users.noreply.github.com；源码提交、CI、正式包号、现场原始与规范化SHA及公网receipts见父目录.local/kimi-k31-release-20261024。服务器/root/aob-kimi-k31-20261024/formal保留备份、旧pin/Gallery数据、实际checkout清单与逐票核验。回退只恢复包指针/pin/Gallery数据，不用旧库覆盖新业务；结果下线保留。
+- [本轮归档](docs/archive/2026-10-24-kimi-k31-release.md)。
+
+## 2026-10-24 · Mix 正式归为 Kimi K3.1 Pro（已上线）
+
+- 用户确认现有匿名Mix为Kimi K3.1 Pro，全部Max、Kimi Code。使用现场library.setMeta，单事务移除x:mix灰度登记并更正17作品的model_id、harness_id与自动标题；原作、摘要、状态、展示开关、来源和内容digest保持。保留原灰度机制供以后使用，没有修改运行源码。
+- 副本演练及生产校验38场历史比较按现有同digest归属规则计入正式模型；原30177票逐行保持，其他2557作品逐行保持。公网目录17作品/15题均为Max、Kimi Code，公开模型榜38比较，schema52/quick_check ok/外键0，三服务active，无重启。
+- 新登记消费如实标记local的包；未commit/push，未覆盖正式包历史或业务库。服务器/root/aob-kimi-k31-20261024保留platform-preapply.db、旧包指针及完整证据；私有本地receipts见父目录.local/kimi-k31-release-20261024。需要回退时不可用旧库覆盖后续投票。
+- [本轮归档](docs/archive/2026-10-24-kimi-k31-release.md)。
+
 ## 2026-10-23 · 灰度模型发布准备
 
 - 用户授权提交全部改动并部署至既有 VPS。本轮以 wsnxxxs noreply 身份提交、推送 main 后发布；发布结果以父工作区 `.local/restricted-release-20261023/` 与服务器 `/root/aob-restricted-release-20261023/` 的私有 receipts 为准，下节“未提交、未部署”为开发时点。

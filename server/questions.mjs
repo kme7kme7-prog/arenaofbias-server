@@ -38,6 +38,7 @@ export function createQuestions(db, { references = null } = {}) {
   const all = db.prepare(`${select} WHERE questions.deleted_at IS NULL ORDER BY questions.created_at DESC, questions.id`);
   const one = db.prepare(`${select} WHERE questions.id = ? AND questions.deleted_at IS NULL`);
   const owned = db.prepare(`${select} WHERE questions.owner_id = ? AND questions.deleted_at IS NULL ORDER BY questions.created_at DESC, questions.id`);
+  const ownedOne = db.prepare(`${select} WHERE questions.owner_id = ? AND questions.id = ? AND questions.deleted_at IS NULL`);
   const pending = db.prepare(`SELECT COUNT(*) AS n FROM questions WHERE owner_id = ? AND deleted_at IS NULL AND json_extract(moderation, '$.status') = 'pending'`);
   const insert = db.prepare(`INSERT INTO questions (id, owner_id, title, summary, prompt, tags, templates, created_at, moderation, category, domains, author_role, reference_credit) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const audit = db.prepare('INSERT INTO audit (at, actor_id, actor_name, action, task_id, work_id, detail) VALUES (?, ?, ?, ?, ?, ?, ?)');
@@ -101,6 +102,8 @@ export function createQuestions(db, { references = null } = {}) {
       samples: question.packaged ? [] : works.all(question.id).filter((work) => work.owner_id === question.owner_id)
         .map((work) => ({ id: work.id, taskId: work.task_id })) };
   }
+  const ownerQuestion = (question, viewer) => ({ ...dto(question, viewer, isSenior(viewer) ? 'admin' : true),
+    ...(question.moderation.status === 'rejected' ? { resubmittable: !approvedBefore.get(question.id) } : {}) });
   function referenceCredit(value = '') {
     if (typeof value !== 'string') fail(400, '参考图署名格式不正确');
     const credit = value.trim();
@@ -170,8 +173,11 @@ export function createQuestions(db, { references = null } = {}) {
       return question && (publicQuestion(question) || privileged) ? dto(question, viewer, privileged ? isSenior(viewer) ? 'admin' : true : false) : null;
     },
     // A rejected question its author can still resubmit: one that was never approved.
-    byOwner: (id, viewer = null) => owned.all(id).map(fromRow).map((question) => ({ ...dto(question, viewer, isSenior(viewer) ? 'admin' : true),
-      ...(question.moderation.status === 'rejected' ? { resubmittable: !approvedBefore.get(question.id) } : {}) })),
+    byOwner: (id, viewer = null) => owned.all(id).map(fromRow).map(question => ownerQuestion(question, viewer)),
+    resubmission(user, id) {
+      const row = ownedOne.get(user.id, id) ?? fail(404, '题目不存在', 'not_found');
+      return ownerQuestion(fromRow(row), user);
+    },
     pendingCount: () => allQuestions().filter((question) => question.moderation.status === 'pending').length,
     adminAll: (viewer = null) => allQuestions().map((question) => adminQuestion(question, viewer)),
     // Index reads need searchable text but not per-question work/vote queries.

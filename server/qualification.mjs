@@ -25,11 +25,21 @@ export function createQualification({ db, catalog, library, auth }) {
     } catch { /* An old package can be pruned; identical current content is enough. */ }
     return digest(current) === s.digest ? current : null;
   }
-  const available = pair => Boolean(resolve(pair.a_snapshot_json) && resolve(pair.b_snapshot_json));
-  const pairDto = pair => ({ id: pair.id, version: pair.version, taskId: pair.task_id,
+  const available = (pair, lookup = resolve) => Boolean(lookup(pair.a_snapshot_json) && lookup(pair.b_snapshot_json));
+  const readSnapshots = read => catalog.withSnapshot(() => {
+    const resolved = new Map();
+    return read(saved => {
+      if (!resolved.has(saved)) resolved.set(saved, resolve(saved));
+      return resolved.get(saved);
+    });
+  });
+  const pairDto = (pair, lookup = resolve) => {
+    const usable = available(pair, lookup);
+    return { id: pair.id, version: pair.version, taskId: pair.task_id,
     aWorkId: pair.a_work, bWorkId: pair.b_work, correctAnswer: pair.correct_answer,
-    explanation: pair.explanation, enabled: Boolean(pair.enabled), available: available(pair),
-    ...(!available(pair) ? { unavailableReason: '标准对内容已不可用，请重新选择作品' } : {}) });
+    explanation: pair.explanation, enabled: Boolean(pair.enabled), available: usable,
+    ...(!usable ? { unavailableReason: '标准对内容已不可用，请重新选择作品' } : {}) };
+  };
   const settingsDto = s => ({ version: s.version, questionCount: s.question_count, passPercent: s.pass_percent });
   const audit = (actor, action, detail) => db.prepare('INSERT INTO audit(at,actor_id,actor_name,action,detail) VALUES (?,?,?,?,?)')
     .run(Date.now(), actor.id, actor.name, action, JSON.stringify(detail));
@@ -109,14 +119,16 @@ export function createQualification({ db, catalog, library, auth }) {
       return summaries;
     },
     overview(user) {
-      const s = settings(), count = pairs().filter(p => p.enabled && available(p)).length;
-      const active = db.prepare("SELECT id FROM qualification_attempts WHERE user_id=? AND status='active'").get(user.id);
-      const last = db.prepare("SELECT * FROM qualification_attempts WHERE user_id=? AND status='completed' ORDER BY finished_at DESC LIMIT 1").get(user.id);
-      const required = Math.ceil(s.question_count * s.pass_percent / 100);
-      return { level: levelOf(user), eligible: levelOf(user) === 0,
-        exam: { ...settingsDto(s), kind: 'standard-pair', correctRequired: required, passCorrect: required,
-          unlimitedAttempts: true, timeLimitSeconds: null, availablePairCount: count, ready: count >= s.question_count },
-        activeAttemptId: active?.id ?? null, lastResult: last ? result(last) : null };
+      return readSnapshots(lookup => {
+        const s = settings(), count = pairs().filter(p => p.enabled && available(p, lookup)).length;
+        const active = db.prepare("SELECT id FROM qualification_attempts WHERE user_id=? AND status='active'").get(user.id);
+        const last = db.prepare("SELECT * FROM qualification_attempts WHERE user_id=? AND status='completed' ORDER BY finished_at DESC LIMIT 1").get(user.id);
+        const required = Math.ceil(s.question_count * s.pass_percent / 100);
+        return { level: levelOf(user), eligible: levelOf(user) === 0,
+          exam: { ...settingsDto(s), kind: 'standard-pair', correctRequired: required, passCorrect: required,
+            unlimitedAttempts: true, timeLimitSeconds: null, availablePairCount: count, ready: count >= s.question_count },
+          activeAttemptId: active?.id ?? null, lastResult: last ? result(last) : null };
+      });
     },
     start(user, body = {}) {
       if (levelOf(user) !== 0) fail(409, '你已具备认证成员资格');
@@ -187,7 +199,7 @@ export function createQualification({ db, catalog, library, auth }) {
         WHERE (i.a_token=? OR i.b_token=?) AND i.token_expires_at>? AND a.status='active'`).get(key, key, Date.now());
       return item ? resolve(item.a_token === key ? item.a_snapshot_json : item.b_snapshot_json) : null;
     },
-    adminInfo(actor) { staff(actor); return { settings: settingsDto(settings()), pairs: pairs().map(pairDto) }; },
+    adminInfo(actor) { staff(actor); return readSnapshots(lookup => ({ settings: settingsDto(settings()), pairs: pairs().map(pair => pairDto(pair, lookup)) })); },
     works(actor, taskId) { staff(actor); return { works: library.eligible(taskId).map(w => ({ id: w.id, title: w.title,
       modelName: w.modelName, promptVariant: w.promptVariant ?? '', preview: `${library.previewOrigin(w)}/` })) }; },
     saveSettings(actor, body) {

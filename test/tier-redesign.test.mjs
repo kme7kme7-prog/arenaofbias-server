@@ -443,3 +443,42 @@ test('risk aggregates exact IP sharing, model preference and hourly peaks, then 
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM arena_choice_evidence WHERE ip IS NOT NULL').get().n,3);
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM votes').get().n,4);
 }));
+
+test('qualification overview and admin summaries resolve repeated snapshots once per synchronous read', async t => fixture(async f => {
+  const saved = [];
+  for (let n = 0; n < 20; n++) {
+    const response = await f.call('root', 'POST', '/api/admin/qualification/pairs', { taskId: 'supernovai', aWorkId: `a${Math.floor(n / 12)}`, bWorkId: `b${n % 12}`, correctAnswer: 'a', explanation: `Pair ${n}` });
+    assert.equal(response.status, 200); saved.push(response.data.pair);
+  }
+  f.db.prepare('UPDATE qualification_pairs SET enabled=0 WHERE id=?').run(saved[0].id);
+  const order = f.db.prepare('SELECT id FROM qualification_pairs ORDER BY created_at,id').all().map(row => row.id);
+  const expectedPairs = order.map(id => ({ ...saved.find(pair => pair.id === id), enabled: id !== saved[0].id }));
+  const reads = [];
+  for (const [who, path] of [['member', '/api/qualification'], ['root', '/api/admin/qualification']]) {
+    const prototype = Object.getPrototypeOf(f.db.prepare('SELECT 1')), all = prototype.all, get = prototype.get;
+    const work = f.library.work;
+    let queries = 0, resolutions = 0;
+    prototype.all = function (...args) { queries++; return Reflect.apply(all, this, args); };
+    prototype.get = function (...args) { queries++; return Reflect.apply(get, this, args); };
+    f.library.work = function (...args) { resolutions++; return work.apply(this, args); };
+    let response;
+    try { response = await f.call(who, 'GET', path); }
+    finally { prototype.all = all; prototype.get = get; f.library.work = work; }
+    t.diagnostic(JSON.stringify({ path, queries, resolutions, bytes: Buffer.byteLength(JSON.stringify(response.data)) }));
+    reads.push({ path, resolutions });
+    assert.equal(response.status, 200);
+    if (who === 'root') assert.deepEqual(response.data.pairs, expectedPairs);
+    else assert.equal(response.data.exam.availablePairCount, 19);
+  }
+  assert.ok(reads.every(read => read.resolutions <= 28), `shared snapshots must not reread identical works (${JSON.stringify(reads)})`);
+  const original = f.db.prepare('SELECT a_snapshot_json FROM qualification_pairs WHERE id=?').get(saved[1].id).a_snapshot_json;
+  f.db.prepare('UPDATE qualification_pairs SET a_snapshot_json=? WHERE id=?').run(JSON.stringify({ ...JSON.parse(original), digest: 'different-content' }), saved[1].id);
+  assert.equal((await f.call('member', 'GET', '/api/qualification')).data.exam.availablePairCount, 18);
+  const mismatched = (await f.call('root', 'GET', '/api/admin/qualification')).data.pairs;
+  for (const pair of mismatched) assert.equal(pair.available, pair.id !== saved[1].id, 'different saved digests for the same work remain separate');
+  f.db.prepare('UPDATE qualification_pairs SET a_snapshot_json=? WHERE id=?').run(original, saved[1].id);
+  f.library.setFaceSettings(f.users.root, 'supernovai', 'a0', { show_arena: false });
+  const hidden = (await f.call('root', 'GET', '/api/admin/qualification')).data;
+  assert.deepEqual(hidden.pairs, expectedPairs.map(pair => ({ ...pair, available: pair.aWorkId !== 'a0', ...(pair.aWorkId === 'a0' ? { unavailableReason: '标准对内容已不可用，请重新选择作品' } : {}) })));
+  assert.equal((await f.call('member', 'GET', '/api/qualification')).data.exam.availablePairCount, 8, 'the next request must observe withdrawn content');
+}));

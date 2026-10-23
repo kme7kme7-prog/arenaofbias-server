@@ -129,6 +129,8 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     works: db.prepare(`${WORK} WHERE ${liveWork} ORDER BY works.created_at DESC`),
     worksOfTask: db.prepare(`${WORK} WHERE works.task_id = ? AND ${liveWork}`),
     worksOfOwner: db.prepare(`${WORK} WHERE works.owner_id = ? AND ${liveWork} ORDER BY works.created_at DESC`),
+    samplesOfOwner: db.prepare(`${WORK} WHERE works.owner_id = ? AND works.task_id = ? AND ${liveWork}
+      AND (works.curated_as IS NULL OR works.curated_as = '') ORDER BY works.created_at DESC`),
     reviewStates: db.prepare(`SELECT id, task_id, status, moderation, reviewed_gallery_at, show_gallery, show_arena, curated_as FROM works WHERE ${liveWork}`),
     reviewOverrides: db.prepare('SELECT task_id, work_id, deleted_at, status, show_gallery, show_arena FROM work_overrides'),
     ownState: db.prepare(`SELECT id, task_id, status, status_reason, moderation FROM works WHERE id = ? AND task_id = ? AND owner_id = ?
@@ -633,6 +635,13 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
         ...(work.status === 'unverified' && queue.has(work.id) ? { queueAhead: queue.get(work.id) } : {}),
         ...(workChangedAt(work) > seen ? { changed: true } : {}),
       }));
+    },
+    resubmissionWorks(user, taskId) {
+      return q.samplesOfOwner.all(user.id, taskId).map(row => {
+        const work = this.toPublic(fromRow(row), user);
+        return Object.fromEntries(['id', 'task', 'title', 'modelName', 'effort', 'moderation', 'scene']
+          .filter(key => Object.hasOwn(work, key)).map(key => [key, work[key]]));
+      });
     },
     submissionStatus(user, taskId, id) {
       const row = q.ownState.get(id, taskId, user.id) ?? fail(404, '作品不存在', 'not_found');

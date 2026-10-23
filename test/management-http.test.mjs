@@ -397,3 +397,78 @@ test('curated summary DTOs match the legacy projection for hidden/deleted/AI/are
   }
   assert.equal((await call('/api/admin/curated', 'moderator')).status, 403);
 }));
+
+test('resubmission reads one owned question and thin samples without the full me projection', async t => fixture(async ({ platform, call, member, moderator, admin, add }) => {
+  const { question } = (await call('/api/admin/questions', 'admin', { title: 'My rejected question', summary: 'Own summary', prompt: 'Own secret prompt', category: '建模', domains: ['物理'], templates: ['static'] })).data;
+  platform.db.prepare('UPDATE questions SET owner_id=?,author_role=\'user\',moderation=? WHERE id=?').run(member.id, JSON.stringify({ status: 'rejected', reason: 'Revise this idea', round: 2, previous: { reason: 'Prior reason', at: 1 } }), question.id);
+  for (let n = 0; n < 180; n++) add(`unrelated-${n}`);
+  const sampleAt = Date.now();
+  add('sample', { task: question.id, moderation: 'rejected', at: sampleAt });
+  add('second-sample', { task: question.id, at: sampleAt });
+  platform.db.prepare('UPDATE works SET moderation=? WHERE id=\'sample\'').run(JSON.stringify({ status: 'rejected', source: 'automatic', reason: 'Do not disclose this model output' }));
+  add('other-sample', { task: question.id, owner: moderator });
+  add('deleted-sample', { task: question.id });
+  add('curated-sample', { task: question.id });
+  platform.db.exec("UPDATE works SET deleted_at=1 WHERE id='deleted-sample';UPDATE works SET curated_as='archive' WHERE id='curated-sample'");
+  const prototype = Object.getPrototypeOf(platform.db.prepare('SELECT 1')), all = prototype.all, get = prototype.get;
+  let queries = 0;
+  prototype.all = function (...args) { queries++; return Reflect.apply(all, this, args); };
+  prototype.get = function (...args) { queries++; return Reflect.apply(get, this, args); };
+  let legacy;
+  try { legacy = await call('/api/me', 'member'); }
+  finally { prototype.all = all; prototype.get = get; }
+  t.diagnostic(JSON.stringify({ legacyQueries: queries, legacyBytes: Buffer.byteLength(JSON.stringify(legacy.data)) }));
+  const scope = `/api/me?view=resubmit&question=${question.id}`;
+  const authorWorks = platform.library.authorWorks, allWorks = platform.library.allWorks;
+  platform.library.authorWorks = platform.library.allWorks = () => { throw new Error('resubmission must not enumerate unrelated works or the review queue'); };
+  let selected;
+  queries = 0;
+  prototype.all = function (...args) { queries++; return Reflect.apply(all, this, args); };
+  prototype.get = function (...args) { queries++; return Reflect.apply(get, this, args); };
+  try { selected = await call(scope, 'member'); }
+  finally { prototype.all = all; prototype.get = get; platform.library.authorWorks = authorWorks; platform.library.allWorks = allWorks; }
+  t.diagnostic(JSON.stringify({ scopedQueries: queries, scopedBytes: Buffer.byteLength(JSON.stringify(selected.data)) }));
+  assert.equal(selected.status, 200);
+  assert.deepEqual(selected.data.question, legacy.data.questions.find(q => q.id === question.id));
+  assert.deepEqual(selected.data.works, legacy.data.works.filter(w => w.task === question.id).map(w => Object.fromEntries(['id','task','title','modelName','effort','moderation','scene'].filter(key => Object.hasOwn(w, key)).map(key => [key, w[key]]))));
+  assert.deepEqual(new Set(selected.data.works.map(w => w.id)), new Set(['sample', 'second-sample']));
+  assert.ok(Buffer.byteLength(JSON.stringify(selected.data)) < Buffer.byteLength(JSON.stringify(legacy.data)) / 10);
+  assert.equal(selected.data.question.moderation.reason, 'Revise this idea');
+  assert.equal(selected.data.works.find(w => w.id === 'sample').moderation.reason, '自动内容审查未通过，请联系管理员');
+  for (const who of ['admin', 'moderator']) assert.equal((await call(scope, who)).status, 404, 'no staff owner bypass');
+  for (const query of ['', '&question=', '&question=missing', '&question=a/b', '&question=' + 'x'.repeat(129), `&question=${question.id}&question=${question.id}`, `&question=${question.id}&owner=x`]) {
+    const response = await call('/api/me?view=resubmit' + query, 'member');
+    assert.equal(response.status, query === '&question=missing' ? 404 : 400, query);
+  }
+  platform.db.prepare('INSERT INTO audit(at,actor_id,actor_name,action,task_id,detail)VALUES(?,?,?,?,?,?)').run(Date.now(), admin.id, admin.name, 'question-review', question.id, '{"status":"approved"}');
+  assert.equal((await call(scope, 'member')).data.question.resubmittable, false, 'past approval keeps the original resubmission restriction');
+  platform.db.prepare('UPDATE questions SET deleted_at=1 WHERE id=?').run(question.id);
+  assert.equal((await call(scope, 'member')).status, 404);
+}));
+
+test('resubmission compressed responses keep the owner send guard on success and fallback', async () => {
+  for (const failed of [false, true]) for (const change of ['logout', 'switch', 'role', 'level']) {
+    let begin, finish, reject, source, encoding, armed = false;
+    const began = new Promise(resolve => { begin = resolve; });
+    await fixture(async ({ platform, call, member, moderator }) => {
+      const { question } = (await call('/api/admin/questions', 'admin', { title: 'Owned question', summary: 'Summary', prompt: 'Private prompt '.repeat(200), category: '建模', domains: ['物理'], templates: ['static'] })).data;
+      platform.db.prepare('UPDATE questions SET owner_id=? WHERE id=?').run(member.id, question.id);
+      armed = true;
+      const reading = call(`/api/me?view=resubmit&question=${question.id}`, 'member', undefined, { 'accept-encoding': 'gzip' });
+      await began;
+      if (change === 'logout') platform.db.prepare('DELETE FROM sessions WHERE user_id=?').run(member.id);
+      if (change === 'switch') platform.db.prepare('UPDATE sessions SET user_id=? WHERE user_id=?').run(moderator.id, member.id);
+      if (change === 'role') platform.db.prepare("UPDATE users SET role='moderator' WHERE id=?").run(member.id);
+      if (change === 'level') platform.db.prepare('UPDATE users SET member_level=1-member_level WHERE id=?').run(member.id);
+      if (failed) reject(new Error('controlled resubmission compression failure'));
+      else finish(await compress(source, encoding));
+      const response = await reading;
+      assert.equal(response.status, ['logout', 'switch'].includes(change) ? 401 : 403, `${failed}/${change}`);
+      assert.deepEqual(Object.keys(response.data), ['error']);
+    }, { compressBody(body, used) {
+      if (!armed) return compress(body, used);
+      armed = false; source = body; encoding = used; begin();
+      return new Promise((yes, no) => { finish = yes; reject = no; });
+    } });
+  }
+});

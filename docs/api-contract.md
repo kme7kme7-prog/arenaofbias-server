@@ -604,6 +604,8 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 投稿完成页可用 `?view=submission&task=<题目ID>&work=<投稿ID>&question=<可选本人题目ID>` 读取单件状态，也可只带 question。task/work 必须成对，至少指定 work 或 question；各 ID 为 1–128 位 ASCII 字母、数字、冒号、点、下划线或连字符，首位须为字母或数字。空值、重复或未知查询键返回 `400 invalid_query`。响应仅含请求的 `{work:{id,task,status,reason,moderation},question:{id,moderation}}`；moderation 沿用作者可见的审核状态与理由，自动拒绝作品不下发模型原始理由。无正文、预览地址、生成信息或全量队列查询。只允许读取当前会话拥有且未删除的投稿/题目，管理员没有所有权豁免；任一目标不存在、不属于本人、已删除或投稿所属题目已删除，整次返回 `404 not_found`。
 
+题目重提表单可用 `?view=resubmit&question=<本人题目ID>`，query 仅允许 view 和单个 question，ID 格式及参数错误沿用上述规则。响应 `{question,works}`：question 完整等于旧本人 questions 列表中的该项，含作者可见题面、参考图、审核理由和符合条件时的 resubmittable；works 只含该题本人未删除、未收录的示例，每项仅 `{id,task,title,modelName,effort,moderation,scene}`，沿原创建时间倒序。scene 沿用本人预览权限，审核理由沿用原脱敏规则；不读取其它题目/作品、全站核验队列或参与统计。题目不存在、删除或非本人时为 `404 not_found`，无管理员所有权豁免。读取不改变能否重提的判定，提交时仍执行原重提规则及权限校验。
+
 **`POST /api/me/works/seen`** —— 标记作品状态变化已读
 
 认证：登录；限流：write 桶，遵循同源校验。无需请求体，将当前用户的 `works_seen_at`（可空毫秒时间，v31 迁移新增）设为当前时间，成功 `200`：`{ "ok": true }`。错误：`401` / `403`（Origin 不受信任）/ `429`。后续发生的决定仍会产生 `me.updates` 和 `changed: true`。

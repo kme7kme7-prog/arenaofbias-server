@@ -610,6 +610,12 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     const user = signedIn(ctx);
     const query = ctx.url.searchParams;
     if (query.size) {
+      if (query.get('view') === 'resubmit') {
+        const id = query.get('question');
+        if (query.size !== 2 || query.getAll('view').length !== 1 || query.getAll('question').length !== 1
+          || !/^[a-zA-Z0-9][a-zA-Z0-9:._-]{0,127}$/.test(id ?? '')) fail(400, '重提题目参数无效', 'invalid_query');
+        return { question: questions.resubmission(user, id), works: library.resubmissionWorks(user, id) };
+      }
       if (query.get('view') === 'submission') {
         const allowed = new Set(['view', 'task', 'work', 'question']);
         if ([...query.keys()].some(key => !allowed.has(key) || query.getAll(key).length !== 1)) fail(400, '投稿状态参数无效', 'invalid_query');

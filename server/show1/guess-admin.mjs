@@ -4,8 +4,10 @@ import { assertSameOrigin, fail, readJson } from '../http.mjs';
 import { GUESS_MODELS, VENDOR_REGION, dayNumber, guessDayKey, modelById, registerExtraModels, validateExtraModels } from './guess-logic.mjs';
 
 // Append-only server data, independent of the checked-in base catalogue.
-export function registerGuessAdmin(router, { db, config, adminOnly, limit }) {
+export function registerGuessAdmin(router, { db, config, adminOnly, limit, adminOn, adminJson }) {
   if (!config?.dataDir || !adminOnly) return;
+  const on = adminOn ?? ((...args) => router.on(...args));
+  const json = adminJson ?? ((ctx, bytes) => readJson(ctx.req, bytes));
   const file = join(config.dataDir, 'guess-models-extra.json');
   const saved = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : { models: [], vendorRegions: {} };
   // The process owns one catalogue. Re-registering an application in tests is idempotent.
@@ -13,7 +15,7 @@ export function registerGuessAdmin(router, { db, config, adminOnly, limit }) {
   const fresh = saved.models.filter(m => !modelById.has(m.id));
   if (fresh.length) registerExtraModels({ ...saved, models: fresh });
   const gate = ctx => { const user = adminOnly(ctx); limit?.write?.(user.id); return user; };
-  router.on('GET', '/api/admin/guess/stats', ctx => {
+  on('GET', '/api/admin/guess/stats', ctx => {
     gate(ctx);
     const summary = where => db.prepare(`SELECT COUNT(*) AS played, COALESCE(SUM(won),0) AS won,
       ROUND(AVG(CASE WHEN won=1 THEN attempts END),1) AS avgSteps FROM guess_results WHERE superseded=0 ${where}`).get();
@@ -28,7 +30,7 @@ export function registerGuessAdmin(router, { db, config, adminOnly, limit }) {
         GROUP BY answer_id ORDER BY times DESC,id`).all().map(row => ({ ...row, name: modelById.get(row.id)?.name ?? row.id })),
     };
   });
-  router.on('GET', '/api/admin/guess/models', ctx => {
+  on('GET', '/api/admin/guess/models', ctx => {
     gate(ctx);
     return { total: GUESS_MODELS.length, extraCount: extras.size,
       vendors: Object.entries(VENDOR_REGION).map(([org, region]) => ({ org, region })),
@@ -36,10 +38,10 @@ export function registerGuessAdmin(router, { db, config, adminOnly, limit }) {
         difficulty: m.difficulty, answerEligible: m.answerEligible, dailyEligible: m.dailyEligible, extra: extras.has(m.id) })),
     };
   });
-  router.on('POST', '/api/admin/guess/models', async ctx => {
+  on('POST', '/api/admin/guess/models', async ctx => {
     gate(ctx);
-    assertSameOrigin(ctx.req, config);
-    const body = await readJson(ctx.req, 8192);
+    if (!ctx.reauthorize) assertSameOrigin(ctx.req, config);
+    const body = await json(ctx, 8192);
     const keys = ['name','id','org','region','year','month','difficulty','popularity','contextK','priceOut','openWeights','reasoning','modalities','dailyEligible'];
     if (Object.keys(body).some(k => !keys.includes(k))) fail(400, '模型字段无效');
     if (saved.models.length >= 2000) fail(409, '增量题库已满，请整理主题库');

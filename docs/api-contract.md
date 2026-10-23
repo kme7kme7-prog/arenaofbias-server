@@ -1311,6 +1311,8 @@ readyElapsedMs沿用该match首次有效选择时间（验证码等待/重试不
 
 ## dots 审核令牌与模式（v48）
 
+后续 v50 新增可选独立管理员绑定及 `admin:read/write` 显式权限；只通过 `/api/dots/admin/*` 的注册白名单复用原业务，详见 [管理员助手 API](dots-admin-api.md)。默认 token scope、原七项作品处理及 `/api/dots/` 以外 Bearer 拒绝保持。读取 JSON 后写入前、压缩成功/失败/不压缩实际发送前均重查管理员身份与 token/scope/绑定。v50 不重写既有用户、作品或权限。v51 增加有界私有 recapture_jobs；管理员重截图为异步 202、只读状态/下载，不自动替换作品图。另提供 works:read 的实际 .sbox 回读及带 version/reason 的 handoff/reopen 人工复核，见同一文档。
+
 追加幂等迁移 v48，仅新增 `moderation_tokens`（只存 SHA-256）、`moderation_token_audit`、`moderation_settings` 三张表，不改已有行。`MODERATION_MODE` 非 `machine` 时，新投稿与作者改送审信息产生的 pending 额外带 `route`（`dots` / `dots-review-only`）；状态值含义不变，无 `route` 的 pending（包括迁移前已排队的）照旧走机器。机器对 `dots-review-only` 作品给出 review 时结果带 `route`，dots 截止前可决定；dots 决定写 `source: "dots"`、`reviewer: "dots:<标签>"`；机器在 dots 超时后接手时写 `fallback: "dots-timeout"`（切换模式后接手为 `mode-change`）。所有决定仍经同一个条件更新，先写入者生效。
 
 | 方法 | 路径 | 说明 |

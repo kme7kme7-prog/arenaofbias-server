@@ -11,6 +11,10 @@
 | `meta:write` | 改作品声明。不能改归属题目、门面或核验 | `PATCH /api/dots/works/:task/:id/meta` |
 | `preview:write` | 给作品上传或替换列表卡片的 3D 小模型预览（`.sbox`） | `PUT /api/dots/works/:task/:id/preview` |
 | `captures:write` | 替换桌面或手机首屏截图（`first` / `mobile`，仅 JPEG） | `PUT /api/dots/works/:task/:id/captures/:slot` |
+| `admin:read` | 绑定独立高级管理员后读取管理能力、分页队列及运营配置 | `/api/dots/admin/*` 的明确 GET 白名单 |
+| `admin:write` | 绑定独立高级管理员后调用原管理业务校验 | `/api/dots/admin/*` 的明确写白名单 |
+
+管理员助手的独立身份、显式授权、能力清单与撤权边界见 [管理员助手 API](dots-admin-api.md)。现有七项作品权限独立保留，新建令牌仍默认只有 `moderation`；不会因部署自动获得管理员权限。
 
 缺某项权限时返回 `403 {"code":"scope_required"}`。权限由运维逐项开关，去掉某项或整个令牌作废都在下一个请求生效。
 

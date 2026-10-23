@@ -379,7 +379,7 @@ test('works queued before the switch keep the machine path; switching modes is a
 test('migrations 48 and 49 add tables to a populated v47 database without touching existing rows', async () => {
   const root = mkdtempSync(join(tmpdir(), 'dots-v47-'));
   try {
-    assert.equal(MIGRATIONS.length, 49);
+    assert.equal(MIGRATIONS.length, 51);
     const file = join(root, 'platform.db');
     openDatabase(file).close();
     const now = Date.now();
@@ -402,7 +402,7 @@ test('migrations 48 and 49 add tables to a populated v47 database without touchi
     const before = raw.prepare('SELECT * FROM works ORDER BY id').all();
     raw.close();
     const upgraded = openDatabase(file);
-    assert.equal(upgraded.prepare('PRAGMA user_version').get().user_version, 49);
+    assert.equal(upgraded.prepare('PRAGMA user_version').get().user_version, MIGRATIONS.length);
     assert.deepEqual(upgraded.prepare('SELECT * FROM works ORDER BY id').all(), before);
     for (const table of ['moderation_tokens', 'moderation_token_audit', 'moderation_settings', 'cover_history']) {
       assert.equal(upgraded.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = ?").get(table).n, 1);
@@ -668,7 +668,7 @@ test('migration 49 gives tokens created under v48 the moderation scope only', ()
     db.close();
     const upgraded = openDatabase(file);
     try {
-      assert.equal(upgraded.prepare('PRAGMA user_version').get().user_version, 49);
+      assert.equal(upgraded.prepare('PRAGMA user_version').get().user_version, MIGRATIONS.length);
       assert.deepEqual(createModerationTokens(upgraded).list().map((row) => [row.id, row.scopes]), [['aaaaaaaaaaaa', ['moderation']]]);
       MIGRATIONS[48](upgraded);
     } finally { upgraded.close(); }

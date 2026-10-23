@@ -20,6 +20,8 @@ import { createSharedRead } from './shared-read.mjs';
 import { createComments } from './comments.mjs';
 import { createChangelog } from './changelog.mjs';
 import { createAnnouncements, retiredAnnouncementStream } from './announcements.mjs';
+import { createRecaptures } from './recapture.mjs';
+import { createDotsAdmin } from './dots-admin.mjs';
 import { createDotsModeration, createModerationMode, createModerationTokens } from './dots-moderation.mjs';
 import { createCaptureStore } from './work-captures.mjs';
 import { createCoverStore } from './work-covers.mjs';
@@ -95,8 +97,18 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const covers = createCoverStore({ db, library });
   const previews = createPreviewStore({ db, library });
   const captureStore = createCaptureStore({ db, library });
-  const dots = createDotsModeration({ db, config, library, mode: moderationMode, tokens: createModerationTokens(db),
-    covers, previews, captureStore, coverBytes: limits.coverBytes, onChange: () => arena.invalidate(),
+  const dotsAdmin = createDotsAdmin({ db, auth });
+  const dotsTokens = createModerationTokens(db);
+  const recaptures = createRecaptures({ db, library, capturer, rootDir: join(config.dataDir, 'recaptures'), authorizeJob: owner => {
+    const current = dotsTokens.active(owner.tokenId);
+    if (!current) fail(401, '审核令牌无效或已吊销', 'unauthorized');
+    if (config.moderation?.dotsApiOff || config.moderation?.dotsDisabledScopes?.includes('admin:write')) fail(503, '管理员任务已被运维关闭', 'scope_disabled');
+    if (!current.scopes.includes('admin:write')) fail(403, '管理员写权限已撤回', 'scope_required');
+    const next = dotsAdmin.bindings.authority(current.id);
+    if (next.actor.id !== owner.actorId || next.revision !== owner.bindingRevision) fail(403, '管理员绑定已变化', 'admin_binding_changed');
+  } });
+  const dots = createDotsModeration({ db, config, library, mode: moderationMode, tokens: dotsTokens,
+    covers, previews, captureStore, admin: dotsAdmin, compressBody, coverBytes: limits.coverBytes, onChange: () => arena.invalidate(),
     categoryOf: (taskId) => catalog.task(taskId)?.category ?? '', tasksIn: (category) => catalog.tasks().filter((task) => task.category === category).map((task) => task.id) });
   const queueWork = (work) => {
     if (work.moderation.status === 'pending') moderator.enqueue(work);
@@ -292,23 +304,61 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const publicBootstrap = { full: anonymousBootstrap(false), lite: anonymousBootstrap(true) };
 
   const router = createRouter();
+  // Only these literal registrations enter the automation registry. The request
+  // URL is never forwarded to the Cookie router or accepted as an operation name.
+  const adminOn = (method, path, handler, dotsPath = path.replace('/api/admin/', '/')) => {
+    router.on(method, path, handler);
+    dotsAdmin.on(method, `/api/dots/admin${dotsPath}`, handler);
+  };
+  const adminJson = async (ctx, bytes) => {
+    const body = await readJson(ctx.req, bytes);
+    ctx.reauthorize?.();
+    ctx.auditFields?.(body);
+    return body;
+  };
+  dotsAdmin.on('GET', '/api/dots/admin/recaptures/source', ctx => {
+    const params = ctx.url.searchParams;
+    if (params.size !== 2 || params.getAll('task').length !== 1 || params.getAll('id').length !== 1) fail(400, '截图源参数无效', 'invalid_query');
+    return recaptures.source(params.get('task'), params.get('id'));
+  });
+  dotsAdmin.on('POST', '/api/dots/admin/recaptures', async ctx => {
+    const body = await adminJson(ctx);
+    const job = await recaptures.request(ctx.dots, body);
+    ctx.auditNote(`job:${job.jobId}`);
+    return job;
+  }, { status: 202 });
+  dotsAdmin.on('GET', '/api/dots/admin/recaptures/:jobId', ctx => {
+    if (ctx.url.searchParams.size) fail(400, '任务参数无效', 'invalid_query');
+    ctx.auditNote(`job:${ctx.params.jobId}`);
+    return recaptures.get(ctx.dots, ctx.params.jobId);
+  });
+  dotsAdmin.on('GET', '/api/dots/admin/recaptures/:jobId/images/:slot', async ctx => {
+    if (ctx.url.searchParams.size) fail(400, '任务图片参数无效', 'invalid_query');
+    ctx.auditNote(`job:${ctx.params.jobId}/${ctx.params.slot}`);
+    const found = await recaptures.download(ctx.dots, ctx.params.jobId, ctx.params.slot);
+    return streamFile(ctx.req, ctx.res, found, { 'Content-Type': found.type, 'Content-Disposition': `attachment; filename="${found.filename}"`,
+      'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; sandbox" }, { beforeSend: () => {
+      ctx.reauthorize();
+      recaptures.verifyDownload(ctx.dots, ctx.params.jobId, ctx.params.slot);
+    } });
+  });
   router.on('GET', '/api/announcements', ctx => sendJson(ctx.res, 200, announcements.published(), { 'Cache-Control': 'no-cache' }));
   router.on('GET', '/api/announcements/events', ctx => retiredAnnouncementStream(ctx.req, ctx.res));
-  router.on('POST', '/api/admin/announcements', async ctx => {
+  adminOn('POST', '/api/admin/announcements', async ctx => {
     const actor = adminOnly(ctx);
-    return announcements.create(actor, await readJson(ctx.req));
+    return announcements.create(actor, await adminJson(ctx));
   });
   router.on('GET', '/api/changelog', ctx => sendJson(ctx.res, 200, changelog.published(ctx.url.searchParams.get('limit')), { 'Cache-Control': 'no-cache' }));
-  router.on('GET', '/api/admin/changelog', ctx => { adminOnly(ctx); return changelog.all(); });
-  router.on('POST', '/api/admin/changelog', async ctx => {
+  adminOn('GET', '/api/admin/changelog', ctx => { adminOnly(ctx); return changelog.all(); });
+  adminOn('POST', '/api/admin/changelog', async ctx => {
     const actor = adminOnly(ctx);
-    return changelog.create(actor, await readJson(ctx.req));
+    return changelog.create(actor, await adminJson(ctx));
   });
-  router.on('POST', '/api/admin/changelog/:id', async ctx => {
+  adminOn('POST', '/api/admin/changelog/:id', async ctx => {
     const actor = adminOnly(ctx);
-    return changelog.update(actor, ctx.params.id, await readJson(ctx.req));
+    return changelog.update(actor, ctx.params.id, await adminJson(ctx));
   });
-  router.on('DELETE', '/api/admin/changelog/:id', ctx => { adminOnly(ctx); return changelog.remove(ctx.params.id); });
+  adminOn('DELETE', '/api/admin/changelog/:id', ctx => { adminOnly(ctx); return changelog.remove(ctx.params.id); });
   router.on('GET', '/api/fold.js', ({ req, res }) => {
     res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Content-Length': foldScript.length,
       'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' });
@@ -401,14 +451,14 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     return { question, work: library.toPublic(work, user) };
   });
 
-  router.on('POST', '/api/admin/questions', async (ctx) => {
+  adminOn('POST', '/api/admin/questions', async (ctx) => {
     const admin = adminOnly(ctx);
     limit.write(admin.id);
-    const question = questions.createByAdmin(admin, await readJson(ctx.req), catalog.tags());
+    const question = questions.createByAdmin(admin, await adminJson(ctx), catalog.tags());
     arena.invalidate();
     return { question };
   });
-  router.on('GET', '/api/admin/questions', (ctx) => {
+  adminOn('GET', '/api/admin/questions', (ctx) => {
     const admin = adminOnly(ctx);
     return { questions: questions.adminAll(admin).map(({ ownerId, ...question }) => ({
       ...question,
@@ -418,17 +468,17 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       }) : [],
     })) };
   });
-  router.on('POST', '/api/questions/:id/moderation', async (ctx) => {
+  adminOn('POST', '/api/questions/:id/moderation', async (ctx) => {
     const admin = adminOnly(ctx);
     limit.write(admin.id);
-    const question = questions.review(admin, ctx.params.id, await readJson(ctx.req));
+    const question = questions.review(admin, ctx.params.id, await adminJson(ctx));
     arena.invalidate();
     return { question };
-  });
-  router.on('POST', '/api/admin/questions/batch-moderation', async (ctx) => {
+  }, '/questions/:id/moderation');
+  adminOn('POST', '/api/admin/questions/batch-moderation', async (ctx) => {
     const admin = adminOnly(ctx);
     limit.write(admin.id);
-    const body = await readJson(ctx.req);
+    const body = await adminJson(ctx);
     batchDecision(body, ['approved', 'rejected'], 'rejected');
     batchItems(body.ids, 50, true);
     const results = body.ids.map((id) => batchResult({ id }, () => {
@@ -443,10 +493,10 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     arena.invalidate();
     return { results };
   });
-  router.on('POST', '/api/admin/questions/:id/meta', async (ctx) => {
+  adminOn('POST', '/api/admin/questions/:id/meta', async (ctx) => {
     const admin = adminOnly(ctx);
     limit.write(admin.id);
-    const question = questions.edit(admin, ctx.params.id, await readJson(ctx.req));
+    const question = questions.edit(admin, ctx.params.id, await adminJson(ctx));
     arena.invalidate();
     return { question };
   });
@@ -457,13 +507,13 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     arena.invalidate();
     return { question };
   });
-  router.on('DELETE', '/api/questions/:id', (ctx) => {
+  adminOn('DELETE', '/api/questions/:id', (ctx) => {
     const user = signedIn(ctx);
     limit.write(user.id);
     questions.remove(user, ctx.params.id);
     arena.invalidate();
     return { ok: true };
-  });
+  }, '/questions/:id');
 
   // Upload: the raw ZIP/HTML/text body is inspected and staged for the trial load.
   router.on('POST', '/api/references', async (ctx) => {
@@ -506,33 +556,44 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     arena.invalidate();
     return { work: library.toPublic(work, user) };
   });
-  router.on('DELETE', '/api/works/:task/:id', async (ctx) => {
+  adminOn('DELETE', '/api/works/:task/:id', async (ctx) => {
     const user = signedIn(ctx);
-    const body = ctx.req.headers['content-type'] ? await readJson(ctx.req) : {};
+    const body = ctx.req.headers['content-type'] ? await adminJson(ctx) : {};
     library.remove(user, ctx.params.task, ctx.params.id, body);
     arena.invalidate();
     return { ok: true };
-  });
-  router.on('POST', '/api/works/:task/:id/review', async (ctx) => {
+  }, '/works/:task/:id');
+  adminOn('POST', '/api/works/:task/:id/review', async (ctx) => {
     const admin = staffOnly(ctx);
     limit.write(admin.id);
-    const body = await readJson(ctx.req);
+    const body = await adminJson(ctx);
     const work = library.review(admin, ctx.params.task, ctx.params.id, body);
     arena.invalidate();
     return { work: library.adminWork(work, admin) };
-  });
-  router.on('POST', '/api/works/:task/:id/moderation', async (ctx) => {
+  }, '/works/:task/:id/review');
+  adminOn('POST', '/api/works/:task/:id/moderation', async (ctx) => {
     const admin = staffOnly(ctx);
     limit.write(admin.id);
-    const work = library.reviewContent(admin, ctx.params.task, ctx.params.id, await readJson(ctx.req));
+    const work = library.reviewContent(admin, ctx.params.task, ctx.params.id, await adminJson(ctx));
     arena.invalidate();
     return { work: library.adminWork(work, admin) };
+  }, '/works/:task/:id/moderation');
+  dotsAdmin.on('GET', '/api/dots/admin/works/:task/:id/moderation/state', ctx => {
+    if (ctx.url.searchParams.size) fail(400, '审核状态参数无效', 'invalid_query');
+    return library.moderationState(adminOnly(ctx), ctx.params.task, ctx.params.id);
+  });
+  for (const action of ['handoff', 'reopen']) dotsAdmin.on('POST', `/api/dots/admin/works/:task/:id/moderation/${action}`, async ctx => {
+    const actor = adminOnly(ctx);
+    limit.write(actor.id);
+    const result = library.handoffModeration(actor, ctx.params.task, ctx.params.id, await adminJson(ctx), action);
+    arena.invalidate();
+    return result;
   });
   // Who decides new submissions: machine, dots or dots-review-only (null returns to MODERATION_MODE).
-  router.on('GET', '/api/admin/moderation-mode', (ctx) => { adminOnly(ctx); return moderationMode.describe(); });
-  router.on('POST', '/api/admin/moderation-mode', async (ctx) => {
+  adminOn('GET', '/api/admin/moderation-mode', (ctx) => { adminOnly(ctx); return moderationMode.describe(); });
+  adminOn('POST', '/api/admin/moderation-mode', async (ctx) => {
     const admin = adminOnly(ctx);
-    const body = await readJson(ctx.req);
+    const body = await adminJson(ctx);
     const result = moderationMode.set(body.mode === 'env' ? null : body.mode ?? null, admin.name);
     db.prepare('INSERT INTO audit (at, actor_id, actor_name, action, task_id, work_id, detail) VALUES (?, ?, ?, ?, NULL, NULL, ?)')
       .run(Date.now(), admin.id, admin.name, 'moderation-mode', JSON.stringify({ mode: body.mode ?? null }));
@@ -540,41 +601,41 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     return result;
   });
   // Cover history and rollback (covers replaced by dots); old files are never deleted.
-  router.on('GET', '/api/works/:task/:id/cover-history', (ctx) => {
+  adminOn('GET', '/api/works/:task/:id/cover-history', (ctx) => {
     adminOnly(ctx);
     const work = library.work(ctx.params.task, ctx.params.id);
     if (!work || work.curated) fail(404, '作品不存在');
     return { cover: work.cover ? `media/${work.id}/${work.cover}` : null, entries: covers.history(work) };
-  });
+  }, '/works/:task/:id/cover-history');
   // Previews uploaded by dots: history and rollback; baked previews are never touched.
-  router.on('GET', '/api/works/:task/:id/preview-history', (ctx) => {
+  adminOn('GET', '/api/works/:task/:id/preview-history', (ctx) => {
     adminOnly(ctx);
     const work = library.work(ctx.params.task, ctx.params.id);
     if (!work || work.curated) fail(404, '作品不存在');
     return { current: previews.current(work).version, entries: previews.history(work) };
-  });
-  router.on('POST', '/api/works/:task/:id/preview/rollback', async (ctx) => {
+  }, '/works/:task/:id/preview-history');
+  adminOn('POST', '/api/works/:task/:id/preview/rollback', async (ctx) => {
     const admin = adminOnly(ctx);
-    const body = await readJson(ctx.req);
+    const body = await adminJson(ctx);
     const result = previews.rollback(library.work(ctx.params.task, ctx.params.id), body.historyId ?? null, { id: admin.id, name: admin.name });
     arena.invalidate();
     return result;
-  });
-  router.on('POST', '/api/works/:task/:id/cover/rollback', async (ctx) => {
+  }, '/works/:task/:id/preview/rollback');
+  adminOn('POST', '/api/works/:task/:id/cover/rollback', async (ctx) => {
     const admin = adminOnly(ctx);
-    const body = await readJson(ctx.req);
+    const body = await adminJson(ctx);
     const result = covers.rollback(library.work(ctx.params.task, ctx.params.id), body.historyId ?? null, { id: admin.id, name: admin.name });
     arena.invalidate();
     return result;
-  });
-  router.on('POST', '/api/works/:task/:id/moderation/retry', (ctx) => {
+  }, '/works/:task/:id/cover/rollback');
+  adminOn('POST', '/api/works/:task/:id/moderation/retry', (ctx) => {
     const admin = staffOnly(ctx);
     limit.write(admin.id);
     const work = library.retryModeration(admin, ctx.params.task, ctx.params.id);
     moderator.enqueue(work);
     arena.invalidate();
     return { work: library.adminWork(work, admin) };
-  });
+  }, '/works/:task/:id/moderation/retry');
   router.on('POST', '/api/works/:task/:id/reactions', async (ctx) => {
     const user = emailBound(ctx);
     limit.write(user.id);
@@ -657,7 +718,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     limit.write(user.id);
     return { user: auth.public(auth.updateProfile(user, await readJson(ctx.req))) };
   });
-  router.on('GET', '/api/review', (ctx) => {
+  adminOn('GET', '/api/review', (ctx) => {
     const admin = staffOnly(ctx);
     if (ctx.url.searchParams.size) return catalog.withSnapshot(() => management.list(ctx.url.searchParams, admin));
     // Reuse question lookups within this response only; the next request reads current decisions.
@@ -665,62 +726,62 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       works: library.allWorks().map((work) => library.adminWork(work, admin)), audit: library.auditLog(),
       questions: isSenior(admin) ? questions.adminAll(admin) : [],
     }));
-  });
+  }, '/review');
 
   // Account administration for Gallery's member list and the admin web app (the CLI in server/cli.mjs does the same).
-  router.on('GET', '/api/admin/users', (ctx) => {
+  adminOn('GET', '/api/admin/users', (ctx) => {
     const admin = adminOnly(ctx);
     if (ctx.url.searchParams.size) return catalog.withSnapshot(() => management.members(ctx.url.searchParams, admin));
     const summaries = qualification.summaries();
     return { users: adminService.members(auth.list()).map(user => ({ ...user, exam: summaries.get(user.id) ?? { passedAt: null, attempts: 0, bestCorrect: null, questionCount: null } })) };
   });
-  router.on('POST', '/api/admin/users/:id/role', async (ctx) => {
+  adminOn('POST', '/api/admin/users/:id/role', async (ctx) => {
     const admin = adminOnly(ctx);
     limit.write(admin.id);
-    const body = await readJson(ctx.req);
+    const body = await adminJson(ctx);
     const user = auth.setRole(admin, ctx.params.id, body.level ?? String(body.role ?? ''));
     library.audit(admin, 'role', null, `${user.name} → Lv${user.level}`);
     return { user };
   });
 
-  router.on('GET', '/api/admin/works', (ctx) => {
+  adminOn('GET', '/api/admin/works', (ctx) => {
     const admin = staffOnly(ctx);
     return catalog.withSnapshot(() => adminService.works(ctx.url.searchParams, admin));
   });
-  router.on('GET', '/api/admin/works/:task/:id', (ctx) => {
+  adminOn('GET', '/api/admin/works/:task/:id', (ctx) => {
     const admin = staffOnly(ctx);
     if (ctx.url.searchParams.size) fail(400, '详情参数无效', 'invalid_query');
     return catalog.withSnapshot(() => management.work(ctx.params.task, ctx.params.id, admin));
   });
-  router.on('GET', '/api/admin/questions/:id', (ctx) => {
+  adminOn('GET', '/api/admin/questions/:id', (ctx) => {
     const admin = adminOnly(ctx);
     if (ctx.url.searchParams.size) fail(400, '详情参数无效', 'invalid_query');
     return catalog.withSnapshot(() => management.question(ctx.params.id, admin));
   });
-  router.on('GET', '/api/admin/inbox/works', (ctx) => {
+  adminOn('GET', '/api/admin/inbox/works', (ctx) => {
     const admin = staffOnly(ctx);
     return { works: library.inboxWorks(admin) };
   });
-  router.on('POST', '/api/admin/works/batch-inbox', async (ctx) => {
+  adminOn('POST', '/api/admin/works/batch-inbox', async (ctx) => {
     const admin = staffOnly(ctx);
     limit.write(admin.id);
-    const body = await readJson(ctx.req);
+    const body = await adminJson(ctx);
     const works = library.assignInbox(admin, body.works, { task: body.task ?? null, entertainment: body.entertainment ?? false });
     arena.invalidate();
     return { works };
   });
-  router.on('POST', '/api/admin/works/batch-face-settings', async (ctx) => {
+  adminOn('POST', '/api/admin/works/batch-face-settings', async (ctx) => {
     const admin = staffOnly(ctx);
     limit.write(admin.id);
-    const { works: items, ...settings } = (await readJson(ctx.req)) ?? {};
+    const { works: items, ...settings } = (await adminJson(ctx)) ?? {};
     const works = library.batchSetFaceSettings(admin, items, settings);
     arena.invalidate();
     return { works };
   });
-  router.on('POST', '/api/admin/works/batch-moderation', async (ctx) => {
+  adminOn('POST', '/api/admin/works/batch-moderation', async (ctx) => {
     const admin = staffOnly(ctx);
     limit.write(admin.id);
-    const body = await readJson(ctx.req);
+    const body = await adminJson(ctx);
     batchDecision(body, ['approved', 'rejected'], 'rejected');
     batchItems(body.works, 100);
     const results = body.works.map(({ task, id }) => batchResult({ task, id }, () => ({
@@ -729,10 +790,10 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     arena.invalidate();
     return { results };
   });
-  router.on('POST', '/api/admin/works/batch-review', async (ctx) => {
+  adminOn('POST', '/api/admin/works/batch-review', async (ctx) => {
     const admin = staffOnly(ctx);
     limit.write(admin.id);
-    const body = await readJson(ctx.req);
+    const body = await adminJson(ctx);
     batchDecision(body, ['verified', 'questioned'], 'questioned');
     batchItems(body.works, 100);
     if (body.meta !== undefined && (!body.meta || typeof body.meta !== 'object' || Array.isArray(body.meta)
@@ -747,17 +808,17 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     arena.invalidate();
     return { results };
   });
-  router.on('POST', '/api/admin/works/:task/:id/face-settings', async (ctx) => {
+  adminOn('POST', '/api/admin/works/:task/:id/face-settings', async (ctx) => {
     const admin = staffOnly(ctx);
     limit.write(admin.id);
-    const work = library.setFaceSettings(admin, ctx.params.task, ctx.params.id, await readJson(ctx.req));
+    const work = library.setFaceSettings(admin, ctx.params.task, ctx.params.id, await adminJson(ctx));
     arena.invalidate();
     return { work };
   });
-  router.on('POST', '/api/admin/works/:task/:id/calibration', async (ctx) => {
+  adminOn('POST', '/api/admin/works/:task/:id/calibration', async (ctx) => {
     const admin = staffOnly(ctx);
     limit.write(admin.id);
-    const body = await readJson(ctx.req);
+    const body = await adminJson(ctx);
     const calibration = library.setFaceCalibration(admin, ctx.params.task, ctx.params.id, body.face, body.calibration);
     arena.invalidate();
     return { task: ctx.params.task, id: ctx.params.id, face: body.face, calibration };
@@ -765,23 +826,23 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   // Short-lived preview host for the admin calibration panel: all works become
   // viewable on the content origin, where the
   // camera bridge answers the capture handshake. The key itself is the permission.
-  router.on('POST', '/api/admin/works/:task/:id/preview', (ctx) => {
+  adminOn('POST', '/api/admin/works/:task/:id/preview', (ctx) => {
     const admin = staffOnly(ctx);
     limit.write(admin.id);
     const work = library.work(ctx.params.task, ctx.params.id);
     if (!work) fail(404, '作品不存在', 'not_found');
     return { url: `${library.previewOrigin(work)}/` };
   });
-  router.on('GET', '/api/admin/tasks/:id/editorial', (ctx) => {
+  adminOn('GET', '/api/admin/tasks/:id/editorial', (ctx) => {
     const admin = adminOnly(ctx);
     return adminService.getEditorial(ctx.params.id, ctx.url.searchParams.get('face'), admin);
   });
-  router.on('POST', '/api/admin/tasks/:id/editorial', async (ctx) => {
+  adminOn('POST', '/api/admin/tasks/:id/editorial', async (ctx) => {
     const admin = adminOnly(ctx);
     limit.write(admin.id);
-    return adminService.saveEditorial(admin, ctx.params.id, await readJson(ctx.req));
+    return adminService.saveEditorial(admin, ctx.params.id, await adminJson(ctx));
   });
-  router.on('GET', '/api/admin/traffic', (ctx) => {
+  adminOn('GET', '/api/admin/traffic', (ctx) => {
     adminOnly(ctx);
     return adminService.traffic(ctx.url.searchParams.get('days'));
   });
@@ -842,10 +903,10 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     return inbox.remove(admin, ctx.url.searchParams.get('id') ?? '');
   });
   // Work metadata edits share one endpoint for package and database entries.
-  router.on('POST', '/api/admin/works/:task/:id/meta', async (ctx) => {
+  adminOn('POST', '/api/admin/works/:task/:id/meta', async (ctx) => {
     const admin = staffOnly(ctx);
     limit.write(admin.id);
-    const work = library.setMeta(admin, ctx.params.task, ctx.params.id, await readJson(ctx.req));
+    const work = library.setMeta(admin, ctx.params.task, ctx.params.id, await adminJson(ctx));
     arena.invalidate();
     return { work };
   });
@@ -889,18 +950,18 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       }
     });
   });
-  router.on('GET','/api/admin/vote-risk/summary',ctx=>voteRisk.summary(adminOnly(ctx),ctx.url.searchParams));
-  router.on('GET','/api/admin/vote-risk/choices',ctx=>voteRisk.choices(adminOnly(ctx),ctx.url.searchParams));
-  router.on('GET','/api/admin/vote-risk/model-voters',ctx=>voteRisk.modelVoters(adminOnly(ctx),ctx.url.searchParams));
-  router.on('POST','/api/admin/vote-risk/votes/void',async ctx=>{const actor=adminOnly(ctx);limit.write(actor.id);return voteRisk.voidVotes(actor,await readJson(ctx.req));});
-  router.on('POST','/api/admin/vote-risk/votes/restore',async ctx=>{const actor=adminOnly(ctx);limit.write(actor.id);return voteRisk.restoreVotes(actor,await readJson(ctx.req));});
+  adminOn('GET','/api/admin/vote-risk/summary',ctx=>voteRisk.summary(adminOnly(ctx),ctx.url.searchParams));
+  adminOn('GET','/api/admin/vote-risk/choices',ctx=>voteRisk.choices(adminOnly(ctx),ctx.url.searchParams));
+  adminOn('GET','/api/admin/vote-risk/model-voters',ctx=>voteRisk.modelVoters(adminOnly(ctx),ctx.url.searchParams));
+  adminOn('POST','/api/admin/vote-risk/votes/void',async ctx=>{const actor=adminOnly(ctx);limit.write(actor.id);return voteRisk.voidVotes(actor,await adminJson(ctx));});
+  adminOn('POST','/api/admin/vote-risk/votes/restore',async ctx=>{const actor=adminOnly(ctx);limit.write(actor.id);return voteRisk.restoreVotes(actor,await adminJson(ctx));});
   router.on('GET', '/api/curated', () => curated.info());
-  router.on('GET', '/api/admin/curated', ctx => curated.adminInfo(adminOnly(ctx)));
-  router.on('POST', '/api/admin/curated/sections', async ctx => curated.createSection(adminOnly(ctx), await readJson(ctx.req)));
-  router.on('PATCH', '/api/admin/curated/sections/:id', async ctx => curated.editSection(adminOnly(ctx), ctx.params.id, await readJson(ctx.req)));
-  router.on('PUT', '/api/admin/curated/sections/order', async ctx => curated.orderSections(adminOnly(ctx), await readJson(ctx.req)));
-  router.on('DELETE', '/api/admin/curated/sections/:id', async ctx => curated.deleteSection(adminOnly(ctx), ctx.params.id, await readJson(ctx.req)));
-  router.on('PUT', '/api/admin/curated/questions', async ctx => curated.saveQuestions(adminOnly(ctx), await readJson(ctx.req)));
+  adminOn('GET', '/api/admin/curated', ctx => curated.adminInfo(adminOnly(ctx)));
+  adminOn('POST', '/api/admin/curated/sections', async ctx => curated.createSection(adminOnly(ctx), await adminJson(ctx)));
+  adminOn('PATCH', '/api/admin/curated/sections/:id', async ctx => curated.editSection(adminOnly(ctx), ctx.params.id, await adminJson(ctx)));
+  adminOn('PUT', '/api/admin/curated/sections/order', async ctx => curated.orderSections(adminOnly(ctx), await adminJson(ctx)));
+  adminOn('DELETE', '/api/admin/curated/sections/:id', async ctx => curated.deleteSection(adminOnly(ctx), ctx.params.id, await adminJson(ctx)));
+  adminOn('PUT', '/api/admin/curated/questions', async ctx => curated.saveQuestions(adminOnly(ctx), await adminJson(ctx)));
   router.on('GET', '/api/qualification', ctx => qualification.overview(signedIn(ctx)));
   router.on('POST', '/api/qualification/attempts', async ctx => { const user = signedIn(ctx); limit.write(user.id); return qualification.start(user, await readJson(ctx.req)); });
   router.on('GET', '/api/qualification/attempts/:id', ctx => qualification.get(signedIn(ctx), ctx.params.id));
@@ -914,12 +975,12 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     ctx.permission = { id: user.id, role: result.user.role, level: result.user.level };
     return result;
   });
-  router.on('GET', '/api/admin/qualification', ctx => qualification.adminInfo(adminOnly(ctx)));
-  router.on('GET', '/api/admin/qualification/works', ctx => qualification.works(adminOnly(ctx), ctx.url.searchParams.get('taskId')));
-  router.on('PUT', '/api/admin/qualification/settings', async ctx => qualification.saveSettings(adminOnly(ctx), await readJson(ctx.req)));
-  router.on('POST', '/api/admin/qualification/pairs', async ctx => qualification.savePair(adminOnly(ctx), await readJson(ctx.req)));
-  router.on('PATCH', '/api/admin/qualification/pairs/:id', async ctx => qualification.savePair(adminOnly(ctx), await readJson(ctx.req), ctx.params.id));
-  router.on('DELETE', '/api/admin/qualification/pairs/:id', async ctx => qualification.deletePair(adminOnly(ctx), ctx.params.id, await readJson(ctx.req)));
+  adminOn('GET', '/api/admin/qualification', ctx => qualification.adminInfo(adminOnly(ctx)));
+  adminOn('GET', '/api/admin/qualification/works', ctx => qualification.works(adminOnly(ctx), ctx.url.searchParams.get('taskId')));
+  adminOn('PUT', '/api/admin/qualification/settings', async ctx => qualification.saveSettings(adminOnly(ctx), await adminJson(ctx)));
+  adminOn('POST', '/api/admin/qualification/pairs', async ctx => qualification.savePair(adminOnly(ctx), await adminJson(ctx)));
+  adminOn('PATCH', '/api/admin/qualification/pairs/:id', async ctx => qualification.savePair(adminOnly(ctx), await adminJson(ctx), ctx.params.id));
+  adminOn('DELETE', '/api/admin/qualification/pairs/:id', async ctx => qualification.deletePair(adminOnly(ctx), ctx.params.id, await adminJson(ctx)));
   router.on('GET', '/api/leaderboard', (ctx) => {
     const board = ctx.url.searchParams.get('board') || null;
     const audience = ctx.url.searchParams.get('audience') || null, sectionId = ctx.url.searchParams.get('sectionId') || null;
@@ -938,7 +999,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   });
 
   registerShow1Compat(router, { db, catalog, library, snapshot: show1Snapshot, config, limit });
-  registerShow1Guess(router, { db, limit, config, adminOnly });
+  registerShow1Guess(router, { db, limit, config, adminOnly, adminOn, adminJson });
   const guessRooms = registerGuessRooms(router, { db, auth, config, requireUser: signedIn });
 
   function serveSite(req, res, pathname) {
@@ -1114,6 +1175,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       clearInterval(matchCleanup);
       clearInterval(referenceCleanup);
       await emailAuth.drain();
+      await recaptures.close();
       await Promise.all([moderator.close(), capturer.close()]);
       await featured.close();
       await arena.close();

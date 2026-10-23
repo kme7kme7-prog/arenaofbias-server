@@ -4,6 +4,10 @@
 //                                                        scopes: comma separated, default moderation;
 //                                                        moderation, capture:read, cover:write, works:read,
 //                                                        meta:write, preview:write, captures:write
+//   node scripts/moderation-token.mjs assistant-create <id> [name]  new independent admin + bind; no password output
+//   node scripts/moderation-token.mjs assistant <id>         safe binding metadata
+//   node scripts/moderation-token.mjs assistant-bind <id> <actor id>  explicit existing-admin binding
+//   node scripts/moderation-token.mjs assistant-unbind <id>   remove binding; scopes unchanged
 //   node scripts/moderation-token.mjs list               ids, labels, scopes, created/revoked/last used
 //   node scripts/moderation-token.mjs grant <id> <scope>     add one scope
 //   node scripts/moderation-token.mjs withdraw <id> <scope>  remove one scope (next request)
@@ -19,7 +23,9 @@
 //   node scripts/moderation-token.mjs audit [limit]      recent token requests, newest first
 import { join } from 'node:path';
 import { userInfo } from 'node:os';
-import { config } from '../server/config.mjs';
+import { config, limits } from '../server/config.mjs';
+import { createAuth } from '../server/auth.mjs';
+import { createDotsAdminBindings } from '../server/dots-admin.mjs';
 import { openDatabase } from '../server/db.mjs';
 import { MODERATION_MODES, TOKEN_SCOPES, createModerationMode, createModerationTokens } from '../server/dots-moderation.mjs';
 import { createCoverStore } from '../server/work-covers.mjs';
@@ -37,6 +43,14 @@ try {
     const created = tokens.create(value, operator, extra ?? 'moderation');
     process.stderr.write(`已创建 ${created.id}（${created.label}，权限 ${created.scopes.join(',')}）。下面一行是令牌明文，只显示这一次，库里只存 SHA-256：\n`);
     process.stdout.write(`${created.token}\n`);
+  } else if (['assistant-create', 'assistant', 'assistant-bind', 'assistant-unbind'].includes(command)) {
+    if (!value || (command === 'assistant-bind' && !extra)) throw new Error('请指定令牌 id；assistant-bind 还需账号 id');
+    const auth = createAuth(db, { admins: config.admins, secureCookies: config.secureCookies, cookieSameSite: config.cookieSameSite, sessionTtl: limits.sessionTtl });
+    const bindings = createDotsAdminBindings({ db, auth });
+    const result = command === 'assistant-create' ? bindings.createAssistant(value, extra ?? 'dots', operator)
+      : command === 'assistant-bind' ? bindings.bind(value, extra, operator)
+      : command === 'assistant-unbind' ? { unbound: bindings.unbind(value, operator) } : bindings.describe(value);
+    console.log(JSON.stringify({ tokenId: value, binding: result }));
   } else if (command === 'list') {
     for (const row of tokens.list()) {
       console.log([row.id, row.label, `scopes ${row.scopes.join(',') || '(none)'}`, `created ${when(row.created_at)} by ${row.created_by}`,
@@ -81,7 +95,7 @@ try {
       console.log([when(row.at), row.token_id, row.token_label, row.action, row.task_id ?? '-', row.work_id ?? '-', row.outcome, row.ip ?? '-', row.reason ?? ''].join('  '));
     }
   } else {
-    console.log(`用法：node scripts/moderation-token.mjs create <label> [${TOKEN_SCOPES.join(',')}] | list | grant <id> <scope> | withdraw <id> <scope> | revoke <id> | mode [${MODERATION_MODES.join('|')}|env] | audit [limit] | cover-history <work id> | cover-rollback <work id> [history id] | preview-history <work id> | preview-rollback <work id> [history id]`);
+    console.log(`用法：node scripts/moderation-token.mjs create <label> [${TOKEN_SCOPES.join(',')}] | assistant-create <id> [name] | assistant <id> | assistant-bind <id> <actor-id> | assistant-unbind <id> | list | grant <id> <scope> | withdraw <id> <scope> | revoke <id> | mode [${MODERATION_MODES.join('|')}|env] | audit [limit] | cover-history <work id> | cover-rollback <work id> [history id] | preview-history <work id> | preview-rollback <work id> [history id]`);
     process.exitCode = command ? 1 : 0;
   }
 } catch (error) {

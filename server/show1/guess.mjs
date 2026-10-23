@@ -44,8 +44,8 @@ const publicGuessModel = (m) => ({
   dailyEligible: m.dailyEligible,
 });
 
-export function registerShow1Guess(router, { db, limit, config, adminOnly }) {
-  registerGuessAdmin(router, { db, limit, config, adminOnly });
+export function registerShow1Guess(router, { db, limit, config, adminOnly, adminOn, adminJson }) {
+  registerGuessAdmin(router, { db, limit, config, adminOnly, adminOn, adminJson });
   // 旧服务端对 check/practice/result 用高频 guess 组限流；映射到共享后端用
   // matches 组（60/分）兜底 write 组。limit.guess 若日后配置则优先。
   const limiter = limit?.guess ?? limit?.matches ?? limit?.write ?? (() => {});

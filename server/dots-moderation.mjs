@@ -12,6 +12,7 @@ import { readdirSync, realpathSync, statSync } from 'node:fs';
 import { extname, join, relative, resolve, sep } from 'node:path';
 import { HttpError, clientIp, createRouter, fail, rateLimit, readBody, readJson, sendJson, streamFile } from './http.mjs';
 import { checkPreviewPoster, sanitizeSbox, webgpuSignals } from './preview-uploads.mjs';
+import { createDotsPreviewDownload } from './dots-preview-download.mjs';
 import { CAPTURE_SLOTS, checkCapture } from './work-captures.mjs';
 import { checkCover } from './work-covers.mjs';
 import { readWorkPreview } from './work-previews.mjs';
@@ -49,7 +50,7 @@ export function createModerationMode(db, config) {
 }
 
 // Abilities a token may hold, each granted and withdrawn on its own.
-export const TOKEN_SCOPES = ['moderation', 'capture:read', 'cover:write', 'works:read', 'meta:write', 'preview:write', 'captures:write'];
+export const TOKEN_SCOPES = ['moderation', 'capture:read', 'cover:write', 'works:read', 'meta:write', 'preview:write', 'captures:write', 'admin:read', 'admin:write'];
 const META_FIELDS = ['title', 'summary', 'note', 'modelId', 'modelName', 'vendor', 'effort', 'promptVariant', 'harnessId', 'harnessOther', 'providerId', 'generationMode', 'humanIntervention'];
 export function parseScopes(value) {
   const list = [...new Set(String(value ?? '').split(/[\s,]+/).filter(Boolean))];
@@ -111,6 +112,10 @@ export function createModerationTokens(db) {
       const same = expected.length === 32 && timingSafeEqual(hashOf(token), expected);
       return same && row && !row.revoked_at ? row : null;
     },
+    active(id) {
+      const row = q.byId.get(String(id));
+      return row && !row.revoked_at ? { id: row.id, label: row.label, scopes: storedScopes(row.scopes) } : null;
+    },
     touch(id) { q.touch.run(Date.now(), id); },
   };
 }
@@ -119,7 +124,7 @@ const IMAGE = /^[\w.-]{1,120}\.(?:jpe?g|png|webp)$/i;
 const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
 
 export function createDotsModeration({ db, config, library, mode, tokens, covers = null, previews = null, captureStore = null, coverBytes = 3 * 1024 * 1024,
-  categoryOf = () => '', tasksIn = () => [], onChange = () => {} }) {
+  admin = null, compressBody, categoryOf = () => '', tasksIn = () => [], onChange = () => {} }) {
   const switches = { off: Boolean(config.moderation?.dotsApiOff), scopesOff: new Set(config.moderation?.dotsDisabledScopes ?? []) };
   const perToken = rateLimit(60_000, config.moderation?.dotsRequestsPerMin ?? 120, '请求太频繁，请稍后再试', 'rate_limited');
   const writes = rateLimit(60_000, config.moderation?.dotsWritesPerMin ?? 30, '写入太频繁，请稍后再试', 'rate_limited');
@@ -127,8 +132,8 @@ export function createDotsModeration({ db, config, library, mode, tokens, covers
   const q = {
     updatedAt: db.prepare('SELECT updated_at FROM works WHERE id = ? AND deleted_at IS NULL'),
     overrideStamp: db.prepare('SELECT updated_at FROM work_overrides WHERE task_id = ? AND work_id = ?'),
-    audit: db.prepare(`INSERT INTO moderation_token_audit (at, token_id, token_label, action, task_id, work_id, reason, ip, outcome)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+    audit: db.prepare(`INSERT INTO moderation_token_audit (at, token_id, token_label, action, task_id, work_id, reason, ip, outcome, actor_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
     routed: db.prepare(`SELECT id FROM works WHERE deleted_at IS NULL
       AND json_extract(moderation, '$.route') IN ('dots', 'dots-review-only')
       AND json_extract(moderation, '$.status') IN ('pending', 'review')`),
@@ -248,7 +253,9 @@ export function createDotsModeration({ db, config, library, mode, tokens, covers
     fail(409, '作品状态刚刚发生变化，请重新获取队列', 'conflict');
   }
 
+  const previewDownload = createDotsPreviewDownload({ library, previews });
   const router = createRouter();
+  router.on('GET', '/api/dots/works/:task/:id/preview/model', { scope: 'works:read', action: 'preview-model', run: ctx => previewDownload.handle(ctx) });
   router.on('GET', '/api/dots/moderation/queue', { scope: 'moderation', action: 'list', run: () => {
     const now = Date.now();
     const items = [];
@@ -457,7 +464,9 @@ export function createDotsModeration({ db, config, library, mode, tokens, covers
   return {
     async handle(req, res, url) {
       const ip = clientIp(req, config.trustProxy);
-      let token = null, action = 'unknown', params = {}, reason = null;
+      let token = null, action = 'unknown', params = {}, reason = null, checkAdmin;
+      const note = {};
+      const record = outcome => q.audit.run(Date.now(), token.id, token.label, action, params.task ?? null, params.id ?? null, reason, ip, outcome, note.actorId ?? null);
       try {
         if (switches.off) fail(503, 'dots 接口已被运维临时关闭', 'dots_disabled');
         const header = String(req.headers.authorization ?? '');
@@ -466,30 +475,51 @@ export function createDotsModeration({ db, config, library, mode, tokens, covers
         token = tokens.verify(bearer);
         if (!token) { failures(ip); fail(401, '审核令牌无效或已吊销', 'unauthorized'); }
         perToken(token.id);
-        const route = router.match(req.method, url.pathname);
+        const route = router.match(req.method, url.pathname) ?? admin?.match(req.method, url.pathname);
         if (!route) fail(404, '接口不存在', 'not_found');
         if (route.methodNotAllowed) fail(405, '不支持这个操作', 'method_not_allowed');
         ({ action } = route.handler);
         if (switches.scopesOff.has(route.handler.scope)) fail(503, '这项能力已被运维临时关闭', 'scope_disabled');
         if (!storedScopes(token.scopes).includes(route.handler.scope)) fail(403, `令牌没有 ${route.handler.scope} 权限`, 'scope_required');
-        if (req.method === 'PUT' || req.method === 'PATCH') writes(token.id);
+        if (req.method === 'PUT' || req.method === 'PATCH' || (route.handler.admin && !['GET', 'HEAD'].includes(req.method))) writes(token.id);
         params = route.params;
         tokens.touch(token.id);
-        const note = {};
+        let authority;
+        const checkAccess = () => {
+          const current = tokens.verify(bearer);
+          if (!current) fail(401, '审核令牌无效或已吊销', 'unauthorized');
+          if (!storedScopes(current.scopes).includes(route.handler.scope)) fail(403, '令牌权限已撤回', 'scope_required');
+          if (switches.off || switches.scopesOff.has(route.handler.scope)) fail(503, '这项能力已被运维临时关闭', 'scope_disabled');
+          return current;
+        };
+        const authorize = () => {
+          const current = checkAccess();
+          const next = admin.bindings.authority(current.id);
+          if (authority && (next.actor.id !== authority.actor.id || next.revision !== authority.revision)) fail(403, '管理员绑定已变化', 'admin_binding_changed');
+          authority ??= next;
+          return { ...next.actor, accountName: next.actor.name, bindingRevision: next.revision, name: `dots:${current.label}` };
+        };
+        if (route.handler.admin) { authorize(); checkAdmin = authorize; }
         let outcome;
-        try { outcome = await route.handler.run({ req, res, url, params, token, note }); }
+        try { outcome = await route.handler.run({ req, res, url, params, token, note, authorize, checkAccess, scopes: storedScopes(token.scopes) }); }
         finally { reason = note.reason ?? null; }
-        q.audit.run(Date.now(), token.id, token.label, action, params.task ?? null, params.id ?? null, reason, ip, 'ok');
-        if (!res.headersSent) return sendJson(res, 200, outcome && Object.hasOwn(outcome, 'result') ? outcome.result : outcome);
+        if (!route.handler.admin || res.headersSent) record(res.headersSent && res.statusCode >= 400 ? `error:${res.statusCode}` : 'ok');
+        if (!res.headersSent) return await sendJson(res, route.handler.status ?? 200, outcome && Object.hasOwn(outcome, 'result') ? outcome.result : outcome, {}, {
+          compressBody,
+          ...(route.handler.admin ? { beforeSend: () => {
+            try { authorize(); record('ok'); }
+            catch (error) { record(`error:${error.status ?? 500}:${error.code ?? ''}`); throw error; }
+          } } : {}),
+        });
       } catch (error) {
         const status = error instanceof HttpError ? error.status : 500;
-        if (token) q.audit.run(Date.now(), token.id, token.label, action, params.task ?? null, params.id ?? null, reason, ip, `error:${status}:${error.code || ''}`);
+        if (token) record(`error:${status}:${error.code || ''}`);
         if (res.headersSent) return res.destroy();
         if (!(error instanceof HttpError)) { console.error(error); return sendJson(res, 500, { error: '服务器出错了，请稍后再试' }); }
         return sendJson(res, error.status, { error: error.message, ...(error.code ? { code: error.code } : {}), ...(error.details ?? {}),
           ...(error.retryAfter ? { retryAfter: error.retryAfter } : {}) }, {
           ...(error.retryAfter ? { 'Retry-After': String(error.retryAfter) } : {}),
-          ...(error.status === 401 ? { 'WWW-Authenticate': 'Bearer' } : {}) });
+          ...(error.status === 401 ? { 'WWW-Authenticate': 'Bearer' } : {}) }, { beforeSend: checkAdmin, compressBody });
       }
     },
     stage,

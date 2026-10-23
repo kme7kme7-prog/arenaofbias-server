@@ -733,6 +733,27 @@ const MIGRATIONS = [
     );
     CREATE INDEX IF NOT EXISTS cover_history_work ON cover_history(work_id, id);`);
   },
+  // Explicit dots administrator bindings; existing tokens and scopes are unchanged.
+  (db) => {
+    db.exec(`CREATE TABLE IF NOT EXISTS moderation_token_admins (
+      token_id TEXT PRIMARY KEY REFERENCES moderation_tokens(id) ON DELETE CASCADE,
+      actor_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      revision TEXT NOT NULL,
+      bound_at INTEGER NOT NULL,
+      bound_by TEXT NOT NULL
+    );`);
+    if (!db.prepare('PRAGMA table_info(moderation_token_audit)').all().some(column => column.name === 'actor_id')) {
+      db.exec('ALTER TABLE moderation_token_audit ADD COLUMN actor_id TEXT');
+    }
+  },
+  (db) => db.exec(`CREATE TABLE IF NOT EXISTS recapture_jobs (
+    id TEXT PRIMARY KEY, token_id TEXT NOT NULL, actor_id TEXT NOT NULL, binding_revision TEXT NOT NULL,
+    task_id TEXT NOT NULL, work_id TEXT NOT NULL, source_version TEXT NOT NULL, spec TEXT NOT NULL,
+    state TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
+    error_code TEXT, error_stage TEXT, outputs TEXT NOT NULL DEFAULT '{}'
+  );
+  CREATE INDEX IF NOT EXISTS recapture_jobs_expiry ON recapture_jobs(expires_at);
+  CREATE INDEX IF NOT EXISTS recapture_jobs_owner ON recapture_jobs(token_id,created_at);`),
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

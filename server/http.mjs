@@ -211,24 +211,30 @@ export function resolveInside(base, urlPath) {
   }
 }
 
-export async function streamFile(req, res, found, headers = {}) {
+export async function streamFile(req, res, found, headers = {}, { beforeSend } = {}) {
   const responseHeaders = {
     'Content-Type': MIME[extname(found.file).toLowerCase()] ?? 'application/octet-stream',
     'Content-Length': found.size,
     'X-Content-Type-Options': 'nosniff',
     ...headers,
   };
+  let stream;
   try {
-    const stream = createReadStream(found.file);
+    stream = createReadStream(found.file);
     await new Promise((resolve, reject) => {
       stream.once('open', resolve);
       stream.once('error', reject);
     });
+    try { beforeSend?.(); }
+    catch (error) { throw error instanceof HttpError ? error : new HttpError(500, '服务器出错了，请稍后再试'); }
     res.writeHead(200, responseHeaders);
     if (req.method === 'HEAD') { stream.destroy(); return res.end(); }
     await pipeline(stream, res);
   } catch (error) {
-    if (!res.headersSent) return sendJson(res, 404, { error: '文件不存在' });
+    stream?.destroy();
+    if (!res.headersSent) return error instanceof HttpError
+      ? sendJson(res, error.status, { error: error.message, ...(error.code ? { code: error.code } : {}) })
+      : sendJson(res, 404, { error: '文件不存在' });
     res.destroy(error);
   }
 }

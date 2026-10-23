@@ -38,6 +38,7 @@ function fixture(t, options = {}) {
     const frame = (value) => ({ locator: () => ({ innerText: async () => value }),
       evaluate: async (expression) => {
         (options.evaluated ??= []).push(expression);
+        if (/\.webgl === true$/.test(expression)) options.onProbe?.();
         return /\.webgl === true$/.test(expression) ? Boolean(options.webgl) : undefined;
       } });
     context.newPage = async () => ({
@@ -51,7 +52,7 @@ function fixture(t, options = {}) {
         if (options.fail?.(settings, attempt)) throw new Error('page failed');
         return { ok: () => true };
       },
-      waitForTimeout: async () => {},
+      waitForTimeout: async ms => { (context.waits ??= []).push(ms); },
       screenshot: async ({ path, timeout }) => {
         context.screenshotTimeout = timeout;
         if (consumeHang(options, 'screenshot')) await new Promise(() => {});
@@ -180,6 +181,45 @@ test('a failed late shot keeps the public capture and leaves the review material
   assert.deepEqual(result.late, {});
   assert.equal(f.saved.length, 1);
   assert.equal(f.launches[0].chromiumSandbox, false);
+});
+
+test('private job dimensions and bounded wait are applied without late input or public publication', async t => {
+  const f=fixture(t,{config:{captureSandbox:true}}), directory=join(f.mediaDir,'private-job');
+  const result=await f.capturer.enqueue(f.work,{publish:false,outputDir:directory,late:false,detailed:true,
+    shots:[{id:'first',viewport:{width:800,height:600},mobile:false},{id:'mobile',viewport:{width:360,height:640},mobile:true}],wait:{load:'domcontentloaded',settleMs:25}});
+  assert.deepEqual(result.captures,{first:'first.jpg',mobile:'mobile.jpg'}); assert.deepEqual(result.late,{}); assert.equal(f.saved.length,0);
+  assert.deepEqual(f.contexts.map(context=>context.settings.viewport),[{width:800,height:600},{width:360,height:640}]);
+  assert.ok(f.contexts.every(context=>context.shots.length===1&&context.shots[0].startsWith(directory)&&!context.load&&context.waits.join(',')==='25'));
+  assert.equal(f.launches[0].chromiumSandbox,true);
+});
+
+test('cancelling a private job in the shared queue leaves earlier normal capture untouched', async t => {
+  const f=fixture(t), controller=new AbortController();
+  const normal=f.capturer.enqueue(f.work);
+  const privateJob=f.capturer.enqueue({...f.work,id:'private'},{publish:false,detailed:true,signal:controller.signal,beforeCapture:()=>assert.fail('cancelled queued work must not execute')});
+  controller.abort();
+  assert.equal((await privateJob).error.code,'capture_cancelled'); assert.equal((await normal).captures.first,'first.jpg'); assert.equal(f.contexts.length,2);
+});
+
+test('private authority is checked again after connecting and cannot capture a stale work', async t => {
+  const f=fixture(t); t.mock.method(console,'warn',()=>{}); let checked=0;
+  const result=await f.capturer.enqueue(f.work,{publish:false,detailed:true,beforeCapture:()=>{if(++checked===2) throw Object.assign(new Error('revoked'),{code:'scope_required'});return f.work;}});
+  assert.equal(result.error.code,'scope_required'); assert.equal(f.contexts.length,0); assert.equal(f.saved.length,0);
+});
+
+test('recovered viewport retry clears only its own detailed error', async t => {
+  const f=fixture(t,{fail:(_settings,attempt)=>attempt===0}); t.mock.method(console,'warn',()=>{});
+  const recovered=await f.capturer.enqueue(f.work,{publish:false,detailed:true,late:false});
+  assert.deepEqual(Object.keys(recovered.captures),['first','mobile']); assert.equal(Object.hasOwn(recovered,'error'),false);
+  const g=fixture(t,{fail:(settings,attempt)=>!settings.isMobile||attempt===0});
+  const partial=await g.capturer.enqueue(g.work,{publish:false,detailed:true,late:false});
+  assert.deepEqual(Object.keys(partial.captures),['mobile']); assert.equal(partial.error.code,'page_failed');
+});
+
+test('abort during a WebGL probe never starts a screenshot afterwards', async t => {
+  const controller=new AbortController(),f=fixture(t,{onProbe:()=>controller.abort()});t.mock.method(console,'warn',()=>{});
+  const result=await f.capturer.enqueue(f.work,{publish:false,detailed:true,late:false,signal:controller.signal});
+  assert.equal(result.error.code,'capture_cancelled');assert.ok(f.contexts.every(context=>!context.shots?.length));
 });
 
 test('remote capture rereads the endpoint after disconnect and writes screenshots on the platform', async (t) => {

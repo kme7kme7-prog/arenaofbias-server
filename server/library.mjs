@@ -1,7 +1,7 @@
 // Every work the platform knows: data package files plus submitted uploads.
 // Uploads move through unverified → verified | questioned; drafts hold a staged upload
 // until its author has watched the trial load and submits it.
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { EFFORTS, EMOJIS } from './config.mjs';
@@ -1056,6 +1056,36 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
         if (updated) audit(actor, 'content-review', work, JSON.stringify(next));
         return Boolean(updated);
       });
+    },
+    moderationState(admin, taskId, id) {
+      const work = this.work(taskId, id);
+      if (!work) fail(404, '作品不存在', 'not_found');
+      requireStaff(admin, work);
+      if (work.curated) fail(409, '数据包作品不进入上传内容复核队列', 'not_reopenable');
+      const version = createHash('sha256').update(JSON.stringify([taskId, id, work.moderationRaw])).digest('hex');
+      return { task: taskId, id, version, moderation: work.moderation };
+    },
+    handoffModeration(admin, taskId, id, body, action = 'handoff') {
+      if (!['handoff', 'reopen'].includes(action)) fail(400, '复核动作无效');
+      if (!plainObject(body) || Object.keys(body).some(key => !['version', 'reason'].includes(key))) fail(400, '人工复核字段无效', 'invalid_field');
+      if (typeof body.reason !== 'string' || !body.reason.trim() || body.reason.trim().length > 500) fail(400, '请填写 1–500 字复核理由', 'reason_required');
+      if (typeof body.version !== 'string' || !/^[a-f0-9]{64}$/.test(body.version)) fail(400, '请提供当前审核版本', 'version_required');
+      const state = this.moderationState(admin, taskId, id);
+      if (state.version !== body.version) fail(409, '审核状态已变化，请重新读取', 'conflict');
+      if (action === 'reopen' ? state.moderation.status !== 'rejected' : !['pending', 'review'].includes(state.moderation.status)) {
+        fail(409, action === 'reopen' ? '只有已拒绝作品可以重新进入人工复核' : '仅待审或疑似作品可以转人工', 'invalid_moderation_state');
+      }
+      const work = this.work(taskId, id);
+      if (!work || work.curated || createHash('sha256').update(JSON.stringify([taskId, id, work.moderationRaw])).digest('hex') !== body.version) fail(409, '审核状态已变化，请重新读取', 'conflict');
+      const next = { status: 'review', source: 'human', reason: body.reason.trim(), reviewer: admin.name,
+        at: Date.now(), revision: token('manual-') };
+      transaction(db, () => {
+        const updated = db.prepare('UPDATE works SET moderation=? WHERE id=? AND task_id=? AND moderation=? AND deleted_at IS NULL')
+          .run(JSON.stringify(next), id, taskId, work.moderationRaw).changes;
+        if (!updated) fail(409, '审核状态已变化，请重新读取', 'conflict');
+        audit(admin, `content-${action}`, work, JSON.stringify({ reason: body.reason.trim(), version: state.version, before: state.moderation, after: next }));
+      });
+      return this.moderationState(admin, taskId, id);
     },
     reviewContent(admin, taskId, id, body) {
       const work = this.work(taskId, id);

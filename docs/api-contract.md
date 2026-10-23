@@ -600,6 +600,8 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 `reviewStats.medianHours` 为全站未删除、当前为 `verified` 且近 30 天有核验时间的作品，从创建至核验的耗时中位数，单位为小时；少于 5 个样本返回 `null`。`changed: true` 仅在本件作品有晚于已读时间的核验或内容审核决定时返回；首次读取同样只看最近 7 天。其它作品省略 `changed`。
 
+可选 `?view=overview|works|questions` 按需读取：overview 仅返回 votes/joinedAt/activity/receivedReactions；works 仅返回 works/questions/reviewStats；questions 仅返回 questions。无参数维持完整响应；重复 view、未知值或额外参数返回 `400 invalid_query`。各视图始终只读取当前会话本人，不接受 owner 参数。
+
 **`POST /api/me/works/seen`** —— 标记作品状态变化已读
 
 认证：登录；限流：write 桶，遵循同源校验。无需请求体，将当前用户的 `works_seen_at`（可空毫秒时间，v31 迁移新增）设为当前时间，成功 `200`：`{ "ok": true }`。错误：`401` / `403`（Origin 不受信任）/ `429`。后续发生的决定仍会产生 `me.updates` 和 `changed: true`。
@@ -623,6 +625,14 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 `audit` 为审计日志倒序最多 200 条，`action` 取值含 `submit` / `verified` / `questioned` / `unverified` / `delete` / `role`。
 
+无参数保留完整旧响应。新 Gallery 使用 `?panel=default|unverified|content|done|questions|catalog|works|log&page=1&pageSize=50`，pageSize 上限100；content 另接 autoPage（默认1），分别分页人工与自动队列。default 按待审题目、人工内容、核验的顺序选择实际面板。questions/catalog 仅高级管理员可读。待审题目、人工内容、自动内容、核验默认最早在前，done/log 最新在前；catalog/works 支持 sort=latest|oldest|title，catalog 另支持 works。
+
+分页响应为 `{panel,works,questions,audit,counts,filterCounts,total,page,pageSize,scopeTotal,questionChoices,domainChoices,autoWorks,autoTotal,autoPage}`。counts 为全局审核导航计数；filterCounts 为已套其它筛选但未套所选 chip 的计数；questionChoices 只含当前角色可见题目的 id/title。支持 q（最多200字符）、task/arena（works）、category/domain（catalog）及面板原有 filter。列表作品带权威 bucket 与生成信息，省略 checks/trial/正文说明/完整校准及适配预览校验；catalog 题目带 works/votes/workCounts，不含 prompt/reference 正文。待审 questions 当页仍带完整题面和轻量 samples；log 附当页日志所引现存作品的轻量行。重复、未知查询键或非法枚举/页码返回 `400 invalid_query`。
+
+`GET /api/admin/works/:task/:id`（普通或高级管理员）按需返回 `{work:<完整管理DTO>,audit:<该作品最近≤200条>}`，高级管理员另有 question；普通管理员不取得私密题面。`GET /api/admin/questions/:id`（仅高级管理员）返回 `{question:<完整题目与samples>,works:<该题所有轻量封面候选>,audit:<该题最近≤200条>}`。详情不接受查询参数。列表和详情均每次同步读取实时权限/审核状态，无跨请求私密缓存。
+
+上述管理与个人接口在实际发送 JSON 前再次确认同一会话用户及当前 role/level，含压缩成功与失败回退；退出或会话换身份返回简短401，权限改变返回简短403，不发送在途旧私密正文。资格考试 submit 自身成功升级的响应按该动作返回的新等级确认。
+
 **`GET /api/admin/users`** —— 账号列表（仅高级管理员）
 
 **认证**：管理员。**限流**：无。
@@ -639,6 +649,8 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 - `role` 为生效角色：`ADMIN_USERNAMES` 内的账号无论库中存值恒为 `admin`，并带 `fixed: true`。
 - `lastSeenAt` 取 `users.last_seen_at`：登录时写入，之后带会话的请求最多每分钟更新一次，退出或会话清理后保留；从未登录为 `null`。
 - `works` 统计未删除且所属题目未删除的作品：`rejected` 为内容审核拒绝，其余按核验状态；`questions` 为未删除的题目数，`votes` 为计票数（跳过不入库）。`trusted` 与 `pendingLimit` 沿用投稿额度规则，管理员为 `false` / `null`（不限）。
+
+可选分页 `?page=1&pageSize=50&filter=all|0|1|2|3|trusted&q=…&email=bound|unbound&active=week|month|idle&sort=seen|latest|oldest|works|votes`，pageSize≤100。响应增加 total/page/pageSize/scopeTotal/filterCounts（角色 chip）、counts（审核导航）、audit（原最近200条全局记录中的 role 操作）；users 仅含当前页且每位成员字段与旧完整响应一致。角色/可信额度批量汇总，保持历史存疑审计与删除作品的原额度口径。查询键重复、未知或非法值返回 `400 invalid_query`。
 
 错误：`401`（未登录）/ `403 仅管理员可以操作`。
 
@@ -921,6 +933,10 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 ### 3.21 Show1 兼容层
 
 这些端点延续 Show1 的请求与响应形状。写请求遵循本服务 Origin、鉴权与限流规则。只读题库合并共用数据包与迁入快照，作品保留迁入快照；符合 `show_arena=1` 且允许公开的已验证新投稿增量进入作品列表。旧快照票不再参与读取、计分或配对；Show1 的新票不进入画廊 Bradley–Terry 榜单。现有数据库中的旧票须通过停机维护命令显式清零，启动和迁移不会自动删票。
+
+prompts/works/playground/works 支持 promptId（单个）或 promptIds（逗号分隔1–50项，二者互斥）；作品接口另支持 ids（1–50个作品ID），与题目筛选取交集。每个ID≤128字符，不接受空项、前后空白、控制字符、重复ID/查询键或未知查询键（`400 invalid_query`）。无参数维持完整清单；筛选在同一实时公开门禁后、文字正文提取和随心玩投影前进行。未公开或不存在ID只返回空子集，不透露原因。
+
+这三个公开目录每次请求独立构建，响应仍为 no-store；正文压缩完成或压缩失败回退前重查目录修订，作品/题目在途中撤下则重新读取门禁后的子集。附表示级 ETag 供条件请求验证，不在进程中跨选择器保留私密或目录响应缓存。
 
 | 方法与路径 | 请求与响应 |
 | --- | --- |

@@ -46,10 +46,11 @@ export function createAdmin({ db, catalog, library }) {
       const works = new Map(worksByOwner.all().map((row) => [row.owner_id, row]));
       const questions = new Map(questionsByOwner.all().map((row) => [row.owner_id, row.n]));
       const votes = new Map(votesByUser.all().map((row) => [row.user_id, row.n]));
+      const trust = library.trustSummaries(users);
       return users.map((user) => {
         const { verified = 0, questioned = 0, pending = 0, rejected = 0 } = works.get(user.id) ?? {};
         return { ...user, works: { verified, questioned, pending, rejected }, questions: questions.get(user.id) ?? 0, votes: votes.get(user.id) ?? 0,
-          trusted: library.trusted(user), pendingLimit: library.pendingLimit(user) };
+          ...trust.get(user.id) };
       });
     },
     works(query, viewer) {
@@ -84,7 +85,11 @@ export function createAdmin({ db, catalog, library }) {
       const pageSize = intParam(query.get('pageSize'), 30, 100, '每页数量');
       const search = String(query.get('search') ?? '').trim().toLocaleLowerCase();
       const voteCounts = new Map(votesPerWork.all().map((row) => [`${row.task_id}/${row.work_id}`, row.votes]));
-      const allWorks = library.allWorks().map((work) => ({ ...library.adminWork(work, viewer), votes: voteCounts.get(`${work.taskId}/${work.id}`) ?? 0 }));
+      const rawWorks = library.allWorks();
+      const byKey = new Map(rawWorks.map(work => [`${work.taskId}/${work.id}`, work]));
+      // Filters need metadata, not a hash of every adaptation on disk. Resolve
+      // full preview fields only for the requested page, after filtering/sorting.
+      const allWorks = rawWorks.map((work) => ({ ...library.adminWork(work, viewer, { preview: false }), votes: voteCounts.get(`${work.taskId}/${work.id}`) ?? 0 }));
       const efforts = [...new Set(allWorks.map((work) => work.effort).filter(Boolean))].sort();
       const rows = allWorks.filter((work) =>
         (!taskId || work.task === taskId) && (!status || work.status === status) &&
@@ -95,7 +100,9 @@ export function createAdmin({ db, catalog, library }) {
         Object.entries(generation).every(([key, value]) => !value || (value === 'unset' ? !work[key] : work[key] === value)) &&
         (!search || `${work.title} ${work.modelName} ${work.vendor} ${work.task} ${work.harnessName ?? ''} ${catalog.provider(work.provider)?.name ?? ''}`.toLocaleLowerCase().includes(search)));
       rows.sort((a, b) => a.task.localeCompare(b.task) || a.title.localeCompare(b.title, 'zh-CN') || a.id.localeCompare(b.id));
-      return { works: rows.slice((page - 1) * pageSize, page * pageSize), total: rows.length, page, pageSize, efforts };
+      return { works: rows.slice((page - 1) * pageSize, page * pageSize).map(row => ({
+        ...library.adminWork(byKey.get(`${row.task}/${row.id}`), viewer), votes: row.votes,
+      })), total: rows.length, page, pageSize, efforts };
     },
     getEditorial(id, rawFace, viewer) {
       task(id, viewer);

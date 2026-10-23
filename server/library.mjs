@@ -139,6 +139,12 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
         (SELECT COUNT(*) FROM audit JOIN works questioned ON questioned.id = audit.work_id
           WHERE questioned.owner_id = ? AND audit.action = 'questioned' AND audit.at >= ?) AS questioned
       FROM works WHERE owner_id = ?`),
+    trustAll: db.prepare(`WITH recent AS (
+      SELECT questioned.owner_id, COUNT(*) AS n FROM audit JOIN works questioned ON questioned.id = audit.work_id
+      WHERE audit.action = 'questioned' AND audit.at >= ? GROUP BY questioned.owner_id)
+      SELECT works.owner_id, COUNT(*) FILTER (WHERE status = 'verified' AND deleted_at IS NULL) AS verified,
+        COUNT(*) FILTER (WHERE status = 'questioned' AND reviewed_at >= ?) + COALESCE(recent.n, 0) AS questioned
+      FROM works LEFT JOIN recent ON recent.owner_id = works.owner_id GROUP BY works.owner_id`),
     worksSeen: db.prepare('SELECT works_seen_at FROM users WHERE id = ?'),
     markWorksSeen: db.prepare('UPDATE users SET works_seen_at = ? WHERE id = ?'),
     updatesOf: db.prepare(`SELECT COUNT(*) AS n FROM works WHERE owner_id = ? AND deleted_at IS NULL AND ${changedAt} > ?`),
@@ -206,6 +212,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     myReactions: db.prepare('SELECT task_id, work_id, emoji FROM reactions WHERE user_id = ?'),
     audit: db.prepare('INSERT INTO audit (at, actor_id, actor_name, action, task_id, work_id, detail) VALUES (?, ?, ?, ?, ?, ?, ?)'),
     auditLog: db.prepare('SELECT * FROM audit ORDER BY id DESC LIMIT ?'),
+    auditFor: db.prepare('SELECT * FROM audit WHERE task_id = ? AND (? IS NULL OR work_id = ?) ORDER BY id DESC LIMIT 200'),
   };
 
   function fromRow(row, archive = catalog) {
@@ -615,8 +622,9 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     },
     authorWorks(user) {
       const seen = seenAt(user.id);
-      const queue = new Map(this.reviewQueue().map((work, index) => [work.id, index]));
-      return this.uploadsOf(user.id).map((work) => ({
+      const works = this.uploadsOf(user.id);
+      const queue = new Map(works.some(work => work.status === 'unverified') ? this.reviewQueue().map((work, index) => [work.id, index]) : []);
+      return works.map((work) => ({
         ...this.toPublic(work, user),
         ...(work.status === 'unverified' && queue.has(work.id) ? { queueAhead: queue.get(work.id) } : {}),
         ...(workChangedAt(work) > seen ? { changed: true } : {}),
@@ -635,7 +643,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
         ...(!work.curated && viewer && (viewer.id === work.ownerId || isStaff(viewer)) ? { arena: arenaState(work) } : {}) };
     },
 
-    toPublic(work, viewer, { admin = false } = {}) {
+    toPublic(work, viewer, { admin = false, preview = true } = {}) {
       work = withDisplay(work);
       if (!work) return null;
       if (work.curated) {
@@ -674,7 +682,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
         files: work.files,
         bytes: work.bytes,
         calibration: work.trial.calibration ?? null,
-        ...(!work.curated && this.canRead(work, viewer) ? readWorkPreview(dirs.media, work) : null),
+        ...(preview && !work.curated && this.canRead(work, viewer) ? readWorkPreview(dirs.media, work) : null),
         ...(privileged ? { checks: work.checks, trial: work.trial, sourceName: work.sourceName, root: work.root, entry: work.entry, reviewer: work.reviewerName } : {}),
       };
     },
@@ -692,12 +700,12 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       return face === 'arena' ? (work.calibrationArena ?? null) : (work.trial?.calibration ?? null);
     },
 
-    adminWork(work, viewer = null) {
+    adminWork(work, viewer = null, { preview = true } = {}) {
       work = withDisplay(work);
       const flags = { show_gallery: work.showGallery, show_arena: work.showArena, show_entertainment: work.showEntertainment };
       const override = work.curated ? q.override.get(work.taskId, work.id) : null;
       return {
-        ...this.toPublic(work, viewer, { admin: true }),
+        ...this.toPublic(work, viewer, { admin: true, preview }),
         ...(work.curated ? {} : {
           reviewed: { gallery: iso(work.reviewedGalleryAt), arena: iso(work.reviewedArenaAt) } }),
         ...flags, calibration_gallery: work.curated ? (override?.calibration_gallery ? JSON.parse(override.calibration_gallery) : null) : work.trial.calibration ?? null,
@@ -1221,10 +1229,22 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     pendingCount: (userId) => q.pendingOf.get(userId).n,
     pendingLimit,
     trusted,
+    trustSummaries(users) {
+      const since = Date.now() - 90 * 24 * 3600e3;
+      const credits = new Map(q.trustAll.all(since, since).map(row => [row.owner_id, row]));
+      return new Map(users.map(user => {
+        const credit = credits.get(user.id);
+        const trusted = !isStaff(user) && Boolean(credit && credit.verified >= limits.trustedMinVerified && credit.questioned === 0);
+        return [user.id, { trusted, pendingLimit: isStaff(user) ? null : trusted ? limits.trustedPendingPerUser : limits.pendingPerUser }];
+      }));
+    },
     updatesCount: (userId) => q.updatesOf.get(userId, seenAt(userId)).n,
     markWorksSeen(userId) { q.markWorksSeen.run(Date.now(), userId); },
     auditLog(limit = 200) {
       return q.auditLog.all(limit).map((row) => ({ at: iso(row.at), actor: row.actor_name, action: row.action, task: row.task_id, work: row.work_id, detail: generationAuditView(row.detail) }));
+    },
+    auditFor(taskId, workId = null) {
+      return q.auditFor.all(taskId, workId, workId).map((row) => ({ at: iso(row.at), actor: row.actor_name, action: row.action, task: row.task_id, work: row.work_id, detail: generationAuditView(row.detail) }));
     },
     hasDirectory: (id) => existsSync(join(dirs.works, id)),
   };

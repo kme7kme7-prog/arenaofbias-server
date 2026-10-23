@@ -62,8 +62,8 @@ async function withPlatform(readLimits, run) {
 test('catalog reads share an IP budget across endpoints, query strings, HEAD and sessions', async () => {
   await withPlatform({ api: 10, catalog: 3 }, async ({ request, cookie, origin }) => {
     const session = await cookie('reader');
-    assert.equal((await request('/api/works?cache=one')).status, 200);
-    assert.equal((await request('/api/prompts?cache=two', { method: 'HEAD',
+    assert.equal((await request('/api/works?promptId=one')).status, 200);
+    assert.equal((await request('/api/prompts?promptId=two', { method: 'HEAD',
       ip: '203.0.113.1, 198.51.100.10' })).status, 200);
     assert.equal((await request('/api/bootstrap', { headers: { cookie: session } })).status, 200);
     const denied = await request('/api/votes?scope=formal', { ip: '203.0.113.2, 198.51.100.10' });

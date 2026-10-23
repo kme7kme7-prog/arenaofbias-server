@@ -33,6 +33,23 @@ import { manualCorrections, voteAttribution, votesBeforeTaskMove } from './vote-
 import { isTextTask, isAiJudgedTask } from './categories.mjs';
 
 const forestTexts = JSON.parse(readFileSync(new URL('./playground-forest-texts.json', import.meta.url), 'utf8'));
+
+// Selectors only narrow the already gated public roster. Missing/withdrawn IDs
+// remain indistinguishable; no private metadata is looked up through this path.
+function catalogSelector(query, works = true) {
+  const allowed = new Set(works ? ['promptId', 'promptIds', 'ids'] : ['promptId', 'promptIds']);
+  for (const key of query.keys()) if (!allowed.has(key) || query.getAll(key).length !== 1) fail(400, '目录筛选无效', 'invalid_query');
+  if (query.has('promptId') && query.has('promptIds')) fail(400, '目录筛选无效', 'invalid_query');
+  const list = (key, maximum = 50) => {
+    if (!query.has(key)) return null;
+    const ids = query.get(key).split(',');
+    if (!ids.length || ids.length > maximum || ids.some(id => !id || id.trim() !== id || id.length > 128 || /[\x00-\x1f\x7f]/.test(id)) || new Set(ids).size !== ids.length) fail(400, '目录筛选无效', 'invalid_query');
+    return new Set(ids);
+  };
+  const prompts = query.has('promptId') ? list('promptId', 1) : list('promptIds');
+  const ids = works ? list('ids') : null;
+  return row => (!prompts || prompts.has(works ? row.promptId : row.id)) && (!ids || ids.has(row.id));
+}
 const REACTION_EMOJI = { up: '👍', down: '👀', laugh: '🤯' };
 const EMOJI_KIND = { '👍': 'up', '👀': 'down', '🤯': 'laugh' };
 const MAPPED_EMOJIS = Object.keys(EMOJI_KIND);
@@ -158,13 +175,14 @@ export function registerShow1Compat(router, deps) {
   const buildGates = () => !library ? null : new Map(q.contentGates.all().map((row) => [row.content_key,
     { taskId: row.task_id, status: row.status, moderation: JSON.parse(row.moderation),
       curatedAs: row.curated_as, authorRole: row.author_role, curated: false }]));
-  const liveWorks = (gates = buildGates()) => {
+  const liveWorks = (gates = buildGates(), select = () => true) => {
     const { roundByTask, aiRounds } = promptCatalog();
     // A work must belong to the same public catalog used by prompts and ballots.
     // Pending/deleted community questions and unassigned inbox items stay out.
     const uploads = q.liveWorks.all().filter((row) => row.entertainment_route !== 1 && !snapshot.upToRid[row.id]
       && roundByTask[row.task_id]
       && !aiRounds.has(row.task_id)
+      && select({ id: row.id, promptId: roundByTask[row.task_id] })
       && (!gates || library.publicContent(gates.get(row.content_key))))
       .map((row) => ({ ...row, round: roundByTask[row.task_id] ?? row.task_id,
         modelName: row.model_id ? (deps.catalog.model(row.model_id)?.name ?? row.model_id) : row.model_other,
@@ -175,7 +193,8 @@ export function registerShow1Compat(router, deps) {
     const datapack = !library || !archive ? [] : archive.tasks().flatMap((task) => {
       const round = roundByTask[task.id];
       if (!round || aiRounds.has(round)) return [];
-      return [...task.works.values()].filter((work) => library.publicCuratedContent(work)).map((work) => ({
+      return [...task.works.values()].filter((work) => select({ id: datapackRid(round, work.id), promptId: round })
+        && library.publicCuratedContent(work)).map((work) => ({
         id: work.id, rid: datapackRid(round, work.id), task_id: task.id, round,
         model_id: work.modelId ?? null, model_other: work.modelId ? '' : (work.modelName ?? ''), title: work.title,
         content_key: library.curatedContentKey(work), modelName: work.modelName ?? work.modelId ?? '', vendor: work.vendor ?? '' }));
@@ -258,7 +277,8 @@ export function registerShow1Compat(router, deps) {
   });
   // Historical HTML rows are indexes, not publication authority. Match the w-host
   // gate at read time so removed tasks / held works cannot enter the random pool.
-  const snapshotWorks = (gates) => snapshot.works.filter((row) => {
+  const snapshotWorks = (gates, select = () => true) => snapshot.works.filter((row) => {
+    if (!select(row)) return false;
     if (promptCatalog().aiRounds.has(row.promptId)) return false;
     if (!library || JSON.parse(row.content).kind !== 'html') return true;
     const key = snapshot.workMap[row.id]?.key;
@@ -310,11 +330,13 @@ export function registerShow1Compat(router, deps) {
     }
     return storyCache.stories;
   };
-  const worksOf = () => {
+  const worksOf = (select = () => true) => {
     const kindByRound = new Map(promptCatalog().prompts.map((prompt) => [prompt.id, prompt.kind]));
     const stories = storiesSnapshot();
     const gates = buildGates();
-    return [...snapshotWorks(gates), ...liveWorks(gates).map((row) => {
+    // ID selectors carry no authority: skip unrelated candidate rows, then run
+    // exactly the same fresh public gate for every row that may be returned.
+    return [...snapshotWorks(gates, select), ...liveWorks(gates, select).map((row) => {
       let story = null;
       if (kindByRound.get(row.round) === 'text') {
         if (!stories.has(row.id)) stories.set(row.id, textStory(row));
@@ -345,11 +367,11 @@ export function registerShow1Compat(router, deps) {
 
   // ---- read-only snapshot -----------------------------------------------------
 
-  router.on('GET', '/api/prompts', () => ({ prompts: promptsOf() }));
-  router.on('GET', '/api/works', () => ({ works: worksOf() }));
+  router.on('GET', '/api/prompts', (ctx) => ({ prompts: promptsOf().filter(catalogSelector(ctx.url.searchParams, false)) }));
+  router.on('GET', '/api/works', (ctx) => ({ works: worksOf(catalogSelector(ctx.url.searchParams)) }));
   // A native-reader projection of the same gated public roster. Original endpoints
   // and files stay intact; known legacy HTML is used only while its SHA matches.
-  router.on('GET', '/api/playground/works', () => ({ works: worksOf().map(row => {
+  router.on('GET', '/api/playground/works', (ctx) => ({ works: worksOf(catalogSelector(ctx.url.searchParams)).map(row => {
     const extracted = row.promptId === '013' && forestTexts[row.id];
     if (!extracted || !library) return row;
     const key = snapshot.workMap[row.id]?.key;

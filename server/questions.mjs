@@ -43,6 +43,7 @@ export function createQuestions(db, { references = null } = {}) {
   const audit = db.prepare('INSERT INTO audit (at, actor_id, actor_name, action, task_id, work_id, detail) VALUES (?, ?, ?, ?, ?, ?, ?)');
   const works = db.prepare('SELECT id, owner_id, task_id FROM works WHERE task_id = ? AND deleted_at IS NULL AND curated_as IS NULL ORDER BY created_at, id');
   const votes = db.prepare('SELECT COUNT(*) AS n FROM votes WHERE task_id = ?');
+  const votesByTask = db.prepare('SELECT task_id, COUNT(*) AS n FROM votes GROUP BY task_id');
   const override = db.prepare('SELECT * FROM question_overrides WHERE task_id = ?');
   const saveOverride = db.prepare(`INSERT INTO question_overrides (task_id, display_json, moderation, accepts_uploads, cover_work, deleted_at, updated_by, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(task_id) DO UPDATE SET display_json = excluded.display_json,
@@ -170,6 +171,13 @@ export function createQuestions(db, { references = null } = {}) {
       ...(question.moderation.status === 'rejected' ? { resubmittable: !approvedBefore.get(question.id) } : {}) })),
     pendingCount: () => allQuestions().filter((question) => question.moderation.status === 'pending').length,
     adminAll: (viewer = null) => allQuestions().map((question) => adminQuestion(question, viewer)),
+    // Index reads need searchable text but not per-question work/vote queries.
+    adminIndex: (viewer = null) => allQuestions().map((question) => dto(question, viewer, 'admin', true)),
+    adminVoteCounts: () => new Map(votesByTask.all().map(row => [row.task_id, row.n])),
+    adminGet(id, viewer = null) {
+      const question = lookup(id);
+      return question ? adminQuestion(question, viewer) : null;
+    },
     create(user, body, existingTags = []) {
       const category = requireCategory(body.category);
       const domains = body.domains === undefined ? [] : requireDomains(body.domains);

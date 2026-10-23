@@ -37,7 +37,7 @@ export function createActivityRevision(db) {
 // (moderation withdrawals). `loose` only decides whether a cached body is reused,
 // so frequent writes such as votes cannot keep a request rebuilding. `ttl` bounds
 // how long a body outlives changes that no counter sees.
-export function createSharedJson({ strict, loose = () => '', read, ttl = 30_000, cacheControl, label = 'shared', now = Date.now }) {
+export function createSharedJson({ strict, loose = () => '', read, ttl = 30_000, cacheControl, label = 'shared', now = Date.now, compressBody = compress }) {
   const building = new Map();
   let cached;
   const fresh = (entry, strictKey, looseKey) => entry && entry.strict === strictKey && entry.loose === looseKey && now() - entry.at < ttl;
@@ -66,7 +66,7 @@ export function createSharedJson({ strict, loose = () => '', read, ttl = 30_000,
   }
   const variant = (entry, encoding) => {
     if (!entry.variants.has(encoding)) {
-      const pending = compress(entry.body, encoding);
+      const pending = compressBody(entry.body, encoding);
       pending.catch(() => entry.variants.delete(encoding));
       entry.variants.set(encoding, pending);
     }

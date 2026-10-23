@@ -32,6 +32,7 @@ import {
 } from './http.mjs';
 import { createLibrary } from './library.mjs';
 import { createAdmin } from './admin.mjs';
+import { createReview } from './review.mjs';
 import { createInbox } from './inbox.mjs';
 import { createQuestions } from './questions.mjs';
 import { createReferences } from './references.mjs';
@@ -46,7 +47,7 @@ import { isSenior, isStaff, levelOf, requireContributor } from './roles.mjs';
 
 const foldScript = readFileSync(new URL('./fold.js', import.meta.url));
 
-export function createPlatform({ config, limits, captureFactory = createCapturer, mailer }) {
+export function createPlatform({ config, limits, captureFactory = createCapturer, mailer, compressBody }) {
   const serverVersion = process.env.SERVER_VERSION || (() => {
     try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: new URL('..', import.meta.url), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); }
     catch { /* 部署目录没有 .git：读部署时写入的版本文件 */ }
@@ -79,6 +80,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const curated = createCurated({ db, catalog, library, questions });
   const arena = createArena({ db, catalog, library, limits, revision: catalogRevision, curated });
   const qualification = createQualification({ db, catalog, library, auth });
+  const management = createReview({ catalog, library, questions, adminService, auth, qualification });
   const voters = createArenaVoters({ db, config });
   const voteRisk = createVoteRisk({ db, invalidate: () => arena.invalidate() });
   voteRisk.cleanup();
@@ -125,7 +127,16 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   // The admin shell shares the site's CSP: it only talks to /api and frames works.
   const adminDir = resolve(config.admin ?? join(config.dist, '..', 'admin'));
 
-  const signedIn = (ctx) => ctx.user ?? fail(401, '请先登录');
+  const signedIn = (ctx) => {
+    const user = ctx.user ?? fail(401, '请先登录');
+    ctx.permission ??= { id: user.id, role: user.role, level: levelOf(user) };
+    return user;
+  };
+  const privateBeforeSend = (ctx) => ctx.permission ? () => {
+    const current = auth.userFrom(ctx.req);
+    if (!current || current.id !== ctx.permission.id) fail(401, '登录状态已变化，请重新载入');
+    if (current.role !== ctx.permission.role || levelOf(current) !== ctx.permission.level) fail(403, '账号权限已变化，请重新载入');
+  } : undefined;
   const emailBound = (ctx) => {
     const user = signedIn(ctx);
     if (!user.email) fail(403, '请先绑定邮箱', 'email_required');
@@ -595,13 +606,22 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     return { calibration: library.setCalibration(user, ctx.params.id, body.calibration) };
   });
 
-  router.on('GET', '/api/me', (ctx) => {
+  router.on('GET', '/api/me', (ctx) => catalog.withSnapshot(() => {
     const user = signedIn(ctx);
+    const query = ctx.url.searchParams;
+    if (query.size) {
+      if (query.size !== 1 || query.getAll('view').length !== 1) fail(400, '个人页参数无效', 'invalid_query');
+      const view = query.get('view');
+      if (view === 'overview') return { votes: arena.votesBy(user.id), ...profile.summary(user) };
+      if (view === 'questions') return { questions: questions.byOwner(user.id, user) };
+      if (view === 'works') return { questions: questions.byOwner(user.id, user), works: library.authorWorks(user), reviewStats: library.reviewStats() };
+      fail(400, '个人页参数无效', 'invalid_query');
+    }
     return {
       questions: questions.byOwner(user.id, user), works: library.authorWorks(user),
       reviewStats: library.reviewStats(), votes: arena.votesBy(user.id), ...profile.summary(user),
     };
-  });
+  }));
   router.on('POST', '/api/me/works/seen', (ctx) => {
     const user = signedIn(ctx);
     limit.write(user.id);
@@ -624,6 +644,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   });
   router.on('GET', '/api/review', (ctx) => {
     const admin = staffOnly(ctx);
+    if (ctx.url.searchParams.size) return catalog.withSnapshot(() => management.list(ctx.url.searchParams, admin));
     // Reuse question lookups within this response only; the next request reads current decisions.
     return catalog.withSnapshot(() => ({
       works: library.allWorks().map((work) => library.adminWork(work, admin)), audit: library.auditLog(),
@@ -633,7 +654,8 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
 
   // Account administration for Gallery's member list and the admin web app (the CLI in server/cli.mjs does the same).
   router.on('GET', '/api/admin/users', (ctx) => {
-    adminOnly(ctx);
+    const admin = adminOnly(ctx);
+    if (ctx.url.searchParams.size) return catalog.withSnapshot(() => management.members(ctx.url.searchParams, admin));
     const summaries = qualification.summaries();
     return { users: adminService.members(auth.list()).map(user => ({ ...user, exam: summaries.get(user.id) ?? { passedAt: null, attempts: 0, bestCorrect: null, questionCount: null } })) };
   });
@@ -648,7 +670,17 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
 
   router.on('GET', '/api/admin/works', (ctx) => {
     const admin = staffOnly(ctx);
-    return adminService.works(ctx.url.searchParams, admin);
+    return catalog.withSnapshot(() => adminService.works(ctx.url.searchParams, admin));
+  });
+  router.on('GET', '/api/admin/works/:task/:id', (ctx) => {
+    const admin = staffOnly(ctx);
+    if (ctx.url.searchParams.size) fail(400, '详情参数无效', 'invalid_query');
+    return catalog.withSnapshot(() => management.work(ctx.params.task, ctx.params.id, admin));
+  });
+  router.on('GET', '/api/admin/questions/:id', (ctx) => {
+    const admin = adminOnly(ctx);
+    if (ctx.url.searchParams.size) fail(400, '详情参数无效', 'invalid_query');
+    return catalog.withSnapshot(() => management.question(ctx.params.id, admin));
   });
   router.on('GET', '/api/admin/inbox/works', (ctx) => {
     const admin = staffOnly(ctx);
@@ -859,7 +891,14 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   router.on('GET', '/api/qualification/attempts/:id', ctx => qualification.get(signedIn(ctx), ctx.params.id));
   router.on('POST', '/api/qualification/attempts/:id/items/:itemId/ready', ctx => { const user = signedIn(ctx); limit.write(user.id); return qualification.ready(user, ctx.params.id, ctx.params.itemId); });
   router.on('PUT', '/api/qualification/attempts/:id/items/:itemId/answer', async ctx => { const user = signedIn(ctx); limit.write(user.id); return qualification.answer(user, ctx.params.id, ctx.params.itemId, (await readJson(ctx.req)).choice); });
-  router.on('POST', '/api/qualification/attempts/:id/submit', ctx => { const user = signedIn(ctx); limit.write(user.id); return qualification.submit(user, ctx.params.id); });
+  router.on('POST', '/api/qualification/attempts/:id/submit', ctx => {
+    const user = signedIn(ctx); limit.write(user.id);
+    const result = qualification.submit(user, ctx.params.id);
+    // Passing this action intentionally upgrades the same member, so its own
+    // successful response is checked against the resulting authorized level.
+    ctx.permission = { id: user.id, role: result.user.role, level: result.user.level };
+    return result;
+  });
   router.on('GET', '/api/admin/qualification', ctx => qualification.adminInfo(adminOnly(ctx)));
   router.on('GET', '/api/admin/qualification/works', ctx => qualification.works(adminOnly(ctx), ctx.url.searchParams.get('taskId')));
   router.on('PUT', '/api/admin/qualification/settings', async ctx => qualification.saveSettings(adminOnly(ctx), await readJson(ctx.req)));
@@ -1017,8 +1056,16 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       if (req.method !== 'GET' && req.method !== 'HEAD') assertSameOrigin(req, config);
       const ctx = { req, res, url, params: route.params, receivedAt: Date.now(), ip: clientIp(req, config.trustProxy),
         user: url.pathname === '/api/catalog' ? null : auth.userFrom(req) };
+      if (['GET', 'HEAD'].includes(req.method) && ['/api/prompts', '/api/works', '/api/playground/works'].includes(url.pathname)) {
+        // Request-local only: a selected text roster must also follow a
+        // withdrawal while its compressed representation is being built.
+        return await createSharedJson({
+          strict: () => `${catalog.snapshot().version}|${catalogRevision()}`,
+          read: () => catalog.withSnapshot(() => route.handler(ctx)), ttl: 0, cacheControl: 'no-store', compressBody,
+        })(req, res);
+      }
       const result = await route.handler(ctx);
-      if (!res.headersSent) return sendJson(res, 200, result ?? { ok: true });
+      if (!res.headersSent) return sendJson(res, 200, result ?? { ok: true }, {}, { beforeSend: privateBeforeSend(ctx), compressBody });
     } catch (error) {
       if (res.headersSent) return res.destroy();
       if (error instanceof HttpError) return sendJson(res, error.status, { error: error.message, ...(error.code ? { code: error.code } : {}),

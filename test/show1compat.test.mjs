@@ -133,6 +133,27 @@ async function signIn(auth, name) {
 const BALLOT = { promptId: '001', winnerRid: '001-a', winnerMid: 'model-a', loserRid: '001-b', loserMid: 'model-b', mode: 'blind', outcome: 'win' };
 const VOTE_KEYS = ['id', 'promptId', 'winnerRid', 'winnerMid', 'loserRid', 'loserMid', 'mode', 'ts', 'outcome', 'winnerName', 'loserName', 'promptKind', 'promptWeights'];
 
+test('public catalog selectors return exact gated subsets and reject ambiguous or unbounded input', async () => withServer({}, async ({ base }) => {
+  for (const endpoint of ['works', 'playground/works']) {
+    const original = await call(base, 'GET', `/api/${endpoint}`);
+    const selected = await call(base, 'GET', `/api/${endpoint}?promptIds=001,004&ids=001-a,004-hall`);
+    assert.equal(selected.status, 200);
+    assert.deepEqual(selected.data.works, original.data.works.filter(row => ['001-a', '004-hall'].includes(row.id)));
+    const prompt = await call(base, 'GET', `/api/${endpoint}?promptId=001`);
+    assert.deepEqual(prompt.data.works, original.data.works.filter(row => row.promptId === '001'));
+    assert.deepEqual((await call(base, 'GET', `/api/${endpoint}?ids=missing`)).data.works, []);
+    assert.deepEqual((await call(base, 'GET', `/api/${endpoint}?promptId=004&ids=001-a`)).data.works, []);
+    for (const query of ['ids=', 'ids=a,', 'ids=a,a', 'ids=a&ids=b', 'promptId=001&promptIds=004', 'promptIds=001,,004', 'promptId=001&extra=x', `ids=${Array.from({ length: 51 }, (_, n) => `id${n}`).join(',')}`, `ids=${'x'.repeat(129)}`]) {
+      const response = await call(base, 'GET', `/api/${endpoint}?${query}`);
+      assert.equal(response.status, 400, `${endpoint}?${query}`); assert.equal(response.data.code, 'invalid_query');
+    }
+  }
+  const allPrompts = (await call(base, 'GET', '/api/prompts')).data;
+  const onePrompt = (await call(base, 'GET', '/api/prompts?promptId=001')).data;
+  assert.deepEqual(onePrompt.prompts, allPrompts.prompts.filter(row => row.id === '001'));
+  assert.equal((await call(base, 'GET', '/api/prompts?ids=001')).status, 400);
+}));
+
 function seedWorks(db) {
   const insert = db.prepare(`INSERT INTO works (id, task_id, owner_id, title, summary, model_id, model_other,
     effort, note, status, content_key, source_name, root, entry, file_count, bytes, digest,

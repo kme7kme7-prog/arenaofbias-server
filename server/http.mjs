@@ -17,7 +17,7 @@ export const fail = (status, message, code) => { throw new HttpError(status, mes
 
 // Bodies of 1 KB or more are compressed when the request accepts it; the write then
 // happens after compression, so callers that need to wait can await the result.
-export function sendJson(res, status, data, headers = {}) {
+export function sendJson(res, status, data, headers = {}, { beforeSend, compressBody = compress } = {}) {
   const body = Buffer.from(JSON.stringify(data));
   const base = {
     'Content-Type': 'application/json; charset=utf-8',
@@ -27,13 +27,27 @@ export function sendJson(res, status, data, headers = {}) {
   };
   const large = body.length >= MIN_COMPRESS_BYTES;
   const encoding = large ? pickEncoding(res.req?.headers?.['accept-encoding']) : null;
+  const canSend = () => {
+    if (res.headersSent || res.destroyed) return false;
+    try { beforeSend?.(); return true; }
+    catch (error) {
+      // Rechecking an expired/revoked session must never fall back to the old
+      // private bytes, including when compression itself failed.
+      const known = error instanceof HttpError;
+      const rejected = Buffer.from(JSON.stringify({ error: known ? error.message : '服务器出错了，请稍后再试', ...(known && error.code ? { code: error.code } : {}) }));
+      res.writeHead(known ? error.status : 500, { 'Content-Type': base['Content-Type'], 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Length': rejected.length });
+      res.end(rejected);
+      return false;
+    }
+  };
   const plain = () => {
+    if (!canSend()) return;
     res.writeHead(status, { ...base, 'Content-Length': body.length, ...(large ? { Vary: withVary(res, 'Accept-Encoding') } : {}) });
     res.end(body);
   };
   if (!encoding) return plain();
-  return compress(body, encoding).then((encoded) => {
-    if (res.headersSent || res.destroyed) return;
+  return compressBody(body, encoding).then((encoded) => {
+    if (!canSend()) return;
     res.writeHead(status, { ...base, 'Content-Encoding': encoding, 'Content-Length': encoded.length, Vary: withVary(res, 'Accept-Encoding') });
     res.end(encoded);
   }, () => { if (!res.headersSent && !res.destroyed) plain(); });

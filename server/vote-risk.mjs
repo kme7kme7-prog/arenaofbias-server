@@ -3,6 +3,7 @@ import { transaction } from './db.mjs';
 import { fail } from './http.mjs';
 import { isSenior } from './roles.mjs';
 import { modelKey } from './catalog.mjs';
+import { seesRestricted } from './restricted.mjs';
 
 export const IP_RETENTION_MS = 180 * 86400e3;
 export function normalizeIp(value) {
@@ -30,7 +31,7 @@ const model = value => {
 const actorKey = row => row.user_id ? `u:${row.user_id}` : `g:${row.visitor_hash}`;
 const staff = actor => { if (!isSenior(actor)) fail(403,'仅高级管理员可以查看投票风控'); };
 
-export function createVoteRisk({ db, invalidate }) {
+export function createVoteRisk({ db, invalidate, restricted = null }) {
   const recordingStartedAt = () => iso(db.prepare('SELECT recording_started_at FROM vote_risk_settings WHERE id=1').get().recording_started_at);
   function options(query) {
     const now = Date.now(), from = query.get('from') == null ? now-7*86400e3 : Date.parse(query.get('from'));
@@ -54,7 +55,9 @@ export function createVoteRisk({ db, invalidate }) {
     return { from,to,ip,subnet,voided,outcome,limit:number('limit',50,1,200),offset:number('offset',0,0,Number.MAX_SAFE_INTEGER),
       minVotes:number('minVotes',5,1,Number.MAX_SAFE_INTEGER), userId:query.get('userId'),visitorHash:query.get('visitorHash'),modelKey:query.get('modelKey') };
   }
-  function load(o, acceptedOnly = false) {
+  function load(o, acceptedOnly = false, actor = null) {
+    // Automation acting as a senior account never sees evidence about restricted models.
+    const hidden = row => restricted && !seesRestricted(actor) && [row.aModel, row.bModel].some(m => m && restricted.hasKey(m.key));
     const where = ['e.submitted_at>=?','e.submitted_at<?'], args = [o.from,o.to];
     for (const [field,value] of [['ip',o.ip],['subnet',o.subnet],['user_id',o.userId],['visitor_hash',o.visitorHash]]) {
       if (value != null) { where.push(`e.${field}=?`); args.push(value); }
@@ -68,7 +71,7 @@ export function createVoteRisk({ db, invalidate }) {
         row.bModel = model(row.b_correction ?? row.b_identity) ?? parse(row.b_model);
         row.winnerModel = row.choice==='a'?row.aModel:row.choice==='b'?row.bModel:null;
         return row;
-      }).filter(row => !o.modelKey || [row.aModel?.key,row.bModel?.key].includes(o.modelKey));
+      }).filter(row => !hidden(row) && (!o.modelKey || [row.aModel?.key,row.bModel?.key].includes(o.modelKey)));
   }
   const page = (rows,o,extra={}) => ({from:iso(o.from),to:iso(o.to),recordingStartedAt:recordingStartedAt(),...extra,
     total:rows.length,rows:rows.slice(o.offset,o.offset+o.limit)});
@@ -155,11 +158,11 @@ export function createVoteRisk({ db, invalidate }) {
     summary(actor,query) {
       staff(actor); const o=options(query),groupBy=query.get('groupBy')??'actor';
       if (!['actor','ip','subnet'].includes(groupBy)) fail(400,'分组无效','invalid_query');
-      return page(grouped(load(o,true),groupBy,o),o,{groupBy});
+      return page(grouped(load(o,true,actor),groupBy,o),o,{groupBy});
     },
     choices(actor,query) {
       staff(actor); const o=options(query);
-      return page(load(o).map(r=>({id:r.id,matchId:r.match_id,voteId:r.vote_id,submittedAt:iso(r.submitted_at),userId:r.user_id,
+      return page(load(o,false,actor).map(r=>({id:r.id,matchId:r.match_id,voteId:r.vote_id,submittedAt:iso(r.submitted_at),userId:r.user_id,
         username:r.username??null,visitorHash:r.visitor_hash,actorKey:actorKey(r),taskId:r.task_id,choice:r.choice,
         ip:r.ip,subnet:r.subnet,drawIp:r.draw_ip,drawSubnet:r.draw_subnet,userAgent:r.user_agent,readyElapsedMs:r.ready_elapsed_ms,
         turnstilePassed:Boolean(r.turnstile_passed),lastVerifiedAt:iso(r.last_verified_at),outcome:r.outcome,errorCode:r.error_code,
@@ -168,7 +171,7 @@ export function createVoteRisk({ db, invalidate }) {
     modelVoters(actor,query) {
       staff(actor); const o=options(query);
       if (!o.modelKey) fail(400,'请选择模型','invalid_query');
-      const source=load(o,true).filter(r=>r.vote_id && r.aModel?.key!==r.bModel?.key);
+      const source=load(o,true,actor).filter(r=>r.vote_id && r.aModel?.key!==r.bModel?.key);
       const byActor=new Map();
       for (const r of source) { const key=actorKey(r); if (!byActor.has(key)) byActor.set(key,[]); byActor.get(key).push(r); }
       const rows=grouped(source,'actor',o).map(row=>{

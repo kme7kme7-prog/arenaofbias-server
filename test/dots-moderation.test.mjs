@@ -379,7 +379,7 @@ test('works queued before the switch keep the machine path; switching modes is a
 test('migrations 48 and 49 add tables to a populated v47 database without touching existing rows', async () => {
   const root = mkdtempSync(join(tmpdir(), 'dots-v47-'));
   try {
-    assert.equal(MIGRATIONS.length, 51);
+    assert.equal(MIGRATIONS.length, 52);
     const file = join(root, 'platform.db');
     openDatabase(file).close();
     const now = Date.now();

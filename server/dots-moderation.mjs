@@ -312,8 +312,15 @@ export function createDotsModeration({ db, config, library, mode, tokens, covers
     // category is the question's category; 3d / modeling are aliases of 建模 (三维建模).
     const asked = url.searchParams.get('category');
     const category = asked == null || asked === '' ? null : ({ '3d': '建模', modeling: '建模', 三维建模: '建模' }[asked] ?? asked);
-    const rows = category == null ? q.captureGaps[manualCover].all(after, limit + 1)
-      : q.captureGapsIn[manualCover].all(after, JSON.stringify(tasksIn(category)), limit + 1);
+    const read = (from, n) => category == null ? q.captureGaps[manualCover].all(from, n)
+      : q.captureGapsIn[manualCover].all(from, JSON.stringify(tasksIn(category)), n);
+    // Restricted works are skipped before paging, so a short page never hints at them.
+    const rows = [];
+    for (let from = after, batch; rows.length <= limit; from = batch.at(-1).id) {
+      batch = read(from, limit + 1);
+      rows.push(...batch.filter((row) => library.uploadById(row.id)));
+      if (batch.length < limit + 1) break;
+    }
     const items = [];
     for (const row of rows.slice(0, limit)) {
       const work = library.uploadById(row.id);
@@ -497,7 +504,8 @@ export function createDotsModeration({ db, config, library, mode, tokens, covers
           const next = admin.bindings.authority(current.id);
           if (authority && (next.actor.id !== authority.actor.id || next.revision !== authority.revision)) fail(403, '管理员绑定已变化', 'admin_binding_changed');
           authority ??= next;
-          return { ...next.actor, accountName: next.actor.name, bindingRevision: next.revision, name: `dots:${current.label}` };
+          // automation: the bound senior account never exposes restricted (gray) works to dots.
+          return { ...next.actor, accountName: next.actor.name, bindingRevision: next.revision, name: `dots:${current.label}`, automation: true };
         };
         if (route.handler.admin) { authorize(); checkAdmin = authorize; }
         let outcome;

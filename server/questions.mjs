@@ -5,6 +5,7 @@ import { transaction } from './db.mjs';
 import { fail } from './http.mjs';
 import { authorOf, isSenior, isStaff, roleOf } from './roles.mjs';
 import { compatibleTemplates, defaultTemplates, requireCategory, requireDomains } from './categories.mjs';
+import { seesRestricted } from './restricted.mjs';
 
 const tagName = (value) => String(value).normalize('NFKC').trim().replace(/^#+/, '').trim();
 const tagKey = (value) => tagName(value).toLowerCase();
@@ -31,7 +32,7 @@ export function normalizeTags(input = [], existing = [], category = null) {
   if (unique.size > 6) fail(400, '每道题最多添加 6 个标签');
   return [...unique.values()];
 }
-export function createQuestions(db, { references = null } = {}) {
+export function createQuestions(db, { references = null, restricted = null } = {}) {
   let catalog = null;
   const select = `SELECT questions.*, COALESCE(NULLIF(users.nickname, ''), users.name) AS owner_name, users.avatar AS owner_avatar
     FROM questions LEFT JOIN users ON users.id = questions.owner_id`;
@@ -42,9 +43,18 @@ export function createQuestions(db, { references = null } = {}) {
   const pending = db.prepare(`SELECT COUNT(*) AS n FROM questions WHERE owner_id = ? AND deleted_at IS NULL AND json_extract(moderation, '$.status') = 'pending'`);
   const insert = db.prepare(`INSERT INTO questions (id, owner_id, title, summary, prompt, tags, templates, created_at, moderation, category, domains, author_role, reference_credit) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const audit = db.prepare('INSERT INTO audit (at, actor_id, actor_name, action, task_id, work_id, detail) VALUES (?, ?, ?, ?, ?, ?, ?)');
-  const works = db.prepare('SELECT id, owner_id, task_id FROM works WHERE task_id = ? AND deleted_at IS NULL AND curated_as IS NULL ORDER BY created_at, id');
+  const works = db.prepare('SELECT id, owner_id, task_id, model_id, model_other FROM works WHERE task_id = ? AND deleted_at IS NULL AND curated_as IS NULL ORDER BY created_at, id');
   const votes = db.prepare('SELECT COUNT(*) AS n FROM votes WHERE task_id = ?');
   const votesByTask = db.prepare('SELECT task_id, COUNT(*) AS n FROM votes GROUP BY task_id');
+  const votePairs = db.prepare('SELECT a_work, b_work FROM votes WHERE task_id = ?');
+  const allVotePairs = db.prepare('SELECT task_id, a_work, b_work FROM votes');
+  const workModels = db.prepare('SELECT id, model_id, model_other FROM works');
+  const coverRow = db.prepare('SELECT model_id, model_other FROM works WHERE id = ?');
+  // Restricted (gray) works and their ballots are left out of every count a non-senior sees.
+  const hiddenIdsFor = (viewer) => !restricted || seesRestricted(viewer) || !restricted.keys().size ? new Set()
+    : new Set(workModels.all().filter((row) => restricted.isRestrictedWork(row)).map((row) => row.id));
+  const visibleVotes = (id, hidden) => hidden.size ? votePairs.all(id).filter((vote) => !hidden.has(vote.a_work) && !hidden.has(vote.b_work)).length : votes.get(id).n;
+  const coverFor = (question, viewer) => question.cover && restricted?.keys().size && restricted.hiddenFrom(coverRow.get(question.cover), viewer) ? null : question.cover;
   const states = db.prepare('SELECT id, tags, moderation FROM questions WHERE deleted_at IS NULL');
   const overlayStates = db.prepare('SELECT task_id, deleted_at, display_json, moderation FROM question_overrides');
   const ownState = db.prepare('SELECT id, moderation FROM questions WHERE id = ? AND owner_id = ? AND deleted_at IS NULL');
@@ -84,7 +94,7 @@ export function createQuestions(db, { references = null } = {}) {
       version: question.version, date: question.date, createdAt: question.createdAt,
       author: authorOf({ role: question.author_role, name: question.owner_name,
         avatar: question.owner_id && question.owner_name ? avatarOf({ id: question.owner_id, avatar: question.owner_avatar }) : null }, adminView),
-      mine: Boolean(viewer?.id && viewer.id === question.owner_id), acceptsUploads: question.acceptsUploads, cover: question.cover,
+      mine: Boolean(viewer?.id && viewer.id === question.owner_id), acceptsUploads: question.acceptsUploads, cover: coverFor(question, viewer),
       ...(moderationView ? { moderation: moderationView === 'admin' ? question.moderation : authorModeration(question.moderation) } : {}) };
   }
   function packWorks(id) {
@@ -96,10 +106,10 @@ export function createQuestions(db, { references = null } = {}) {
     saveOverride.run(question.id, next.display_json ?? null, next.moderation ?? null, next.accepts_uploads ?? null,
       next.cover_work ?? null, next.deleted_at ?? null, actor.id, Date.now());
   }
-  function adminQuestion(question, viewer) {
+  function adminQuestion(question, viewer, hidden = hiddenIdsFor(viewer)) {
     return { ...dto(question, viewer, 'admin', true), ownerId: question.owner_id,
-      works: itemsFor(question.id).length, votes: votes.get(question.id).n,
-      samples: question.packaged ? [] : works.all(question.id).filter((work) => work.owner_id === question.owner_id)
+      works: itemsFor(question.id).filter((work) => !hidden.has(work.id)).length, votes: visibleVotes(question.id, hidden),
+      samples: question.packaged ? [] : works.all(question.id).filter((work) => work.owner_id === question.owner_id && !hidden.has(work.id))
         .map((work) => ({ id: work.id, taskId: work.task_id })) };
   }
   const ownerQuestion = (question, viewer) => ({ ...dto(question, viewer, isSenior(viewer) ? 'admin' : true),
@@ -148,7 +158,7 @@ export function createQuestions(db, { references = null } = {}) {
     if (Object.hasOwn(body, 'acceptsUploads') && typeof body.acceptsUploads !== 'boolean') fail(400, '投稿开关无效');
     const acceptsUploads = body.acceptsUploads ?? question.acceptsUploads;
     const cover = Object.hasOwn(body, 'cover') ? body.cover : question.cover;
-    if (Object.hasOwn(body, 'cover') && cover !== null && (typeof cover !== 'string' || !items.some((work) => work.id === cover))) fail(400, '封面必须是本题现有作品');
+    if (Object.hasOwn(body, 'cover') && cover !== null && (typeof cover !== 'string' || !items.some((work) => work.id === cover && !restricted?.isRestrictedWork(work)))) fail(400, '封面必须是本题现有作品');
     const tags = category !== question.category ? question.tags.filter((tag) => tagKey(tag) !== tagKey(category)) : question.tags;
     return { title, summary, prompt, category, domains, templates, tags, acceptsUploads, cover, references: refs, referenceCredit: credit };
   }
@@ -179,10 +189,16 @@ export function createQuestions(db, { references = null } = {}) {
       return ownerQuestion(fromRow(row), user);
     },
     pendingCount: () => allQuestions().filter((question) => question.moderation.status === 'pending').length,
-    adminAll: (viewer = null) => allQuestions().map((question) => adminQuestion(question, viewer)),
+    adminAll: (viewer = null) => { const hidden = hiddenIdsFor(viewer); return allQuestions().map((question) => adminQuestion(question, viewer, hidden)); },
     // Index reads need searchable text but not per-question work/vote queries.
     adminIndex: (viewer = null) => allQuestions().map((question) => dto(question, viewer, 'admin', true)),
-    adminVoteCounts: () => new Map(votesByTask.all().map(row => [row.task_id, row.n])),
+    adminVoteCounts: (viewer = null) => {
+      const hidden = hiddenIdsFor(viewer);
+      if (!hidden.size) return new Map(votesByTask.all().map(row => [row.task_id, row.n]));
+      const counts = new Map();
+      for (const vote of allVotePairs.all()) if (!hidden.has(vote.a_work) && !hidden.has(vote.b_work)) counts.set(vote.task_id, (counts.get(vote.task_id) ?? 0) + 1);
+      return counts;
+    },
     // Queue totals need visibility/state only, not prompt/reference/author DTOs.
     reviewStates() {
       const overlays = new Map(overlayStates.all().map(row => [row.task_id, row]));
@@ -293,9 +309,13 @@ export function createQuestions(db, { references = null } = {}) {
       const question = lookup(id);
       if (!question) fail(404, '题目不存在');
       if (actor.id !== question.owner_id && !isSenior(actor)) fail(403, '只能删除自己发起的题目');
+      // Checks run on everything, restricted works and ballots included. Someone who cannot see
+      // a restricted work gets the ordinary "already answered" refusal, so it is never deleted
+      // through them (dots included).
       const items = itemsFor(id), count = votes.get(id).n;
-      if (isSenior(actor) && count > 0) fail(409, '这道题目已有投票记录，不能删除');
-      if (!isSenior(actor) && publicQuestion(question) && (count > 0 || items.some((work) => (work.owner_id ?? work.ownerId) !== actor.id))) fail(409, '已经有人作答的题目不能删除');
+      const hiddenIds = hiddenIdsFor(actor), grayInside = works.all(id).some((work) => hiddenIds.has(work.id));
+      if (isSenior(actor) && (count > 0 || grayInside)) fail(409, '这道题目已有投票记录，不能删除');
+      if (!isSenior(actor) && (grayInside || publicQuestion(question) && (count > 0 || items.some((work) => (work.owner_id ?? work.ownerId) !== actor.id)))) fail(409, '已经有人作答的题目不能删除');
       const removed = works.all(id).filter((work) => isSenior(actor) || work.owner_id === actor.id), now = Date.now();
       transaction(db, () => {
         for (const work of removed) {

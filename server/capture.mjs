@@ -466,6 +466,11 @@ export function createCapturer({ config, library, loadChromium = async () => (aw
     aborted();
     work = (await beforeCapture?.()) ?? work;
     aborted();
+    // A restricted work whose owner is no longer a senior admin has no address to load.
+    const originFor = (current) => library.captureOrigin ? library.captureOrigin(current)
+      : library.publicContent(current) ? library.originOf(current.contentKey) : library.previewOrigin(current);
+    const skipped = () => detailed ? { error: { code: 'not_found', stage: 'initialize' }, captures: {} } : null;
+    if (originFor(work) === null) return skipped();
     notedDiscard = false;
     const budget = createBudget(timeouts.task);
     activeBudget = budget;
@@ -481,7 +486,8 @@ export function createCapturer({ config, library, loadChromium = async () => (aw
       aborted();
       work = (await beforeCapture?.()) ?? work;
       aborted();
-      const origin = library.publicContent(work) ? library.originOf(work.contentKey) : library.previewOrigin(work);
+      const origin = originFor(work);
+      if (origin === null) return skipped();
       const captures = {};
       const late = {};
       const texts = [];

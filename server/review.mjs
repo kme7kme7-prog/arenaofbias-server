@@ -66,8 +66,8 @@ export function createReview({ catalog, library, questions, adminService, auth, 
   function index(viewer) {
     const allQuestions = isSenior(viewer) ? questions.adminIndex(viewer) : catalog.tasks();
     const publicIds = new Set(catalog.tasks().filter(q => !q.tags?.includes('arena-only')).map(q => q.id));
-    const works = library.allWorks();
-    const { questionById, buckets, counts } = classify(viewer, allQuestions, publicIds, works, library.auditLog().length);
+    const works = library.allWorks({ viewer });
+    const { questionById, buckets, counts } = classify(viewer, allQuestions, publicIds, works, library.auditLog(200, viewer).length);
     const thin = work => {
       const dto = library.adminWork(work, viewer, { preview: false });
       for (const key of ['checks', 'trial', 'sourceName', 'root', 'entry', 'summary', 'note', 'calibration', 'calibration_gallery', 'calibration_arena']) delete dto[key];
@@ -81,14 +81,14 @@ export function createReview({ catalog, library, questions, adminService, auth, 
     const works = data.works.filter(w => w.taskId === id).map(data.thin);
     const sampleIds = new Set(question.samples.map(w => w.id));
     const { ownerId, ...dto } = question;
-    return { question: { ...dto, samples: works.filter(w => sampleIds.has(w.id)) }, works, ...(current ? {} : { audit: library.auditFor(id) }) };
+    return { question: { ...dto, samples: works.filter(w => sampleIds.has(w.id)) }, works, ...(current ? {} : { audit: library.auditFor(id, null, viewer) }) };
   }
   function navigation(viewer, logCount) {
     const states = questions.reviewStates();
     const publicQuestions = states.filter(q => ['legacy', 'approved'].includes(q.moderation?.status));
     const publicIds = new Set(publicQuestions.filter(q => !q.tags?.includes('arena-only')).map(q => q.id));
     return classify(viewer, isSenior(viewer) ? states : publicQuestions, publicIds,
-      library.reviewStates(new Set(states.map(q => q.id))), logCount).counts;
+      library.reviewStates(new Set(states.map(q => q.id)), viewer), logCount).counts;
   }
   const workFilters = ['all', 'public', 'content', 'unverified', 'questioned', 'off', 'rejected'];
   const doneFilters = ['all', 'public', 'noarena', 'off', 'questioned', 'rejected', 'machine', 'injection'];
@@ -107,7 +107,7 @@ export function createReview({ catalog, library, questions, adminService, auth, 
       const result = { panel, works: [], questions: [], audit: [], counts, filterCounts: {}, total: 0, page, pageSize, scopeTotal: 0,
         questionChoices: allQuestions.map(({ id, title }) => ({ id, title })), domainChoices: [], autoWorks: [], autoTotal: 0, autoPage: params.number('autoPage', 1, 100000) };
       if (panel === 'log') {
-        const audit = library.auditLog();
+        const audit = library.auditLog(200, viewer);
         const current = slice(audit, page, pageSize);
         const keys = new Set(current.filter(row => row.work).map(row => `${row.task}/${row.work}`));
         return { ...result, audit: current, works: works.filter(work => keys.has(`${work.taskId}/${work.id}`)).map(thin), total: audit.length, scopeTotal: audit.length };
@@ -130,7 +130,7 @@ export function createReview({ catalog, library, questions, adminService, auth, 
         const countWorks = row => Object.values(byTask.get(row.id) ?? {}).reduce((a, b) => a + b, 0);
         rows.sort(sort === 'title' ? titleSort : sort === 'works' ? (a, b) => countWorks(b) - countWorks(a) : (a, b) => (sort === 'oldest' ? 1 : -1) * (time(a) - time(b)));
         result.total = rows.length;
-        const votes = panel === 'catalog' ? questions.adminVoteCounts() : null;
+        const votes = panel === 'catalog' ? questions.adminVoteCounts(viewer) : null;
         result.questions = slice(rows, page, pageSize).map(row => {
           if (panel === 'questions') return questionDetail(row.id, viewer, data).question;
           const { prompt, promptVariants, references, referenceCredit, ...summary } = row;
@@ -176,8 +176,8 @@ export function createReview({ catalog, library, questions, adminService, auth, 
       return result;
     },
     work(task, id, viewer) {
-      const work = library.work(task, id) ?? fail(404, '作品不存在', 'not_found');
-      return { work: library.adminWork(work, viewer), ...(isSenior(viewer) ? { question: questions.adminGet(task, viewer) } : {}), audit: library.auditFor(task, id) };
+      const work = library.work(task, id, null, viewer) ?? fail(404, '作品不存在', 'not_found');
+      return { work: library.adminWork(work, viewer), ...(isSenior(viewer) ? { question: questions.adminGet(task, viewer) } : {}), audit: library.auditFor(task, id, viewer) };
     },
     question: questionDetail,
     members(query, viewer) {
@@ -187,7 +187,7 @@ export function createReview({ catalog, library, questions, adminService, auth, 
       const active = params.choice('active', ['', 'week', 'month', 'idle']);
       const sort = params.choice('sort', ['seen', 'latest', 'oldest', 'works', 'votes']);
       const now = Date.now();
-      let rows = adminService.members(auth.list()).filter(user => (!params.q || wordsIn(params.q, `${user.name} ${user.nickname ?? ''}`)) &&
+      let rows = adminService.members(auth.list(), viewer).filter(user => (!params.q || wordsIn(params.q, `${user.name} ${user.nickname ?? ''}`)) &&
         (!email || user.emailVerified === (email === 'bound')) && (!active || (() => { const days = user.lastSeenAt ? (now - Date.parse(user.lastSeenAt)) / 86400000 : Infinity; return active === 'week' ? days <= 7 : active === 'month' ? days <= 30 : days > 30; })()));
       const inFilter = (user, value) => value === 'all' || (value === 'trusted' ? user.trusted : user.level === Number(value));
       const scopeTotal = rows.length;
@@ -196,7 +196,7 @@ export function createReview({ catalog, library, questions, adminService, auth, 
       const totalWorks = user => Object.values(user.works).reduce((a, b) => a + b, 0);
       rows.sort((a, b) => sort === 'seen' ? (Date.parse(b.lastSeenAt) || 0) - (Date.parse(a.lastSeenAt) || 0) : sort === 'works' ? totalWorks(b) - totalWorks(a) : sort === 'votes' ? b.votes - a.votes : (sort === 'oldest' ? 1 : -1) * (Date.parse(a.createdAt) - Date.parse(b.createdAt)));
       const exams = qualification.summaries();
-      const audit = library.auditLog();
+      const audit = library.auditLog(200, viewer);
       return { users: slice(rows, params.page, params.pageSize).map(user => ({ ...user, exam: exams.get(user.id) ?? { passedAt: null, attempts: 0, bestCorrect: null, questionCount: null } })),
         total: rows.length, page: params.page, pageSize: params.pageSize, scopeTotal, filterCounts, counts: navigation(viewer, audit.length), audit: audit.filter(row => row.action === 'role') };
     },

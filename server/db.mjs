@@ -754,6 +754,10 @@ const MIGRATIONS = [
   );
   CREATE INDEX IF NOT EXISTS recapture_jobs_expiry ON recapture_jobs(expires_at);
   CREATE INDEX IF NOT EXISTS recapture_jobs_owner ON recapture_jobs(token_id,created_at);`),
+  // Restricted (gray) models: works whose model key is listed stay visible to senior admins only.
+  (db) => db.exec(`CREATE TABLE IF NOT EXISTS restricted_models (
+    model_key TEXT PRIMARY KEY, label TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, created_by TEXT NOT NULL DEFAULT ''
+  );`),
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

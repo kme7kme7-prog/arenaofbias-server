@@ -76,7 +76,7 @@ export function registerShow1Compat(router, deps) {
     dataVersion: db.prepare('PRAGMA data_version'),
     worksStamp: db.prepare('SELECT COUNT(*) AS n FROM works'),
     questionAudit: db.prepare("SELECT COUNT(*) AS n, COALESCE(MAX(id), 0) AS m FROM audit WHERE action LIKE 'question%'"),
-    contentGates: db.prepare('SELECT task_id, status, moderation, curated_as, author_role, content_key FROM works WHERE deleted_at IS NULL AND content_key IS NOT NULL'),
+    contentGates: db.prepare('SELECT task_id, status, moderation, curated_as, author_role, content_key, model_id, model_other FROM works WHERE deleted_at IS NULL AND content_key IS NOT NULL'),
     liveFormal: db.prepare("SELECT * FROM votes WHERE source = 'show1' AND compat_mode = 'formal' ORDER BY created_at, id"),
     liveEntertainment: db.prepare("SELECT * FROM votes WHERE source = 'show1' AND (compat_mode IS NULL OR compat_mode <> 'formal') ORDER BY created_at, id"),
     voteByPair: db.prepare('SELECT * FROM votes WHERE user_id = ? AND pair_key = ?'),
@@ -86,7 +86,8 @@ export function registerShow1Compat(router, deps) {
     insertVote: db.prepare(`INSERT INTO votes (id, match_id, user_id, task_id, a_work, b_work, pair_key, choice,
       created_at, a_identity, b_identity, source, compat_mode, compat_weights_json, compat_weight_source)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'show1', ?, ?, 'cast')`),
-    commentsOfTask: db.prepare(`SELECT comments.id, comments.side, comments.body, comments.created_at, users.name AS username
+    commentsOfTask: db.prepare(`SELECT comments.id, comments.side, comments.body, comments.created_at, users.name AS username,
+      works.model_id, works.model_other
       FROM comments JOIN works ON works.id = comments.work_id LEFT JOIN users ON users.id = comments.user_id
       WHERE works.task_id = ? AND comments.deleted_at IS NULL
       ORDER BY comments.created_at DESC, comments.id DESC LIMIT 100`),
@@ -174,12 +175,16 @@ export function registerShow1Compat(router, deps) {
   // Rows are read fresh on every call chain, so moderation flips keep applying.
   const buildGates = () => !library ? null : new Map(q.contentGates.all().map((row) => [row.content_key,
     { taskId: row.task_id, status: row.status, moderation: JSON.parse(row.moderation),
-      curatedAs: row.curated_as, authorRole: row.author_role, curated: false }]));
+      curatedAs: row.curated_as, authorRole: row.author_role, curated: false,
+      // publicContent() also needs the model to keep restricted works out.
+      modelId: row.model_id, modelName: row.model_other }]));
   const liveWorks = (gates = buildGates(), select = () => true) => {
     const { roundByTask, aiRounds } = promptCatalog();
     // A work must belong to the same public catalog used by prompts and ballots.
     // Pending/deleted community questions and unassigned inbox items stay out.
+    // Restricted (gray) uploads never join this public roster.
     const uploads = q.liveWorks.all().filter((row) => row.entertainment_route !== 1 && !snapshot.upToRid[row.id]
+      && !library?.isRestricted?.(row)
       && roundByTask[row.task_id]
       && !aiRounds.has(row.task_id)
       && select({ id: row.id, promptId: roundByTask[row.task_id] })
@@ -506,7 +511,7 @@ export function registerShow1Compat(router, deps) {
   router.on('GET', '/api/comments', (ctx) => {
     const round = String(ctx.url.searchParams.get('round') ?? '');
     if (!published(round)) fail(400, '题目不存在');
-    return { comments: q.commentsOfTask.all(taskOfRound(round)).map((row) => publicComment(row, round)) };
+    return { comments: q.commentsOfTask.all(taskOfRound(round)).filter((row) => !library?.isRestricted?.(row)).map((row) => publicComment(row, round)) };
   });
 
   router.on('POST', '/api/comments', async (ctx) => {

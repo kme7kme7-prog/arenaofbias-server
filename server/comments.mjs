@@ -14,8 +14,8 @@ export function createComments(db, library) {
     remove: db.prepare('UPDATE comments SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL'),
   };
 
-  const listed = (taskId, workId) => {
-    const work = library.work(taskId, workId);
+  const listed = (taskId, workId, viewer) => {
+    const work = library.work(taskId, workId, null, viewer);
     if (!work || work.status !== 'verified' ||
       (!library.visibleTo(work, 'show1') && !library.visibleTo(work, 'show2'))) fail(404, '作品不存在');
   };
@@ -30,11 +30,11 @@ export function createComments(db, library) {
 
   return {
     list(viewer, taskId, workId) {
-      listed(taskId, workId);
+      listed(taskId, workId, viewer);
       return q.byWork.all(taskId, workId).map((row) => publicComment(row, viewer));
     },
     create(user, taskId, workId, body) {
-      listed(taskId, workId);
+      listed(taskId, workId, user);
       if (typeof body !== 'string' || !body.trim() || body.trim().length > 280) fail(400, '请输入 1–280 字的评论');
       const id = newId();
       const createdAt = Date.now();

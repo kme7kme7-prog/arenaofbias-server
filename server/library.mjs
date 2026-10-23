@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync }
 import { dirname, join, resolve, sep } from 'node:path';
 import { EFFORTS, EMOJIS } from './config.mjs';
 import { transaction } from './db.mjs';
-import { providerOf } from './catalog.mjs';
+import { modelNameKey, providerOf } from './catalog.mjs';
 import { avatarOf } from './auth.mjs';
 import { authorOf, isStaff, isSenior, roleOf } from './roles.mjs';
 import { fail } from './http.mjs';
@@ -15,6 +15,7 @@ import { isTextTask, templatesOf } from './categories.mjs';
 import { GENERATION_FIELDS, IGNORED_GENERATION_FIELDS, generationFrom, generationOf, generationAudit, generationAuditView } from './generation.mjs';
 import { readWorkPreview } from './work-previews.mjs';
 import { contentUrl } from './content-path.mjs';
+import { ALL_WORKS, catalogConflict, createRestricted, restrictedKeyOf, seesRestricted, workModelKey } from './restricted.mjs';
 
 const token = (prefix) => `${prefix}${randomBytes(16).toString('hex')}`;
 const workId = () => `up-${[...randomBytes(8)].map((byte) => (byte % 36).toString(36)).join('')}`;
@@ -62,7 +63,9 @@ function writeTree(target, files) {
   }
 }
 
-export function createLibrary({ db, catalog, config, limits, legacyRounds = new Set(), moderationRoute = () => 'machine' }) {
+export function createLibrary({ db, catalog, config, limits, legacyRounds = new Set(), moderationRoute = () => 'machine', restricted = createRestricted(db), maintenance = true }) {
+  const isRestricted = (work) => restricted.isRestrictedWork(work);
+  const hidden = (work, viewer) => restricted.hiddenFrom(work, viewer);
   const contentAllowedEffective = (work) => Boolean(work && !work.curatedAs && catalog.task(work.taskId) &&
     (work.curated || ['legacy', 'approved'].includes(work.moderation?.status)));
   const contentAllowed = (work) => contentAllowedEffective(withDisplay(work));
@@ -71,7 +74,11 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
   const publicContentEffective = (work) => Boolean(contentAllowedEffective(work) &&
     (!(work.curated || ['admin', 'moderator'].includes(work.authorRole)) || work.status !== 'unverified') &&
     (work.curated || work.status !== 'unverified' || work.moderation?.source === 'human'));
-  const publicContent = (work) => publicContentEffective(withDisplay(work));
+  // Restricted works never get a public content address; seniors open them through previews.
+  const publicContent = (work) => {
+    const current = withDisplay(work);
+    return publicContentEffective(current) && !isRestricted(current);
+  };
   const dirs = { drafts: join(config.dataDir, 'drafts'), works: join(config.dataDir, 'works'), media: join(config.dataDir, 'media') };
   for (const dir of Object.values(dirs)) mkdirSync(dir, { recursive: true });
   const originOf = (key) => contentUrl(config, key);
@@ -79,13 +86,16 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
   // work hosts never serve a held upload, even when its old URL is known.
   // Datapack ids repeat across tasks, so a key belongs to one task/id pair.
   const previews = new Map(), previewOf = new Map();
-  function previewKey(work) {
-    const now = Date.now(), id = `${work.taskId}/${work.id}`;
+  // A restricted work's key belongs to the senior it was issued to and stops working
+  // as soon as that account is no longer a senior admin.
+  function previewKey(work, viewer = null) {
+    const issuer = isRestricted(work) ? viewer?.id ?? '' : null;
+    const now = Date.now(), id = `${work.taskId}/${work.id}${issuer === null ? '' : `#${issuer}`}`;
     const current = previewOf.get(id);
     if (current && previews.get(current)?.expiresAt > now) return current;
-    for (const [key, value] of previews) if (value.expiresAt <= now) { previews.delete(key); previewOf.delete(`${value.task}/${value.id}`); }
+    for (const [key, value] of previews) if (value.expiresAt <= now) { previews.delete(key); previewOf.delete(value.slot); }
     const key = token('p');
-    previews.set(key, { id: work.id, task: work.taskId, expiresAt: now + 3600e3 });
+    previews.set(key, { id: work.id, task: work.taskId, slot: id, issuer, expiresAt: now + 3600e3 });
     previewOf.set(id, key);
     return key;
   }
@@ -125,15 +135,15 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     moveReactions: db.prepare('UPDATE reactions SET task_id = ? WHERE task_id = ? AND work_id = ?'),
     storedWork: db.prepare('SELECT id, cover FROM works WHERE id = ?'),
     workByKey: db.prepare(`${WORK} WHERE works.content_key = ? AND ${liveWork}`),
-    workByDigest: db.prepare('SELECT id, title, task_id FROM works WHERE digest = ? AND deleted_at IS NULL LIMIT 1'),
+    workByDigest: db.prepare('SELECT id, title, task_id, model_id, model_other FROM works WHERE digest = ? AND deleted_at IS NULL'),
     works: db.prepare(`${WORK} WHERE ${liveWork} ORDER BY works.created_at DESC`),
     worksOfTask: db.prepare(`${WORK} WHERE works.task_id = ? AND ${liveWork}`),
     worksOfOwner: db.prepare(`${WORK} WHERE works.owner_id = ? AND ${liveWork} ORDER BY works.created_at DESC`),
     samplesOfOwner: db.prepare(`${WORK} WHERE works.owner_id = ? AND works.task_id = ? AND ${liveWork}
       AND (works.curated_as IS NULL OR works.curated_as = '') ORDER BY works.created_at DESC`),
-    reviewStates: db.prepare(`SELECT id, task_id, status, moderation, reviewed_gallery_at, show_gallery, show_arena, curated_as FROM works WHERE ${liveWork}`),
+    reviewStates: db.prepare(`SELECT id, task_id, status, moderation, reviewed_gallery_at, show_gallery, show_arena, curated_as, model_id, model_other FROM works WHERE ${liveWork}`),
     reviewOverrides: db.prepare('SELECT task_id, work_id, deleted_at, status, show_gallery, show_arena FROM work_overrides'),
-    ownState: db.prepare(`SELECT id, task_id, status, status_reason, moderation FROM works WHERE id = ? AND task_id = ? AND owner_id = ?
+    ownState: db.prepare(`SELECT id, task_id, status, status_reason, moderation, model_id, model_other FROM works WHERE id = ? AND task_id = ? AND owner_id = ?
       AND (curated_as IS NULL OR curated_as = '') AND ${liveWork}`),
     pendingOf: db.prepare(`SELECT COUNT(*) AS n FROM works WHERE owner_id = ? AND status = 'unverified'
       AND ${liveWork} AND COALESCE(json_extract(works.moderation, '$.status'), '') != 'rejected'
@@ -154,7 +164,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     worksSeen: db.prepare('SELECT works_seen_at FROM users WHERE id = ?'),
     markWorksSeen: db.prepare('UPDATE users SET works_seen_at = ? WHERE id = ?'),
     updatesOf: db.prepare(`SELECT COUNT(*) AS n FROM works WHERE owner_id = ? AND deleted_at IS NULL AND ${changedAt} > ?`),
-    recentReviews: db.prepare(`SELECT (reviewed_at - created_at) / 3600000.0 AS hours FROM works
+    recentReviews: db.prepare(`SELECT (reviewed_at - created_at) / 3600000.0 AS hours, model_id, model_other FROM works
       WHERE status = 'verified' AND deleted_at IS NULL AND reviewed_at >= ? ORDER BY hours`),
     insertWork: db.prepare(`INSERT INTO works (id, task_id, owner_id, title, summary, model_id, model_other, model_vendor, effort,
       harness_id, harness_other, provider_id, provider_other, note, content_key,
@@ -218,7 +228,10 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     myReactions: db.prepare('SELECT task_id, work_id, emoji FROM reactions WHERE user_id = ?'),
     audit: db.prepare('INSERT INTO audit (at, actor_id, actor_name, action, task_id, work_id, detail) VALUES (?, ?, ?, ?, ?, ?, ?)'),
     auditLog: db.prepare('SELECT * FROM audit ORDER BY id DESC LIMIT ?'),
-    auditFor: db.prepare('SELECT * FROM audit WHERE task_id = ? AND (? IS NULL OR work_id = ?) ORDER BY id DESC LIMIT 200'),
+    auditFor: db.prepare('SELECT * FROM audit WHERE task_id = ? AND (? IS NULL OR work_id = ?) ORDER BY id DESC LIMIT ?'),
+    workModels: db.prepare('SELECT id, model_id, model_other FROM works'),
+    userRole: db.prepare('SELECT role FROM users WHERE id = ?'),
+    ballotsOfWork: db.prepare('SELECT a_work, b_work FROM votes WHERE task_id = ? AND (a_work = ? OR b_work = ?)'),
   };
 
   function fromRow(row, archive = catalog) {
@@ -315,24 +328,27 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       q.deleteDraft.run(id);
     }
   }
-  purgeDrafts();
-  // Directories left behind by an interrupted upload.
-  for (const name of readdirSync(dirs.drafts)) if (!q.draft.get(name)) rmSync(join(dirs.drafts, name), { recursive: true, force: true });
-  const orphans = join(config.dataDir, 'orphans');
-  for (const item of readdirSync(dirs.works, { withFileTypes: true })) {
-    if (!item.isDirectory()) continue;
-    const row = q.storedWork.get(item.name);
-    if (!row) {
-      mkdirSync(orphans, { recursive: true });
-      const target = join(orphans, `${item.name}-${Date.now()}-${randomBytes(4).toString('hex')}`);
-      renameSync(join(dirs.works, item.name), target);
-      console.warn(`Moved orphan work directory ${item.name} to ${target}`);
-    } else if (row.cover) {
-      const pending = join(dirs.media, item.name, `${row.cover}.tmp`);
-      const final = join(dirs.media, item.name, row.cover);
-      if (existsSync(pending) && !existsSync(final)) {
-        renameSync(pending, final);
-        console.warn(`Completed pending cover for ${item.name}`);
+  // The CLI shares this data directory with a running server: only the server sweeps it.
+  if (maintenance) {
+    purgeDrafts();
+    // Directories left behind by an interrupted upload.
+    for (const name of readdirSync(dirs.drafts)) if (!q.draft.get(name)) rmSync(join(dirs.drafts, name), { recursive: true, force: true });
+    const orphans = join(config.dataDir, 'orphans');
+    for (const item of readdirSync(dirs.works, { withFileTypes: true })) {
+      if (!item.isDirectory()) continue;
+      const row = q.storedWork.get(item.name);
+      if (!row) {
+        mkdirSync(orphans, { recursive: true });
+        const target = join(orphans, `${item.name}-${Date.now()}-${randomBytes(4).toString('hex')}`);
+        renameSync(join(dirs.works, item.name), target);
+        console.warn(`Moved orphan work directory ${item.name} to ${target}`);
+      } else if (row.cover) {
+        const pending = join(dirs.media, item.name, `${row.cover}.tmp`);
+        const final = join(dirs.media, item.name, row.cover);
+        if (existsSync(pending) && !existsSync(final)) {
+          renameSync(pending, final);
+          console.warn(`Completed pending cover for ${item.name}`);
+        }
       }
     }
   }
@@ -353,7 +369,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     const current = withDisplay(work);
     return Boolean(work?.curated && work.status === 'verified' && current?.status === 'verified' && current.dir &&
       (!work.moderation || ['legacy', 'approved'].includes(work.moderation.status)) &&
-      publicContentEffective(current) && !inInbox(current) && current.showEntertainment);
+      publicContentEffective(current) && !inInbox(current) && current.showEntertainment && !isRestricted(current));
   };
   const curatedKeys = {
     byWork: db.prepare('SELECT content_key FROM curated_content_keys WHERE task_id = ? AND work_id = ?'),
@@ -385,6 +401,19 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     const work = withDisplay(raw);
     return Boolean(work && work.status !== 'questioned' && (visibleEffective(work, 'show1') || visibleEffective(work, 'show2')));
   };
+
+  const auditView = (row) => ({ at: iso(row.at), actor: row.actor_name, action: row.action, task: row.task_id, work: row.work_id, detail: generationAuditView(row.detail) });
+  // Audit rows about restricted works are left out for everyone but senior admins; the page
+  // is refilled from older rows so its length does not reveal the gap.
+  function visibleAudit(read, limit, viewer) {
+    if (seesRestricted(viewer) || !restricted.keys().size) return read(limit);
+    const ids = new Set(q.workModels.all().filter(isRestricted).map((row) => row.id));
+    if (!ids.size) return read(limit);
+    for (let n = limit; ; n *= 2) {
+      const rows = read(n), shown = rows.filter((row) => !ids.has(row.work_id));
+      if (shown.length >= limit || rows.length < n) return shown.slice(0, limit);
+    }
+  }
 
   function reactionsOf(taskId, id) {
     return Object.fromEntries(q.workReactions.all(taskId, id).map((row) => [row.emoji, row.n]));
@@ -433,20 +462,57 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     return { buffer, type };
   }
 
-  function identity(body) {
+  function identity(body, actor = null) {
     const modelId = body.modelId ? String(body.modelId) : null;
     if (modelId) {
       const model = catalog.model(modelId);
       if (!model) fail(400, '所选模型不存在');
+      // A later data package could register a restricted code; that model stays unusable here.
+      if (restricted.claims(model.id) || restricted.claims(model.name)) fail(400, '模型名称无效', 'invalid_model');
       return { modelId, modelName: model.name, vendor: model.vendor };
     }
     const modelName = clip(body.modelName, 60);
     if (!modelName) fail(400, '请填写模型名称');
+    // Restricted names are checked before registry resolution: only senior admins may use
+    // them, and the work then takes the exact restricted key (never a registered model).
+    const claimed = restricted.claims(modelName);
+    if (claimed) {
+      if (!seesRestricted(actor)) fail(400, '模型名称无效', 'invalid_model');
+      return { modelId: null, modelName: restricted.displayName(claimed), vendor: '' };
+    }
     // A typed name that is a registered name or alias ranks with that model.
     const named = catalog.modelNamed(modelName);
     if (named) return { modelId: named.id, modelName: named.name, vendor: named.vendor };
     return { modelId: null, modelName, vendor: clip(body.vendor, 40) };
   }
+  // A gray work under a member's question would show through that owner's question limits,
+  // so restricted works only live under datapack tasks or questions a senior admin owns.
+  const grayHome = (taskId) => {
+    if (catalog.snapshot().task(taskId)) return true;
+    const question = db.prepare('SELECT owner_id FROM questions WHERE id = ?').get(taskId);
+    return !question || db.prepare('SELECT role FROM users WHERE id = ?').get(question.owner_id)?.role === 'admin';
+  };
+  const GRAY_HOME = '只能放在数据包题目或高级管理员自己发起的题目下';
+  // Restricted works keep their `x:` identity: a model edit could merge them into a public model.
+  function restrictedIdentity(work, body) {
+    if (body.modelId || (body.modelName !== undefined && restricted.claims(body.modelName) !== workModelKey(work)))
+      fail(400, '灰度作品不能修改模型', 'restricted_model');
+    return { modelId: null, modelName: work.modelName, vendor: work.vendor };
+  }
+  const editedIdentity = (work, body, actor) => {
+    if (body.modelId === undefined && body.modelName === undefined && body.vendor === undefined) return displayIdentity(work);
+    if (isRestricted(work)) return restrictedIdentity(work, body);
+    const current = displayIdentity(work);
+    const next = { ...current, vendor: current.modelId ? '' : work.vendor, ...(body.modelName !== undefined ? { modelId: null } : {}), ...body };
+    // Edits keep a public work public: only new submissions and CLI imports become restricted.
+    // An older free-text name that now compacts to a restricted code (say "M-I-X") stays as it is.
+    const name = next.modelId ? null : clip(next.modelName, 60);
+    if (name && restricted.claims(name)) {
+      if (current.modelId || modelNameKey(name) !== modelNameKey(work.modelName ?? '')) fail(400, '模型名称无效', 'invalid_model');
+      return { modelId: null, modelName: work.modelName, vendor: clip(next.vendor, 40) };
+    }
+    return identity(next, actor);
+  };
 
   function provenance(body, current = {}) {
     const next = {
@@ -561,65 +627,93 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     },
     canRead(work, viewer) {
       work = withDisplay(work);
+      if (hidden(work, viewer)) return false;
       return Boolean(work && (publicContentEffective(work) || viewer && (viewer.id === work.ownerId || isStaff(viewer))));
     },
-    previewOrigin(work) { return originOf(previewKey(work)); },
+    previewOrigin(work, viewer = null) { return originOf(previewKey(work, viewer)); },
+    // Where the screenshot worker loads a work. A restricted work is opened with a key issued
+    // to its owner while that owner is still a senior admin; otherwise there is nothing to load.
+    captureOrigin(work) {
+      if (publicContent(work)) return originOf(work.contentKey);
+      if (!isRestricted(work)) return originOf(previewKey(work));
+      const owner = work.ownerId ? q.userRole.get(work.ownerId) : null;
+      return owner && seesRestricted(owner) ? originOf(previewKey(work, { id: work.ownerId })) : null;
+    },
     previewByKey(key) {
       const value = previews.get(key);
       if (!value || value.expiresAt <= Date.now()) { previews.delete(key); return null; }
       // Package works preview from the datapack directory; uploads from their own dir.
-      return this.work(value.task, value.id);
+      // Keys are only issued to viewers who may read the work, restricted ones included.
+      const work = this.work(value.task, value.id, null, ALL_WORKS);
+      if (work && isRestricted(work) && !(value.issuer && seesRestricted(q.userRole.get(value.issuer)))) return null;
+      return work;
+    },
+    // Ids of every restricted work (deleted ones included), for counts kept on the public basis.
+    restrictedIds() {
+      return restricted.keys().size ? new Set(q.workModels.all().filter(isRestricted).map((row) => row.id)) : new Set();
     },
     // Uploads waiting for an automatic decision, for the moderation sweep.
     pendingModerationIds() {
       return q.pendingModeration.all().map((row) => row.id);
     },
-    uploadById(id) {
+    // Every lookup below hides restricted works unless the viewer is a senior admin
+    // (or ALL_WORKS for internal scoring); hidden reads look exactly like missing ones.
+    restricted,
+    isRestricted,
+    uploadById(id, viewer = null) {
       const row = q.work.get(id);
-      return row ? fromRow(row) : null;
+      const work = row ? fromRow(row) : null;
+      return hidden(work, viewer) ? null : work;
     },
 
-    work(taskId, id, snapshot = null) {
+    work(taskId, id, snapshot = null, viewer = null) {
       const archive = snapshot ?? catalog.snapshot();
       const curated = archive.work(taskId, id);
-      return curated ? withDisplay(curated) : upload(taskId, id, archive);
+      const work = curated ? withDisplay(curated) : upload(taskId, id, archive);
+      return hidden(work, viewer) ? null : work;
     },
     // Like work(), but withdrawn works still resolve: ballots and audits outlive removal.
-    ballotWork(taskId, id, snapshot = null) {
+    ballotWork(taskId, id, snapshot = null, viewer = null) {
       const archive = snapshot ?? catalog.snapshot();
       const curated = archive.work(taskId, id);
-      if (curated) return withDisplay(curated, true);
-      const row = q.withdrawnWork.get(id);
-      return row && row.task_id === taskId ? fromRow(row, archive) : null;
+      let work = null;
+      if (curated) work = withDisplay(curated, true);
+      else {
+        const row = q.withdrawnWork.get(id);
+        work = row && row.task_id === taskId ? fromRow(row, archive) : null;
+      }
+      return hidden(work, viewer) ? null : work;
     },
+    // Public content hosts are cookieless: restricted works never resolve here.
     byContentKey(key) {
       const row = q.workByKey.get(key);
-      return row ? fromRow(row) : null;
+      const work = row ? fromRow(row) : null;
+      return isRestricted(work) ? null : work;
     },
     // Package works plus verified uploads: the pool blind comparisons draw from.
-    eligible(taskId, snapshot = null) {
+    eligible(taskId, snapshot = null, viewer = null) {
       const archive = snapshot ?? catalog.snapshot();
       return catalog.withSnapshot(() => [...archive.works(taskId).map((work) => withDisplay(work)),
-        ...q.worksOfTask.all(taskId).map((row) => fromRow(row, archive))].filter(eligibleEffective));
+        ...q.worksOfTask.all(taskId).map((row) => fromRow(row, archive))].filter((work) => eligibleEffective(work) && !hidden(work, viewer)));
     },
-    allWorks({ uploads = this.uploads(), snapshot = catalog.snapshot() } = {}) {
+    allWorks({ viewer = null, uploads = this.uploads(viewer), snapshot = catalog.snapshot() } = {}) {
       const tasks = new Map();
       return [...snapshot.tasks().flatMap((task) => [...task.works.values()].map(work => withDisplay(work))), ...uploads]
         .filter((work) => {
-          if (!work || work.curatedAs) return false;
+          if (!work || work.curatedAs || hidden(work, viewer)) return false;
           if (!tasks.has(work.taskId)) tasks.set(work.taskId, catalog.task(work.taskId, { role: 'admin' }));
           return Boolean(tasks.get(work.taskId));
         });
     },
-    uploads() {
+    uploads(viewer = null) {
       const snapshot = catalog.snapshot();
-      return q.works.all().map((row) => fromRow(row, snapshot)).filter((work) => !work.curatedAs);
+      return q.works.all().map((row) => fromRow(row, snapshot)).filter((work) => !work.curatedAs && !hidden(work, viewer));
     },
     published(site) {
-      return q.works.all().map((row) => fromRow(row)).filter((work) => !work.curatedAs && work.status === 'verified' && visibleTo(work, site));
+      return q.works.all().map((row) => fromRow(row)).filter((work) => !work.curatedAs && work.status === 'verified' && visibleTo(work, site) && !isRestricted(work));
     },
-    uploadsOf(userId) {
-      return q.worksOfOwner.all(userId).map((row) => fromRow(row)).filter((work) => !work.curatedAs);
+    uploadsOf(userId, viewer = null) {
+      return q.worksOfOwner.all(userId).map((row) => fromRow(row)).filter((work) => !work.curatedAs && !hidden(work, viewer));
     },
     // Gallery's queue also includes arena-verified uploads awaiting a gallery decision.
     reviewQueue(works = this.allWorks()) {
@@ -628,7 +722,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     },
     authorWorks(user) {
       const seen = seenAt(user.id);
-      const works = this.uploadsOf(user.id);
+      const works = this.uploadsOf(user.id, user);
       const queue = new Map(works.some(work => work.status === 'unverified') ? this.reviewQueue().map((work, index) => [work.id, index]) : []);
       return works.map((work) => ({
         ...this.toPublic(work, user),
@@ -637,31 +731,32 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       }));
     },
     resubmissionWorks(user, taskId) {
-      return q.samplesOfOwner.all(user.id, taskId).map(row => {
+      return q.samplesOfOwner.all(user.id, taskId).filter(row => !hidden(row, user)).map(row => {
         const work = this.toPublic(fromRow(row), user);
         return Object.fromEntries(['id', 'task', 'title', 'modelName', 'effort', 'moderation', 'scene']
           .filter(key => Object.hasOwn(work, key)).map(key => [key, work[key]]));
       });
     },
     submissionStatus(user, taskId, id) {
-      const row = q.ownState.get(id, taskId, user.id) ?? fail(404, '作品不存在', 'not_found');
+      const row = q.ownState.get(id, taskId, user.id);
+      if (!row || hidden(row, user)) fail(404, '作品不存在', 'not_found');
       return { id: row.id, task: row.task_id, status: row.status, reason: row.status_reason, moderation: authorModeration(JSON.parse(row.moderation)) };
     },
-    reviewStates(taskIds) {
+    reviewStates(taskIds, viewer = null) {
       const overrides = new Map(q.reviewOverrides.all().map(row => [`${row.task_id}/${row.work_id}`, row]));
       const packaged = catalog.snapshot().tasks().flatMap(task => !taskIds.has(task.id) ? [] : [...task.works.values()].flatMap(work => {
         const row = overrides.get(`${task.id}/${work.id}`);
-        if (row?.deleted_at) return [];
+        if (row?.deleted_at || hidden(work, viewer)) return [];
         return [{ taskId: task.id, id: work.id, curated: true, status: row?.status ?? 'verified', moderation: { status: 'approved' },
           showGallery: Boolean(row?.show_gallery ?? 1), showArena: Boolean(row?.show_arena ?? 1) }];
       }));
-      return [...packaged, ...q.reviewStates.all().filter(row => !row.curated_as && taskIds.has(row.task_id)).map(row => ({
+      return [...packaged, ...q.reviewStates.all().filter(row => !row.curated_as && taskIds.has(row.task_id) && !hidden(row, viewer)).map(row => ({
         taskId: row.task_id, id: row.id, curated: false, status: row.status, moderation: JSON.parse(row.moderation),
         reviewedGalleryAt: row.reviewed_gallery_at, showGallery: Boolean(row.show_gallery), showArena: Boolean(row.show_arena),
       }))];
     },
     reviewStats() {
-      const samples = q.recentReviews.all(Date.now() - 30 * 24 * 3600e3).map((row) => row.hours);
+      const samples = q.recentReviews.all(Date.now() - 30 * 24 * 3600e3).filter((row) => !isRestricted(row)).map((row) => row.hours);
       if (samples.length < 5) return { medianHours: null };
       const middle = Math.floor(samples.length / 2);
       return { medianHours: samples.length % 2 ? samples[middle] : (samples[middle - 1] + samples[middle]) / 2 };
@@ -688,6 +783,8 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       return {
         task: work.taskId,
         id: work.id,
+        // Only senior responses can reach this: callers drop restricted works for everyone else.
+        ...(isRestricted(work) ? { restricted: true } : {}),
         title: work.title,
         summary: work.summary,
         model: work.modelId,
@@ -706,7 +803,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
         mine: Boolean(viewer && viewer.id === work.ownerId),
         addedAt: iso(work.createdAt),
         reviewedAt: iso(work.reviewedAt),
-        scene: `${!publicContent(work) && privileged ? originOf(previewKey(work)) : originOf(work.contentKey)}/`,
+        scene: `${!publicContent(work) && privileged ? originOf(previewKey(work, viewer)) : originOf(work.contentKey)}/`,
         captures: Object.fromEntries(Object.entries(work.captures).map(([id, file]) => [id, `media/${work.id}/${file}`])),
         cover: work.cover ? `media/${work.id}/${work.cover}` : null,
         files: work.files,
@@ -750,7 +847,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     },
 
     setFaceSettings(admin, taskId, id, body, withinTransaction = false) {
-      const work = this.work(taskId, id);
+      const work = this.work(taskId, id, null, admin);
       if (!work) fail(404, '作品不存在', 'not_found');
       requireStaff(admin, work);
       if (!body || typeof body !== 'object' || Array.isArray(body) || !Object.keys(body).length ||
@@ -760,7 +857,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       const gallery = body.show_gallery ?? current.show_gallery;
       const arena = body.show_arena ?? current.show_arena;
       // Uploaded settings live on the row; package settings use the override table.
-      const entertainment = body.show_entertainment ?? current.show_entertainment;
+      const entertainment = !isRestricted(work) && (body.show_entertainment ?? current.show_entertainment);
       const now = Date.now();
       const apply = () => {
         if (work.curated) q.setOverride.run(taskId, id, Number(gallery), Number(arena), Number(entertainment), admin.id, now);
@@ -770,7 +867,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       };
       if (withinTransaction) apply();
       else transaction(db, apply);
-      return this.adminWork(this.work(taskId, id), admin);
+      return this.adminWork(this.work(taskId, id, null, admin), admin);
     },
 
     batchSetFaceSettings(admin, items, settings) {
@@ -781,7 +878,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     },
 
     setFaceCalibration(admin, taskId, id, face, patch) {
-      const work = this.work(taskId, id);
+      const work = this.work(taskId, id, null, admin);
       if (!work) fail(404, '作品不存在', 'not_found');
       requireStaff(admin, work);
       if (!['gallery', 'arena'].includes(face)) fail(400, '门面参数无效', 'invalid_face');
@@ -815,13 +912,13 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
 
     getCalibration(viewer, id) {
       const row = q.work.get(id);
-      if (!row || ((!contentAllowed(fromRow(row)) || row.status !== 'verified' || !row.show_gallery) && viewer?.id !== row.owner_id && !isStaff(viewer))) fail(404, '作品不存在');
+      if (!row || hidden(row, viewer) || ((!contentAllowed(fromRow(row)) || row.status !== 'verified' || !row.show_gallery) && viewer?.id !== row.owner_id && !isStaff(viewer))) fail(404, '作品不存在');
       return JSON.parse(row.trial).calibration ?? null;
     },
 
     setCalibration(user, id, patch) {
       const row = q.work.get(id);
-      if (!row) fail(404, '作品不存在');
+      if (!row || hidden(row, user)) fail(404, '作品不存在');
       if (isStaff(user)) requireStaff(user, fromRow(row));
       else if (row.owner_id !== user.id) fail(403, '只能校准自己的作品');
       if (patch !== null && (!plainObject(patch) || !Object.keys(patch).length ||
@@ -858,7 +955,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       if (format === 'vite' && (!inspected.files.has('package.json') || !inspected.root)) fail(400, 'Vite 项目请包含 package.json 和构建后的 dist/ 目录');
       inspected.checks.find((check) => check.id === 'format').template = format;
       const curatedTwin = catalog.duplicateOf(inspected.entryDigest);
-      const uploadTwin = q.workByDigest.get(inspected.digest);
+      const uploadTwin = q.workByDigest.all(inspected.digest).find((row) => !hidden(row, user));
       if (curatedTwin) inspected.checks.push({ id: 'duplicate', state: 'warn', label: '重复检测', detail: `入口页面与已有作品「${curatedTwin.title}」（${curatedTwin.modelName}）完全相同，核验时会重点比对。` });
       else if (uploadTwin) inspected.checks.push({ id: 'duplicate', state: 'warn', label: '重复检测', detail: `与已上传的作品「${uploadTwin.title}」内容完全相同。` });
       else inspected.checks.push({ id: 'duplicate', state: 'ok', label: '重复检测', detail: '未发现与已有作品相同的内容' });
@@ -913,7 +1010,8 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       if (!source.providerId) fail(400, '请选择服务商');
       const promptVariant = promptVariantFrom(draft.task_id, body, '', !isStaff(user));
       if (!isStaff(user) && !source.harnessId && !source.harnessOther) fail(400, '请选择或填写 Harness');
-      const who = identity(body);
+      const who = identity(body, user);
+      if (!createQuestion && !who.modelId && restricted.claims(who.modelName) && !grayHome(draft.task_id)) fail(409, GRAY_HOME);
       const title = clip(body.title, 40) || defaultTitle(who.modelName, effort);
       if (!title) fail(400, '请填写作品标题');
       const cover = coverFrom(body.cover);
@@ -968,9 +1066,70 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       return upload(taskId, id);
     },
 
+    // Server-side import of a restricted (gray) model's result (server/cli.mjs restricted-import).
+    // Files pass the same inspection as an upload; the work is stored verified with both
+    // faces on, skips drafts, trial loads and automatic content review, and keeps the exact
+    // `x:` key (the code is never resolved to a registered model).
+    importRestricted(owner, { taskId, filename, buffer, template = null, code, effort, title = '', summary = '', note = '',
+      promptVariant = '', providerId = 'official', harnessId = null, harnessOther = '', generationMode = 'single-turn', humanIntervention = 'none' }, { dryRun = false } = {}) {
+      if (!seesRestricted(owner)) fail(403, '只能以高级管理员身份导入灰度作品');
+      const key = restrictedKeyOf(code);
+      if (!restricted.hasKey(key)) fail(409, `模型 ${key} 尚未登记为灰度模型，请先运行 restricted-model add`);
+      if (catalogConflict(catalog, key)) fail(409, '灰度代号与已登记的公开模型重名，请换一个代号');
+      const task = catalog.task(taskId, owner);
+      if (!task) fail(404, '题目不存在');
+      if (!grayHome(taskId)) fail(409, GRAY_HOME);
+      const allowed = templatesOf(task);
+      if (template && !allowed.includes(template)) fail(400, '该题不支持此提交格式');
+      const selected = template ?? (allowed.length === 1 ? allowed[0] : /\.(txt|md|markdown)$/i.test(filename) && allowed.includes('text') ? 'text' : null);
+      const inspected = inspectUpload(buffer, filename, { limits, cdn: config.cdn, template: selected });
+      const format = selected ?? (inspected.files.has('package.json') && inspected.root ? 'vite' : 'static');
+      if (!allowed.includes(format)) fail(400, '该题不支持此提交格式');
+      if (format === 'vite' && (!inspected.files.has('package.json') || !inspected.root)) fail(400, 'Vite 项目请包含 package.json 和构建后的 dist/ 目录');
+      inspected.checks.find((check) => check.id === 'format').template = format;
+      const level = effortOf(effort);
+      if (!level) fail(400, '请填写推理档位');
+      const source = provenance({ providerId, ...(harnessId ? { harnessId } : { harnessOther }) });
+      if (!source.providerId) fail(400, '请选择服务商');
+      const generation = generationFrom({ generationMode, humanIntervention });
+      const variant = promptVariantFrom(taskId, { promptVariant }, '', true);
+      const modelName = restricted.displayName(key);
+      const name = clip(title, 40) || defaultTitle(modelName, level);
+      const twin = q.workByDigest.all(inspected.digest)[0] ?? null;
+      const plan = { task: taskId, modelKey: key, title: name, effort: level, format, files: inspected.count, bytes: inspected.bytes,
+        entry: inspected.entry, duplicateOf: twin?.id ?? catalog.duplicateOf(inspected.entryDigest)?.id ?? null,
+        checks: inspected.checks.map(({ id, state, label }) => ({ id, state, label })) };
+      if (dryRun) return { dryRun: true, ...plan };
+      let id = workId();
+      while (q.storedWork.get(id)) id = workId();
+      const stored = join(dirs.works, id);
+      writeTree(stored, inspected.files);
+      try {
+        transaction(db, () => {
+          if (!restricted.hasKey(key)) fail(409, `模型 ${key} 已不在灰度登记中`);
+          const now = Date.now();
+          q.insertWork.run(id, taskId, owner.id, name, clip(summary, 200), null, modelName, '', level,
+            source.harnessId, source.harnessOther, source.providerId, source.providerOther, clip(note, 1000), token('w'),
+            clip(filename, 120) || 'import', inspected.root, inspected.entry, inspected.count, inspected.bytes, inspected.digest,
+            JSON.stringify(inspected.checks), JSON.stringify(sanitizeTrial({})), null, now, now,
+            ...GENERATION_FIELDS.map((field) => generation[field]),
+            JSON.stringify({ status: 'approved', source: 'human', reviewer: owner.nickname || owner.name, reason: '灰度模型导入', at: now }),
+            variant, roleOf(owner.role));
+          db.prepare(`UPDATE works SET status = 'verified', status_reason = '', show_gallery = 1, show_arena = 1, show_entertainment = 0,
+            reviewed_at = ?, reviewed_gallery_at = ?, reviewed_arena_at = ?, updated_at = ? WHERE id = ?`).run(now, now, now, now, id);
+          q.audit.run(now, owner.id, owner.name, 'submit', taskId, id, '服务器导入');
+          q.audit.run(now, owner.id, owner.name, 'verified', taskId, id, '通过验证：服务器导入');
+        });
+      } catch (error) {
+        rmSync(stored, { recursive: true, force: true });
+        throw error;
+      }
+      return { ...plan, id };
+    },
+
     // Admins edit any upload; authors edit their own until it has been reviewed.
     setMeta(actor, taskId, id, body, { author = false, inTransaction = false, asStaff = false, resubmitModeration = false, guard = false, expectUpdatedAt } = {}) {
-      const work = this.work(taskId, id);
+      const work = this.work(taskId, id, null, actor);
       if (!work) fail(404, '作品不存在', 'not_found');
       const admin = !author;
       if (admin && !asStaff) requireStaff(actor, work, false);
@@ -989,13 +1148,11 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
         if (work.curated) fail(400, '数据包作品不能调整归属题目');
         const target = String(body.task);
         if (!catalog.task(target) && !q.questionExists.get(target)) fail(400, '目标题目不存在', 'invalid_task');
+        if (isRestricted(work) && !grayHome(target)) fail(409, GRAY_HOME);
         moved = { from: taskId, to: target };
       }
       const summary = body.summary === undefined ? work.summary : clip(body.summary, 200);
-      const currentIdentity = displayIdentity(work);
-      const who = body.modelId !== undefined || body.modelName !== undefined || body.vendor !== undefined
-        ? identity({ ...currentIdentity, vendor: currentIdentity.modelId ? '' : work.vendor,
-          ...(body.modelName !== undefined ? { modelId: null } : {}), ...body }) : currentIdentity;
+      const who = editedIdentity(work, body, actor);
       const effort = body.effort !== undefined ? effortOf(body.effort) : work.effort;
       const title = body.title === undefined ? work.title : clip(body.title, 40) || defaultTitle(who.modelName, effort);
       if (!title) fail(400, '请填写作品标题');
@@ -1042,7 +1199,8 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       };
       if (inTransaction) apply();
       else transaction(db, apply);
-      return admin ? this.adminWork(this.work(moved ? moved.to : taskId, id), actor) : this.toPublic(this.work(moved ? moved.to : taskId, id), actor);
+      const next = this.work(moved ? moved.to : taskId, id, null, actor);
+      return admin ? this.adminWork(next, actor) : this.toPublic(next, actor);
     },
 
     setCaptures(id, captures) {
@@ -1058,7 +1216,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       });
     },
     moderationState(admin, taskId, id) {
-      const work = this.work(taskId, id);
+      const work = this.work(taskId, id, null, admin);
       if (!work) fail(404, '作品不存在', 'not_found');
       requireStaff(admin, work);
       if (work.curated) fail(409, '数据包作品不进入上传内容复核队列', 'not_reopenable');
@@ -1075,7 +1233,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       if (action === 'reopen' ? state.moderation.status !== 'rejected' : !['pending', 'review'].includes(state.moderation.status)) {
         fail(409, action === 'reopen' ? '只有已拒绝作品可以重新进入人工复核' : '仅待审或疑似作品可以转人工', 'invalid_moderation_state');
       }
-      const work = this.work(taskId, id);
+      const work = this.work(taskId, id, null, admin);
       if (!work || work.curated || createHash('sha256').update(JSON.stringify([taskId, id, work.moderationRaw])).digest('hex') !== body.version) fail(409, '审核状态已变化，请重新读取', 'conflict');
       const next = { status: 'review', source: 'human', reason: body.reason.trim(), reviewer: admin.name,
         at: Date.now(), revision: token('manual-') };
@@ -1088,7 +1246,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       return this.moderationState(admin, taskId, id);
     },
     reviewContent(admin, taskId, id, body) {
-      const work = this.work(taskId, id);
+      const work = this.work(taskId, id, null, admin);
       if (!work) fail(404, '作品不存在');
       requireStaff(admin, work);
       if (work.curated) fail(409, '数据包作品已完成内容审核，请使用作品核验');
@@ -1099,9 +1257,10 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       return upload(taskId, id);
     },
     retryModeration(admin, taskId, id) {
-      const work = this.work(taskId, id);
+      const work = this.work(taskId, id, null, admin);
       if (!work) fail(404, '作品不存在');
       requireStaff(admin, work);
+      if (isRestricted(work)) fail(409, '灰度作品不进入自动内容审查', 'restricted_model');
       if (work.curated) fail(409, '数据包作品没有托管的上传文件，不能重新自动审核');
       if (!config.moderation?.enabled) fail(409, '自动内容审查未启用');
       transaction(db, () => {
@@ -1113,7 +1272,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
 
     // ---- review and removal -----------------------------------------------------------
     review(admin, taskId, id, body, { inTransaction = false } = {}) {
-      const work = this.work(taskId, id);
+      const work = this.work(taskId, id, null, admin);
       if (!work) fail(404, '作品不存在');
       requireStaff(admin, work);
       const status = String(body.status ?? '');
@@ -1121,10 +1280,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       if (status === 'verified' && !['legacy', 'approved'].includes(work.moderation?.status)) fail(409, '请先完成内容审核');
       const reason = clip(body.reason, 500);
       if (status === 'questioned' && !reason) fail(400, '标记存疑时请写明原因，作者和访客都会看到');
-      const currentIdentity = displayIdentity(work);
-      const who = body.modelId !== undefined || body.modelName !== undefined || body.vendor !== undefined
-        ? identity({ ...currentIdentity, vendor: currentIdentity.modelId ? '' : work.vendor,
-          ...(body.modelName !== undefined ? { modelId: null } : {}), ...body }) : currentIdentity;
+      const who = editedIdentity(work, body, admin);
       const effort = body.effort !== undefined ? effortOf(body.effort) : work.effort;
       const source = provenance(body, work);
       const generation = generationFrom(body, work);
@@ -1156,6 +1312,8 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       } else if (firstVerify) {
         entertainment = true; route = 0;
       }
+      // Restricted works stay off the Show1 entertainment roster.
+      if (isRestricted(work) || isRestricted({ modelId: who.modelId, modelName: who.modelName })) entertainment = false;
       const nextAudience = gallery && arena ? 'both' : gallery ? 'show2' : arena ? 'show1' : 'hidden';
       if (!inbox && work.audience === 'hidden' && status === 'verified' && nextAudience === 'hidden' && body.show_gallery === undefined && body.show_arena === undefined) fail(400, '请选择审核通过后展示的网站');
       if (nextAudience !== 'hidden' && status !== 'verified' && work.audience === 'hidden') fail(400, '隐藏作品须先审核通过才能发布');
@@ -1183,7 +1341,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       };
       if (inTransaction) apply();
       else transaction(db, apply);
-      return this.work(taskId, id);
+      return this.work(taskId, id, null, admin);
     },
 
     reviewWithMeta(admin, taskId, id, body) {
@@ -1194,7 +1352,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     },
 
     inboxWorks(viewer = null) {
-      return this.uploads().filter((work) => work.entertainmentRoute === 1).map((work) => this.adminWork(work, viewer));
+      return this.uploads(viewer).filter((work) => work.entertainmentRoute === 1).map((work) => this.adminWork(work, viewer));
     },
 
     setDisplay(admin, taskId, id, body) {
@@ -1212,14 +1370,14 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       const now = Date.now();
       return transaction(db, () => items.map(({ task: from, id }) => {
         const work = upload(from, id);
-        if (!work || work.entertainmentRoute !== 1) fail(404, '收件箱里没有这件作品', 'not_found');
+        if (!work || hidden(work, admin) || work.entertainmentRoute !== 1) fail(404, '收件箱里没有这件作品', 'not_found');
         requireStaff(admin, work);
         if (task != null && String(task) !== from) this.setMeta(admin, from, id, { task: String(task) }, { inTransaction: true });
         const home = task != null ? String(task) : from;
         if (task != null) q.setRoute.run(2, now, id);
         if (entertainment) this.setFaceSettings(admin, home, id, { show_entertainment: true }, true);
         audit(admin, task != null ? 'inbox-assign' : 'inbox-note', { taskId: home, id }, task != null ? `归属题目 ${from} → ${home}` : '补充信息');
-        return this.adminWork(this.work(home, id), admin);
+        return this.adminWork(this.work(home, id, null, admin), admin);
       }));
     },
 
@@ -1233,11 +1391,14 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       if (purge && !isSenior(user)) fail(403, '只有高级管理员可以清除作品文件');
       const reason = clip(body.reason, 500);
       if (voided && !reason) fail(400, '作废对局时请写明原因');
-      const live = this.work(taskId, id);
-      const work = live ?? (voided || purge ? this.ballotWork(taskId, id) : null);
+      const live = this.work(taskId, id, null, user);
+      const work = live ?? (voided || purge ? this.ballotWork(taskId, id, null, user) : null);
       if (!work) fail(404, '作品不存在');
       if (work.ownerId !== user.id && !isSenior(user) && !(voided && isStaff(user))) fail(403, '只能删除自己上传的作品');
       const votes = q.votesOfWork.get(taskId, id, id).n;
+      // Moderators read this audit line, so a public work's count leaves out gray ballots.
+      const gray = isRestricted(work) ? new Set() : this.restrictedIds();
+      const counted = gray.size ? q.ballotsOfWork.all(taskId, id, id).filter((vote) => !gray.has(vote.a_work) && !gray.has(vote.b_work)).length : votes;
       const now = Date.now();
       transaction(db, () => {
         if (voided) {
@@ -1249,7 +1410,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
           else q.remove.run(now, now, id);
         }
         const how = [live ? (user.id === work.ownerId ? '作者下架' : '管理员下架') : '',
-          voided ? `作废 ${votes} 票对局：${reason}` : votes && live ? `保留 ${votes} 票对局` : '', purge && !work.curated ? '清除文件' : ''];
+          voided ? `作废 ${counted} 票对局：${reason}` : counted && live ? `保留 ${counted} 票对局` : '', purge && !work.curated ? '清除文件' : ''];
         audit(user, live ? 'delete' : 'delete-followup', work, how.filter(Boolean).join('；'));
       });
       if (!work.curated && (purge || !votes)) {
@@ -1260,7 +1421,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
 
     // ---- reactions -------------------------------------------------------------------------
     react(user, taskId, id, emoji) {
-      const work = this.work(taskId, id);
+      const work = this.work(taskId, id, null, user);
       if (!work) fail(404, '作品不存在');
       if (!isInteractive(work)) fail(409, '存疑作品仅供参考，不能再互动');
       if (!EMOJIS.includes(emoji)) fail(400, '不支持这个表情');
@@ -1275,7 +1436,10 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
         const visibility = new Map();
         const shown = (row) => {
           const key = `${row.task_id}/${row.work_id}`;
-          if (!visibility.has(key)) visibility.set(key, visibleTo(catalog.work(row.task_id, row.work_id) ?? upload(row.task_id, row.work_id), site));
+          if (!visibility.has(key)) {
+            const work = catalog.work(row.task_id, row.work_id) ?? upload(row.task_id, row.work_id);
+            visibility.set(key, visibleTo(work, site) && !hidden(work, user));
+          }
           return visibility.get(key);
         };
         const counts = {};
@@ -1300,11 +1464,11 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     },
     updatesCount: (userId) => q.updatesOf.get(userId, seenAt(userId)).n,
     markWorksSeen(userId) { q.markWorksSeen.run(Date.now(), userId); },
-    auditLog(limit = 200) {
-      return q.auditLog.all(limit).map((row) => ({ at: iso(row.at), actor: row.actor_name, action: row.action, task: row.task_id, work: row.work_id, detail: generationAuditView(row.detail) }));
+    auditLog(limit = 200, viewer = null) {
+      return visibleAudit((n) => q.auditLog.all(n), limit, viewer).map(auditView);
     },
-    auditFor(taskId, workId = null) {
-      return q.auditFor.all(taskId, workId, workId).map((row) => ({ at: iso(row.at), actor: row.actor_name, action: row.action, task: row.task_id, work: row.work_id, detail: generationAuditView(row.detail) }));
+    auditFor(taskId, workId = null, viewer = null) {
+      return visibleAudit((n) => q.auditFor.all(taskId, workId, workId, n), 200, viewer).map(auditView);
     },
     hasDirectory: (id) => existsSync(join(dirs.works, id)),
   };

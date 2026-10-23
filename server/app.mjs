@@ -46,6 +46,7 @@ import { registerGuessRooms } from './show1/guess-room-http.mjs';
 import { turnstileEnabled, turnstileSiteKey, verifyTurnstile } from './turnstile.mjs';
 import { createReadGuard } from './read-guard.mjs';
 import { isSenior, isStaff, levelOf, requireContributor } from './roles.mjs';
+import { createRestricted, seesRestricted } from './restricted.mjs';
 
 const foldScript = readFileSync(new URL('./fold.js', import.meta.url));
 
@@ -57,10 +58,11 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     catch { return 'dev'; }
   })();
   const db = openDatabase(join(config.dataDir, 'platform.db'));
+  const restricted = createRestricted(db);
   const changelog = createChangelog(db);
   const announcements = createAnnouncements(db);
   const references = createReferences({ db, config, limits });
-  const questions = createQuestions(db, { references });
+  const questions = createQuestions(db, { references, restricted });
   references.bindQuestions(questions);
   references.cleanup();
   const referenceCleanup = setInterval(() => references.cleanup(), 60e3);
@@ -75,7 +77,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const show1Snapshot = JSON.parse(readFileSync(new URL('./show1/compat-data.json', import.meta.url), 'utf8'));
   const moderationMode = createModerationMode(db, config);
   const library = createLibrary({ db, catalog, config, limits, legacyRounds: new Set(show1Snapshot.works.map((work) => work.promptId)),
-    moderationRoute: () => moderationMode.current });
+    moderationRoute: () => moderationMode.current, restricted });
   const adminService = createAdmin({ db, catalog, library });
   const inbox = createInbox({ library, config, limits });
   const catalogRevision = createCatalogRevision(db);
@@ -84,7 +86,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const qualification = createQualification({ db, catalog, library, auth });
   const management = createReview({ catalog, library, questions, adminService, auth, qualification });
   const voters = createArenaVoters({ db, config });
-  const voteRisk = createVoteRisk({ db, invalidate: () => arena.invalidate() });
+  const voteRisk = createVoteRisk({ db, invalidate: () => arena.invalidate(), restricted });
   voteRisk.cleanup();
   const questionEligibility = user => ({ allowed: levelOf(user) >= 1, level: levelOf(user), requiredLevel: 1,
     ...(levelOf(user) < 1 ? { reason: 'level_required' } : {}) });
@@ -208,7 +210,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   });
   async function galleryList(user, snapshot = catalog.snapshot()) {
     await yieldToRequests();
-    const allWorks = catalog.withSnapshot(() => library.allWorks({ snapshot }));
+    const allWorks = catalog.withSnapshot(() => library.allWorks({ snapshot, viewer: user }));
     const works = [];
     for (let i = 0; i < allWorks.length; i += 32) {
       catalog.withSnapshot(() => {
@@ -269,11 +271,12 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       const result = catalog.withSnapshot(() => {
         // Access flags and staff review counts use the same fresh rows within
         // this synchronous batch; nothing is retained across requests or awaits.
-        const uploads = user ? library.uploads() : [];
-        const works = user ? library.allWorks({ uploads, snapshot }) : [];
+        const uploads = user ? library.uploads(user) : [];
+        const works = user ? library.allWorks({ uploads, snapshot, viewer: user }) : [];
         return {
           ...versionInfo(snapshot), reactions: library.reactionSummary(user), arena: arenaStats,
-          ...(isSenior(user) ? { arenaModels: arena.poolModels(pools) } : {}),
+          // Shared pools are public; a senior's pin list also offers restricted models.
+          ...(isSenior(user) ? { arenaModels: arena.poolModels(seesRestricted(user) ? null : pools, user) } : {}),
           featured: featured.read(), totals,
           workAccess: works.filter((work) => library.visibleTo(work, 'show2')).map((work) => library.access(work, user)),
           review: review(user, uploads, works),
@@ -462,7 +465,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     const admin = adminOnly(ctx);
     return { questions: questions.adminAll(admin).map(({ ownerId, ...question }) => ({
       ...question,
-      samples: ownerId ? library.uploadsOf(ownerId).filter((work) => work.taskId === question.id).map((work) => {
+      samples: ownerId ? library.uploadsOf(ownerId, admin).filter((work) => work.taskId === question.id).map((work) => {
         const { id, task, title, modelName, effort, status, moderation, scene } = library.adminWork(work, admin);
         return { id, task, title, modelName, effort, status, moderation, scene };
       }) : [],
@@ -602,29 +605,29 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   });
   // Cover history and rollback (covers replaced by dots); old files are never deleted.
   adminOn('GET', '/api/works/:task/:id/cover-history', (ctx) => {
-    adminOnly(ctx);
-    const work = library.work(ctx.params.task, ctx.params.id);
+    const admin = adminOnly(ctx);
+    const work = library.work(ctx.params.task, ctx.params.id, null, admin);
     if (!work || work.curated) fail(404, '作品不存在');
     return { cover: work.cover ? `media/${work.id}/${work.cover}` : null, entries: covers.history(work) };
   }, '/works/:task/:id/cover-history');
   // Previews uploaded by dots: history and rollback; baked previews are never touched.
   adminOn('GET', '/api/works/:task/:id/preview-history', (ctx) => {
-    adminOnly(ctx);
-    const work = library.work(ctx.params.task, ctx.params.id);
+    const admin = adminOnly(ctx);
+    const work = library.work(ctx.params.task, ctx.params.id, null, admin);
     if (!work || work.curated) fail(404, '作品不存在');
     return { current: previews.current(work).version, entries: previews.history(work) };
   }, '/works/:task/:id/preview-history');
   adminOn('POST', '/api/works/:task/:id/preview/rollback', async (ctx) => {
     const admin = adminOnly(ctx);
     const body = await adminJson(ctx);
-    const result = previews.rollback(library.work(ctx.params.task, ctx.params.id), body.historyId ?? null, { id: admin.id, name: admin.name });
+    const result = previews.rollback(library.work(ctx.params.task, ctx.params.id, null, admin), body.historyId ?? null, { id: admin.id, name: admin.name });
     arena.invalidate();
     return result;
   }, '/works/:task/:id/preview/rollback');
   adminOn('POST', '/api/works/:task/:id/cover/rollback', async (ctx) => {
     const admin = adminOnly(ctx);
     const body = await adminJson(ctx);
-    const result = covers.rollback(library.work(ctx.params.task, ctx.params.id), body.historyId ?? null, { id: admin.id, name: admin.name });
+    const result = covers.rollback(library.work(ctx.params.task, ctx.params.id, null, admin), body.historyId ?? null, { id: admin.id, name: admin.name });
     arena.invalidate();
     return result;
   }, '/works/:task/:id/cover/rollback');
@@ -711,7 +714,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     const work = library.setMeta(user, ctx.params.task, ctx.params.id, await readJson(ctx.req), { author: !isStaff(user) });
     if (!isStaff(user)) moderator.enqueue(library.work(ctx.params.task, ctx.params.id));
     arena.invalidate();
-    return { work: library.toPublic(library.work(work.task, work.id), user) };
+    return { work: library.toPublic(library.work(work.task, work.id, null, user), user) };
   });
   router.on('PATCH', '/api/me', async (ctx) => {
     const user = signedIn(ctx);
@@ -723,7 +726,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     if (ctx.url.searchParams.size) return catalog.withSnapshot(() => management.list(ctx.url.searchParams, admin));
     // Reuse question lookups within this response only; the next request reads current decisions.
     return catalog.withSnapshot(() => ({
-      works: library.allWorks().map((work) => library.adminWork(work, admin)), audit: library.auditLog(),
+      works: library.allWorks({ viewer: admin }).map((work) => library.adminWork(work, admin)), audit: library.auditLog(200, admin),
       questions: isSenior(admin) ? questions.adminAll(admin) : [],
     }));
   }, '/review');
@@ -733,7 +736,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     const admin = adminOnly(ctx);
     if (ctx.url.searchParams.size) return catalog.withSnapshot(() => management.members(ctx.url.searchParams, admin));
     const summaries = qualification.summaries();
-    return { users: adminService.members(auth.list()).map(user => ({ ...user, exam: summaries.get(user.id) ?? { passedAt: null, attempts: 0, bestCorrect: null, questionCount: null } })) };
+    return { users: adminService.members(auth.list(), admin).map(user => ({ ...user, exam: summaries.get(user.id) ?? { passedAt: null, attempts: 0, bestCorrect: null, questionCount: null } })) };
   });
   adminOn('POST', '/api/admin/users/:id/role', async (ctx) => {
     const admin = adminOnly(ctx);
@@ -829,9 +832,9 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   adminOn('POST', '/api/admin/works/:task/:id/preview', (ctx) => {
     const admin = staffOnly(ctx);
     limit.write(admin.id);
-    const work = library.work(ctx.params.task, ctx.params.id);
+    const work = library.work(ctx.params.task, ctx.params.id, null, admin);
     if (!work) fail(404, '作品不存在', 'not_found');
-    return { url: `${library.previewOrigin(work)}/` };
+    return { url: `${library.previewOrigin(work, admin)}/` };
   });
   adminOn('GET', '/api/admin/tasks/:id/editorial', (ctx) => {
     const admin = adminOnly(ctx);
@@ -995,7 +998,9 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       if (value && value !== 'unset' && !catalog[field](value)) fail(400, `${field === 'harness' ? 'Harness' : '服务商'}筛选无效`, 'invalid_query');
       return [field, value];
     }));
-    return arena.leaderboardSnapshot({ task, category, domain, board, audience, sectionId, by: ctx.url.searchParams.get('by') === 'model' ? 'model' : 'config', ...filters });
+    // Senior admins read a separately cached board that also counts restricted works; sendJson keeps it no-store.
+    return arena.leaderboardSnapshot({ task, category, domain, board, audience, sectionId, by: ctx.url.searchParams.get('by') === 'model' ? 'model' : 'config', ...filters,
+      ...(seesRestricted(ctx.user) ? { senior: true } : {}) });
   });
 
   registerShow1Compat(router, { db, catalog, library, snapshot: show1Snapshot, config, limit });
@@ -1036,14 +1041,15 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     }
     const media = /^\/media\/(up-[a-z0-9]{8})\/(cover(?:-[a-z0-9]{8,24})?\.(?:png|jpg|webp)|first(?:-[a-z0-9]{8,24})?\.jpg|mobile(?:-[a-z0-9]{8,24})?\.jpg|preview\.(?:sbox|webp|jpg)|preview-[a-z0-9]{8,24}\.(?:sbox|webp))$/.exec(pathname);
     if (pathname.startsWith('/media/')) {
-      const work = media && library.uploadById(media[1]);
-      if (!library.canRead(work, auth.userFrom(req))) return sendJson(res, 404, { error: '文件不存在' });
+      const viewer = auth.userFrom(req);
+      const work = media && library.uploadById(media[1], viewer);
+      if (!library.canRead(work, viewer)) return sendJson(res, 404, { error: '文件不存在' });
       const found = media && resolveInside(library.mediaDir, `/${media[1]}/${media[2]}`);
       if (!found) return sendJson(res, 404, { error: '文件不存在' });
       // Covers and screenshots keep their file names while re-bakes overwrite
       // them, so published works get a short private cache instead of immutable;
       // legacy media is frozen and stays shareable.
-      return streamFile(req, res, found, { 'Cache-Control': work.moderation.status === 'legacy' ? 'public, max-age=300' : 'private, max-age=600', 'Content-Security-Policy': "default-src 'none'" });
+      return streamFile(req, res, found, { 'Cache-Control': library.isRestricted(work) ? 'no-store' : work.moderation.status === 'legacy' ? 'public, max-age=300' : 'private, max-age=600', 'Content-Security-Policy': "default-src 'none'" });
     }
     // Admin inbox previews stream straight from the staging directory; session-guarded
     // because these files are not published works yet.

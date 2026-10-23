@@ -66,7 +66,7 @@ function fixture(t, options = {}) {
   };
   browser.close = async () => { f.closes = (f.closes ?? 0) + 1; browser.emit('disconnected'); };
   const library = { mediaDir, publicContent: () => true, originOf: () => 'http://work.localhost',
-    hasDirectory: () => true, setCaptures: (id, captures) => saved.push({ id, captures }) };
+    hasDirectory: () => true, setCaptures: (id, captures) => saved.push({ id, captures }), ...options.library };
   let f;
   const capturer = createCapturer({ config: { capture: true, cdn: [], ...options.config, ...(options.timeouts ? { captureTimeouts: options.timeouts } : {}) }, library,
     loadChromium: options.loadChromium ?? (async () => ({ launch: async (settings) => { f.launches.push(settings); return browser; } })), now: options.now });
@@ -575,4 +575,11 @@ test('moderation records an incomplete capture and continues when the browser ha
   await moderator.idle();
   assert.deepEqual(results.map((item) => item.error), ['capture_incomplete', 'capture_incomplete']);
   assert.ok(results.every((item) => item.status === 'review'));
+});
+
+test('a work without a capture address is skipped before the browser starts', async (t) => {
+  const f = fixture(t, { library: { captureOrigin: () => null } });
+  assert.equal(await f.capturer.enqueue(f.work), null);
+  assert.deepEqual((await f.capturer.enqueue(f.work, { detailed: true })).error, { code: 'not_found', stage: 'initialize' });
+  assert.deepEqual([f.launches.length, f.contexts.length, f.saved.length], [0, 0, 0]);
 });

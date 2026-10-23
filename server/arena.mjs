@@ -24,6 +24,7 @@ import { isTextTask, isAiJudgedTask } from './categories.mjs';
 import { isSenior, isStaff, levelOf } from './roles.mjs';
 import { checkTiming, timing } from './arena-voter-state.mjs';
 import { manualCorrections, voteAttribution, votesBeforeTaskMove } from './vote-attribution.mjs';
+import { ALL_WORKS, createRestricted, seesRestricted } from './restricted.mjs';
 
 const MATCH = { tierWidth: 150, sameTierRate: 0.9, blowoutGap: 400, rerolls: 2, cooldownRounds: 6, cooldownMs: 15 * 60e3 };
 const ANONYMOUS_MATCH_MAX = 10000;
@@ -51,6 +52,10 @@ const fromIdentity = (text) => {
 export function createArena({ db, catalog, library, limits, random = Math.random, revision = () => '', curated: curation = null }) {
   curation ??= createCurated({ db, catalog, library });
   const readBatch = (read) => catalog.withSnapshot ? catalog.withSnapshot(read) : read();
+  // Restricted (gray) works: public boards drop every ballot that touches one, so public
+  // scores and counts never move because of them; senior boards are cached separately.
+  const restricted = library.restricted ?? createRestricted(db);
+  const roleOf = db.prepare('SELECT role FROM users WHERE id = ?');
   const q = {
     insertMatch: db.prepare('INSERT INTO matches (id, user_id, task_id, a_work, b_work, a_token, b_token, created_at, expires_at, datapack_root, datapack_version, a_identity, b_identity, pin, visitor_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
     match: db.prepare('SELECT * FROM matches WHERE id = ?'),
@@ -95,7 +100,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
   };
   const currentRevision = (snapshot) => {
     const staffRevision = JSON.stringify(q.staffVoters.all().map(user => user.id));
-    const next = `${snapshot.version}|${revision()}|${curation.revision()}|${q.riskRevision.get().revision}|${staffRevision}`;
+    const next = `${snapshot.version}|${revision()}|${curation.revision()}|${q.riskRevision.get().revision}|${staffRevision}|${restricted.revision()}`;
     if (readRevision !== next) {
       invalidate();
       readRevision = next;
@@ -124,7 +129,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     const lookup = (task, id) => {
       const key = `${task}/${id}`;
       if (!works.has(key)) {
-        const work = library.ballotWork(task, id, snapshot);
+        const work = library.ballotWork(task, id, snapshot, ALL_WORKS);
         works.set(key, library.countsVotes(work) ? work : null);
       }
       return works.get(key);
@@ -145,9 +150,11 @@ export function createArena({ db, catalog, library, limits, random = Math.random
           const a = lookup(row.task_id, row.a_work) ?? lookup(aIdentity.taskId, row.a_work);
           const b = lookup(row.task_id, row.b_work) ?? lookup(bIdentity.taskId, row.b_work);
           if (a && b) {
+            const left = { ...voteAttribution(row, 'a', aIdentity, fromIdentity(row.a_correction), a, snapshot, manual), taskId: row.task_id };
+            const right = { ...voteAttribution(row, 'b', bIdentity, fromIdentity(row.b_correction), b, snapshot, manual), taskId: row.task_id };
             const vote = {
-              a: { ...voteAttribution(row, 'a', aIdentity, fromIdentity(row.a_correction), a, snapshot, manual), taskId: row.task_id },
-              b: { ...voteAttribution(row, 'b', bIdentity, fromIdentity(row.b_correction), b, snapshot, manual), taskId: row.task_id },
+              a: left, b: right,
+              restricted: [a, b, aIdentity, bIdentity, left, right].some((item) => restricted.isRestrictedWork(item)),
               choice: row.choice, userId: row.user_id ?? row.visitor_hash ?? `vote:${row.id}`,
               voterLevel: row.voter_level, createdAt: row.created_at, staffVoter: staffVoters.has(row.user_id),
             };
@@ -159,7 +166,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     return votes;
   }
 
-  async function countedVotes(taskId, snapshot, keyOf, filters = null, taskIds = null, curatedScope = null) {
+  async function countedVotes(taskId, snapshot, keyOf, filters = null, taskIds = null, curatedScope = null, senior = false) {
     const cacheKey = `${snapshot.version}|ballots|${taskId ?? '*'}`;
     const activeCache = cache;
     if (!activeCache.has(cacheKey)) {
@@ -173,6 +180,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       await new Promise((resolve) => setImmediate(resolve));
       for (const vote of all.slice(i, i + 100)) {
         if (taskIds && !taskIds.has(vote.a.taskId)) continue;
+        if (vote.restricted && !senior) continue;
         // Current admins and moderators also contribute their valid historical ballots.
         if (curatedScope && !vote.staffVoter && (!(vote.voterLevel >= 1) || vote.createdAt < curatedScope.startedAt)) continue;
         if (filters && !(provenanceMatch(filters, vote.a) && provenanceMatch(filters, vote.b))) continue;
@@ -257,7 +265,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
   // `domain` (e.g. 化学) only tasks naming it, and the two combine. A task with two domains
   // counts fully in both. The unscoped board also reports each entry's rank inside every category.
   // Totals count only comparisons the fit used: votes between works of one entry drop out.
-  function leaderboard({ task = null, category = null, domain = null, board = null, audience = null, sectionId = null, by = 'config', snapshot = null, harness = null, provider = null } = {}) {
+  function leaderboard({ task = null, category = null, domain = null, board = null, audience = null, sectionId = null, by = 'config', snapshot = null, harness = null, provider = null, senior = false } = {}) {
     if (board && (board !== 'frontend' || audience === 'public' || sectionId)) fail(400, '精选榜筛选无效', 'invalid_query');
     audience ??= board ? 'curated' : 'public';
     if (!['public','curated'].includes(audience) || (sectionId && audience !== 'curated')) fail(400, '榜单筛选无效', 'invalid_query');
@@ -266,7 +274,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     const archive = snapshot ?? catalog.snapshot();
     currentRevision(archive);
     const filters = harness || provider ? { harness, provider } : null;
-    const cacheKey = `${archive.version}|${task ?? '*'}|${category ?? '*'}|${domain ?? '*'}|${audience}|${sectionId ?? '*'}|${curated?.revision ?? ''}|${by}${filters ? `|${harness ?? ''}|${provider ?? ''}` : ''}`;
+    const cacheKey = `${archive.version}|${task ?? '*'}|${category ?? '*'}|${domain ?? '*'}|${audience}|${sectionId ?? '*'}|${curated?.revision ?? ''}|${by}${filters ? `|${harness ?? ''}|${provider ?? ''}` : ''}${senior ? '|senior' : ''}`;
     if (cache.has(cacheKey)) return cache.get(cacheKey);
     const activeCache = cache;
     const pending = Promise.resolve().then(async () => {
@@ -274,13 +282,13 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       const rankedTasks = readBatch(() => (task ? [catalog.task(task)].filter(Boolean) : catalog.tasks()).filter((t) => !isAiJudgedTask(t)));
       const selected = curated && new Set(curated.taskIds);
       const scoped = curated || category || domain ? rankedTasks.filter((t) => (!selected || selected.has(t.id)) && (!category || t.category === category) && (!domain || t.domains?.includes(domain))) : null;
-      const { votes, rankedEntryCount } = await countedVotes(task, archive, keyOf, filters, scoped && new Set(scoped.map((t) => t.id)), curated);
+      const { votes, rankedEntryCount } = await countedVotes(task, archive, keyOf, filters, scoped && new Set(scoped.map((t) => t.id)), curated, senior);
       const ranked = await rankOffThread(votes, by, rankedEntryCount);
       // Qualification always uses the same scoped model fit, including in configuration view.
       // Keep all valid opponents in the fit; qualification changes membership, not ballot history.
       let qualifiedModels, provisionalModels;
       if (curated) {
-        const modelBoard = by === 'model' ? null : await leaderboard({ audience: 'curated', sectionId, by: 'model', snapshot: archive, harness, provider });
+        const modelBoard = by === 'model' ? null : await leaderboard({ audience: 'curated', sectionId, by: 'model', snapshot: archive, harness, provider, senior });
         const modelRows = modelBoard ? modelBoard.rows : ranked;
         // Match Gallery's visible registry (modelPool also contains guessing-game-only entries).
         const registered = archive.models();
@@ -295,7 +303,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       const qualifies = (work) => !qualifiedModels || qualifiedModels.has(work.modelKey ?? modelKey(work));
       const pool = [];
       for (const selectedTask of scoped ?? rankedTasks) {
-        pool.push(...readBatch(() => library.eligible(selectedTask.id, archive)
+        pool.push(...readBatch(() => library.eligible(selectedTask.id, archive, senior ? ALL_WORKS : null)
           .filter((work) => !filters || provenanceMatch(filters, work))));
         await new Promise((resolve) => setImmediate(resolve));
       }
@@ -303,7 +311,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       if (!task && !category && !domain && !curated) {
         standings = {};
         for (const name of new Set(rankedTasks.map((t) => t.category).filter(Boolean))) {
-          const board = await leaderboard({ category: name, by, snapshot, harness, provider });
+          const board = await leaderboard({ category: name, by, snapshot, harness, provider, senior });
           if (board.rows.length) standings[name] = Object.fromEntries(board.rows.map((row) => [row.key, row.rank]));
         }
       }
@@ -335,6 +343,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
           rank: i + 1,
           key: row.key,
           ...describeRanked(row),
+          ...(senior && restricted.isRestrictedWork(works.get(row.key)?.sample ?? latest.get(row.key) ?? row.sample) ? { restricted: true } : {}),
           score: row.score,
           interval: row.interval,
           games: row.games,
@@ -347,7 +356,8 @@ export function createArena({ db, catalog, library, limits, random = Math.random
           works: works.get(row.key)?.count ?? 0,
           provisional: row.provisional,
         })),
-        unranked: [...works].filter(([key, { sample }]) => !rankedKeys.has(key) && qualifies(sample)).map(([key, { sample, count }]) => ({ key, ...describe(sample, by), works: count }))
+        unranked: [...works].filter(([key, { sample }]) => !rankedKeys.has(key) && qualifies(sample)).map(([key, { sample, count }]) => ({ key, ...describe(sample, by), works: count,
+          ...(senior && restricted.isRestrictedWork(sample) ? { restricted: true } : {}) }))
           .sort((a, b) => a.modelName.localeCompare(b.modelName, 'en', { numeric: true }) || a.effort.localeCompare(b.effort)),
         provisionalGames: limits.provisionalGames,
         updatedAt: new Date().toISOString(),
@@ -423,12 +433,12 @@ export function createArena({ db, catalog, library, limits, random = Math.random
   }
 
   // Models in the blind pool and the tasks holding their works, for a senior admin to pin.
-  function poolModels(pools = null) {
+  function poolModels(pools = null, viewer = null) {
     const archive = catalog.snapshot();
     const models = new Map();
     for (const task of catalog.tasks()) {
       if (isAiJudgedTask(task)) continue;
-      for (const work of pools?.get(task.id) ?? library.eligible(task.id)) {
+      for (const work of pools?.get(task.id) ?? library.eligible(task.id, null, viewer)) {
         const key = modelKey(work);
         if (!models.has(key)) models.set(key, { key, name: (work.modelId && archive.model(work.modelId)?.name) || work.modelName, tasks: [] });
         const { tasks } = models.get(key);
@@ -442,9 +452,11 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     for (;;) {
       const snapshot = options.snapshot ?? catalog.snapshot();
       const before = currentRevision(snapshot);
-      const key = JSON.stringify([snapshot.version, ...['task', 'category', 'domain', 'board', 'audience', 'sectionId', 'by', 'harness', 'provider']
+      const key = JSON.stringify([snapshot.version, ...['task', 'category', 'domain', 'board', 'audience', 'sectionId', 'by', 'harness', 'provider', 'senior']
         .map((field) => options[field] ?? null)]);
-      const result = await publishedBoards.get(key, () => leaderboard({ ...options, snapshot: options.snapshot ?? catalog.snapshot() }));
+      // Senior boards never enter the shared ten-minute cache; they read the live calculation.
+      const read = () => leaderboard({ ...options, snapshot: options.snapshot ?? catalog.snapshot() });
+      const result = await (options.senior ? read() : publishedBoards.get(key, read));
       // A withdrawal or external database write while fitting cannot publish an old board.
       if (before === currentRevision(options.snapshot ?? catalog.snapshot())) return result;
     }
@@ -470,7 +482,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       if (isAiJudgedTask(catalog.task(taskId) ?? snapshot.task(taskId))) fail(409, '这道题由 AI 评分，暂不开放盲评', 'ai-judged');
       if (Date.now() - lastCleanup >= 60e3) cleanupExpiredMatches();
       const groups = new Map();
-      for (const work of library.eligible(taskId, snapshot)) {
+      for (const work of library.eligible(taskId, snapshot, user)) {
         if (user && !isStaff(user) && work.ownerId === user.id) continue;
         const key = JSON.stringify([work.promptVariant ?? '', entityKey(work)]);
         if (!groups.has(key)) groups.set(key, []);
@@ -506,7 +518,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       }
       if (!candidates.length) fail(409, '这道题的组合你都已经评过了，换一道题试试', 'exhausted');
 
-      const chosen = pick(candidates, await leaderboard({ task: taskId, snapshot }), pin);
+      const chosen = pick(candidates, await leaderboard({ task: taskId, snapshot, senior: seesRestricted(user) }), pin);
       const [first, second] = pickWorks(taskId, chosen, voted, random);
       const [a, b] = random() < 0.5 ? [first, second] : [second, first];
       const id = randomBytes(12).toString('hex');
@@ -568,8 +580,8 @@ export function createArena({ db, catalog, library, limits, random = Math.random
         return { choice, counted: false, reason: 'skipped', a: null, b: null, countedFor: { public: false, curated: false }, curatedEligible: false, voterLevel: levelOf(user) };
       }
       const snapshot = catalog.at(match.datapack_root);
-      const a = library.work(match.task_id, match.a_work, snapshot);
-      const b = library.work(match.task_id, match.b_work, snapshot);
+      const a = library.work(match.task_id, match.a_work, snapshot, user);
+      const b = library.work(match.task_id, match.b_work, snapshot, user);
       const aIdentity = fromIdentity(match.a_identity);
       const bIdentity = fromIdentity(match.b_identity);
       let counted = false;
@@ -578,7 +590,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
         if (!q.decide.run(choice, Date.now(), match.id).changes) fail(409, '这一组已经提交过了');
         accept(match);
         const saveBallot = () => {
-          if (!library.isEligible(library.work(match.task_id, match.a_work)) || !library.isEligible(library.work(match.task_id, match.b_work))) { reason = 'changed'; return; }
+          if (!library.isEligible(library.work(match.task_id, match.a_work, null, user)) || !library.isEligible(library.work(match.task_id, match.b_work, null, user))) { reason = 'changed'; return; }
           if (user && !isStaff(user) && (aIdentity.ownerId === user.id || bIdentity.ownerId === user.id)) { reason = 'own'; return; }
           const key = pairKey(match.task_id, match.a_work, match.b_work);
           if (user ? q.votedPair.get(user.id, key) : q.visitorPair.get(visitorHash, key)) { reason = 'duplicate'; return; }
@@ -607,7 +619,9 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       if (!match?.datapack_root) return null;
       let snapshot;
       try { snapshot = catalog.at(match.datapack_root); } catch { return null; } // Release already pruned.
-      return library.work(match.task_id, match.a_token === key ? match.a_work : match.b_work, snapshot);
+      // Restricted sides only resolve for a match drawn by a current senior admin.
+      const owner = match.user_id ? roleOf.get(match.user_id) : null;
+      return library.work(match.task_id, match.a_token === key ? match.a_work : match.b_work, snapshot, owner);
     },
 
     // Explicit correction of a saved vote. The caller supplies an authenticated admin
@@ -626,8 +640,8 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       const original = fromIdentity(row[`${side}_identity`]);
       if (!original || !row.a_identity || !row.b_identity) fail(409, '旧票没有完整的当时身份快照，不能推断更正');
       const archive = catalog.snapshot();
-      const work = library.ballotWork(row.task_id, row[`${side}_work`], archive)
-        ?? library.ballotWork(original.taskId, row[`${side}_work`], archive);
+      const work = library.ballotWork(row.task_id, row[`${side}_work`], archive, ALL_WORKS)
+        ?? library.ballotWork(original.taskId, row[`${side}_work`], archive, ALL_WORKS);
       const previous = voteAttribution(row, side, original, fromIdentity(row[`${side}_correction`]), work, archive, manualCorrections(db));
       const next = { ...identityOf({ ...previous, ...replacement, taskId: previous.taskId, id: previous.id, ownerId: previous.ownerId }), manual: true };
       transaction(db, () => {

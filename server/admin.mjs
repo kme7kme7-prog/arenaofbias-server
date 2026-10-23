@@ -3,6 +3,7 @@ import { fail } from './http.mjs';
 import { transaction } from './db.mjs';
 import { effortKey } from './catalog.mjs';
 import { GENERATION_MODES, HUMAN_INTERVENTIONS } from './generation.mjs';
+import { seesRestricted } from './restricted.mjs';
 
 const faceOf = (value) => ['gallery', 'arena'].includes(value) ? value : fail(400, '门面参数无效', 'invalid_face');
 const intParam = (value, fallback, max, label) => {
@@ -36,16 +37,33 @@ export function createAdmin({ db, catalog, library }) {
       WHERE owner_id IS NOT NULL AND deleted_at IS NULL
         AND NOT EXISTS (SELECT 1 FROM questions WHERE questions.id = works.task_id AND questions.deleted_at IS NOT NULL))
     GROUP BY owner_id`);
+  // Restricted works and the ballots touching them stay out of a non-senior's member counts.
+  const ownedWorks = db.prepare(`SELECT id, owner_id, status, model_id, model_other, COALESCE(json_extract(moderation, '$.status'), '') = 'rejected' AS rejected FROM works
+    WHERE owner_id IS NOT NULL AND deleted_at IS NULL
+      AND NOT EXISTS (SELECT 1 FROM questions WHERE questions.id = works.task_id AND questions.deleted_at IS NOT NULL)`);
+  const workBallots = db.prepare("SELECT task_id, a_work, b_work FROM votes WHERE choice != 'skip'");
+  const userBallots = db.prepare('SELECT user_id, a_work, b_work FROM votes WHERE user_id IS NOT NULL');
   const questionsByOwner = db.prepare('SELECT owner_id, COUNT(*) AS n FROM questions WHERE deleted_at IS NULL GROUP BY owner_id');
   const votesByUser = db.prepare('SELECT user_id, COUNT(*) AS n FROM votes WHERE user_id IS NOT NULL GROUP BY user_id');
 
   const task = (id, viewer) => catalog.task(id, viewer) ?? fail(404, '题目不存在', 'not_found');
   const iso = (ms) => new Date(ms).toISOString();
   return {
-    members(users) {
-      const works = new Map(worksByOwner.all().map((row) => [row.owner_id, row]));
+    members(users, viewer = null) {
+      const works = new Map(worksByOwner.all().map((row) => [row.owner_id, { ...row }]));
       const questions = new Map(questionsByOwner.all().map((row) => [row.owner_id, row.n]));
       const votes = new Map(votesByUser.all().map((row) => [row.user_id, row.n]));
+      const restricted = library.restricted;
+      if (restricted && !seesRestricted(viewer) && restricted.keys().size) {
+        const hidden = new Set();
+        for (const row of ownedWorks.all()) {
+          if (!restricted.isRestrictedWork(row)) continue;
+          hidden.add(row.id);
+          const counts = works.get(row.owner_id), bucket = row.rejected ? 'rejected' : { verified: 'verified', questioned: 'questioned', unverified: 'pending' }[row.status];
+          if (counts && bucket) counts[bucket]--;
+        }
+        if (hidden.size) for (const vote of userBallots.all()) if (hidden.has(vote.a_work) || hidden.has(vote.b_work)) votes.set(vote.user_id, votes.get(vote.user_id) - 1);
+      }
       const trust = library.trustSummaries(users);
       return users.map((user) => {
         const { verified = 0, questioned = 0, pending = 0, rejected = 0 } = works.get(user.id) ?? {};
@@ -84,8 +102,14 @@ export function createAdmin({ db, catalog, library }) {
       const page = intParam(query.get('page'), 1, 100000, '页码');
       const pageSize = intParam(query.get('pageSize'), 30, 100, '每页数量');
       const search = String(query.get('search') ?? '').trim().toLocaleLowerCase();
-      const voteCounts = new Map(votesPerWork.all().map((row) => [`${row.task_id}/${row.work_id}`, row.votes]));
-      const rawWorks = library.allWorks();
+      // Non-seniors (dots included) count only ballots without a restricted side, like members().
+      const gray = seesRestricted(viewer) ? new Set() : library.restrictedIds?.() ?? new Set();
+      const voteCounts = new Map(gray.size ? [] : votesPerWork.all().map((row) => [`${row.task_id}/${row.work_id}`, row.votes]));
+      if (gray.size) for (const vote of workBallots.all()) {
+        if (gray.has(vote.a_work) || gray.has(vote.b_work)) continue;
+        for (const id of [vote.a_work, vote.b_work]) voteCounts.set(`${vote.task_id}/${id}`, (voteCounts.get(`${vote.task_id}/${id}`) ?? 0) + 1);
+      }
+      const rawWorks = library.allWorks({ viewer });
       const byKey = new Map(rawWorks.map(work => [`${work.taskId}/${work.id}`, work]));
       // Filters need metadata, not a hash of every adaptation on disk. Resolve
       // full preview fields only for the requested page, after filtering/sorting.

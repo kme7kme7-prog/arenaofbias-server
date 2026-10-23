@@ -1,3 +1,20 @@
+## 2026-10-23 · 灰度模型发布准备
+
+- 用户授权提交全部改动并部署至既有 VPS。本轮以 wsnxxxs noreply 身份提交、推送 main 后发布；发布结果以父工作区 `.local/restricted-release-20261023/` 与服务器 `/root/aob-restricted-release-20261023/` 的私有 receipts 为准，下节“未提交、未部署”为开发时点。
+- 本机 Node 26 与保留现场补丁的 Linux Node 22.23.4 均语法 168/0、测试 534/534，失败、取消、跳过均 0。修正一处测试夹具：随机删除公开对手后，截图断言改读未删除的另一作品。
+- 发布候选只增量 15 个后端模块；三方合并保留线上 arena-only 题目隔离、新题提示词版本校验及其他既有补丁。生产一致副本迁移 51→52，旧运行代码可重开；47 项完整读取 DTO 对照全部一致（只规范随机预览令牌）；Mix 预检无登记、无公开模型冲突、无同名作品或相关票。拟发布后再次核验再登记 `x:mix`，不强制隐藏旧作品、不导入作品。
+- 备份与回退位于服务器本轮目录 `backend-backup/`。恢复代码、版本文件及对应 systemd 版本配置即可，保留追加表结构和当前业务数据库，不以旧库覆盖新业务。前端、数据包与 Nginx 沿用现有发布。
+- [本轮归档](docs/archive/2026-10-23-restricted-model-release-wsnxxxs.md)。未做真实管理员浏览器操作、实际灰度作品导入或生产投票；权限矩阵及导入由临时 SQLite HTTP/CLI 测试覆盖。
+
+## 2026-10-23 · 灰度模型 Mix（本地实现，未提交、未推送、未部署）
+
+- 新迁移 52 `restricted_models(model_key, label, created_at, created_by)`。登记的 modelKey（本轮为 `x:mix`，显示名 Mix）下的作品只有高级管理员（role=admin 且非 dots 自动化）能看到、投票、揭晓和置顶；其他身份（匿名、成员、普通管理员、dots Bearer）在作品列表、单件读取、媒体、评论、校准、审核与日志、计数、公开榜和内容域上与「作品不存在」一致。公开榜剔除任一侧涉及灰度作品的票；榜单缓存按 audience 分开，senior 榜单 `no-store` 并带 `restricted: true`。
+- 登记/导入只走 CLI（`server/cli.mjs`）：`restricted-model add|remove|list|check <代号>`，`restricted-import --task --model --effort --owner --dir [--title] [--prompt-variant] [--dry-run]`。导入直接 verified、不进自动审核/dots 队列、不进娱乐盲测；只能导入数据包题目或高级管理员自己的题目。运行中的服务通过 SQLite data_version 感知 CLI 写入。`check` 只读，部署前用来盘点现有 Mix 类投稿与票数；`add` 遇到同名或规范化同名的已有作品会拒绝并列出数量，确认后需加 `--force`。
+- 受限按 modelKey 判定：灰度作品 model_id 恒为 NULL；所有编辑入口拒绝改模型（400 `restricted_model`），归属题目只能移到数据包题目或高级管理员的题目。非高级用户填 Mix / MIX / M-I-X / 全角等规范化同名会得到通用「模型名称无效」。
+- 题目删除和改元数据时，「已有作品 / 投票」按全量数据（含灰度）判断；看不到灰度作品的人（含 dots）删含灰度作品的题，得到与有投票时相同的 409，灰度作品和它的题不会被删。编辑只保持作品当前分类：库里已有的 M-I-X 类公开作品被编辑后仍是公开作品，自动受限只作用于新投稿和 CLI 导入。
+- 风险：dots 看到某题 0 件作品，删除或改提示词时却得到 409（只在题里只有灰度作品时出现）；将来数据包若登记名称或别名规范化后为 mix 的公开模型，`identity()` 先判灰度，公开模型这条路会被拒（上线新数据包前先 `restricted-model check`/换代号）；`remove` 后该代号的历史作品和票立即公开计入公开榜；`add --force` 会立刻隐藏 key 完全相同的已有投稿；400 撞名本身可被探测到「这个名字不能用」；senior 被降级后，他自建题里的灰度作品归属与删除属边缘情况未特殊处理；show1 评论在取 100 条后过滤，偶尔不足 100 条。
+- 详情见父工作区 `.local/restricted-model-20261023/DEV-REPORT.md`。
+
 ## 2026-10-23 · dots 管理助手与三个接口（已上线）
 
 真实 merge 整理 PR #24（队列外已有图片/源附件）与 #25（投稿封面、独立 WebP 海报），保留两支 ancestry 和性能修复。修正多材质网格 groups 以本地材质槽校验，单材质 Box groups 保持可用；审计只记录海报文件名和尺寸，不记录图片 Buffer。

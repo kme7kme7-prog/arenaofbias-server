@@ -74,28 +74,34 @@ export function createSharedJson({ strict, loose = () => '', read, ttl = 30_000,
   };
   const handler = async (req, res) => {
     const started = performance.now();
-    const { entry, hit } = await current();
-    const encoding = entry.body.length >= MIN_COMPRESS_BYTES ? pickEncoding(req.headers['accept-encoding']) : null;
-    const headers = {
-      'Cache-Control': cacheControl,
-      ETag: etagFor(entry.hash, encoding),
-      Vary: withVary(res, 'Accept-Encoding'),
-      'X-Content-Type-Options': 'nosniff',
-    };
-    const timing = () => `${label};dur=${(performance.now() - started).toFixed(2)};desc="${hit ? 'hit' : 'miss'}"`;
-    if (etagMatches(req.headers['if-none-match'], entry.hash)) {
-      res.writeHead(304, { ...headers, 'Server-Timing': timing() });
-      return res.end();
+    for (;;) {
+      const { entry, hit } = await current();
+      if (strict() !== entry.strict) continue;
+      const encoding = entry.body.length >= MIN_COMPRESS_BYTES ? pickEncoding(req.headers['accept-encoding']) : null;
+      const headers = {
+        'Cache-Control': cacheControl,
+        ETag: etagFor(entry.hash, encoding),
+        Vary: withVary(res, 'Accept-Encoding'),
+        'X-Content-Type-Options': 'nosniff',
+      };
+      const timing = () => `${label};dur=${(performance.now() - started).toFixed(2)};desc="${hit ? 'hit' : 'miss'}"`;
+      if (etagMatches(req.headers['if-none-match'], entry.hash)) {
+        res.writeHead(304, { ...headers, 'Server-Timing': timing() });
+        return res.end();
+      }
+      let body = entry.body;
+      let used = null;
+      if (encoding) {
+        try { body = await variant(entry, encoding); used = encoding; } catch { body = entry.body; }
+      }
+      // Compression also yields. Recheck before publishing the bytes, including
+      // the plain-body fallback when a compressor fails during a withdrawal.
+      if (strict() !== entry.strict) continue;
+      if (!used) headers.ETag = etagFor(entry.hash, null);
+      res.writeHead(200, { ...headers, 'Server-Timing': timing(), 'Content-Type': 'application/json; charset=utf-8',
+        ...(used ? { 'Content-Encoding': used } : {}), 'Content-Length': body.length });
+      return res.end(req.method === 'HEAD' ? undefined : body);
     }
-    let body = entry.body;
-    let used = null;
-    if (encoding) {
-      try { body = await variant(entry, encoding); used = encoding; } catch { body = entry.body; }
-    }
-    if (!used) headers.ETag = etagFor(entry.hash, null);
-    res.writeHead(200, { ...headers, 'Server-Timing': timing(), 'Content-Type': 'application/json; charset=utf-8',
-      ...(used ? { 'Content-Encoding': used } : {}), 'Content-Length': body.length });
-    res.end(req.method === 'HEAD' ? undefined : body);
   };
   handler.current = current;
   return handler;

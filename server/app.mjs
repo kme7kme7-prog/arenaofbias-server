@@ -183,7 +183,6 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     limits: { uploadBytes: limits.uploadBytes, coverBytes: limits.coverBytes, referenceCount: limits.referenceCount,
       referenceBytes: limits.referenceBytes, pendingPerUser: limits.pendingPerUser, provisionalGames: limits.provisionalGames },
   });
-  const galleryWorks = () => library.allWorks().filter((work) => library.visibleTo(work, 'show2'));
   async function galleryList(user, snapshot = catalog.snapshot()) {
     await yieldToRequests();
     const allWorks = catalog.withSnapshot(() => library.allWorks({ snapshot }));
@@ -214,12 +213,11 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       } : null,
     };
   }
-  function review(user) {
-    const uploads = isStaff(user) ? library.uploads() : [];
+  function review(user, uploads, works) {
     return isStaff(user) ? {
         // Same queue as the Gallery review page: released content on a public question that the
         // gallery has not decided yet, which includes uploads already verified for the arena.
-        unverified: library.reviewQueue().length,
+        unverified: library.reviewQueue(works).length,
         content: uploads.filter((work) => work.moderation.status === 'review').length,
         autoRejected: uploads.filter((work) => work.moderation.status === 'rejected' && work.moderation.source !== 'human').length,
         injected: uploads.filter((work) => work.moderation.categories?.includes('prompt-injection')).length,
@@ -245,13 +243,19 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       const revision = activityRevision();
       const { snapshot, pools, arenaStats } = await publicPools();
       const totals = await arena.totals(snapshot);
-      const result = catalog.withSnapshot(() => ({
-        ...versionInfo(snapshot), reactions: library.reactionSummary(user), arena: arenaStats,
-        ...(isSenior(user) ? { arenaModels: arena.poolModels(pools) } : {}),
-        featured: featured.read(), totals,
-        workAccess: user ? galleryWorks().map((work) => library.access(work, user)) : [],
-        review: review(user),
-      }));
+      const result = catalog.withSnapshot(() => {
+        // Access flags and staff review counts use the same fresh rows within
+        // this synchronous batch; nothing is retained across requests or awaits.
+        const uploads = user ? library.uploads() : [];
+        const works = user ? library.allWorks({ uploads, snapshot }) : [];
+        return {
+          ...versionInfo(snapshot), reactions: library.reactionSummary(user), arena: arenaStats,
+          ...(isSenior(user) ? { arenaModels: arena.poolModels(pools) } : {}),
+          featured: featured.read(), totals,
+          workAccess: works.filter((work) => library.visibleTo(work, 'show2')).map((work) => library.access(work, user)),
+          review: review(user, uploads, works),
+        };
+      });
       if (activityRevision() === revision) return result;
     }
   }

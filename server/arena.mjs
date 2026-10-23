@@ -68,6 +68,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     votes: db.prepare("SELECT id, user_id, task_id, a_work, b_work, choice, created_at, a_identity, b_identity, a_correction, b_correction, voter_level, visitor_hash FROM votes WHERE source = 'arena' AND voided_at IS NULL ORDER BY created_at"),
     votesOfTask: db.prepare("SELECT id, user_id, task_id, a_work, b_work, choice, created_at, a_identity, b_identity, a_correction, b_correction, voter_level, visitor_hash FROM votes WHERE task_id = ? AND source = 'arena' AND voided_at IS NULL ORDER BY created_at"),
     riskRevision: db.prepare('SELECT revision FROM vote_risk_settings WHERE id=1'),
+    staffVoters: db.prepare("SELECT id FROM users WHERE role IN ('admin', 'moderator') ORDER BY id"),
     userVotes: db.prepare('SELECT COUNT(*) AS n FROM votes WHERE user_id = ?'),
     correctA: db.prepare('UPDATE votes SET a_correction = ? WHERE id = ?'),
     correctB: db.prepare('UPDATE votes SET b_correction = ? WHERE id = ?'),
@@ -93,7 +94,8 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     if (!votesOnly) publishedBoards.clear();
   };
   const currentRevision = (snapshot) => {
-    const next = `${snapshot.version}|${revision()}|${curation.revision()}|${q.riskRevision.get().revision}`;
+    const staffRevision = JSON.stringify(q.staffVoters.all().map(user => user.id));
+    const next = `${snapshot.version}|${revision()}|${curation.revision()}|${q.riskRevision.get().revision}|${staffRevision}`;
     if (readRevision !== next) {
       invalidate();
       readRevision = next;
@@ -112,6 +114,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
   });
 
   async function validVotes(taskId, snapshot) {
+    const staffVoters = new Set(q.staffVoters.all().map(user => user.id));
     const works = new Map();
     const tasks = new Map();
     const aiJudged = (id) => {
@@ -146,7 +149,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
               a: { ...voteAttribution(row, 'a', aIdentity, fromIdentity(row.a_correction), a, snapshot, manual), taskId: row.task_id },
               b: { ...voteAttribution(row, 'b', bIdentity, fromIdentity(row.b_correction), b, snapshot, manual), taskId: row.task_id },
               choice: row.choice, userId: row.user_id ?? row.visitor_hash ?? `vote:${row.id}`,
-              voterLevel: row.voter_level, createdAt: row.created_at,
+              voterLevel: row.voter_level, createdAt: row.created_at, staffVoter: staffVoters.has(row.user_id),
             };
             votes.push(vote);
           }
@@ -170,7 +173,8 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       await new Promise((resolve) => setImmediate(resolve));
       for (const vote of all.slice(i, i + 100)) {
         if (taskIds && !taskIds.has(vote.a.taskId)) continue;
-        if (curatedScope && (!(vote.voterLevel >= 1) || vote.createdAt < curatedScope.startedAt)) continue;
+        // Current admins and moderators also contribute their valid historical ballots.
+        if (curatedScope && !vote.staffVoter && (!(vote.voterLevel >= 1) || vote.createdAt < curatedScope.startedAt)) continue;
         if (filters && !(provenanceMatch(filters, vote.a) && provenanceMatch(filters, vote.b))) continue;
         votes.push(vote);
         const left = keyOf(vote.a), right = keyOf(vote.b);
@@ -322,7 +326,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
         category,
         domain,
         audience, sectionId,
-        ...(curated ? { board: 'frontend', scope: { taskIds: scoped.map(t => t.id), countingStartedAt: new Date(curated.startedAt).toISOString(), revision: curated.revision, minimumVoterLevel: 1, qualifiedModels: qualifiedModels.size, provisionalModels, qualification: 'registered-nonprovisional-model', provisionalGames: limits.provisionalGames } } : {}),
+        ...(curated ? { board: 'frontend', scope: { taskIds: scoped.map(t => t.id), countingStartedAt: new Date(curated.startedAt).toISOString(), revision: curated.revision, minimumVoterLevel: 1, includesStaffHistory: true, qualifiedModels: qualifiedModels.size, provisionalModels, qualification: 'registered-nonprovisional-model', provisionalGames: limits.provisionalGames } } : {}),
         by,
         ...(standings ? { standings } : {}),
         ...(filters ? { filters } : {}),

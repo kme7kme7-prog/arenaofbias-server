@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { createPlatform } from '../server/app.mjs';
-import { limits } from '../server/config.mjs';
+import { EMOJIS, limits } from '../server/config.mjs';
 import { verifiedUser } from './helpers/email.mjs';
 
 async function fixture(run) {
@@ -248,6 +248,58 @@ test('activity rebuilds after withdrawal during an in-flight shared pool calcula
     const results = await Promise.all([call('/api/activity'), call('/api/activity', { who: 'admin' })]);
     for (const result of results) { assert.equal(result.status, 200); assert.equal(result.data.arena.one.works, 0); }
   } finally { platform.library.eligible = eligible; }
+}));
+
+test('activity shares one upload read for staff access and review counts', async () => fixture(async ({ platform, call }) => {
+  await call('/api/activity'); await platform.featured.drain();
+  const statements = Object.getPrototypeOf(platform.db.prepare('SELECT 1'));
+  const all = statements.all;
+  let uploadReads = 0;
+  statements.all = function (...args) {
+    if (/FROM works\s+LEFT JOIN users owner/.test(this.sourceSQL) && !this.sourceSQL.includes('works.task_id = ?')) uploadReads++;
+    return Reflect.apply(all, this, args);
+  };
+  try {
+    const response = await call('/api/activity', { who: 'admin' });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.ok(response.data.review);
+    assert.equal(response.data.workAccess.length, 1);
+    assert.equal(uploadReads, 1, 'access and staff review should share the same fresh upload rows');
+  } finally { statements.all = all; }
+}));
+
+test('reaction reads check each work once across emojis and personal reactions and observe withdrawals', async () => fixture(async ({ platform, call, admin, member }) => {
+  const draft = await call('/api/drafts?task=one&name=work.html', { who: 'member', method: 'POST', raw: true,
+    body: '<!doctype html><h1>Reaction work</h1>' });
+  const submitted = await call('/api/works', { who: 'member', method: 'POST', body: {
+    draftId: draft.data.draft.id, confirmed: true, title: 'Reaction work', modelId: 'model', effort: 'Default',
+    providerId: 'official', harnessOther: 'Test', generationMode: 'single-turn', humanIntervention: 'none',
+  } });
+  assert.equal(submitted.status, 200, submitted.text);
+  const id = submitted.data.work.id;
+  platform.library.review(admin, 'one', id, { status: 'verified', show_gallery: true });
+  platform.library.reviewContent(admin, 'one', id, { status: 'approved' });
+  for (const emoji of EMOJIS) platform.library.react(member, 'one', id, emoji);
+  const statements = Object.getPrototypeOf(platform.db.prepare('SELECT 1'));
+  const get = statements.get;
+  let workReads = 0;
+  statements.get = function (...args) {
+    if (/FROM works\s+LEFT JOIN users owner/.test(this.sourceSQL)) workReads++;
+    return Reflect.apply(get, this, args);
+  };
+  try {
+    const summary = platform.library.reactionSummary(member);
+    assert.deepEqual(summary.counts[`one/${id}`], Object.fromEntries(EMOJIS.map(emoji => [emoji, 1])));
+    assert.deepEqual(new Set(summary.mine[`one/${id}`]), new Set(EMOJIS));
+    assert.equal(workReads, 1, 'all emoji rows and the user list share one visibility check');
+    platform.library.setFaceSettings(admin, 'one', id, { show_gallery: false });
+    assert.deepEqual(platform.library.reactionSummary(member), { counts: {}, mine: {} });
+    platform.library.setFaceSettings(admin, 'one', id, { show_gallery: true });
+    assert.ok(platform.library.reactionSummary(null).counts[`one/${id}`]);
+    platform.library.reviewContent(admin, 'one', id, { status: 'rejected', reason: 'Withdraw reaction work' });
+    assert.deepEqual(platform.library.reactionSummary(member), { counts: {}, mine: {} });
+  } finally { statements.get = get; }
 }));
 
 test('review reads repeated-task works without repeating question queries per work', async () => fixture(async ({ platform, call, data, dist, admin }) => {

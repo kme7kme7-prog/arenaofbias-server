@@ -307,6 +307,63 @@ test('curated starts at zero, filters level snapshots and history, and sections 
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM votes').get().n,75,'no configuration change deletes history');
 }));
 
+test('curated includes current admins and moderators historical ballots without rewriting votes', async () => fixture(async f => {
+  f.auth.promote('otheruser', 2);
+  const epoch = f.db.prepare('SELECT counting_started_at FROM curated_settings').get().counting_started_at;
+  let n = 0;
+  function seed(who, count, level, at = epoch - 1, task = 'supernovai', voided = false) {
+    const a = f.library.work(task, 'a0'), b = f.library.work(task, 'b0');
+    const identity = w => JSON.stringify({ ...w, dir: undefined,
+      digest: createHash('sha256').update(readFileSync(join(w.dir, 'index.html'))).digest('hex') });
+    for (let i = 0; i < count; i++) {
+      const key = `staff-history-${++n}`;
+      f.db.prepare(`INSERT INTO votes(id,match_id,user_id,task_id,a_work,b_work,pair_key,choice,created_at,source,a_identity,b_identity,voter_level,voided_at)
+        VALUES (?,?,?,?,?,?,?,'a',?,'arena',?,?,?,?)`)
+        .run(key,key,f.users[who].id,task,a.id,b.id,key,at,identity(a),identity(b),level,voided ? epoch : null);
+    }
+  }
+  seed('root', 10, null); seed('otheruser', 20, null);
+  seed('root', 1, 0); seed('otheruser', 1, 1);
+  seed('member', 1, null); seed('member', 1, null, epoch);
+  seed('member', 1, 0, epoch); seed('member', 1, 1); seed('member', 1, 1, epoch);
+  seed('root', 7, null, epoch - 1, 'other'); seed('root', 1, null, epoch - 1, 'supernovai', true);
+  const saved = f.db.prepare('SELECT * FROM votes ORDER BY id').all();
+  const before = await f.arena.leaderboardSnapshot({ audience: 'curated', by: 'model' });
+  assert.equal(before.totals.votes, 33);
+  assert.equal(before.rows.length, 2, 'historical staff ballots contribute to model qualification');
+  assert.equal(before.scope.includesStaffHistory, true);
+  assert.equal((await f.arena.leaderboard({ board: 'frontend' })).totals.votes, 33);
+  assert.equal((await f.arena.leaderboard()).totals.votes, 44, 'public vote eligibility is unchanged');
+  f.auth.promote('member', 1);
+  assert.equal((await f.arena.leaderboard({ audience: 'curated' })).totals.votes, 33, 'Lv1 promotion still does not backfill history');
+  let config = (await f.call('root', 'GET', '/api/admin/curated')).data;
+  const changed = await f.call('root', 'PUT', '/api/admin/curated/questions', { revision: config.revision,
+    questions: [{ taskId: 'supernovai', sectionId: 'web-design' }, { taskId: 'other', sectionId: 'three-dimensional' }] });
+  assert.equal(changed.status, 200);
+  assert.equal((await f.arena.leaderboardSnapshot({ audience: 'curated', by: 'model' })).totals.votes, 40);
+  assert.equal((await f.arena.leaderboard({ audience: 'curated', sectionId: 'three-dimensional', by: 'model' })).totals.votes, 7);
+  const section = await f.arena.leaderboard({ audience: 'curated', sectionId: 'web-design', by: 'model' });
+  assert.equal(section.totals.votes, 33);
+  f.auth.promote('otheruser', 0);
+  assert.equal((await f.arena.leaderboardSnapshot({ audience: 'curated', by: 'model' })).totals.votes, 19,
+    'changing staff membership invalidates already published historical eligibility');
+  f.auth.promote('otheruser', 2);
+  const ballotWork = f.library.ballotWork;
+  let revoked = false;
+  f.library.ballotWork = function (...args) {
+    const work = Reflect.apply(ballotWork, this, args);
+    if (!revoked) { revoked = true; setImmediate(() => f.auth.promote('otheruser', 0)); }
+    return work;
+  };
+  try {
+    const pending = await Promise.all([f.arena.leaderboardSnapshot({ audience: 'curated', by: 'model' }),
+      f.arena.leaderboardSnapshot({ audience: 'curated', by: 'model' })]);
+    assert.ok(revoked);
+    assert.ok(pending.every(board => board.totals.votes === 19), 'concurrent in-flight boards discard revoked staff history');
+  } finally { f.library.ballotWork = ballotWork; }
+  assert.deepEqual(f.db.prepare('SELECT * FROM votes ORDER BY id').all(), saved, 'no historical level or timestamp is changed');
+}));
+
 test('choice evidence records submission and draw IP separately, rejected retries, timing, UA and reversible exclusions', async () => fixture(async f => {
   f.auth.promote('member',1);
   const draw=await f.call('member','POST','/api/arena/matches',{task:'supernovai'},{'x-forwarded-for':'9.9.9.9, 198.51.100.41'});

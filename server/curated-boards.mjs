@@ -23,7 +23,7 @@ export function createCurated({ db, catalog, library, questions }) {
   };
   const info = (admin = false) => {
     const s = settings(), rows = assignments();
-    return { countingStartedAt: new Date(s.counting_started_at).toISOString(), revision: s.revision,
+    return { countingStartedAt: new Date(s.counting_started_at).toISOString(), revision: s.revision, includesStaffHistory: true,
       sections: sections().map(row => sectionDto(row, rows, admin)) };
   };
   const checkName = value => {

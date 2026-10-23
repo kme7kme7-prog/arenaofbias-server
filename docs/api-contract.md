@@ -222,7 +222,7 @@ v44 增加 `visitor_hash`（访客 cookie 的 SHA-256）、`ready_at`（首次�
 
 ### 2.6 投票（vote）
 
-v44 增加 `voter_level`（入库时数字等级，访客及历史票为 NULL）、`visitor_hash`。历史票不回填、不删除；账号保留原 UNIQUE(user_id,pair_key)，访客增加 visitor_hash/pair_key 非空唯一索引。大众榜包含访客和未绑邮箱票；精选额外要求投票时 Lv1+、统一新起点之后及题目当前入选，后续升级不追溯旧票。
+v44 增加 `voter_level`（入库时数字等级，访客及历史票为 NULL）、`visitor_hash`。历史票不回填、不删除；账号保留原 UNIQUE(user_id,pair_key)，访客增加 visitor_hash/pair_key 非空唯一索引。大众榜包含访客和未绑邮箱票；精选要求题目当前入选；当前 role=admin/moderator 账号的全部有效 arena 票（含历史票）直接参与，其余账号仍要求投票时 Lv1+ 且不早于统一新起点，晋升 Lv1 不追溯旧票。不改写历史等级快照。
 
 数据库字段：`id`、`match_id`（唯一）、`user_id`、`task_id`、`a_work` / `b_work`、`pair_key`（`题目:作品A+作品B`，ID 排序后拼接）、`choice`（`a` / `b` / `tie`，`skip` 不产生投票行）、`created_at`，以及 `a_identity` / `b_identity` JSON 原始快照、`a_correction` / `b_correction` JSON 显式更正和 `source`（`arena` / `show1` / `legacy`，v18 删除冗余的 `identity_source`）。快照含当时模型 ID、名称、厂商、档位、归一化档位、model/config 计分 key、内容摘要 `digest`，以及 `harnessId`、`providerId`。这两项不参与 `configKey` 或 `digest` 计算；旧快照里的 `harnessVersion` 读取输出时忽略，不重写原始快照。数据包摘要为入口页 SHA-256，投稿为全包 SHA-256。v8 迁移前的 legacy 票在 `a_identity` / `b_identity` 中存的是裸的旧模型 ID，并非 JSON；这类票不参与计分，也不能按推测更正。迁移前没有身份快照的对局不能再投票。新票按持久快照或显式更正计分，原始快照保持不变。约束：`UNIQUE(user_id, pair_key)`——**同一用户对同一作品组合只计一票**。
 
@@ -715,7 +715,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 - `unranked` 与 `works` 计数按作品当前的来源字段筛选。
 - 带筛选时响应多一个 `"filters": { "harness": …, "provider": … }`；不带筛选时响应形状、计票范围与缓存键都与不支持筛选时完全相同。
 
-大众榜使用 `audience=public`（默认），保持 source=arena 的有效历史票，并纳入上线后的访客和未绑邮箱票。精选榜使用 `audience=curated`；省略 sectionId 为精选总榜，`sectionId=<稳定ID>` 为分区榜；旧 `board=frontend` 兼容精选总榜，不能与 sectionId 同用。精选不可与 task/category/domain 混用，支持 by 与来源筛选。题集和分区来自数据库，可由 Lv3 动态维护，初始网页设计10题、三维建模26题；与大众 category 独立。仅计 `voter_level>=1` 且 created_at 不早于一次性 counting_started_at 的有效票，历史快照为 NULL 不回填；新勾选的题也使用统一起点后的合格票。每个范围独立重新拟合 Bradley–Terry，不平均单题分数。模型须已在 Gallery models/aliases 收录且本范围有效比较≥30；配置沿用同范围模型资格，配置仍可暂定。有效但未达资格的对手参与拟合，rows/unranked 按资格过滤，空榜正常。返回 audience/sectionId，以及 scope:{taskIds,countingStartedAt,revision,minimumVoterLevel:1,qualifiedModels,provisionalModels,qualification:"registered-nonprovisional-model",provisionalGames:30}，兼容 board:"frontend"，不带大众 standings。题集/分区变更立即失效并丢弃在途旧计算；新票保持600秒公开快照。GET /api/curated 提供分区名称、次序及 taskIds，详见 §3.26。
+大众榜使用 `audience=public`（默认），保持 source=arena 的有效历史票，并纳入上线后的访客和未绑邮箱票。精选榜使用 `audience=curated`；省略 sectionId 为精选总榜，`sectionId=<稳定ID>` 为分区榜；旧 `board=frontend` 兼容精选总榜，不能与 sectionId 同用。精选不可与 task/category/domain 混用，支持 by 与来源筛选。题集和分区来自数据库，可由 Lv3 动态维护，初始网页设计10题、三维建模26题；与大众 category 独立。当前 role=admin/moderator 账号的全部有效 arena 票直接参与，不受历史等级快照或新起点限制；其余账号仍只计 `voter_level>=1` 且 created_at 不早于一次性 counting_started_at 的有效票，历史快照不回填。新勾选的题使用同一资格规则。管理员身份变化立即使榜单缓存失效。每个范围独立重新拟合 Bradley–Terry，不平均单题分数。模型须已在 Gallery models/aliases 收录且本范围有效比较≥30；配置沿用同范围模型资格，配置仍可暂定。有效但未达资格的对手参与拟合，rows/unranked 按资格过滤，空榜正常。返回 audience/sectionId，以及 scope:{taskIds,countingStartedAt,revision,minimumVoterLevel:1,includesStaffHistory:true,qualifiedModels,provisionalModels,qualification:"registered-nonprovisional-model",provisionalGames:30}，兼容 board:"frontend"，不带大众 standings。题集/分区变更立即失效并丢弃在途旧计算；新票保持600秒公开快照。GET /api/curated 提供分区名称、次序及 taskIds，详见 §3.26。
 
 题型与领域：响应回显 `category`、`domain`（未指定为 `null`）。`totals.votes` / `totals.voters` 只计实际参与拟合的比较：同一计分单位（按配置为同一配置，按模型为同一模型）两件作品之间的票不计入；`totals.tasks` 为这些比较涉及的题目数，前端据此在领域榜少于 2 题或 50 次比较时提示样本不足。既无 `task`、`category` 也无 `domain` 的综合榜多一个 `standings`：`{ [题型]: { [key]: 该题型内名次 } }`，只列已有排名的题型，沿用同一计分单位与来源筛选。已公开的题目按 `category` 进入对应题型；迁移后分类仍为空的旧题只计入综合榜。
 
@@ -1018,7 +1018,7 @@ v26 仅追加幂等建表 `featured_picks(task_id, scope, model_key, work_id, co
 | POST `/api/arena/matches/:id/vote` **改动** | `{choice:'a'\|'b'\|'tie'\|'skip',turnstileToken?}` | 保留 `{choice,counted,reason,a,b,pinned?}`；增加 `countedFor:{public:boolean,curated:boolean},curatedEligible:boolean,voterLevel:null\|0..3,challenge`。curatedEligible 表示已入库票具备等级/起点资格；countedFor.curated 还要求本题当前被勾选，表示当前计入精选输入，公开展示仍按十分钟更新 |
 | POST `/api/questions` **改动** | 原参数 | lv0 所有分支统一 403/level_required；lv1+ 不再受 100票/10作品门槛，但保留邮箱、审核、已有格式限制 |
 | POST `/api/drafts`、POST `/api/works` **改动** | 原参数 | lv0 新建统一403/level_required；旧内容的查看/编辑/撤回保持原权限 |
-| GET `/api/curated` **新增** | 无 | `{countingStartedAt,revision,sections:[{id,name,order,questionCount,taskIds:string[]}]}`；按 order 排序，taskIds 只含该分区当前公开且可计入精选的入选题，questionCount=taskIds.length；空分区 taskIds=[]，用于精选标记与抽题入口 |
+| GET `/api/curated` **新增** | 无 | `{countingStartedAt,revision,includesStaffHistory:true,sections:[{id,name,order,questionCount,taskIds:string[]}]}`；按 order 排序，taskIds 只含该分区当前公开且可计入精选的入选题，questionCount=taskIds.length；空分区 taskIds=[]，用于精选标记与抽题入口 |
 | GET `/api/leaderboard` **改动** | 大众默认或 `audience=public`；精选总榜 `audience=curated`；分区榜 `audience=curated&sectionId=<id>`；保留 by/harness/provider | 增加 `audience:'public'\|'curated',sectionId:null\|string`，精选 `scope:{taskIds,countingStartedAt,revision,minimumVoterLevel:1,qualification,provisionalGames:30,qualifiedModels,provisionalModels}`；保留 totals/rows/unranked/refreshIntervalSeconds/nextUpdateAt |
 
 兼容规则：无 audience/board/sectionId 时就是大众榜；旧 `board=frontend` 是**新精选总榜**的兼容别名，不再表示固定「前端分区」，新前端不发送 board。旧别名只允许不传 sectionId，且与 audience=public 冲突；未知 board 返回 invalid_query。canonical `audience=curated` 无需 board，sectionId 缺省表示总榜；sectionId 只允许配合精选，不与 task/category/domain 混用。大众继续支持原 task/category/domain。不存在的 sectionId 返回 404/section_not_found；存在但空的分区返回 200、totals=0、rows=[]。
@@ -1088,7 +1088,7 @@ session/bootstrap 的顶层 `qualification` 只有本人存在 active attempt �
 
 | 方法与路径 | 权限 / 请求 | 响应 |
 | --- | --- | --- |
-| GET `/api/admin/curated` **新增** | lv3 | `{countingStartedAt,revision,sections:[{id,name,order,questionCount,selectedQuestionCount}],questions:[{taskId,title,category,selected,sectionId:null\|string,available,unavailableReason?,curatedComparisons?:number}]}`；selectedQuestionCount=questionCount=taskIds.length，仅统计当前可用的入选题；questions保留不存在/不可用的已选题及unavailable标记；curatedComparisons为可选，首版省略，见下方 |
+| GET `/api/admin/curated` **新增** | lv3 | `{countingStartedAt,revision,includesStaffHistory:true,sections:[{id,name,order,questionCount,selectedQuestionCount}],questions:[{taskId,title,category,selected,sectionId:null\|string,available,unavailableReason?,curatedComparisons?:number}]}`；selectedQuestionCount=questionCount=taskIds.length，仅统计当前可用的入选题；questions保留不存在/不可用的已选题及unavailable标记；curatedComparisons为可选，首版省略，见下方 |
 | POST `/api/admin/curated/sections` **新增** | lv3；`{revision,name}` | `{section:{id,name,order,questionCount:0},revision}`；自动创建稳定 id，追加末尾 |
 | PATCH `/api/admin/curated/sections/:id` **新增** | lv3；`{revision,name}` | `{section,revision}`；改名不影响 id、归属或票 |
 | PUT `/api/admin/curated/sections/order` **新增** | lv3；`{revision,sectionIds:string[]}`，须为所有现有分区的无重复完整排列 | `{sections,revision}`；统一更新 order=0..n-1，不能漏掉空分区 |

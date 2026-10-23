@@ -1,3 +1,10 @@
+## 2026-10-23 · 性能与按需加载优化（已完成）
+
+- 共享JSON压缩完成/失败后重新确认目录修订，避免下架后发旧正文；同一同步批次复用作品读取、表情统计复用逐作品可见性检查。审查并保留既有精选管理员历史票补丁，增加在途撤权回归。
+- check158/0、本机463/463、保留现场额外行为的Linux Node22组合463/463；生产一致只读副本9组完整DTO一致。生产v49、quick_check=ok、外键0；catalog304/0正文、未登录审核拒绝。
+- 仅app/library/catalog-response三个运行模块上线，保留arena-only与新题提示词版本校验等现场差异；重启2.32秒。备份/root/aob-performance-20261023/backend-backup；回滚代码/版本配置，不覆盖当前业务数据库。无迁移、新依赖、Nginx/CDN变更。
+- 四仓先同步，原未提交内容完整保留并完善；用户已授权四仓分别一条英文提交并推送 main，身份 wsnxxxs / 269096463+wsnxxxs@users.noreply.github.com。本条记录推送准备，实际 SHA 与远端核对结果见父工作区私有 receipts。完整验证、真实测量限制与未执行项见[2026-10-23-performance-demand-loading.md](docs/archive/2026-10-23-performance-demand-loading.md)，私有发布证据与报告在父工作区.local/performance-20261023/。
+
 ## 2026-10-22 · dots 作品完善默认权限（A′+F′，未部署）
 
 - kme7 已批准实现。默认档是 `moderation + capture:read + cover:write + works:read + meta:write + preview:write + captures:write`。封面仍只用已有 `cover:write`；截图 first/mobile 用新的 `captures:write`，没有并进封面。
@@ -114,6 +121,13 @@
 - 已给 newContext、newPage、goto、screenshot、close、connect 和单件总时长加上限，变量与默认值见 README 与 docs/deploy.md。超时后该件按原失败语义结束（视口重试一次，材料不齐则 `capture_incomplete` 转人工），关闭 context/page，两个队列继续。连接无响应或断开时丢弃当前连接，下一件重建并重读端点；启动或连接失败仍冷却五分钟。
 - 验证：`npm run check` 142/0；`test/capture.test.mjs` 19/19。`npm test` 398/399。失败的 1 条是 `test/blind-pool.test.mjs` 厂商改名断言，未改过的 main 上同样是 390/391，该文件单独跑 21/21。未跑真实 Chrome 或独立 capture 服务，未部署。
 - 归档：[截图队列超时](docs/archive/2026-10-20-capture-timeouts-kme7kme7-prog.md)。
+## 2026-10-19 · 管理员历史票纳入精选榜（已上线，未提交/推送）
+
+- 用户要求 wujisuan、shadow 等高级管理员及普通管理员的票直接参与精选排名，并提供 VPS 运维授权。本轮只增量发布 arena/curated-boards 两个模块；版本追加 `+curated-staff.2c76759e5841`，原有现场运行文件保留，schema 仍为 46。
+- 当前 role=admin/moderator 账号的全部有效 arena 票参与精选总榜和对应分区，不受新起点及旧票 NULL 等级快照限制；其他账号仍沿用 Lv1+ 投票时快照和原起点。管理员名单变化使缓存失效；题集、30 次模型门槛、来源筛选、作废/作品有效性和大众榜计分保持。新增 includesStaffHistory 元数据，不回填、删改或重置历史票。
+- 本机 check142/0、test392/392；保留现场补丁的 Linux 候选 check143/0（多一个旧 arena 对照模块）、test392/392。生产一致库副本新旧大众模型/配置榜除时间字段外逐字段一致；精选模型比较487→1632、合格模型11→31，历史票摘要不变。
+- 上线公网模型榜1639比较/18人/31合格模型；网页设计421、三维1218。服务 active、NRestarts0、ExecMainStatus0；生产库 integrity ok、外键0，备份中全部旧票与线上对应行一致。浏览器看到新说明及配置榜1666比较。没有生产测试投票或考试写入。
+- 已做一致 SQLite 和代码/版本/systemd 回滚备份：`/root/aob-curated-staff-20261019/backup`；Gallery 原目录 `/www/wwwroot/gallery.before-curated-staff-20261019`。本地证据和部署工具在父级 `.local/curated-staff-20261019/`；尚未 commit/push，后续发布须包含本轮源码，避免覆盖线上热修复。
 
 ## 2026-10-19 · 网站更新日志（已提交 6d941d2 并与成员等级 v44–v45 一起上线，schema 46）
 

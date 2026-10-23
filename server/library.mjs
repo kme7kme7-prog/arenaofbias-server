@@ -609,8 +609,8 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       return q.worksOfOwner.all(userId).map((row) => fromRow(row)).filter((work) => !work.curatedAs);
     },
     // Gallery's queue also includes arena-verified uploads awaiting a gallery decision.
-    reviewQueue() {
-      return this.allWorks().filter((work) => !work.curatedAs && work.status !== 'questioned' && (work.curated ? work.status === 'unverified' : !work.reviewedGalleryAt)
+    reviewQueue(works = this.allWorks()) {
+      return works.filter((work) => !work.curatedAs && work.status !== 'questioned' && (work.curated ? work.status === 'unverified' : !work.reviewedGalleryAt)
         && contentAllowed(work)).sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
     },
     authorWorks(user) {
@@ -1203,12 +1203,19 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     },
 
     reactionSummary(user, site = 'show2') {
-      const counts = {};
-      const shown = (row) => visibleTo(catalog.work(row.task_id, row.work_id) ?? upload(row.task_id, row.work_id), site);
-      for (const row of q.reactionCounts.all()) if (shown(row)) (counts[`${row.task_id}/${row.work_id}`] ??= {})[row.emoji] = row.n;
-      const mine = {};
-      if (user) for (const row of q.myReactions.all(user.id)) if (shown(row)) (mine[`${row.task_id}/${row.work_id}`] ??= []).push(row.emoji);
-      return { counts, mine };
+      return catalog.withSnapshot(() => {
+        const visibility = new Map();
+        const shown = (row) => {
+          const key = `${row.task_id}/${row.work_id}`;
+          if (!visibility.has(key)) visibility.set(key, visibleTo(catalog.work(row.task_id, row.work_id) ?? upload(row.task_id, row.work_id), site));
+          return visibility.get(key);
+        };
+        const counts = {};
+        for (const row of q.reactionCounts.all()) if (shown(row)) (counts[`${row.task_id}/${row.work_id}`] ??= {})[row.emoji] = row.n;
+        const mine = {};
+        if (user) for (const row of q.myReactions.all(user.id)) if (shown(row)) (mine[`${row.task_id}/${row.work_id}`] ??= []).push(row.emoji);
+        return { counts, mine };
+      });
     },
 
     pendingCount: (userId) => q.pendingOf.get(userId).n,

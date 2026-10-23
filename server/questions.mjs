@@ -44,6 +44,9 @@ export function createQuestions(db, { references = null } = {}) {
   const works = db.prepare('SELECT id, owner_id, task_id FROM works WHERE task_id = ? AND deleted_at IS NULL AND curated_as IS NULL ORDER BY created_at, id');
   const votes = db.prepare('SELECT COUNT(*) AS n FROM votes WHERE task_id = ?');
   const votesByTask = db.prepare('SELECT task_id, COUNT(*) AS n FROM votes GROUP BY task_id');
+  const states = db.prepare('SELECT id, tags, moderation FROM questions WHERE deleted_at IS NULL');
+  const overlayStates = db.prepare('SELECT task_id, deleted_at, display_json, moderation FROM question_overrides');
+  const ownState = db.prepare('SELECT id, moderation FROM questions WHERE id = ? AND owner_id = ? AND deleted_at IS NULL');
   const override = db.prepare('SELECT * FROM question_overrides WHERE task_id = ?');
   const saveOverride = db.prepare(`INSERT INTO question_overrides (task_id, display_json, moderation, accepts_uploads, cover_work, deleted_at, updated_by, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(task_id) DO UPDATE SET display_json = excluded.display_json,
@@ -174,6 +177,20 @@ export function createQuestions(db, { references = null } = {}) {
     // Index reads need searchable text but not per-question work/vote queries.
     adminIndex: (viewer = null) => allQuestions().map((question) => dto(question, viewer, 'admin', true)),
     adminVoteCounts: () => new Map(votesByTask.all().map(row => [row.task_id, row.n])),
+    // Queue totals need visibility/state only, not prompt/reference/author DTOs.
+    reviewStates() {
+      const overlays = new Map(overlayStates.all().map(row => [row.task_id, row]));
+      return [...(catalog?.snapshot().tasks() ?? []).flatMap(task => {
+        const overlay = overlays.get(task.id);
+        if (overlay?.deleted_at != null) return [];
+        const display = JSON.parse(overlay?.display_json ?? '{}');
+        return [{ id: task.id, tags: Object.hasOwn(display, 'tags') ? display.tags : task.tags ?? [], moderation: JSON.parse(overlay?.moderation ?? '{"status":"approved"}') }];
+      }), ...states.all().map(row => ({ id: row.id, tags: JSON.parse(row.tags), moderation: JSON.parse(row.moderation) }))];
+    },
+    submissionStatus(user, id) {
+      const row = ownState.get(id, user.id) ?? fail(404, '题目不存在', 'not_found');
+      return { id: row.id, moderation: authorModeration(JSON.parse(row.moderation)) };
+    },
     adminGet(id, viewer = null) {
       const question = lookup(id);
       return question ? adminQuestion(question, viewer) : null;

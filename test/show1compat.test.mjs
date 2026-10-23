@@ -977,6 +977,41 @@ test('retired snapshot ballots never enter live vote or rating responses', () =>
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM reactions WHERE user_id = ?').get(one.user.id).n, 0);
   }));
 
+  test('reaction writes fence an old account queue while keeping omitted userId compatible', () => withServer({}, async ({ db, auth, base }) => {
+    const one = await signIn(auth, 'queueone'), two = await signIn(auth, 'queuetwo');
+    const post = body => call(base, 'POST', '/api/reactions', { cookie: two.cookie, body });
+    const intent = { id: randomUUID(), userId: one.user.id, promptId: '001', mid: 'model-a', kind: 'up' };
+    const stale = await post(intent);
+    assert.equal(stale.status, 401); assert.equal(stale.data.code, 'identity_changed');
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM reactions').get().n, 0, 'old A intent must not be written under cookie B');
+    assert.equal((await post({ ...intent, userId: two.user.id })).status, 201);
+    assert.equal((await post({ id: randomUUID(), promptId: '001', mid: 'model-a', kind: 'down' })).status, 201);
+    assert.deepEqual(db.prepare('SELECT user_id,emoji FROM reactions').all().map(row => ({ ...row })), [{ user_id: two.user.id, emoji: '👀' }]);
+    for (const body of [null, [], 1, 'up']) assert.equal((await post(body)).status, 400);
+  }));
+
+  test('reaction reads build one request-local roster for all counts and mine, and skip an empty roster', () => withServer({}, async ({ db, auth, base }) => {
+    const user = await signIn(auth, 'manyreactions');
+    const prototype = Object.getPrototypeOf(db.prepare('SELECT 1')), all = prototype.all;
+    let rosters = 0;
+    prototype.all = function (...args) {
+      if (this.sourceSQL.includes('SELECT id, task_id, model_id, model_other, model_vendor')) rosters++;
+      return Reflect.apply(all, this, args);
+    };
+    try {
+      assert.deepEqual((await call(base, 'GET', '/api/reactions?prompt=001', { cookie: user.cookie })).data, { counts: {}, mine: {} });
+      assert.equal(rosters, 0, 'empty reactions need no full roster');
+      const insert = db.prepare("INSERT INTO reactions(task_id,work_id,user_id,emoji,created_at)VALUES('show1-001',?,?,?,1)");
+      for (const work of ['up-aaaa0001', 'up-bbbb0002', ...Array.from({ length: 8 }, (_, n) => `up-001-extra-${n + 2}`)]) for (const emoji of ['👍', '👀', '🤯']) insert.run(work, user.user.id, emoji);
+      const response = await call(base, 'GET', '/api/reactions?prompt=001', { cookie: user.cookie });
+      assert.deepEqual(response.data.counts, { 'model-a': { up: 9, down: 9, laugh: 9 }, 'model-b': { up: 1, down: 1, laugh: 1 } });
+      assert.equal(Object.keys(response.data.mine).length, 2);
+      assert.equal(rosters, 1, 'all thirty count rows and thirty personal rows share one fresh roster');
+      await call(base, 'GET', '/api/reactions?prompt=001', { cookie: user.cookie });
+      assert.equal(rosters, 2, 'the next request rebuilds gates rather than reusing a private roster');
+    } finally { prototype.all = all; }
+  }));
+
   test('POST /api/track always answers 204 and hashes the ip with a daily salt', () => withServer({}, async ({ db, base }) => {
     const tracked = await call(base, 'POST', '/api/track', { body: { path: '/vote/001' } });
     assert.equal(tracked.status, 204);

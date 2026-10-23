@@ -129,6 +129,10 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     works: db.prepare(`${WORK} WHERE ${liveWork} ORDER BY works.created_at DESC`),
     worksOfTask: db.prepare(`${WORK} WHERE works.task_id = ? AND ${liveWork}`),
     worksOfOwner: db.prepare(`${WORK} WHERE works.owner_id = ? AND ${liveWork} ORDER BY works.created_at DESC`),
+    reviewStates: db.prepare(`SELECT id, task_id, status, moderation, reviewed_gallery_at, show_gallery, show_arena, curated_as FROM works WHERE ${liveWork}`),
+    reviewOverrides: db.prepare('SELECT task_id, work_id, deleted_at, status, show_gallery, show_arena FROM work_overrides'),
+    ownState: db.prepare(`SELECT id, task_id, status, status_reason, moderation FROM works WHERE id = ? AND task_id = ? AND owner_id = ?
+      AND (curated_as IS NULL OR curated_as = '') AND ${liveWork}`),
     pendingOf: db.prepare(`SELECT COUNT(*) AS n FROM works WHERE owner_id = ? AND status = 'unverified'
       AND ${liveWork} AND COALESCE(json_extract(works.moderation, '$.status'), '') != 'rejected'
       AND NOT EXISTS (SELECT 1 FROM questions WHERE questions.id = works.task_id
@@ -598,7 +602,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     },
     allWorks({ uploads = this.uploads(), snapshot = catalog.snapshot() } = {}) {
       const tasks = new Map();
-      return [...snapshot.tasks().flatMap((task) => [...task.works.values()].map(withDisplay)), ...uploads]
+      return [...snapshot.tasks().flatMap((task) => [...task.works.values()].map(work => withDisplay(work))), ...uploads]
         .filter((work) => {
           if (!work || work.curatedAs) return false;
           if (!tasks.has(work.taskId)) tasks.set(work.taskId, catalog.task(work.taskId, { role: 'admin' }));
@@ -629,6 +633,23 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
         ...(work.status === 'unverified' && queue.has(work.id) ? { queueAhead: queue.get(work.id) } : {}),
         ...(workChangedAt(work) > seen ? { changed: true } : {}),
       }));
+    },
+    submissionStatus(user, taskId, id) {
+      const row = q.ownState.get(id, taskId, user.id) ?? fail(404, '作品不存在', 'not_found');
+      return { id: row.id, task: row.task_id, status: row.status, reason: row.status_reason, moderation: authorModeration(JSON.parse(row.moderation)) };
+    },
+    reviewStates(taskIds) {
+      const overrides = new Map(q.reviewOverrides.all().map(row => [`${row.task_id}/${row.work_id}`, row]));
+      const packaged = catalog.snapshot().tasks().flatMap(task => !taskIds.has(task.id) ? [] : [...task.works.values()].flatMap(work => {
+        const row = overrides.get(`${task.id}/${work.id}`);
+        if (row?.deleted_at) return [];
+        return [{ taskId: task.id, id: work.id, curated: true, status: row?.status ?? 'verified', moderation: { status: 'approved' },
+          showGallery: Boolean(row?.show_gallery ?? 1), showArena: Boolean(row?.show_arena ?? 1) }];
+      }));
+      return [...packaged, ...q.reviewStates.all().filter(row => !row.curated_as && taskIds.has(row.task_id)).map(row => ({
+        taskId: row.task_id, id: row.id, curated: false, status: row.status, moderation: JSON.parse(row.moderation),
+        reviewedGalleryAt: row.reviewed_gallery_at, showGallery: Boolean(row.show_gallery), showArena: Boolean(row.show_arena),
+      }))];
     },
     reviewStats() {
       const samples = q.recentReviews.all(Date.now() - 30 * 24 * 3600e3).map((row) => row.hours);

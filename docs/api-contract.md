@@ -602,6 +602,8 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 可选 `?view=overview|works|questions` 按需读取：overview 仅返回 votes/joinedAt/activity/receivedReactions；works 仅返回 works/questions/reviewStats；questions 仅返回 questions。无参数维持完整响应；重复 view、未知值或额外参数返回 `400 invalid_query`。各视图始终只读取当前会话本人，不接受 owner 参数。
 
+投稿完成页可用 `?view=submission&task=<题目ID>&work=<投稿ID>&question=<可选本人题目ID>` 读取单件状态，也可只带 question。task/work 必须成对，至少指定 work 或 question；各 ID 为 1–128 位 ASCII 字母、数字、冒号、点、下划线或连字符，首位须为字母或数字。空值、重复或未知查询键返回 `400 invalid_query`。响应仅含请求的 `{work:{id,task,status,reason,moderation},question:{id,moderation}}`；moderation 沿用作者可见的审核状态与理由，自动拒绝作品不下发模型原始理由。无正文、预览地址、生成信息或全量队列查询。只允许读取当前会话拥有且未删除的投稿/题目，管理员没有所有权豁免；任一目标不存在、不属于本人、已删除或投稿所属题目已删除，整次返回 `404 not_found`。
+
 **`POST /api/me/works/seen`** —— 标记作品状态变化已读
 
 认证：登录；限流：write 桶，遵循同源校验。无需请求体，将当前用户的 `works_seen_at`（可空毫秒时间，v31 迁移新增）设为当前时间，成功 `200`：`{ "ok": true }`。错误：`401` / `403`（Origin 不受信任）/ `429`。后续发生的决定仍会产生 `me.updates` 和 `changed: true`。
@@ -633,6 +635,8 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 上述管理与个人接口在实际发送 JSON 前再次确认同一会话用户及当前 role/level，含压缩成功与失败回退；退出或会话换身份返回简短401，权限改变返回简短403，不发送在途旧私密正文。资格考试 submit 自身成功升级的响应按该动作返回的新等级确认。
 
+含可选本人字段的 GET/HEAD 也执行相同发送前确认：session、auth/me、activity、bootstrap、show1/works、兼容 reactions、作品 calibration 和作品 comments。仅在请求起始已有有效会话时记录权限；匿名响应及不含本人字段的公开 catalog/prompts/works 目录沿用各自公开契约。
+
 **`GET /api/admin/users`** —— 账号列表（仅高级管理员）
 
 **认证**：管理员。**限流**：无。
@@ -651,6 +655,8 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 - `works` 统计未删除且所属题目未删除的作品：`rejected` 为内容审核拒绝，其余按核验状态；`questions` 为未删除的题目数，`votes` 为计票数（跳过不入库）。`trusted` 与 `pendingLimit` 沿用投稿额度规则，管理员为 `false` / `null`（不限）。
 
 可选分页 `?page=1&pageSize=50&filter=all|0|1|2|3|trusted&q=…&email=bound|unbound&active=week|month|idle&sort=seen|latest|oldest|works|votes`，pageSize≤100。响应增加 total/page/pageSize/scopeTotal/filterCounts（角色 chip）、counts（审核导航）、audit（原最近200条全局记录中的 role 操作）；users 仅含当前页且每位成员字段与旧完整响应一致。角色/可信额度批量汇总，保持历史存疑审计与删除作品的原额度口径。查询键重复、未知或非法值返回 `400 invalid_query`。
+
+审核导航 counts 按每次请求的题目/作品状态批量投影计算，与 review 同一分类规则；不为计数生成全站作者、题面、参考资料及作品详情，不跨请求缓存权限或审核状态。已删除的数据包作品同数据库作品一样不进入管理列表与导航计数。
 
 错误：`401`（未登录）/ `403 仅管理员可以操作`。
 
@@ -950,7 +956,7 @@ prompts/works/playground/works 支持 promptId（单个）或 promptIds（逗号
 | `GET /api/comments?round=<题目编号>` | `{ comments: [...] }`；无效题目 `400`。 |
 | `POST /api/comments` | 登录必需；请求 `id`、`roundId`、`side`、`body`，成功 `201 { comment }`。 |
 | `GET /api/reactions?prompt=<题目编号>` | `{ counts, mine }`；无效题目 `400`。 |
-| `POST /api/reactions` | 登录且绑定邮箱；请求 `id`、`promptId`、`mid`、`kind`，成功 `201 { counts, mine }`；`kind:null` 撤销。未绑定返回 `403 email_required`。 |
+| `POST /api/reactions` | 登录且绑定邮箱；请求 `id`、`promptId`、`mid`、`kind`，成功 `201 { counts, mine }`；`kind:null` 撤销。可选 userId 必须严格等于当前会话用户 ID，否则 `401 identity_changed`，不写入反应；省略仍兼容旧请求。未绑定返回 `403 email_required`。 |
 | `POST /api/track` | 最佳努力记录 `path` 浏览量，成功 `204`。 |
 
 正式题目在数据仓库登记 `arenaId`（稳定三位编号）、`kind`（`text` / `web`）和 `category`。共享后端保留这些编号；无 `arenaId` 的公开数据包题及展览馆创建、已审核公开的数据库题，直接沿用 task ID。兼容层题目 ID 契约为 `/^(?:\d{3}|[a-z][a-z0-9-]{0,63})$/`；题目、作品、投票、评论和反应统一使用此 ID。数据库题未提供 `kind` 时由类别与 templates 判定文字或网页。待审、拒绝或删除的数据库题不进入公开题目/作品目录，作品仍须通过原有公开内容、审核和娱乐展示门禁。

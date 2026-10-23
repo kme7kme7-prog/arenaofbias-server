@@ -12,9 +12,10 @@ import { verifiedUser } from './helpers/email.mjs';
 async function fixture(run, options = {}) {
   const root = mkdtempSync(join(tmpdir(), 'management-http-')), dist = join(root, 'dist');
   mkdirSync(dist);
-  writeFileSync(join(dist, 'data.json'), JSON.stringify({ title: 'Fixture', models: [{ id: 'model', name: 'Model', vendor: 'Vendor' }], tasks: [
+  const packageData = { title: 'Fixture', models: [{ id: 'model', name: 'Model', vendor: 'Vendor' }], tasks: [
     { id: 'one', title: 'One', summary: 'Summary', prompt: 'Three.js public prompt', category: '建模', domains: ['物理'], templates: ['static'], results: [{ id: 'pack', title: 'Pack', model: 'model', scene: './' }] },
-  ] }));
+  ] };
+  writeFileSync(join(dist, 'data.json'), JSON.stringify(packageData));
   writeFileSync(join(dist, 'index.html'), '<!doctype html><h1>Fixture</h1>');
   const platform = createPlatform({ config: { dist, dataDir: join(root, 'data'), contentTemplate: 'http://{token}.localhost', siteOrigins: [], admins: [], cdn: [], capture: false,
     secureCookies: false, moderation: { enabled: false }, readLimits: { api: 1000, catalog: 1000 } }, limits, ...options });
@@ -34,7 +35,7 @@ async function fixture(run, options = {}) {
   function add(id, { task = 'one', owner = member, status = 'unverified', moderation = 'approved', reviewed = null, gallery = 0, arena = 0, at = Date.now() } = {}) {
     insert.run(id, task, owner.id, `Work ${id}`, `key-${id}`, `digest-${id}`, at, at, status, JSON.stringify({ status: moderation, source: 'human' }), reviewed, gallery, arena);
   }
-  try { await run({ platform, call, member, moderator, admin, add }); }
+  try { await run({ platform, call, member, moderator, admin, add, packageData, dist }); }
   finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await platform.close(); rmSync(root, { recursive: true, force: true }); }
 }
 
@@ -214,3 +215,106 @@ test('selected public works and prompts rebuild after withdrawals during compres
     }, { compressBody(body, used) { if (!armed || held) return compress(body, used); held = true; source = body; encoding = used; begin(); return new Promise((resolve, no) => { finish = resolve; reject = no; }); } });
   }
 });
+
+test('optional signed-in reads recheck identity/role/level after successful or failed compression', async () => {
+  for (const endpoint of ['activity', 'bootstrap?lite=1']) for (const failed of [false, true]) for (const change of ['logout', 'switch', 'role', 'level']) {
+    let begin, finish, reject, source, encoding;
+    const began = new Promise(resolve => { begin = resolve; });
+    let held = false;
+    await fixture(async ({ platform, call, add, member, moderator }) => {
+      for (let n = 0; n < 30; n++) add(`optional-${n}`, { status: 'verified', reviewed: Date.now(), gallery: 1, arena: 1 });
+      const reading = call(`/api/${endpoint}`, 'member', undefined, { 'accept-encoding': 'gzip' });
+      await began;
+      if (change === 'logout') platform.db.prepare('DELETE FROM sessions WHERE user_id=?').run(member.id);
+      if (change === 'switch') platform.db.prepare('UPDATE sessions SET user_id=? WHERE user_id=?').run(moderator.id, member.id);
+      if (change === 'role') platform.db.prepare("UPDATE users SET role='moderator' WHERE id=?").run(member.id);
+      if (change === 'level') platform.db.prepare('UPDATE users SET member_level=1-member_level WHERE id=?').run(member.id);
+      if (failed) reject(new Error('controlled optional compression failure'));
+      else finish(await compress(source, encoding));
+      const response = await reading;
+      assert.equal(response.status, ['logout', 'switch'].includes(change) ? 401 : 403, `${endpoint}/${change}/${failed}`);
+      assert.deepEqual(Object.keys(response.data), ['error']);
+    }, { compressBody(body, used) { if (held) return compress(body, used); held = true; source = body; encoding = used; begin(); return new Promise((resolve, no) => { finish = resolve; reject = no; }); } });
+  }
+});
+
+test('small optional reads recheck a signed-in account without changing anonymous/public contracts', async () => fixture(async ({ platform, call, add }) => {
+  add('small');
+  const userFrom = platform.auth.userFrom;
+  try {
+    for (const path of ['/api/session', '/api/auth/me', '/api/works/small/calibration', '/api/works/one/pack/comments']) {
+      let reads = 0;
+      platform.auth.userFrom = (...args) => ++reads === 1 ? userFrom.apply(platform.auth, args) : null;
+      assert.equal((await call(path, 'member', undefined, { 'accept-encoding': 'identity' })).status, 401, path);
+      assert.equal(reads, 2, path);
+    }
+    for (const path of ['/api/session', '/api/auth/me', '/api/activity', '/api/bootstrap?lite=1', '/api/works?ids=missing', '/api/prompts?promptId=missing']) {
+      let reads = 0;
+      platform.auth.userFrom = (...args) => { reads++; return userFrom.apply(platform.auth, args); };
+      assert.equal((await call(path, null, undefined, { 'accept-encoding': 'identity' })).status, 200, path);
+      assert.equal(reads, 1, path);
+    }
+  } finally { platform.auth.userFrom = userFrom; }
+}));
+
+test('submission status reads only owned requested objects and does not build work/profile DTOs', async () => fixture(async ({ platform, call, add, member }) => {
+  add('tracked'); add('other', { owner: platform.auth.list().find(user => user.name === 'root') });
+  const created = await call('/api/admin/questions', 'admin', { title: 'Own question', summary: 'Summary', prompt: 'Secret prompt', category: '建模', domains: ['物理'], templates: ['static'] });
+  const questionId = created.data.question.id;
+  platform.db.prepare('UPDATE questions SET owner_id=? WHERE id=?').run(member.id, questionId);
+  const scope = `me?view=submission&task=one&work=tracked&question=${questionId}`;
+  const normal = (await call(`/api/${scope}`, 'member')).data;
+  assert.deepEqual(normal.work, { id: 'tracked', task: 'one', status: 'unverified', reason: '', moderation: { status: 'approved' } });
+  assert.equal(normal.question.id, questionId); assert.equal(normal.question.moderation.status, 'pending');
+  for (const object of Object.values(normal)) for (const key of ['scene', 'prompt', 'title', 'trial', 'checks', 'root', 'cover', 'queueAhead']) assert.equal(Object.hasOwn(object, key), false);
+  const authorWorks = platform.library.authorWorks, allWorks = platform.library.allWorks;
+  platform.library.authorWorks = platform.library.allWorks = () => { throw new Error('status must not enumerate works'); };
+  try { assert.deepEqual((await call(`/api/${scope}`, 'member')).data, normal); }
+  finally { platform.library.authorWorks = authorWorks; platform.library.allWorks = allWorks; }
+  assert.equal((await call('/api/me?view=submission&task=one&work=other', 'member')).status, 404);
+  assert.equal((await call('/api/me?view=submission&task=one&work=tracked', 'admin')).status, 404, 'staff has no owner bypass');
+  assert.equal((await call(`/api/me?view=submission&question=${questionId}`, 'admin')).status, 404);
+  for (const query of ['task=one', 'work=tracked', 'work=tracked&task=', 'work=tracked&task=one&work=other', 'work=tracked&task=one&owner=x', 'question=', 'question=a/b', 'question=' + 'x'.repeat(129), '']) assert.equal((await call(`/api/me?view=submission${query ? '&' + query : ''}`, 'member')).status, 400, query);
+  platform.db.prepare('UPDATE works SET deleted_at=? WHERE id=?').run(Date.now(), 'tracked');
+  assert.equal((await call('/api/me?view=submission&task=one&work=tracked', 'member')).status, 404);
+  platform.db.prepare('UPDATE questions SET deleted_at=? WHERE id=?').run(Date.now(), questionId);
+  assert.equal((await call(`/api/me?view=submission&question=${questionId}`, 'member')).status, 404);
+}));
+
+test('member navigation matches full review counts across a deterministic moderation matrix with bounded SQL', async () => fixture(async ({ platform, call, add, member, admin, packageData, dist }) => {
+  const states = ['approved', 'pending', 'review', 'rejected', 'legacy'];
+  const insertQuestion = platform.db.prepare(`INSERT INTO questions(id,owner_id,title,summary,prompt,tags,templates,created_at,moderation,category,domains,author_role)
+    VALUES(?,?,?,'Summary','Prompt',?,'["static"]',?,?,?,?, 'user')`);
+  for (let n = 0; n < 18; n++) insertQuestion.run(`q-matrix-${n}`, member.id, `Question ${n}`, n % 4 ? '[]' : '["arena-only"]', Date.now() - n, JSON.stringify({ status: states[n % states.length] }), '建模', '["物理"]');
+  packageData.tasks[0].results = Array.from({ length: 80 }, (_, n) => ({ id: `pack-${n}`, title: `Pack ${n}`, model: 'model', scene: './' }));
+  writeFileSync(join(dist, 'data.json'), JSON.stringify(packageData));
+  let seed = 20261023;
+  const next = max => { seed = Math.imul(seed, 1664525) + 1013904223 | 0; return (seed >>> 0) % max; };
+  for (let n = 0; n < 220; n++) add(`matrix-${n}`, { task: n % 4 ? `q-matrix-${next(18)}` : 'one', status: ['unverified', 'verified', 'questioned'][next(3)], moderation: states[next(states.length)], reviewed: next(2) ? Date.now() : null, gallery: next(2), arena: next(2) });
+  platform.db.exec("UPDATE works SET deleted_at=1 WHERE id IN ('matrix-1','matrix-2'); UPDATE works SET curated_as='archive' WHERE id='matrix-3'; UPDATE questions SET deleted_at=1 WHERE id='q-matrix-17'");
+  const overlay = platform.db.prepare('INSERT INTO work_overrides(task_id,work_id,status,show_gallery,show_arena,deleted_at,updated_by,updated_at)VALUES(?,?,?,?,?,?,?,?)');
+  for (let n = 0; n < 40; n++) overlay.run('one', `pack-${n}`, ['verified', 'unverified', 'questioned'][next(3)], next(2), next(2), n % 11 ? null : 1, admin.id, Date.now());
+  for (const status of ['approved', 'pending', 'review', 'rejected']) {
+    platform.db.prepare(`INSERT INTO question_overrides(task_id,moderation,updated_by,updated_at)VALUES('one',?,?,?) ON CONFLICT(task_id)DO UPDATE SET moderation=excluded.moderation`).run(JSON.stringify({ status }), admin.id, Date.now());
+    const expected = (await call('/api/review?panel=log')).data.counts;
+    const prototype = Object.getPrototypeOf(platform.db.prepare('SELECT 1')), all = prototype.all, get = prototype.get;
+    let queries = 0;
+    prototype.all = function (...args) { queries++; return Reflect.apply(all, this, args); };
+    prototype.get = function (...args) { queries++; return Reflect.apply(get, this, args); };
+    let actual;
+    try { actual = (await call('/api/admin/users?page=1')).data.counts; }
+    finally { prototype.all = all; prototype.get = get; }
+    assert.deepEqual(actual, expected, status);
+    assert.ok(queries <= 18, `navigation must not perform one query per work/question (${queries})`);
+  }
+}));
+
+test('deleting a non-first package work removes it from management without breaking legacy review', async () => fixture(async ({ platform, call, admin, packageData, dist }) => {
+  packageData.tasks[0].results.push({ id: 'second', title: 'Second', model: 'model', scene: './' });
+  writeFileSync(join(dist, 'data.json'), JSON.stringify(packageData));
+  platform.db.prepare('INSERT INTO work_overrides(task_id,work_id,deleted_at,updated_by,updated_at)VALUES(?,?,?,?,?)').run('one', 'second', Date.now(), admin.id, Date.now());
+  const result = await call('/api/review');
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.data.works.map(work => work.id), ['pack']);
+  assert.deepEqual(platform.library.allWorks().map(work => work.id), ['pack']);
+}));

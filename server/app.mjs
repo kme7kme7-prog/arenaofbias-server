@@ -610,6 +610,15 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     const user = signedIn(ctx);
     const query = ctx.url.searchParams;
     if (query.size) {
+      if (query.get('view') === 'submission') {
+        const allowed = new Set(['view', 'task', 'work', 'question']);
+        if ([...query.keys()].some(key => !allowed.has(key) || query.getAll(key).length !== 1)) fail(400, '投稿状态参数无效', 'invalid_query');
+        const taskId = query.get('task'), workId = query.get('work'), questionId = query.get('question');
+        const id = value => value === null || /^[a-zA-Z0-9][a-zA-Z0-9:._-]{0,127}$/.test(value);
+        if (![taskId, workId, questionId].every(id) || Boolean(taskId) !== Boolean(workId) || !workId && !questionId) fail(400, '投稿状态参数无效', 'invalid_query');
+        return { ...(workId ? { work: library.submissionStatus(user, taskId, workId) } : {}),
+          ...(questionId ? { question: questions.submissionStatus(user, questionId) } : {}) };
+      }
       if (query.size !== 1 || query.getAll('view').length !== 1) fail(400, '个人页参数无效', 'invalid_query');
       const view = query.get('view');
       if (view === 'overview') return { votes: arena.votesBy(user.id), ...profile.summary(user) };
@@ -1056,6 +1065,9 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       if (req.method !== 'GET' && req.method !== 'HEAD') assertSameOrigin(req, config);
       const ctx = { req, res, url, params: route.params, receivedAt: Date.now(), ip: clientIp(req, config.trustProxy),
         user: url.pathname === '/api/catalog' ? null : auth.userFrom(req) };
+      if (ctx.user && ['GET', 'HEAD'].includes(req.method) && (
+        ['/api/session', '/api/auth/me', '/api/activity', '/api/bootstrap', '/api/show1/works', '/api/reactions'].includes(url.pathname)
+        || /^\/api\/works\/[^/]+\/(?:calibration|[^/]+\/comments)$/.test(url.pathname))) signedIn(ctx);
       if (['GET', 'HEAD'].includes(req.method) && ['/api/prompts', '/api/works', '/api/playground/works'].includes(url.pathname)) {
         // Request-local only: a selected text roster must also follow a
         // withdrawal while its compressed representation is being built.

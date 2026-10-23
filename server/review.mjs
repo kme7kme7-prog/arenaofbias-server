@@ -36,33 +36,38 @@ const domainNames = { 数学: 'Mathematics', 物理: 'Physics', 化学: 'Chemist
   文学艺术: 'Literature & arts', 哲学: 'Philosophy', 历史文化: 'History & culture', 教育学习: 'Education & learning', 经济金融: 'Economics & finance', 商业管理: 'Business & management', 法律政务: 'Law & government', 社会生活: 'Society',
   建筑: 'Architecture', 自然景观: 'Nature & landscapes', 交通与机械: 'Transport & machinery', 产品与品牌: 'Products & brands', 游戏娱乐: 'Games & entertainment', 生活服务: 'Everyday services', 餐饮美食: 'Food & dining', 旅游出行: 'Travel', 运动体育: 'Sports' };
 
+function classify(viewer, questions, publicIds, works, logCount) {
+  const questionById = new Map(questions.map(q => [q.id, q]));
+  const buckets = new Map(works.map(work => {
+    let bucket;
+    if (isSenior(viewer) && questionById.get(work.taskId)?.moderation?.status === 'rejected') bucket = 'rejected';
+    else if (work.moderation?.status === 'review') bucket = 'content';
+    else if (work.moderation?.status === 'pending') bucket = 'auto';
+    else if (work.moderation?.status === 'rejected') bucket = 'rejected';
+    else if (!publicIds.has(work.taskId)) bucket = questionById.has(work.taskId) || !isSenior(viewer) ? 'sample' : 'rejected';
+    else if (work.status === 'questioned') bucket = 'questioned';
+    else if (work.curated ? work.status === 'unverified' : !work.reviewedGalleryAt) bucket = 'unverified';
+    else if (work.status === 'verified' && (work.showGallery || work.showArena)) bucket = 'verified';
+    else bucket = 'off';
+    return [work, bucket];
+  }));
+  const counts = { questions: isSenior(viewer) ? questions.filter(waiting).length : 0, content: 0, auto: 0, unverified: 0, done: 0,
+    catalog: isSenior(viewer) ? questions.length : 0, works: works.length, log: logCount };
+  for (const value of buckets.values()) {
+    if (['content', 'auto', 'unverified'].includes(value)) counts[value]++;
+    if (['verified', 'off', 'questioned', 'rejected'].includes(value)) counts.done++;
+  }
+  return { questionById, buckets, counts };
+}
+
 export function createReview({ catalog, library, questions, adminService, auth, qualification }) {
   const publisher = item => item.author?.role === 'user' ? item.author.name ?? '已注销的用户'
     : `${item.author?.name ?? catalog.snapshot().title} · ${roleNames[item.author?.role ?? 'admin']}`;
   function index(viewer) {
     const allQuestions = isSenior(viewer) ? questions.adminIndex(viewer) : catalog.tasks();
-    const questionById = new Map(allQuestions.map(q => [q.id, q]));
     const publicIds = new Set(catalog.tasks().filter(q => !q.tags?.includes('arena-only')).map(q => q.id));
     const works = library.allWorks();
-    const bucket = work => {
-      if (isSenior(viewer) && questionById.get(work.taskId)?.moderation?.status === 'rejected') return 'rejected';
-      const status = work.moderation?.status;
-      if (status === 'review') return 'content';
-      if (status === 'pending') return 'auto';
-      if (status === 'rejected') return 'rejected';
-      if (!publicIds.has(work.taskId)) return questionById.has(work.taskId) || !isSenior(viewer) ? 'sample' : 'rejected';
-      if (work.status === 'questioned') return 'questioned';
-      if (work.curated ? work.status === 'unverified' : !work.reviewedGalleryAt) return 'unverified';
-      if (work.status === 'verified' && (work.showGallery || work.showArena)) return 'verified';
-      return 'off';
-    };
-    const buckets = new Map(works.map(w => [w, bucket(w)]));
-    const counts = { questions: isSenior(viewer) ? allQuestions.filter(waiting).length : 0, content: 0, auto: 0, unverified: 0, done: 0,
-      catalog: isSenior(viewer) ? allQuestions.length : 0, works: works.length, log: library.auditLog().length };
-    for (const value of buckets.values()) {
-      if (['content', 'auto', 'unverified'].includes(value)) counts[value]++;
-      if (['verified', 'off', 'questioned', 'rejected'].includes(value)) counts.done++;
-    }
+    const { questionById, buckets, counts } = classify(viewer, allQuestions, publicIds, works, library.auditLog().length);
     const thin = work => {
       const dto = library.adminWork(work, viewer, { preview: false });
       for (const key of ['checks', 'trial', 'sourceName', 'root', 'entry', 'summary', 'note', 'calibration', 'calibration_gallery', 'calibration_arena']) delete dto[key];
@@ -77,6 +82,13 @@ export function createReview({ catalog, library, questions, adminService, auth, 
     const sampleIds = new Set(question.samples.map(w => w.id));
     const { ownerId, ...dto } = question;
     return { question: { ...dto, samples: works.filter(w => sampleIds.has(w.id)) }, works, ...(current ? {} : { audit: library.auditFor(id) }) };
+  }
+  function navigation(viewer, logCount) {
+    const states = questions.reviewStates();
+    const publicQuestions = states.filter(q => ['legacy', 'approved'].includes(q.moderation?.status));
+    const publicIds = new Set(publicQuestions.filter(q => !q.tags?.includes('arena-only')).map(q => q.id));
+    return classify(viewer, isSenior(viewer) ? states : publicQuestions, publicIds,
+      library.reviewStates(new Set(states.map(q => q.id))), logCount).counts;
   }
   const workFilters = ['all', 'public', 'content', 'unverified', 'questioned', 'off', 'rejected'];
   const doneFilters = ['all', 'public', 'noarena', 'off', 'questioned', 'rejected', 'machine', 'injection'];
@@ -184,8 +196,9 @@ export function createReview({ catalog, library, questions, adminService, auth, 
       const totalWorks = user => Object.values(user.works).reduce((a, b) => a + b, 0);
       rows.sort((a, b) => sort === 'seen' ? (Date.parse(b.lastSeenAt) || 0) - (Date.parse(a.lastSeenAt) || 0) : sort === 'works' ? totalWorks(b) - totalWorks(a) : sort === 'votes' ? b.votes - a.votes : (sort === 'oldest' ? 1 : -1) * (Date.parse(a.createdAt) - Date.parse(b.createdAt)));
       const exams = qualification.summaries();
+      const audit = library.auditLog();
       return { users: slice(rows, params.page, params.pageSize).map(user => ({ ...user, exam: exams.get(user.id) ?? { passedAt: null, attempts: 0, bestCorrect: null, questionCount: null } })),
-        total: rows.length, page: params.page, pageSize: params.pageSize, scopeTotal, filterCounts, counts: index(viewer).counts, audit: library.auditLog().filter(row => row.action === 'role') };
+        total: rows.length, page: params.page, pageSize: params.pageSize, scopeTotal, filterCounts, counts: navigation(viewer, audit.length), audit: audit.filter(row => row.action === 'role') };
     },
   };
 }

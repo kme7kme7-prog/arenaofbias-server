@@ -556,11 +556,13 @@ export function registerShow1Compat(router, deps) {
 
   // ---- reactions -----------------------------------------------------------------
 
-  function reactionCounts(taskId, onlyMid = null) {
+  function reactionCounts(taskId, onlyMid = null, mapping = null) {
     const counts = {}, round = roundOfTask(taskId);
     for (const row of q.reactionCounts.all(taskId)) {
       const kind = EMOJI_KIND[row.emoji];
-      const mid = kind ? midOfWorkId(round, row.work_id) : null;
+      if (!kind) continue;
+      mapping ??= workMap();
+      const mid = mapping[ridOf(round, row.work_id)]?.mid;
       if (!mid || (onlyMid && mid !== onlyMid)) continue;
       (counts[mid] ??= { up: 0, down: 0, laugh: 0 })[kind] += row.n;
     }
@@ -571,15 +573,18 @@ export function registerShow1Compat(router, deps) {
     const promptId = String(ctx.url.searchParams.get('prompt') ?? '');
     if (!published(promptId)) fail(400, '题目不存在');
     const taskId = taskOfRound(promptId);
+    let mapping = null;
     const mine = {};
     if (ctx.user) {
       for (const row of q.myReactions.all(taskId, ctx.user.id)) {
         const kind = EMOJI_KIND[row.emoji];
-        const mid = kind ? midOfWorkId(promptId, row.work_id) : null;
+        if (!kind) continue;
+        mapping ??= workMap();
+        const mid = mapping[ridOf(promptId, row.work_id)]?.mid;
         if (mid) mine[mid] = kind;
       }
     }
-    return { counts: reactionCounts(taskId), mine };
+    return { counts: reactionCounts(taskId, null, mapping), mine };
   });
 
   router.on('POST', '/api/reactions', async (ctx) => {
@@ -587,6 +592,8 @@ export function registerShow1Compat(router, deps) {
     if (!user.email) fail(403, '请先绑定邮箱', 'email_required');
     write(user.id);
     const body = await readJson(ctx.req);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) fail(400, '表态内容无效');
+    if (Object.hasOwn(body, 'userId') && body.userId !== user.id) fail(401, '登录账号已变化，请重新确认表态', 'identity_changed');
     const id = String(body.id ?? '');
     if (!UUID4.test(id)) fail(400, '表态编号无效');
     const promptId = String(body.promptId ?? '');

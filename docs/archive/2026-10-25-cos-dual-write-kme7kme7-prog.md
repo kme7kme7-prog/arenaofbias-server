@@ -13,13 +13,14 @@
 - 环境变量仅 `COS_BUCKET`、`COS_REGION`、`COS_SECRET_ID`、`COS_SECRET_KEY`。进程环境优先；否则读 `/root/.config/arenaofbias/cos.env`，再否则读安装目录 `cos.env`。`COS_REGION` 缺省 `ap-shanghai`。缺桶名或密钥则跳过并警告一次。
 - 读切换不在本服务。前端变量名为 `MEDIA_CDN_BASE_URL`：空 = `https://api.arenaofbias.icu`；`https://media.arenaofbias.icu`（无末尾 `/`）才改读 CDN。
 - 文档：`docs/deploy.md`、`docs/api-contract.md`。`cos.env` 加入 `.gitignore`。无迁移，无 npm 依赖。
+- 按运维 Phase A 清单写死键前缀，不另造路径。投稿 jpg 与 `preview.sbox` 的前缀是 `media/`（11664 + 291）。画廊 sbox 的前缀是 `assets/scenes/`（170），源目录名 `gallery/assets/scenes/` 不进入对象键。抽测对象是 `media/up-duj5bt74/first.jpg`、`media/up-duj5bt74/preview.sbox`、`assets/scenes/show1-005/claude-opus-5.5-max.sbox`。
 
 ## 验证
 
 - `npm run check`：170 个文件，0 错误。
 - `node --test test/cos-dual-write.test.mjs`：10/10。覆盖成功 Put（调用方不等待）、缺密钥跳过且不抛、失败重试 4 次后不把错误抛给调用方、环境变量覆盖 ops 文件、ops 文件优先于相对 `cos.env`、SigV4 与 AWS GET 示例签名一致。没有请求真实 COS。
 - `npm test`：543 通过，1 失败，0 取消。失败项是 `test/blind-pool.test.mjs` 里「same package content follows registration and provenance changes while other works stay put」（期望厂商名 `Renamed vendor`，得到 `Current vendor`）。在 `origin/main` 上复跑同样失败（533/534）。只跑 `test/blind-pool.test.mjs` 为 21/21。不是本轮改动引入的。
-- 没有界面改动，没有用浏览器验收。没有部署，没有对 `media.arenaofbias.icu` 做真实 Put。
+- 没有界面改动，没有用浏览器验收。没有部署，没有对 `media.arenaofbias.icu` 做真实 Put。CDN 上已是 200 的三条 URL 来自运维 Phase A 抽测记录，不是本轮请求的结果。
 
 ## 明确没做
 
@@ -36,4 +37,4 @@
 ## 下一步建议
 
 - Gallery / Show1 另开 PR，用 `MEDIA_CDN_BASE_URL` 做读切换，默认保持 API 源站。
-- 运维放好 `/root/.config/arenaofbias/cos.env` 并加上 `EnvironmentFile=-` 之后，用一条新的公开媒体核对 `COS dual-write ok` 和 `https://media.arenaofbias.icu/media/...` 变为 200。
+- 运维放好 `/root/.config/arenaofbias/cos.env` 并加上 `EnvironmentFile=-` 之后，用一条新的公开媒体核对 `COS dual-write ok media/<作品>/<文件>`，以及 `https://media.arenaofbias.icu/media/<作品>/<文件>` 变为 200。对照已有抽测：`https://media.arenaofbias.icu/media/up-duj5bt74/first.jpg`（338225 字节）和 `https://media.arenaofbias.icu/media/up-duj5bt74/preview.sbox`（4181873 字节）。画廊场景保持 `assets/scenes/`，例如 `https://media.arenaofbias.icu/assets/scenes/show1-005/claude-opus-5.5-max.sbox`。

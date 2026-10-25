@@ -1,8 +1,8 @@
 ## 2026-10-25 · 媒体 CDN 双写 Phase B（PR，未合并，未部署）
 
-- 新的公开投稿媒体在源站写成功后，由 `server/cos-dual-write.mjs` 异步 Put 到腾讯云 COS。对象键等于公开路径去掉开头的 `/`：磁盘 `DATA_DIR/media/up-xxxxxxxx/first.jpg` → `media/up-xxxxxxxx/first.jpg`。只上传 `/media/<workId>/` 实际放行的文件名（封面、first/mobile jpg、preview.sbox/webp/jpg 及带 stamp 的版本）。`*-late.jpg`、`preview.json`、`history/` 不上传。私有重截图（`outputDir`）不上传。
+- 新的公开投稿媒体在源站写成功后，由 `server/cos-dual-write.mjs` 异步 Put 到腾讯云 COS。对象键等于公开路径去掉开头的 `/`：磁盘 `DATA_DIR/media/up-duj5bt74/first.jpg` → `media/up-duj5bt74/first.jpg`。只上传 `/media/<workId>/` 实际放行的文件名（封面、first/mobile jpg、preview.sbox/webp/jpg 及带 stamp 的版本）。`*-late.jpg`、`preview.json`、`history/` 不上传。私有重截图（`outputDir`）不上传。
 - 变量只有 `COS_BUCKET`（`agi-1419403229`）、`COS_REGION`（缺省 `ap-shanghai`）、`COS_SECRET_ID`、`COS_SECRET_KEY`。进程环境优先，缺项从 `/root/.config/arenaofbias/cos.env` 补，没有该文件再用安装目录相对路径 `cos.env`。四个关键项不齐则跳过并每个进程警告一次，上传和截图仍成功。签名是自写的 S3 兼容 SigV4，无 npm 依赖，无迁移。systemd 用 `EnvironmentFile=-/root/.config/arenaofbias/cos.env`（减号表示文件缺失也不阻止启动）。回滚是去掉该行或删掉密钥后重启。
-- 本服务不拼绝对媒体 URL，不读 `MEDIA_CDN_BASE_URL`。Gallery / Show1 的读切换用这个名字：空或不设置继续 `https://api.arenaofbias.icu`；打开时为 `https://media.arenaofbias.icu`（不要末尾 `/`）。`assets/scenes/` 不是本服务的写入路径。
+- 本服务不拼绝对媒体 URL，不读 `MEDIA_CDN_BASE_URL`。Gallery / Show1 的读切换用这个名字：空或不设置继续 `https://api.arenaofbias.icu`；打开时为 `https://media.arenaofbias.icu`（不要末尾 `/`）。Phase A 已在桶内的键前缀只有两个：投稿 `.data/media/**/*.jpg`（11664，755.78 MB）和 `.data/media/**/preview.sbox`（291，301.24 MB）都是 `media/`；画廊 `gallery/assets/scenes/**/*.sbox`（170，157.49 MB）是 `assets/scenes/`，不是 `gallery/assets/scenes/`。抽测已 200：`/media/up-duj5bt74/first.jpg`（338225 字节，与 api 同源同大小）、`/media/up-duj5bt74/preview.sbox`（4181873 字节）、`/assets/scenes/show1-005/claude-opus-5.5-max.sbox`（831817 字节）。本服务不写 `assets/scenes/`。新双写只追加 `media/` 下公开文件名，不另造前缀。
 - 验证：`npm run check` 170/0；`node --test test/cos-dual-write.test.mjs` 10/10（模拟 HTTPS，无真实 COS）。`npm test` 543 通过、1 失败、0 取消。失败是 `test/blind-pool.test.mjs` 的「same package content follows registration…」，`origin/main` 上同样 533/534，单独跑该文件 21/21。不是这次改动引入的。未做浏览器验收（没有界面改动），未对真实 COS Put，未部署。
 - [本轮归档](docs/archive/2026-10-25-cos-dual-write-kme7kme7-prog.md)。
 

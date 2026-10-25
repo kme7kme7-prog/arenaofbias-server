@@ -389,7 +389,17 @@ Environment="TURNSTILE_SECRET_KEY=<secret-key>"
 
 新的公开投稿媒体在源站写成功之后，由 `server/cos-dual-write.mjs` 异步 `PutObject` 到私有桶。不新增 npm 依赖，不改表结构。四个变量齐备才上传；缺任何一个都跳过并打一行警告，上传和截图仍然成功。读请求仍走 `https://api.arenaofbias.icu`。本服务不拼绝对媒体 URL，也不读取 `MEDIA_CDN_BASE_URL`（见 [api-contract.md](api-contract.md) 1.2）。
 
-对象键等于公开 URL 路径，没有开头的 `/`，也不含 `?v=`。磁盘 `DATA_DIR/media/up-xxxxxxxx/first.jpg` 对应键 `media/up-xxxxxxxx/first.jpg`，主机为 `https://<COS_BUCKET>.cos.<COS_REGION>.myqcloud.com`。已由运维同步过的历史 `media/`（jpg 与 preview.sbox）和 `assets/scenes/` 不在这次写入范围内。本服务不写 `assets/scenes/`；那是数据包和画廊的静态文件。
+对象键沿用运维 Phase A 已经写入桶 `agi-1419403229` 的前缀，没有开头的 `/`，也不含 `?v=`。Put 主机是 `https://<COS_BUCKET>.cos.<COS_REGION>.myqcloud.com`。Phase A（2026-10-25，源站 coscli 直推，线上文件未删）的清单：
+
+| 源路径 | COS 键前缀 | 对象数 | 体积 |
+| --- | --- | ---: | --- |
+| `.data/media/**/*.jpg` | `media/` | 11664 | 755.78 MB |
+| `.data/media/**/preview.sbox` | `media/` | 291 | 301.24 MB |
+| `gallery/assets/scenes/**/*.sbox` | `assets/scenes/` | 170 | 157.49 MB |
+
+合计 12125 个对象，约 1.21 GB。画廊场景的键是 `assets/scenes/…`，不是 `gallery/assets/scenes/…`。本服务不写 `assets/scenes/`。Phase B 只给之后新落盘的公开投稿媒体追加 `media/` 下的键。磁盘 `DATA_DIR/media/up-duj5bt74/first.jpg` 对应键 `media/up-duj5bt74/first.jpg`，与已抽测对象同一形状。
+
+Phase A 的 jpg 是当时 `.data/media` 下的全部 `*.jpg`；`preview.sbox` 只包含路径以 `preview.sbox` 结尾的对象，不含 `preview-<stamp>.sbox`，也不含 webp / png。本服务新写入只双写 `/media/<workId>/` 实际放行的文件名。`*-late.jpg`、`preview.json`、`history/` 即使曾作为 jpg 进过桶，之后也不再上传。
 
 只使用下面这些变量名。进程环境优先；缺的项再从文件补齐。两个文件不合并：先看 `/root/.config/arenaofbias/cos.env`，没有再看安装目录里的相对路径 `cos.env`（已在 `.gitignore`，不要提交）。
 
@@ -423,7 +433,16 @@ COS_SECRET_KEY=<secret-key>
 
 写入点：投稿封面、截图服务生成的 `first.jpg` / `mobile.jpg`（不含 `outputDir` 私有重截图，也不含 `*-late.jpg`）、`cover:write`、`captures:write`、dots 预览的 `.sbox` / `.webp`。封面或预览回滚只改指针，不重新上传。每个对象最多 4 次 Put（间隔 0.5s、2s、8s）。成功日志 `COS dual-write ok <key> <bytes>B`，耗尽后 `COS dual-write failed <key> after 4 attempts:`。缺密钥时每个进程只警告一次：`COS dual-write skipped:`。队列在进程内，重启会丢掉尚未完成的 Put；源站文件还在，需要时再同步这一键。
 
-验收：源站已有文件后，日志出现对应 `COS dual-write ok`，随后 `curl -I https://media.arenaofbias.icu/media/<作品>/<文件>` 应为 200。CDN 回源可能稍晚，短时间内不是 200 先看日志再重试，不要据此关掉源站。私有作品在 API 上仍要登录，CDN 域名是否对匿名可读由桶策略和 CDN 鉴权决定，本服务不把对象设为 public-read。
+Phase A 抽测（2026-10-25 16:45 UTC+8）已经是 200，用来核对键和字节。这三支不是本 PR 新上传的：
+
+| URL | HTTP | 字节 | 对照 |
+| --- | ---: | ---: | --- |
+| `https://media.arenaofbias.icu/media/up-duj5bt74/first.jpg` | 200 | 338225 | image/jpeg |
+| `https://media.arenaofbias.icu/media/up-duj5bt74/preview.sbox` | 200 | 4181873 | application/octet-stream |
+| `https://media.arenaofbias.icu/assets/scenes/show1-005/claude-opus-5.5-max.sbox` | 200 | 831817 | application/octet-stream |
+| `https://api.arenaofbias.icu/media/up-duj5bt74/first.jpg` | 200 | 338225 | 与 CDN 上的 first.jpg 同大小 |
+
+Phase B 上线后的新文件仍用前缀 `media/`。源站 `https://api.arenaofbias.icu/media/<作品>/<文件>` 对有权查看的人是 200，日志出现 `COS dual-write ok media/<作品>/<文件>`，随后 `curl -I https://media.arenaofbias.icu/media/<作品>/<文件>` 应为 200。CDN 回源可能稍晚，短时间内不是 200 先看日志再重试，不要据此关掉源站。私有作品在 API 上仍要登录。CDN 域名是否对匿名可读由桶策略和 CDN 鉴权决定，本服务不把对象设为 public-read。
 
 ## 6. Luna Flex 内容审查
 

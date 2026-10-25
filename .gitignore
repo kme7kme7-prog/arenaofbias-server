@@ -4,3 +4,4 @@ dist/
 .datapack/
 output/
 *.log
+cos.env

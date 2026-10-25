@@ -38,6 +38,8 @@
 
 作品内容 URL 不写在各端点文档里逐个列出，而是由响应字段（`bootstrap.site.content`、作品对象的 `scene`、对战对象的 `a`/`b`）以完整 URL 形式下发，前端直接消费，不自行拼接。投稿 `captures` / `cover` 返回相对路径 `media/...`，前端以 API 站点根解析；数据包 `scene` 路径取自画廊所用数据包。
 
+媒体 CDN 的读切换不在本服务。`captures`、`cover` 和预览字段（`previewModel` / `previewPoster` / `previewCapture`，可带 `?v=`）都是相对路径，作品 `scene` 是内容源的绝对地址，不是媒体 CDN。本进程不读取 `MEDIA_CDN_BASE_URL`，响应里也不改写成绝对地址。Gallery 与 Show1 若要切换读取，变量名只用 `MEDIA_CDN_BASE_URL`：空或不设置时继续把 `media/...` 解析到 `https://api.arenaofbias.icu`；设为 `https://media.arenaofbias.icu`（不要末尾 `/`）时，同一路径和查询串改到该主机。`media/references/`、`media/pack-references/` 和作品内容源保持 API / 内容源。`assets/scenes/` 由数据包与画廊静态资源提供，本服务不写这些文件。
+
 ### 1.3 认证方式
 
 - 认证基于 **Cookie 会话**。注册 / 登录成功后，响应头种下：
@@ -771,6 +773,8 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 - 响应头：旧流程作品为 `Cache-Control: public, max-age=300`，参与内容审查的作品为 `no-store`；`Content-Security-Policy: default-src 'none'`（防止媒体被当页面执行）。内容未通过的媒体只供作者或管理员会话访问，其他请求为 404。
 - 404：`{ "error": "文件不存在" }`。
 - 路径越界（`..` 等）在路径解析层被拒，等同 404。
+
+新写入的公开媒体在本地落盘成功后异步复制到腾讯云 COS（Phase B）。对象键等于公开路径去掉开头的 `/`，例如磁盘 `.data/media/up-abcd1234/first.jpg` 对应键 `media/up-abcd1234/first.jpg`，与 `GET /media/up-abcd1234/first.jpg` 一致。实际上传的文件名以 `server/app.mjs` 的 `/media/<work-id>/` 路由为准：`cover.png|jpg|webp`、`cover-<stamp>.<ext>`、`first.jpg`、`mobile.jpg`、`first-<stamp>.jpg`、`mobile-<stamp>.jpg`、`preview.sbox|webp|jpg`、`preview-<stamp>.sbox|webp`。`first-late.jpg`、`preview.json`、`history/` 不上传。COS 失败或缺少 `COS_BUCKET` / `COS_SECRET_ID` / `COS_SECRET_KEY` 只记日志，不改变上传或截图是否成功。变量与 `EnvironmentFile=` 见 [deploy.md](deploy.md) 的「媒体 CDN 双写」。读路径仍是相对路径；`MEDIA_CDN_BASE_URL` 见 1.2。
 
 ### 3.12 作品内容伺服（令牌子域）
 

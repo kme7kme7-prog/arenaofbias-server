@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { createServer } from 'node:net';
 import { THREE_MIRROR_PATH } from './config.mjs';
 import { contentRuntimePath } from './content-path.mjs';
+import { mirrorPublicMedia } from './cos-dual-write.mjs';
 
 const SHOTS = [
   { id: 'first', viewport: { width: 1440, height: 900 }, mobile: false },
@@ -544,6 +545,8 @@ export function createCapturer({ config, library, loadChromium = async () => (aw
             mkdirSync(directory, { recursive: true });
             const name = `${prefix}${shot.id}.jpg`;
             await shoot(name);
+            // Private recapture jobs pass outputDir and reuse first.jpg outside .data/media.
+            if (!outputDir) mirrorPublicMedia({ workId: work.id, name, file: join(directory, name) });
             const text = await step(() => pageText(page), timeouts.text, 'text');
             texts.push(text);
             firstTexts.push(text);
@@ -565,6 +568,7 @@ export function createCapturer({ config, library, loadChromium = async () => (aw
               await step(() => page.waitForTimeout(8500), relaxed(8500), 'wait');
               const lateName = `${prefix}${shot.id}-late.jpg`;
               await shoot(lateName);
+              if (!outputDir) mirrorPublicMedia({ workId: work.id, name: lateName, file: join(directory, lateName) });
               texts.push(await step(() => pageText(page), timeouts.text, 'text'));
               late[shot.id] = lateName;
             } catch (error) {

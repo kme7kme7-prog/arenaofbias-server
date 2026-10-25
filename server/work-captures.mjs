@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { transaction } from './db.mjs';
 import { HttpError, fail } from './http.mjs';
 import { COVER_LIMITS, sniffImage } from './work-covers.mjs';
+import { mirrorPublicMedia } from './cos-dual-write.mjs';
 
 export const CAPTURE_SLOTS = ['first', 'mobile'];
 
@@ -48,8 +49,9 @@ export function createCaptureStore({ db, library }) {
       const pending = join(dirOf(work), `.${name}.tmp`);
       writeFileSync(pending, buffer);
       renameSync(pending, join(dirOf(work), name));
+      let result;
       try {
-        return transaction(db, () => {
+        result = transaction(db, () => {
           if (!q.swap.run(JSON.stringify(next), work.id, row.captures).changes) {
             throw new HttpError(409, '截图刚刚被修改，请重新获取后再试', 'conflict');
           }
@@ -65,6 +67,8 @@ export function createCaptureStore({ db, library }) {
         rmSync(join(dirOf(work), name), { force: true });
         throw error;
       }
+      mirrorPublicMedia({ workId: work.id, name, body: buffer });
+      return result;
     },
   };
 }

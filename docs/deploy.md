@@ -385,6 +385,65 @@ Environment="TURNSTILE_SECRET_KEY=<secret-key>"
 
 写入后执行 `systemctl daemon-reload`、重启服务，并通过 `/api/auth/turnstile` 核对站点密钥。SMTP 仍由现有 `smtp.conf` 提供。
 
+## 媒体 CDN 双写（COS，Phase B）
+
+新的公开投稿媒体在源站写成功之后，由 `server/cos-dual-write.mjs` 异步 `PutObject` 到私有桶。不新增 npm 依赖，不改表结构。四个变量齐备才上传；缺任何一个都跳过并打一行警告，上传和截图仍然成功。读请求仍走 `https://api.arenaofbias.icu`。本服务不拼绝对媒体 URL，也不读取 `MEDIA_CDN_BASE_URL`（见 [api-contract.md](api-contract.md) 1.2）。
+
+对象键沿用运维 Phase A 已经写入桶 `agi-1419403229` 的前缀，没有开头的 `/`，也不含 `?v=`。Put 主机是 `https://<COS_BUCKET>.cos.<COS_REGION>.myqcloud.com`。Phase A（2026-10-25，源站 coscli 直推，线上文件未删）的清单：
+
+| 源路径 | COS 键前缀 | 对象数 | 体积 |
+| --- | --- | ---: | --- |
+| `.data/media/**/*.jpg` | `media/` | 11664 | 755.78 MB |
+| `.data/media/**/preview.sbox` | `media/` | 291 | 301.24 MB |
+| `gallery/assets/scenes/**/*.sbox` | `assets/scenes/` | 170 | 157.49 MB |
+
+合计 12125 个对象，约 1.21 GB。画廊场景的键是 `assets/scenes/…`，不是 `gallery/assets/scenes/…`。本服务不写 `assets/scenes/`。Phase B 只给之后新落盘的公开投稿媒体追加 `media/` 下的键。磁盘 `DATA_DIR/media/up-duj5bt74/first.jpg` 对应键 `media/up-duj5bt74/first.jpg`，与已抽测对象同一形状。
+
+Phase A 的 jpg 是当时 `.data/media` 下的全部 `*.jpg`；`preview.sbox` 只包含路径以 `preview.sbox` 结尾的对象，不含 `preview-<stamp>.sbox`，也不含 webp / png。本服务新写入只双写 `/media/<workId>/` 实际放行的文件名。`*-late.jpg`、`preview.json`、`history/` 即使曾作为 jpg 进过桶，之后也不再上传。
+
+只使用下面这些变量名。进程环境优先；缺的项再从文件补齐。两个文件不合并：先看 `/root/.config/arenaofbias/cos.env`，没有再看安装目录里的相对路径 `cos.env`（已在 `.gitignore`，不要提交）。
+
+| 变量 | 说明 |
+| --- | --- |
+| `COS_BUCKET` | `agi-1419403229`。缺失或格式不对则跳过双写。 |
+| `COS_REGION` | `ap-shanghai`。文件和环境都没写时按 `ap-shanghai`。 |
+| `COS_SECRET_ID` | 腾讯云 SecretId。日志不打印。缺失则跳过双写。 |
+| `COS_SECRET_KEY` | 腾讯云 SecretKey。日志不打印。缺失则跳过双写。 |
+| `MEDIA_CDN_BASE_URL` | 只给 Gallery / Show1 的读切换。本进程不读。空或不设置 = 继续用 `https://api.arenaofbias.icu`。打开时为 `https://media.arenaofbias.icu`，不要末尾 `/`。 |
+
+密钥放在 root 持有的 `0600` 文件里，由 systemd 注入。行首的 `-` 表示文件还不存在时服务照常启动，此时双写跳过并警告，不会把 API 停掉：
+
+```ini
+# /etc/systemd/system/arenaofbias-server.service.d/cos-dual-write.conf
+[Service]
+EnvironmentFile=-/root/.config/arenaofbias/cos.env
+```
+
+```
+# /root/.config/arenaofbias/cos.env
+COS_BUCKET=agi-1419403229
+COS_REGION=ap-shanghai
+COS_SECRET_ID=<secret-id>
+COS_SECRET_KEY=<secret-key>
+```
+
+本地没有这份绝对路径时，把同样的 `cos.env` 放在安装目录即可。改完执行 `systemctl daemon-reload` 并重启 `arenaofbias-server`。
+
+回滚：从 drop-in 去掉 `EnvironmentFile=`，或从 `cos.env` 删掉 `COS_SECRET_ID` / `COS_SECRET_KEY`，然后 `daemon-reload` 并重启。新文件只留在源站；已上传的对象还在桶里。读路径不变，因为前端还没有设置 `MEDIA_CDN_BASE_URL`。
+
+写入点：投稿封面、截图服务生成的 `first.jpg` / `mobile.jpg`（不含 `outputDir` 私有重截图，也不含 `*-late.jpg`）、`cover:write`、`captures:write`、dots 预览的 `.sbox` / `.webp`。封面或预览回滚只改指针，不重新上传。每个对象最多 4 次 Put（间隔 0.5s、2s、8s）。成功日志 `COS dual-write ok <key> <bytes>B`，耗尽后 `COS dual-write failed <key> after 4 attempts:`。缺密钥时每个进程只警告一次：`COS dual-write skipped:`。队列在进程内，重启会丢掉尚未完成的 Put；源站文件还在，需要时再同步这一键。
+
+Phase A 抽测（2026-10-25 16:45 UTC+8）已经是 200，用来核对键和字节。这三支不是本 PR 新上传的：
+
+| URL | HTTP | 字节 | 对照 |
+| --- | ---: | ---: | --- |
+| `https://media.arenaofbias.icu/media/up-duj5bt74/first.jpg` | 200 | 338225 | image/jpeg |
+| `https://media.arenaofbias.icu/media/up-duj5bt74/preview.sbox` | 200 | 4181873 | application/octet-stream |
+| `https://media.arenaofbias.icu/assets/scenes/show1-005/claude-opus-5.5-max.sbox` | 200 | 831817 | application/octet-stream |
+| `https://api.arenaofbias.icu/media/up-duj5bt74/first.jpg` | 200 | 338225 | 与 CDN 上的 first.jpg 同大小 |
+
+Phase B 上线后的新文件仍用前缀 `media/`。源站 `https://api.arenaofbias.icu/media/<作品>/<文件>` 对有权查看的人是 200，日志出现 `COS dual-write ok media/<作品>/<文件>`，随后 `curl -I https://media.arenaofbias.icu/media/<作品>/<文件>` 应为 200。CDN 回源可能稍晚，短时间内不是 200 先看日志再重试，不要据此关掉源站。私有作品在 API 上仍要登录。CDN 域名是否对匿名可读由桶策略和 CDN 鉴权决定，本服务不把对象设为 public-read。
+
 ## 6. Luna Flex 内容审查
 
 实际运行状态以 HANDOFF 最新部署记录为准。首次启用时，按本文版本门禁与备份流程先发布配套后端（启动追加 v19），再发布前端。密钥只放受限服务器环境文件，不写入仓库、前端构建变量或验收日志：

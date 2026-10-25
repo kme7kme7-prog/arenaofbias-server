@@ -8,6 +8,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, w
 import { join } from 'node:path';
 import { transaction } from './db.mjs';
 import { HttpError, fail } from './http.mjs';
+import { mirrorPublicMedia } from './cos-dual-write.mjs';
 
 export const COVER_LIMITS = { minSide: 64, maxSide: 4096, maxPixels: 16_777_216 };
 export const COVER_FILE = /^cover(?:-[a-z0-9]{8,24})?\.(?:png|jpg|webp)$/;
@@ -109,15 +110,18 @@ export function createCoverStore({ db, library }) {
       const pending = join(dirOf(work), `.${name}.tmp`);
       writeFileSync(pending, buffer);
       renameSync(pending, join(dirOf(work), name));
+      let result;
       try {
         const snap = snapshot(work, stamp);
         const historyId = point(work, work.cover ?? null, name, 'cover-replace', actor,
           { source, bytes: buffer.length, type: image.mime, width: image.width, height: image.height }, snap);
-        return { historyId, cover: `media/${work.id}/${name}`, previous: work.cover ? `media/${work.id}/${work.cover}` : null };
+        result = { historyId, cover: `media/${work.id}/${name}`, previous: work.cover ? `media/${work.id}/${work.cover}` : null };
       } catch (error) {
         rmSync(join(dirOf(work), name), { force: true });
         throw error;
       }
+      mirrorPublicMedia({ workId: work.id, name, body: buffer });
+      return result;
     },
     history(work) {
       return q.list.all(work.id).map((row) => ({ id: row.id, at: new Date(row.at).toISOString(), action: row.action, previous: row.previous,

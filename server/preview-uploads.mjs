@@ -17,6 +17,7 @@ import { gunzipSync, gzipSync } from 'node:zlib';
 import { transaction } from './db.mjs';
 import { HttpError, fail } from './http.mjs';
 import { COVER_LIMITS, sniffImage } from './work-covers.mjs';
+import { mirrorPublicMedia } from './cos-dual-write.mjs';
 
 export const PREVIEW_LIMITS = {
   bytes: 2 * 1024 * 1024, // compressed upload
@@ -338,12 +339,16 @@ export function createPreviewStore({ db, library }) {
       throw new HttpError(409, '预览刚刚被修改，请重新上传', 'conflict');
     }
     activate(work, manifest.version);
+    let historyId;
     try {
-      return record(work, 'preview-replace', now.version, manifest.version, actor, detail);
+      historyId = record(work, 'preview-replace', now.version, manifest.version, actor, detail);
     } catch (error) {
       activate(work, now.version);
       throw error;
     }
+    // Versioned .sbox / .webp only. preview.json is the local activation copy and is not a public object.
+    for (const [name, buffer] of files) mirrorPublicMedia({ workId: work.id, name, body: buffer });
+    return historyId;
   }
 
   return {

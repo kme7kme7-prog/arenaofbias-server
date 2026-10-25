@@ -14,6 +14,7 @@ import { inspectUpload } from './inspect.mjs';
 import { isTextTask, templatesOf } from './categories.mjs';
 import { GENERATION_FIELDS, IGNORED_GENERATION_FIELDS, generationFrom, generationOf, generationAudit, generationAuditView } from './generation.mjs';
 import { readWorkPreview } from './work-previews.mjs';
+import { mirrorPublicMedia } from './cos-dual-write.mjs';
 import { contentUrl } from './content-path.mjs';
 import { ALL_WORKS, catalogConflict, createRestricted, restrictedKeyOf, seesRestricted, workModelKey } from './restricted.mjs';
 
@@ -348,6 +349,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
         if (existsSync(pending) && !existsSync(final)) {
           renameSync(pending, final);
           console.warn(`Completed pending cover for ${item.name}`);
+          mirrorPublicMedia({ workId: item.name, name: row.cover, file: final });
         }
       }
     }
@@ -1063,6 +1065,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
         if (cover) rmSync(media, { recursive: true, force: true });
         throw error;
       }
+      if (coverName) mirrorPublicMedia({ workId: id, name: coverName, body: cover.buffer });
       return upload(taskId, id);
     },
 

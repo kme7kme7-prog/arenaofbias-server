@@ -6,6 +6,7 @@ import { fail } from './http.mjs';
 import { authorOf, isSenior, isStaff, roleOf } from './roles.mjs';
 import { compatibleTemplates, defaultTemplates, requireCategory, requireDomains } from './categories.mjs';
 import { seesRestricted } from './restricted.mjs';
+import { purgeWorkMedia } from './cos-dual-write.mjs';
 
 const tagName = (value) => String(value).normalize('NFKC').trim().replace(/^#+/, '').trim();
 const tagKey = (value) => tagName(value).toLowerCase();
@@ -283,7 +284,7 @@ export function createQuestions(db, { references = null, restricted = null } = {
       if (Object.keys(fields).some((field) => !['title', 'summary', 'prompt', 'category', 'domains', 'templates', 'references', 'referenceCredit'].includes(field))) fail(400, '题目信息格式不正确');
       if (!isStaff(user) && pending.get(user.id).n >= 3) fail(429, '你已有 3 道题目在等待审核');
       const now = Date.now();
-      transaction(db, () => {
+      const removedSamples = transaction(db, () => {
         const removed = removeSamples ? works.all(id).filter((work) => work.owner_id === user.id) : [];
         for (const work of removed) {
           db.prepare('UPDATE works SET deleted_at = ?, updated_at = ? WHERE id = ?').run(now, now, work.id);
@@ -302,7 +303,9 @@ export function createQuestions(db, { references = null, restricted = null } = {
         saveMeta(user, question, next, true);
         db.prepare('UPDATE questions SET moderation = ? WHERE id = ?').run(JSON.stringify(moderation), id);
         audit.run(now, user.id, user.name, 'question-resubmit', id, null, JSON.stringify(detail));
+        return removed;
       });
+      for (const work of removedSamples) purgeWorkMedia(work.id);
       return dto(lookup(id), user, true);
     },
     remove(actor, id) {
@@ -327,6 +330,7 @@ export function createQuestions(db, { references = null, restricted = null } = {
         audit.run(now, actor.id, actor.name, 'question-delete', id, null, question.title);
       });
       references?.removeQuestion(id);
+      for (const work of removed) purgeWorkMedia(work.id);
       return { ok: true, deletedWorks: [...removed.map((work) => work.id), ...(question.packaged ? packWorks(id).map((work) => work.id) : [])] };
     },
   };

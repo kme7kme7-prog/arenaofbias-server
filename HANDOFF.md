@@ -1,3 +1,14 @@
+## 2026-10-26 · 作品删除/拒绝后清理 COS 与 CDN（PR，未合并，未部署）
+
+- 问题：作品删除或被拒后，源站 `/media/<id>/` 已 404，但 `media.arenaofbias.icu`（COS 桶 `agi-1419403229` + 腾讯 CDN）上的副本仍可匿名直读。
+- 改动：`server/cos-dual-write.mjs` 新增 `purgeWorkMedia(workId)`。它异步 List `media/<workId>/` 下全部对象（含 10-25 全量同步带上去的 `recheck-*`、`*-late.jpg`），逐个 DeleteObject，再用 CDN `PurgeUrlsCache` 只刷新这些对象自己的 URL（每次最多 100 条，TC3-HMAC-SHA256，零依赖）。代码里只有这一个 CDN 动作，不做目录或全站刷新。删除任务排在同一队列里先前的 Put 之后。任何失败只写日志，不阻塞删除；COS 未配置时不发请求，只按原逻辑每进程警告一次。与 91d0e22 的 `COS_MEDIA_ACCESS_CONTROLLED` 门控并存：Put/remirror 仍受该门控，purge 不要求它（便于清理存量）。
+- 覆盖路径：`library.remove`（作者撤回、管理员撤回/作废票/彻底删除）；`questions.remove`（删题连带作品）；`questions.resubmit` 带 `removeSamples`；`finishModeration` 结果为 `rejected`（机器审核、dots 审核、管理员单件/批量审核）；启动维护时的孤儿目录清理。`handoff/reopen` 重开被拒作品时，把磁盘上仍在的公开文件重新 Put 回 COS（仍受 `COS_MEDIA_ACCESS_CONTROLLED`）。精选（curated）作品不动。
+- 开关：`COS_DELETE_ON_REMOVE`（默认开，`0` 关）；`MEDIA_CDN_PURGE_HOST`（默认 `media.arenaofbias.icu`，`off` 或任何非域名值都会关掉 CDN 刷新）。两个变量与 `COS_*` 一样，可放进程环境或 `cos.env`。
+- 权限：`server-cos` 需要 `cos:GetBucket`（限 `media/` 前缀）、`cos:DeleteObject`（`media/*`）和 `cdn:PurgeUrlsCache`（2026-10-27 冒烟已过）。缺权限时只会出现 `COS purge failed … HTTP 403` 或 `CDN purge failed … UnauthorizedOperation` 日志。
+- 验证：rebase 到 origin/main `91d0e22` 后跑 check/test；新增 `test/cos-purge.test.mjs`；platform/moderation 加撤回、删题、拒绝时 purge 断言。未对真实 COS 删除，未部署。
+- 已知缺口：待审核作品在截图完成时就双写到 COS（审核前即可读），本轮未改；删除后才完成的截图仍可能再 Put 一次。只读盘点见 `/workspace/rd/cos-orphans-20261026/`（不在仓库内）。存量误传 `recheck-*`/`*-late.jpg` 已于 2026-10-26 由运维清理 6613 个。
+- [本轮归档](docs/archive/2026-10-26-cos-purge-on-delete-kme7kme7-prog.md)。
+
 ## 2026-10-26 · 查询索引与媒体权限边界（已授权发布准备，生产验收待执行）
 
 - 用户已明确授权本轮 commit、push 和上线；负责人 wsnxxxs（GitHub ID 269096463），使用其 noreply 身份，由主代理统一执行。执行 Codex（子任务 GPT-6.1 Sol / max）。本节写入时尚未执行正式生产安装与验收，实际提交、部署、备份和公网结果以 `/root/aob-performance-20261026/` 本轮发布 receipt 为准。

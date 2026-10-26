@@ -21,6 +21,8 @@
 
 本服务是整个体系中**唯一的动态服务与唯一写库者**，负责账号、投票、排行榜、投稿审核与作品沙盒伺服。`ArenaGalleri` 提供静态画廊前端与原作展示，`arenaofbias` 提供主站，`arenaofbias-server` 提供动态 API、数据库、`/admin/` 管理页面和投稿沙盒，`arenaofbias-data` 构建后端读取的数据包数据包。两个用户前端各自部署并调用本服务；数据库（`DATA_DIR/platform.db`）由本服务独占，前端不直接读写。旧 same-prompt-gallery 已归档。
 
+SQLite v53 仅追加有效 arena 票时间序、用户/题目历史、可清理对局过期时间及审计 action/id 四个查询索引；API 字段、业务行、投票归属、排名和权限口径保持。
+
 服务同时监听**两个端口**：
 
 | 端口 | 默认 | 职责 |
@@ -38,7 +40,9 @@
 
 作品内容 URL 不写在各端点文档里逐个列出，而是由响应字段（`bootstrap.site.content`、作品对象的 `scene`、对战对象的 `a`/`b`）以完整 URL 形式下发，前端直接消费，不自行拼接。投稿 `captures` / `cover` 返回相对路径 `media/...`，前端以 API 站点根解析；数据包 `scene` 路径取自画廊所用数据包。
 
-媒体 CDN 的读切换不在本服务。`captures`、`cover` 和预览字段（`previewModel` / `previewPoster` / `previewCapture`，可带 `?v=`）都是相对路径，作品 `scene` 是内容源的绝对地址，不是媒体 CDN。本进程不读取 `MEDIA_CDN_BASE_URL`，响应里也不改写成绝对地址。Gallery 与 Show1 若要切换读取，变量名只用 `MEDIA_CDN_BASE_URL`：空或不设置时继续把 `media/...` 解析到 `https://api.arenaofbias.icu`；设为 `https://media.arenaofbias.icu`（不要末尾 `/`）时，同一路径和查询串改到该主机。`media/references/`、`media/pack-references/` 和作品内容源保持 API / 内容源。投稿媒体的 COS 键前缀是 `media/`（Phase A 已有 `.data/media/**/*.jpg` 与 `.data/media/**/preview.sbox`）。画廊场景的 COS 键前缀是 `assets/scenes/`，不是 `gallery/assets/scenes/`，也不是 `media/`；Phase A 已同步 170 个 `*.sbox`，抽测 `https://media.arenaofbias.icu/assets/scenes/show1-005/claude-opus-5.5-max.sbox` 为 200。本服务不写这些文件。
+`captures`、`cover` 和预览字段（`previewModel` / `previewPoster` / `previewCapture`，可带 `?v=`）都是相对路径，作品 `scene` 是独立内容源的绝对地址。本进程不读取 `MEDIA_CDN_BASE_URL`，也不把媒体字段改成绝对地址。动态 `media/...`（包括 `media/references/` 与 `media/pack-references/`）必须由前端解析到 API 根并逐次验权，不能切到无条件 CDN；Gallery 附稳定 `access=20261026` 参数避开旧 301 浏览器缓存，参数不授予权限。私密模型只向精确配置的 API origin、其 `media/` 目录且无内嵌账号密码的 URL 携带跨源会话；静态 CDN 与第三方地址不扩大凭据范围。
+
+Gallery 的 `MEDIA_CDN_BASE_URL` 只切换静态 `assets/scenes/`，空或不设置保持画廊同源。场景 COS 键是 `assets/scenes/`，本服务不写这些文件。历史 Phase A 曾同步 170 个场景 `*.sbox` 与 `media/` 下的 jpg、`preview.sbox`；存量对象不代表仍可匿名公开。COS 动态媒体镜像默认关闭，未来每次读取均验权的 CDN 实际建成后才可显式启用，见 3.11 和 [部署说明](deploy.md)。用户负责关闭存量 COS 匿名动态媒体、阻断 EdgeOne `/media/` 并清缓存；未验收前不视为直链已关闭。
 
 ### 1.3 认证方式
 
@@ -275,7 +279,7 @@ ETag 按表示区分：原文 `"<sha256>"`，压缩后 `"<sha256>-br"` / `"<sha2
 
 客户端每次复用都须重新验证，不设置允许脱离服务端确认的 max-age 或 stale-while-revalidate。支持 If-None-Match / 304 和 HEAD，304 前也检查当前目录版本；CORS 允许 If-None-Match，`/api/catalog` 与 `/api/bootstrap` 暴露 ETag、Server-Timing。服务端用 Server-Timing 标记目录缓存命中及处理耗时。
 
-Nginx 的动态 API 代理 location 必须包含 `deploy/nginx/api-proxy.conf`，显式关闭继承的 proxy_cache。否则即使响应为 no-cache，代理仍可能清除传给应用的条件请求头，导致同一 ETag 重复返回完整200。公开目录缓存由应用维护，媒体 location 的既有缓存策略独立保留。API 使用gzip第6级减小首次目录传输。
+Nginx 的动态 API 代理 location 必须包含 `deploy/nginx/api-proxy.conf`，显式关闭继承的 proxy_cache。否则即使响应为 no-cache，代理仍可能清除传给应用的条件请求头，导致同一 ETag 重复返回完整200。公开目录缓存由应用维护；动态媒体 location 使用 `deploy/nginx/protected-media.conf` 代理当前权限检查，不能无条件跳转 CDN 或共享缓存。API 使用gzip第6级减小首次目录传输。
 
 ### 3.1 `GET /api/bootstrap` —— 兼容首屏聚合
 
@@ -768,13 +772,14 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 ### 3.11 `/media/*` —— 投稿媒体
 
-`GET /media/<work-id>/<file>`，其中 `<work-id>` 形如 `up-XXXXXXXX`，`<file>` ∈ `cover.png` / `cover.jpg` / `cover.webp` / `first.jpg` / `mobile.jpg`。
+`GET /media/<work-id>/<file>`（亦支持 HEAD），其中 `<work-id>` 形如 `up-XXXXXXXX`。文件白名单为 `cover.png|jpg|webp`、`cover-<stamp>.<ext>`、`first.jpg`、`mobile.jpg`、`first-<stamp>.jpg`、`mobile-<stamp>.jpg`、`preview.sbox|webp|jpg`、`preview-<stamp>.sbox|webp`；stamp 为 8–24 位小写字母数字。`*-late.jpg`、`preview.json`、`history/` 不在公开路由中。
 
-- 响应头：旧流程作品为 `Cache-Control: public, max-age=300`，参与内容审查的作品为 `no-store`；`Content-Security-Policy: default-src 'none'`（防止媒体被当页面执行）。内容未通过的媒体只供作者或管理员会话访问，其他请求为 404。
+- 每次请求按当前作品和题目权限判断；公开媒体使用 `Cache-Control: private, no-cache, max-age=0, must-revalidate` 与弱 ETag，只有重新确认仍公开且字节未变才返回 304。私密媒体仅作者或有权管理员会话可读，`Cache-Control: no-store`、无 ETag；异步文件打开后发送前重新读取当前会话和可见性。作品删除或当前请求无权读取优先于条件请求，返回 404。
+- `Vary: Origin, Cookie`、`Content-Security-Policy: default-src 'none'`，保留配置的精确前端来源与凭据 CORS。此策略不授权共享 CDN、离线或过期复用。
 - 404：`{ "error": "文件不存在" }`。
 - 路径越界（`..` 等）在路径解析层被拒，等同 404。
 
-新写入的公开媒体在本地落盘成功后异步复制到腾讯云 COS（Phase B）。键前缀与 Phase A 清单相同，是 `media/`，等于公开路径去掉开头的 `/`。已在桶里并抽测为 200 的对象是 `media/up-duj5bt74/first.jpg`（338225 字节，image/jpeg，与 `https://api.arenaofbias.icu/media/up-duj5bt74/first.jpg` 同大小）和 `media/up-duj5bt74/preview.sbox`（4181873 字节，application/octet-stream）。画廊场景前缀是 `assets/scenes/`（抽测 `assets/scenes/show1-005/claude-opus-5.5-max.sbox`），本服务不写。Phase A 同步的是当时 `.data/media` 下全部 jpg 和以 `preview.sbox` 结尾的文件。本服务之后只上传 `server/app.mjs` 的 `/media/<work-id>/` 放行的文件名：`cover.png|jpg|webp`、`cover-<stamp>.<ext>`、`first.jpg`、`mobile.jpg`、`first-<stamp>.jpg`、`mobile-<stamp>.jpg`、`preview.sbox|webp|jpg`、`preview-<stamp>.sbox|webp`。`first-late.jpg`、`preview.json`、`history/` 不上传。COS 失败或缺少 `COS_BUCKET` / `COS_SECRET_ID` / `COS_SECRET_KEY` 只记日志，不改变上传或截图是否成功。变量、清单数字与 `EnvironmentFile=` 见 [deploy.md](deploy.md) 的「媒体 CDN 双写」。读路径仍是相对路径；`MEDIA_CDN_BASE_URL` 见 1.2。
+COS 镜像默认关闭，只有运维在已建成每次读取均验权的 CDN 后设置进程环境 `COS_MEDIA_ACCESS_CONTROLLED=1` 才可启用；密钥齐备和白名单文件名不表示公开权限。启用后仅在本地落盘成功时把上述文件名异步写到 `media/` 键（去掉 URL 开头 `/`，查询串不进键），不上传清单、history、私有重截图或静态 `assets/scenes/`。运行中与待发任务合计最多 64 件、64 MiB；每次 PUT 含响应正文 20 秒截止，最多 4 次尝试并按 0.5s/2s/8s 退避。未启用、缺凭据、失败或超限只记录并跳过镜像，不改变本地上传或截图结果。重启不重放内存队列。当前动态媒体走 API 的方案保持该开关关闭；存量云对象和缓存由用户另行关闭。配置、历史清单与回退见 [deploy.md](deploy.md) 的「媒体 CDN 双写」。
 
 ### 3.12 作品内容伺服（令牌子域）
 
@@ -791,6 +796,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 - 公开 `w` / `c` 的 HTML（包括服务端注入后的最终字节）、CSS、脚本及其他作品资源带弱 ETag。浏览器可以私有保存副本，但每次复用必须回源验证；当前仍可公开访问且最终字节未变才返回无正文的 `304`。作品文件、折页参数、校准或注入内容变化会重新返回 `200` 与新 ETag。流式文件在异步哈希结束后再次检查公开门禁，不跨请求缓存授权结果。
 - 撤下/转私密/审核限制优先于 ETag：返回 `410`、`no-store` 且无 ETag，不允许旧副本绕过权限。错误页和可信 `/v/<key>/` 外壳仍为 `no-store`；`d/p/m/e` 的作品内容也始终 `no-store`、无 ETag。仅通用且文件名含内容哈希的运行时代码保留既有长期公开缓存。
+- `d/p/m/e` 在异步文件打开后、发送前按各自既有能力规则重新解析目标与资格，包括草稿或票据过期、受限预览签发者权限、对局或考试失效，以及目录或入口被替换；仍沿用原有 bearer 能力语义。请求期间文件消失返回 404。
 - 此策略不授权共享 CDN 缓存，不设置离线复用或过期复用窗口；不改 CSP、沙盒或作品文件。首次访问、浏览器清理/驱逐副本及沙盒分区导致无法复用的子资源仍可能全量传输。
 - EdgeOne 的公开路径条件代理见 `deploy/edgeone/`：仅固定作品域 `/c/w…/` 与 `/c/c…/` 的 GET/HEAD，经固定 HTTPS 源站透传条件头与原始响应；不在边缘判断权限或 ETag。`/v/` 与 `p/d/m/e` 不使用该代理。源站的实时门禁、私有强制验证和 no-store 规则不变；不允许为省流量改为共享缓存或离线复用。
 - 仅接受 GET / HEAD，其余方法 `405`。
@@ -819,9 +825,9 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 数据库题目 DTO（公开、本人、审核及管理视图）增加 `references: [{id, name, src, caption, width, height}]` 和 `referenceCredit`，src 为 `media/references/<id>.<ext>` 相对媒体路径。`GET /api/review` 增加 questions，高级管理员取得题目管理视图，普通管理员为空数组。数据包题目也返回当前包声明的参考图与来源，包图没有上传 id，src 映射为 `media/pack-references/<task>/<name>`（路径段 URL 编码）；后台不复制图片、不写入 reference_uploads。包图和来源仅由数据仓维护；元数据编辑可同值重发有序 name / caption 与来源，变更返回 400，客户端 id / src 不用于图片绑定。包题面继续从当前 catalog 读取，普通元数据编辑不新建 prompt 覆盖；既有显式 prompt 覆盖保留。新增 SQLite v39，仅追加 `questions.reference_credit` 与 `reference_uploads` 表和索引，API 版本保持 2。
 
-**`GET /media/references/<id>.<ext>`**（亦支持 HEAD）：临时上传仅上传者和管理员可读；绑定后按题目权限，未公开仅题目作者和管理员可读，公开后所有人可读，不能读取返回 404。正确 MIME、nosniff、`Content-Disposition: inline; filename*=UTF-8''<name>`，公开缓存 `public, max-age=31536000, immutable`，私密缓存使用 private；`Vary: Origin, Cookie`。沿用配置的前端源 CORS 与凭据许可，支持 GET/HEAD 预检，公开图片可供跨源 fetch 打包下载。
+**`GET /media/references/<id>.<ext>`**（亦支持 HEAD）：临时上传仅上传者和管理员可读；绑定后按题目权限，未公开仅题目作者和管理员可读，公开后所有人可读，不能读取返回 404。正确 MIME、nosniff、`Content-Disposition: inline; filename*=UTF-8''<name>`、`Vary: Origin, Cookie`。公开图片为 `private, no-cache, max-age=0, must-revalidate` 与弱 ETag，每次 GET/HEAD/304 重新确认题目仍公开；私密图片为 `no-store`、无 ETag，并在文件打开后发送前重核当前会话与题目权限。沿用配置的精确前端源 CORS 与凭据许可，支持 GET/HEAD 预检及有权读取者跨源 fetch 打包下载，不授权共享缓存。
 
-**`GET /media/pack-references/<task>/<name>`**（亦支持 HEAD）：只提供当前包该题声明的图片，未声明文件或无题目读取权限返回 404；包题目撤回公开后只允许工作人员读取。返回原包字节及对应 MIME、nosniff、`Cache-Control: no-cache`、`Vary: Origin, Cookie`，沿用前端源凭据 CORS 与 GET/HEAD 预检，不复用上传参考图表或文件存储。
+**`GET /media/pack-references/<task>/<name>`**（亦支持 HEAD）：只提供当前包该题声明的图片，未声明文件或无题目读取权限返回 404；包题目撤回公开后只允许有权工作人员读取。返回原包字节及对应 MIME、nosniff、`Vary: Origin, Cookie`。公开图同样为 `private, no-cache, max-age=0, must-revalidate` 与弱 ETag、逐次验权后才可 304；私密读取为 `no-store`、无 ETag，文件打开后发送前复核当前会话、声明图片与题目权限。沿用前端源凭据 CORS 与 GET/HEAD 预检，不复用上传参考图表或文件存储。
 
 不附作品时传题目字段；附示例时另传 `draftId`、`confirmed:true`、`work`（同作品表单字段）。草稿须属于本人、未过期且 task=__new__。题目与示例及审计在同一事务写入，失败保留可重试草稿。响应 `{ "question": <题目作者视图>, "work"?: <作品作者视图> }`，统一 author/mine DTO。
 

@@ -72,6 +72,28 @@ export function createContentHandler({ config, library, arena, qualification, ca
     `frame-ancestors ${siteOrigins.join(' ')}`,
   ].join('; ');
 
+  function targetFor(key) {
+    let target = null;
+    let work = null;
+    if (key[0] === 'd') {
+      const draft = library.draftByToken(key);
+      if (draft) target = { dir: draft.dir, entry: draft.entry, draft: true };
+    } else if (key[0] === 'm' || key[0] === 'e') {
+      work = key[0] === 'e' ? qualification?.workForToken(key) : arena.workForToken(key);
+      if (library.isEligible(work)) target = { dir: work.dir, entry: work.entry ?? 'index.html' };
+    } else if (key[0] === 'c') {
+      work = library.curatedByKey(key);
+      if (library.publicCuratedContent(work)) target = { dir: work.dir, entry: work.entry ?? 'index.html' };
+    } else if (key[0] === 'p') {
+      work = library.previewByKey(key);
+      if (work) target = { dir: work.dir, entry: work.entry ?? 'index.html', private: true };
+    } else {
+      work = library.byContentKey(key);
+      if (library.publicContent(work)) target = { dir: work.dir, entry: work.entry };
+    }
+    return { target, work };
+  }
+
   function serve(req, res) {
     const route = contentRoute(config, req);
     const preflight = req.method === 'OPTIONS' && route && !route.shell;
@@ -90,25 +112,15 @@ export function createContentHandler({ config, library, arena, qualification, ca
     if (!/^[wmdpce][0-9a-f]{32}$/.test(key)) return errorPage(res, 404, '作品地址无效', '请从展厅重新打开作品。');
 
     const blind = key[0] === 'm' || key[0] === 'e';
-    let target = null;
-    let work = null;
-    if (key[0] === 'd') {
-      const draft = library.draftByToken(key);
-      if (draft) target = { dir: draft.dir, entry: draft.entry, draft: true };
-    } else if (blind) {
-      work = key[0] === 'e' ? qualification?.workForToken(key) : arena.workForToken(key);
-      if (library.isEligible(work)) target = { dir: work.dir, entry: work.entry ?? 'index.html' };
-    } else if (key[0] === 'c') {
-      work = library.curatedByKey(key);
-      if (library.publicCuratedContent(work)) target = { dir: work.dir, entry: work.entry ?? 'index.html' };
-    } else if (key[0] === 'p') {
-      work = library.previewByKey(key);
-      if (work) target = { dir: work.dir, entry: work.entry ?? 'index.html', private: true };
-    } else {
-      work = library.byContentKey(key);
-      if (library.publicContent(work)) target = { dir: work.dir, entry: work.entry };
-    }
+    const { target, work } = targetFor(key);
     if (!target) return errorPage(res, 410, '作品已不可用', blind ? '这一组比较已经结束，请开始新的一组。' : '作品尚未公开、已被删除，或预览地址已过期。');
+    const stillAllowed = () => {
+      const check = () => {
+        const current = targetFor(key).target;
+        return current && current.dir === target.dir && (current.entry ?? 'index.html') === (target.entry ?? 'index.html');
+      };
+      return catalog ? catalog.withSnapshot(check) : check();
+    };
 
     const url = new URL(req.url, route?.origin || 'http://content.invalid');
     const pathname = route?.path ?? url.pathname;
@@ -255,15 +267,12 @@ export function createContentHandler({ config, library, arena, qualification, ca
       const body = Buffer.from(rebaseCss(readFileSync(found.file, 'utf8'), route.prefix));
       return send(body, { 'Content-Type': 'text/css; charset=utf-8', 'X-Content-Type-Options': 'nosniff' });
     }
-    if (revalidate) return streamRevalidatedFile(req, res, found, headers, () => {
-      const check = () => {
-        const current = key[0] === 'c' ? library.curatedByKey(key) : library.byContentKey(key);
-        return current && current.dir === target.dir && (current.entry ?? 'index.html') === (target.entry ?? 'index.html') &&
-          (key[0] === 'c' ? library.publicCuratedContent(current) : library.publicContent(current));
-      };
-      return catalog ? catalog.withSnapshot(check) : check();
-    });
-    return streamFile(req, res, found, headers);
+    if (revalidate) return streamRevalidatedFile(req, res, found, headers, stillAllowed);
+    return streamFile(req, res, found, headers, { beforeSend: () => {
+      // Opening a private file also yields to I/O. Recheck the same capability,
+      // including expiration, active matches/exams and current eligibility.
+      if (!stillAllowed()) throw new HttpError(410, '作品已不可用');
+    } });
   }
 
   // Which bridge tags a document gets. Match sides restore the saved arena camera and

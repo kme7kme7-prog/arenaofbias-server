@@ -208,11 +208,17 @@ export function createCosMirror({
   timeoutMs = 20_000,
   now = () => new Date(),
   readBytes = readFileSync,
+  maxPending = 64,
+  maxPendingBytes = 64 * 1024 * 1024,
 } = {}) {
   const settings = loadCosSettings(env, { fileText, readFile, exists });
+  // File names do not imply public visibility. Only an operator who has put
+  // current authorization checks in front of every CDN read may opt back in.
+  const accessControlled = env.COS_MEDIA_ACCESS_CONTROLLED === '1';
   const queue = [];
   let running = false;
   let pending = 0;
+  let pendingBytes = 0;
   const idle = [];
   let warned = false;
 
@@ -252,8 +258,13 @@ export function createCosMirror({
     });
     return new Promise((resolve, reject) => {
       let settled = false;
-      const finish = (fn, value) => { if (!settled) { settled = true; fn(value); } };
+      const finish = (fn, value) => { if (!settled) { settled = true; clearTimeout(deadline); fn(value); } };
       let req;
+      const deadline = setTimeout(() => {
+        const error = Object.assign(new Error('COS put timed out'), { code: 'timeout' });
+        finish(reject, error);
+        req?.destroy(error);
+      }, timeoutMs);
       try {
         req = request({
           protocol: 'https:',
@@ -312,6 +323,7 @@ export function createCosMirror({
     running = true;
     send(job).finally(() => {
       pending -= 1;
+      pendingBytes -= job.body.length;
       running = false;
       pump();
     });
@@ -323,13 +335,27 @@ export function createCosMirror({
       try {
         const key = publicMediaKey(spec?.workId, spec?.name);
         if (!key) return;
+        if (!accessControlled) {
+          if (!warned) log.warn('COS dual-write disabled: uploaded media requires authorization on every read; configure gated CDN access before setting COS_MEDIA_ACCESS_CONTROLLED=1.');
+          warned = true;
+          return;
+        }
         if (!settings.ready) {
           warnSkip();
           return;
         }
+        if (pending >= maxPending) {
+          log.warn(`COS dual-write skipped ${key}: pending job limit`);
+          return;
+        }
         const body = bytesOf(spec, key);
         if (!body) return;
+        if (body.length > maxPendingBytes - pendingBytes) {
+          log.warn(`COS dual-write skipped ${key}: pending byte limit`);
+          return;
+        }
         pending += 1;
+        pendingBytes += body.length;
         queue.push({ key, body, contentType: contentTypeForMedia(spec.name) });
         pump();
       } catch (error) {

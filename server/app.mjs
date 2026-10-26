@@ -28,6 +28,7 @@ import { createCoverStore } from './work-covers.mjs';
 import { createPreviewStore } from './preview-uploads.mjs';
 import { AVATARS, EFFORTS, EMOJIS } from './config.mjs';
 import { createContentHandler } from './content.mjs';
+import { CONTENT_REVALIDATE, streamRevalidatedFile } from './content-cache.mjs';
 import { openDatabase, transaction } from './db.mjs';
 import {
   HttpError, assertSameOrigin, clientIp, createRouter, fail, isTrustedOrigin, rateLimit, readBody, readJson, resolveInside, sendJson, streamFile,
@@ -45,7 +46,7 @@ import { registerShow1Guess } from './show1/guess.mjs';
 import { registerGuessRooms } from './show1/guess-room-http.mjs';
 import { turnstileEnabled, turnstileSiteKey, verifyTurnstile } from './turnstile.mjs';
 import { createReadGuard } from './read-guard.mjs';
-import { isSenior, isStaff, levelOf, requireContributor } from './roles.mjs';
+import { isSenior, isStaff, levelOf, requireContributor, canSkipEmail } from './roles.mjs';
 import { createRestricted, seesRestricted } from './restricted.mjs';
 
 const foldScript = readFileSync(new URL('./fold.js', import.meta.url));
@@ -153,7 +154,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   } : undefined;
   const emailBound = (ctx) => {
     const user = signedIn(ctx);
-    if (!user.email) fail(403, '请先绑定邮箱', 'email_required');
+    if (!user.email && !canSkipEmail(user)) fail(403, '请先绑定邮箱', 'email_required');
     return user;
   };
   const adminOnly = (ctx) => (isSenior(signedIn(ctx)) ? ctx.user : fail(403, '仅高级管理员可以操作'));
@@ -1007,23 +1008,38 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   registerShow1Guess(router, { db, limit, config, adminOnly, adminOn, adminJson });
   const guessRooms = registerGuessRooms(router, { db, auth, config, requireUser: signedIn });
 
+  async function streamRevalidatedMedia(req, res, found, headers, stillAllowed) {
+    try { return await streamRevalidatedFile(req, res, found, headers, stillAllowed); }
+    catch (error) {
+      if (['ENOENT', 'ENOTDIR'].includes(error.code)) fail(404, '文件不存在');
+      throw error;
+    }
+  }
+
   function serveSite(req, res, pathname) {
     readGuard.file(req);
     const packagedReference = /^\/media\/pack-references\/([^/]+)\/([^/]+)$/.exec(pathname);
     if (pathname.startsWith('/media/pack-references/')) {
       const taskId = packagedReference && decodeURIComponent(packagedReference[1]);
       const name = packagedReference && decodeURIComponent(packagedReference[2]);
-      const snapshot = catalog.snapshot();
-      const image = taskId && questions.get(taskId, auth.userFrom(req))
-        && snapshot.task(taskId)?.references.find((ref) => ref.name === name);
-      const found = image && resolveInside(snapshot.root, `/${image.src}`);
+      const locate = (viewer) => catalog.withSnapshot(() => {
+        const snapshot = catalog.snapshot();
+        const image = taskId && questions.get(taskId, viewer)
+          && snapshot.task(taskId)?.references.find((ref) => ref.name === name);
+        return image && resolveInside(snapshot.root, `/${image.src}`);
+      });
+      const found = locate(auth.userFrom(req));
       if (!found) return sendJson(res, 404, { error: '文件不存在' });
-      // Packaged references only change with the data package and the gallery
-      // version stamps the URL (?v=), so browsers may keep them indefinitely.
-      // Private: question visibility is re-checked per request, a shared cache
-      // must not answer for a viewer the gate would reject.
-      return streamFile(req, res, found, { 'Cache-Control': 'private, max-age=31536000, immutable', 'Vary': 'Origin, Cookie',
-        'Content-Security-Policy': "default-src 'none'" });
+      const allowed = (viewer) => {
+        if (locate(viewer)?.file !== found.file) fail(404, '文件不存在');
+        return true;
+      };
+      const headers = { 'Vary': 'Origin, Cookie', 'Content-Security-Policy': "default-src 'none'" };
+      if (locate(null)?.file === found.file)
+        return streamRevalidatedMedia(req, res, found, { ...headers, 'Cache-Control': CONTENT_REVALIDATE }, () => allowed(null));
+      return streamFile(req, res, found, { ...headers, 'Cache-Control': 'no-store' }, {
+        beforeSend() { allowed(auth.userFrom(req)); },
+      });
     }
     const reference = /^\/media\/references\/([a-z0-9-]+)\.(png|jpg|webp)$/.exec(pathname);
     if (reference) {
@@ -1031,12 +1047,22 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       if (!image || extname(image.path) !== `.${reference[2]}`) return sendJson(res, 404, { error: '文件不存在' });
       const found = resolveInside(config.dataDir, `/references/${reference[1]}.${reference[2]}`);
       if (!found) return sendJson(res, 404, { error: '文件不存在' });
-      return streamFile(req, res, found, {
+      const allowed = (viewer) => {
+        const current = references.file(reference[1], viewer);
+        if (current?.path !== image.path || resolveInside(config.dataDir, `/references/${reference[1]}.${reference[2]}`)?.file !== found.file)
+          fail(404, '文件不存在');
+        return true;
+      };
+      const headers = {
         'Content-Type': image.type,
-        'Cache-Control': `${image.public ? 'public' : 'private'}, max-age=31536000, immutable`,
         'Vary': 'Origin, Cookie',
         'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(image.name).replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`)}`,
         'Content-Security-Policy': "default-src 'none'",
+      };
+      if (image.public)
+        return streamRevalidatedMedia(req, res, found, { ...headers, 'Cache-Control': CONTENT_REVALIDATE }, () => allowed(null));
+      return streamFile(req, res, found, { ...headers, 'Cache-Control': 'no-store' }, {
+        beforeSend() { allowed(auth.userFrom(req)); },
       });
     }
     const media = /^\/media\/(up-[a-z0-9]{8})\/(cover(?:-[a-z0-9]{8,24})?\.(?:png|jpg|webp)|first(?:-[a-z0-9]{8,24})?\.jpg|mobile(?:-[a-z0-9]{8,24})?\.jpg|preview\.(?:sbox|webp|jpg)|preview-[a-z0-9]{8,24}\.(?:sbox|webp))$/.exec(pathname);
@@ -1046,24 +1072,38 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       if (!library.canRead(work, viewer)) return sendJson(res, 404, { error: '文件不存在' });
       const found = media && resolveInside(library.mediaDir, `/${media[1]}/${media[2]}`);
       if (!found) return sendJson(res, 404, { error: '文件不存在' });
-      // Covers and screenshots keep their file names while re-bakes overwrite
-      // them, so published works get a short private cache instead of immutable;
-      // legacy media is frozen and stays shareable.
-      return streamFile(req, res, found, { 'Cache-Control': library.isRestricted(work) ? 'no-store' : work.moderation.status === 'legacy' ? 'public, max-age=300' : 'private, max-age=600', 'Content-Security-Policy': "default-src 'none'" });
+      // Media can be withdrawn or become private without changing its filename.
+      // Public bytes may be reused only after a fresh access check; private
+      // owner/reviewer media must never be stored or receive a validator.
+      const allowed = (currentViewer) => library.canRead(library.uploadById(media[1], currentViewer), currentViewer);
+      if (library.canRead(work, null)) {
+        return streamRevalidatedMedia(req, res, found, {
+          'Cache-Control': CONTENT_REVALIDATE, 'Vary': 'Origin, Cookie', 'Content-Security-Policy': "default-src 'none'",
+        }, () => allowed(null));
+      }
+      return streamFile(req, res, found, { 'Cache-Control': 'no-store', 'Vary': 'Origin, Cookie', 'Content-Security-Policy': "default-src 'none'" }, {
+        beforeSend() {
+          if (!allowed(auth.userFrom(req))) fail(404, '文件不存在');
+        },
+      });
     }
     // Admin inbox previews stream straight from the staging directory; session-guarded
     // because these files are not published works yet.
     if (pathname.startsWith('/admin/inbox/')) {
       if (!isStaff(auth.userFrom(req))) {
-        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
         return res.end('Not found');
       }
       const found = inbox.resolve(pathname.slice('/admin/inbox'.length));
       if (!found) {
-        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
         return res.end('Not found');
       }
-      return streamFile(req, res, found, { 'Cache-Control': 'no-store', 'Content-Security-Policy': 'sandbox allow-scripts', ...(found.type ? { 'Content-Type': found.type } : {}) });
+      return streamFile(req, res, found, { 'Cache-Control': 'no-store', 'Content-Security-Policy': 'sandbox allow-scripts', ...(found.type ? { 'Content-Type': found.type } : {}) }, {
+        beforeSend() {
+          if (!isStaff(auth.userFrom(req)) || inbox.resolve(pathname.slice('/admin/inbox'.length))?.file !== found.file) fail(404, '文件不存在');
+        },
+      });
     }
     // The admin app lives in this repository and takes precedence over the dist fallback.
     if (pathname === '/admin' || pathname.startsWith('/admin/')) {
@@ -1089,8 +1129,13 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
       return res.end('Not found');
     }
-    return streamFile(req, res, found, { 'Cache-Control': 'no-cache',
-      'Content-Security-Policy': "sandbox; default-src 'none'", 'Referrer-Policy': 'no-referrer' });
+    const registry = packagePath === 'data.json';
+    return streamFile(req, res, found, { 'Cache-Control': registry ? 'no-store' : 'no-cache',
+      'Content-Security-Policy': "sandbox; default-src 'none'", 'Referrer-Policy': 'no-referrer' }, {
+      beforeSend: registry ? () => {
+        if (!isStaff(auth.userFrom(req)) || resolveInside(config.dist, pathname)?.file !== found.file) fail(404, '文件不存在');
+      } : undefined,
+    });
   }
 
   async function handleSite(req, res) {
@@ -1123,7 +1168,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       }
       if (!url.pathname.startsWith('/api/')) {
         if (req.method !== 'GET' && req.method !== 'HEAD') fail(405, '不支持这个操作');
-        return serveSite(req, res, url.pathname);
+        return await serveSite(req, res, url.pathname);
       }
       // Moderation tokens open only the dots whitelist; every other API refuses them.
       if (url.pathname.startsWith('/api/dots/')) return dots.handle(req, res, url);

@@ -4,7 +4,7 @@ import { createHash, randomBytes, scrypt, scryptSync, timingSafeEqual } from 'no
 import { AVATARS } from './config.mjs';
 import { fail, HttpError, uniqueCookie } from './http.mjs';
 import { transaction } from './db.mjs';
-import { roleOf, isStaff, isSenior, levelOf, capabilitiesOf } from './roles.mjs';
+import { roleOf, isStaff, isSenior, levelOf, capabilitiesOf, canSkipEmail } from './roles.mjs';
 
 const COOKIE = 'sp_session';
 const SCRYPT = { N: 16384, r: 8, p: 1 };
@@ -93,7 +93,7 @@ export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', 
   }
 
   return {
-    public: (user) => (user ? { id: user.id, name: user.name, nickname: user.nickname || user.name, avatar: avatarOf(user), role: roleOf(user.role), level: levelOf(user), levelSince: user.level_since ? new Date(user.level_since).toISOString() : null, levelSource: user.level_source ?? null, capabilities: capabilitiesOf(user) } : null),
+    public: (user) => (user ? { id: user.id, name: user.name, nickname: user.nickname || user.name, avatar: avatarOf(user), role: roleOf(user.role), level: levelOf(user), levelSince: user.level_since ? new Date(user.level_since).toISOString() : null, levelSource: user.level_source ?? null, capabilities: capabilitiesOf(user), emailOptional: canSkipEmail(user) } : null),
     byId: (id) => { const user = q.userById.get(id); return user ? syncRole(user) : null; },
     isAdminName(rawName) {
       const key = nameKey(String(rawName ?? ''));

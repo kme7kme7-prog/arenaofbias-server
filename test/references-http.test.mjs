@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { createPlatform } from '../server/app.mjs';
 import { limits } from '../server/config.mjs';
+import { CONTENT_REVALIDATE } from '../server/content-cache.mjs';
 import { verifiedUser } from './helpers/email.mjs';
 import { seedQuestionVotes } from './helpers/question-eligibility.mjs';
 import { referenceJpeg, referencePng, referenceWebp } from './helpers/reference-images.mjs';
@@ -139,7 +140,7 @@ describe('reference image HTTP contract', () => {
       assert.deepEqual(image.buffer, png);
       assert.equal(image.headers.get('content-type'), 'image/png');
       assert.equal(image.headers.get('x-content-type-options'), 'nosniff');
-      assert.equal(image.headers.get('cache-control'), 'private, max-age=31536000, immutable');
+      assert.equal(image.headers.get('cache-control'), 'no-store');
       assert.equal(image.headers.get('access-control-allow-origin'), galleryOrigin);
       assert.equal(image.headers.get('access-control-allow-credentials'), 'true');
       assert.match(image.headers.get('vary'), /Cookie/i);
@@ -187,7 +188,7 @@ describe('reference image HTTP contract', () => {
     assert.equal(publicQuestion.referenceCredit, question.referenceCredit);
     const publicImage = await call('guest', 'GET', mediaPath(reference));
     assert.equal(publicImage.status, 200); assert.deepEqual(publicImage.buffer, png);
-    assert.equal(publicImage.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+    assert.equal(publicImage.headers.get('cache-control'), CONTENT_REVALIDATE);
     assert.equal((await moderate(question.id, 'rejected', 'Temporary rejection')).status, 200);
     assert.ok(stored(reference.id));
     assert.ok(existsSync(fileOf(reference)));
@@ -285,9 +286,8 @@ describe('reference image HTTP contract', () => {
     const image = await call('guest', 'GET', path);
     assert.equal(image.status, 200); assert.deepEqual(image.buffer, png);
     assert.equal(image.headers.get('content-type'), 'image/png');
-    // Packaged references are immutable per data package; the gallery stamps the
-    // URL with a version. Private: question visibility is re-checked per request.
-    assert.equal(image.headers.get('cache-control'), 'private, max-age=31536000, immutable');
+    // A package version fixes bytes, while question visibility remains live.
+    assert.equal(image.headers.get('cache-control'), CONTENT_REVALIDATE);
     assert.equal(image.headers.get('access-control-allow-origin'), galleryOrigin);
     assert.equal((await call('guest', 'HEAD', path)).status, 200);
     assert.equal((await call('guest', 'OPTIONS', path, undefined, { 'access-control-request-method': 'GET' })).status, 204);

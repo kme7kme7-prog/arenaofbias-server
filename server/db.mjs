@@ -758,6 +758,14 @@ const MIGRATIONS = [
   (db) => db.exec(`CREATE TABLE IF NOT EXISTS restricted_models (
     model_key TEXT PRIMARY KEY, label TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, created_by TEXT NOT NULL DEFAULT ''
   );`),
+  // Keep cold ballot reads in chronological order without sorting their identity JSON;
+  // target the same user/task, disposable-round and attribution-audit predicates as readers.
+  (db) => db.exec(`CREATE INDEX IF NOT EXISTS votes_arena_created ON votes(created_at)
+    WHERE source = 'arena' AND voided_at IS NULL;
+  CREATE INDEX IF NOT EXISTS votes_user_task ON votes(user_id, task_id);
+  CREATE INDEX IF NOT EXISTS matches_disposable_expiry ON matches(expires_at)
+    WHERE choice IS NULL OR user_id IS NULL;
+  CREATE INDEX IF NOT EXISTS audit_action ON audit(action, id);`),
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

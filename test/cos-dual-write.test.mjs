@@ -9,6 +9,7 @@ import {
 } from '../server/cos-dual-write.mjs';
 
 const CREDS = {
+  COS_MEDIA_ACCESS_CONTROLLED: '1',
   COS_BUCKET: 'agi-1419403229',
   COS_REGION: 'ap-shanghai',
   COS_SECRET_ID: 'AKIDexample',
@@ -159,7 +160,7 @@ test('a successful put is not awaited by the caller and uses the public key', as
 test('missing credentials skip the put and do not throw', async () => {
   const http = fakeRequest();
   const { log, lines } = logger();
-  const mirror = createCosMirror({ env: { COS_REGION: 'ap-shanghai' }, ...NO_FILE, request: http.request, log, retryDelays: [0, 0, 0] });
+  const mirror = createCosMirror({ env: { COS_REGION: 'ap-shanghai', COS_MEDIA_ACCESS_CONTROLLED: '1' }, ...NO_FILE, request: http.request, log, retryDelays: [0, 0, 0] });
   assert.equal(mirror.settings.ready, false);
   assert.doesNotThrow(() => mirror.put({ workId: 'up-abcd1234', name: 'cover.png', body: Buffer.from('png') }));
   mirror.put({ workId: 'up-abcd1234', name: 'cover.png', body: Buffer.from('png') });
@@ -173,14 +174,15 @@ test('missing credentials skip the put and do not throw', async () => {
   assert.doesNotMatch(lines.warn[0], /secret-key/);
 });
 
-test('credentials alone enable a put; no extra flag is required', async () => {
+test('credentials alone cannot publish mutable media without an access-controlled CDN', async () => {
   const http = fakeRequest({ status: 200 });
   const { log, lines } = logger();
-  const mirror = createCosMirror({ env: CREDS, ...NO_FILE, request: http.request, log, retryDelays: [] });
+  const mirror = createCosMirror({ env: { ...CREDS, COS_MEDIA_ACCESS_CONTROLLED: undefined }, ...NO_FILE, request: http.request, log, retryDelays: [] });
   mirror.put({ workId: 'up-abcd1234', name: 'preview.sbox', body: Buffer.from('sbox') });
   await mirror.settled();
-  assert.equal(http.calls.length, 1);
-  assert.deepEqual(lines.warn, []);
+  assert.equal(http.calls.length, 0);
+  assert.equal(lines.warn.length, 1);
+  assert.match(lines.warn[0], /authorization on every read/);
 });
 
 test('put failures retry and do not reject the caller', async () => {
@@ -283,4 +285,40 @@ test('mirrorPublicMedia ignores a throwing mirror and private filenames', () => 
     console.warn = warn;
     resetCosMirror();
   }
+});
+
+test('a stalled COS response has a total deadline even when its socket stays active', async () => {
+  let destroyed = 0;
+  const request = () => ({
+    write() {}, end() {}, on() { return this; }, setTimeout() {}, destroy() { destroyed++; },
+  });
+  const { log, lines } = logger();
+  const mirror = createCosMirror({ env: CREDS, ...NO_FILE, request, log, timeoutMs: 20, retryDelays: [] });
+  mirror.put({ workId: 'up-abcd1234', name: 'first.jpg', body: Buffer.from('image') });
+  await mirror.settled();
+  assert.equal(destroyed, 1);
+  assert.equal(lines.warn.length, 1);
+  assert.match(lines.warn[0], /timed out/);
+});
+
+test('slow COS writes have bounded pending jobs and bytes and release their capacity', async () => {
+  const completions = [];
+  const request = (_, callback) => ({
+    write() {}, on() { return this; }, setTimeout() {}, destroy() {},
+    end() { completions.push(() => callback({ statusCode: 200, resume() {}, on(event, fn) { if (event === 'end') queueMicrotask(fn); return this; } })); },
+  });
+  const { log, lines } = logger();
+  const mirror = createCosMirror({ env: CREDS, ...NO_FILE, request, log, maxPending: 2, maxPendingBytes: 6, retryDelays: [] });
+  const put = (name, text) => mirror.put({ workId: 'up-abcd1234', name, body: Buffer.from(text) });
+  put('first.jpg', 'aaa'); put('mobile.jpg', 'bbb'); put('cover.png', 'x');
+  assert.equal(completions.length, 1, 'only one network write runs at a time');
+  assert.match(lines.warn[0], /pending job limit/);
+  completions.shift()(); await new Promise(setImmediate);
+  assert.equal(completions.length, 1);
+  completions.shift()(); await mirror.settled();
+  put('preview.sbox', 'toolarge');
+  assert.match(lines.warn[1], /pending byte limit/);
+  put('cover.png', 'ok'); assert.equal(completions.length, 1);
+  completions.shift()(); await mirror.settled();
+  assert.equal(lines.log.length, 3);
 });

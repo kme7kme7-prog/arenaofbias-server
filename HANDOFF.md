@@ -1,3 +1,16 @@
+## 2026-10-26 · 查询索引与媒体权限边界（已授权发布准备，生产验收待执行）
+
+- 用户已明确授权本轮 commit、push 和上线；负责人 wsnxxxs（GitHub ID 269096463），使用其 noreply 身份，由主代理统一执行。执行 Codex（子任务 GPT-6.1 Sol / max）。本节写入时尚未执行正式生产安装与验收，实际提交、部署、备份和公网结果以 `/root/aob-performance-20261026/` 本轮发布 receipt 为准。
+- 已先 fetch 四仓；候选基于最新 origin/main b4acb04，并保留原仓 dots 邮箱豁免。现场运行源码另有 arena-only 题目/提示词版本等补丁，发布候选以现场为底三方合并，不覆盖这些逻辑。
+- 只追加迁移 53 四个幂等索引：有效 arena 票时间序、用户/题目历史、可清理匹配过期时间、审计 action/id。生产一致副本的 42 表旧行哈希保持、quick_check ok/FK0、旧代码可重开 v53；27 组完整 DTO 三方一致。
+- 副本 Linux Node22 SQL 中位数：冷榜 545.85→361.33ms；过期清理52.71→9.29ms；活跃用户单题历史10.88→0.60ms；移题审计4.70→0.22ms。索引约+2.07MiB，迁移约199ms；这些不含HTTP，也不是生产端到端提速承诺。
+- 私密作品能力 d/p/m/e 在异步文件打开后复核；上传媒体及参考图公开读每次重新鉴权后可ETag复用，私密读no-store并在发送前复核身份。API媒体代理配置取消无条件CDN跳转。
+- COS双写默认停止，只有实际配置每次读取权限校验的CDN后才允许进程变量 COS_MEDIA_ACCESS_CONTROLLED=1；不应仅因配置了COS密钥就上传私密资源。镜像队列最多64件/64MiB，每次PUT尝试有20s完整截止；最多4次尝试，间隔0.5/2/8秒退避。
+- 最终保留现场补丁的Linux Node22.23.4组合语法176/0、测试580/580通过，失败/取消/跳过0。首次测试包缺datapack配置与EdgeOne辅助文件，补齐后完整重跑通过；没有跳过测试。全部数据库验证在一致副本和临时库，未写生产业务库。
+- 用户明确要求MySQL公网3306暂时保留并记录风险，不改防火墙/MySQL；本站使用SQLite。
+- 云端存量媒体直链尚需用户在 API 和前端安全路径上线后按交付配置关闭并清缓存，完成前不能称已关闭。回退代码保留v53和当前业务数据库，不用旧库覆盖后续投票；不要恢复动态媒体公开 CDN 直跳。
+- [本轮归档](docs/archive/2026-10-26-query-indexes-media-access-wsnxxxs.md)。下方 Phase B 的历史默认双写和 CDN 读取描述由本轮安全策略覆盖。
+
 ## 2026-10-25 · 媒体 CDN 双写 Phase B（PR，未合并，未部署）
 
 - 新的公开投稿媒体在源站写成功后，由 `server/cos-dual-write.mjs` 异步 Put 到腾讯云 COS。对象键等于公开路径去掉开头的 `/`：磁盘 `DATA_DIR/media/up-duj5bt74/first.jpg` → `media/up-duj5bt74/first.jpg`。只上传 `/media/<workId>/` 实际放行的文件名（封面、first/mobile jpg、preview.sbox/webp/jpg 及带 stamp 的版本）。`*-late.jpg`、`preview.json`、`history/` 不上传。私有重截图（`outputDir`）不上传。

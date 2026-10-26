@@ -307,19 +307,10 @@ test('v6 migrates legacy password hashes on first successful login', async () =>
   const legacy = new DatabaseSync(file);
   const salt = '0123456789abcdef0123456789abcdef';
   const oldHash = scryptSync('correct horse', salt, 64, { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }).toString('hex');
-  legacy.exec(`CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, name_key TEXT NOT NULL UNIQUE,
-    role TEXT NOT NULL, salt TEXT NOT NULL, hash TEXT NOT NULL, created_at INTEGER NOT NULL,
-    nickname TEXT NOT NULL DEFAULT '');
-    CREATE TABLE sessions (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users (id),
-      created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
-    CREATE TABLE works (id TEXT PRIMARY KEY, status TEXT NOT NULL, task_id TEXT NOT NULL, owner_id TEXT, deleted_at INTEGER, reviewed_at INTEGER, updated_at INTEGER);
-    CREATE TABLE matches (id TEXT PRIMARY KEY, created_at INTEGER);
-    CREATE TABLE votes (id TEXT PRIMARY KEY, pair_key TEXT, identity_source TEXT NOT NULL DEFAULT 'legacy');
-    CREATE TABLE audit (id INTEGER PRIMARY KEY, at INTEGER, actor_id TEXT, actor_name TEXT, action TEXT, task_id TEXT, work_id TEXT, detail TEXT);
-    PRAGMA user_version = 5;`);
+  for (const migration of MIGRATIONS.slice(0, 5)) typeof migration === 'function' ? migration(legacy) : legacy.exec(migration);
+  legacy.exec('PRAGMA user_version = 5');
   legacy.prepare('INSERT INTO users (id, name, name_key, role, salt, hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
     .run('legacy-user', 'olduser', 'olduser', 'member', salt, oldHash, Date.now());
-  legacy.exec(MIGRATIONS[1]);
   legacy.close();
   const db = openDatabase(file);
   try {
@@ -346,17 +337,8 @@ test('malformed legacy hash_params are treated as a wrong password, never a 500'
   const root = mkdtempSync(join(tmpdir(), 'legacy-auth-'));
   const file = join(root, 'platform.db');
   const setup = new DatabaseSync(file);
-  setup.exec(`CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, name_key TEXT NOT NULL UNIQUE,
-    role TEXT NOT NULL, salt TEXT NOT NULL, hash TEXT NOT NULL, created_at INTEGER NOT NULL,
-    nickname TEXT NOT NULL DEFAULT '');
-    CREATE TABLE sessions (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users (id),
-      created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
-    CREATE TABLE works (id TEXT PRIMARY KEY, status TEXT NOT NULL, task_id TEXT NOT NULL, owner_id TEXT, deleted_at INTEGER, reviewed_at INTEGER, updated_at INTEGER);
-    CREATE TABLE matches (id TEXT PRIMARY KEY, created_at INTEGER);
-    CREATE TABLE votes (id TEXT PRIMARY KEY, pair_key TEXT, identity_source TEXT NOT NULL DEFAULT 'legacy');
-    CREATE TABLE audit (id INTEGER PRIMARY KEY, at INTEGER, actor_id TEXT, actor_name TEXT, action TEXT, task_id TEXT, work_id TEXT, detail TEXT);
-    PRAGMA user_version = 5;`);
-  setup.exec(MIGRATIONS[1]);
+  for (const migration of MIGRATIONS.slice(0, 5)) typeof migration === 'function' ? migration(setup) : setup.exec(migration);
+  setup.exec('PRAGMA user_version = 5');
   setup.close();
   const db = openDatabase(file);
   try {

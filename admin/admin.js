@@ -166,7 +166,7 @@ const contentHeld = (w) => ['pending', 'review', 'rejected'].includes(w.moderati
 const contentReady = (w) => ['legacy', 'approved'].includes(w.moderation?.status);
 const isStaff = (user) => ['admin', 'moderator'].includes(user?.role);
 const isSenior = () => state.user?.role === 'admin';
-const canDecide = (work) => isSenior() || !work.mine;
+const canDecide = () => isStaff(state.user);
 const LEVELS = { 3: 'Lv3 高级管理员', 2: 'Lv2 普通管理员', 1: 'Lv1 认证成员', 0: 'Lv0 成员' };
 const levelOfUser = (u) => u.level ?? ({ admin: 3, moderator: 2 }[u.role] ?? 0);
 const publisher = (item) => item.author?.role === 'user' ? '用户' : '管理员';
@@ -350,7 +350,7 @@ function inboxPanel() {
         <label class="field"><span class="field-label">摘要</span><input class="input" name="summary" maxlength="200" value="${value('summary')}"></label>
         ${provenanceFields({ harness: { choice: form.harnessChoice, other: form.harnessOther }, provider: { choice: form.providerChoice } })}
         ${generationFields(form)}
-        <p class="fine">管理员发布跳过内容审核，登记后进入人工核验队列。普通管理员的作品须由其他管理员核验。</p>
+        <p class="fine">管理员发布跳过内容审核，登记后进入人工核验队列。普通管理员也可以核验自己发布的作品。</p>
         <p class="form-error" role="alert"></p>
         <div class="actions"><button type="button" class="btn sm danger ghost" data-inbox-remove>${icon('trash')}移除</button><span class="spacer"></span><button class="btn sm primary" type="submit">${icon('check')}登记入库</button></div>
       </form>
@@ -429,7 +429,7 @@ function adminWorkRow(w, face = state.system) {
     <td>${esc(w.modelName)}${provenanceText(w) ? `<small class="work-provenance">${esc(provenanceText(w))}</small>` : ''}</td><td>${statusBadge(w.status)}</td>
     <td>${publisher(w)}${w.author?.name ? `<small>${esc(w.author.name)}</small>` : ''}</td><td>${w.show_gallery ? '进入展览馆' : '未进展览馆'}</td>
     ${face === 'arena' ? `<td>${formal}</td><td>${entertainment}</td>` : '<td>—</td>'}
-    <td><div class="actions"><button class="btn sm" data-preview="${esc(`${w.task}/${w.id}`)}">预览</button>${canDecide(w) ? `<button class="btn sm" data-calibrate="${esc(`${w.task}/${w.id}`)}">${label}取景</button>` : ''}${isSenior() ? `<button class="btn sm" data-task-note="${esc(w.task)}">${face === 'gallery' ? '策展笔记' : '题目点评'}</button>` : ''}<button class="btn sm" data-edit="${esc(`${w.task}/${w.id}`)}">编辑</button>${canDecide(w) ? `<a class="btn sm" href="${REVIEW_URL}" target="_blank" rel="noopener">审核</a>` : '<small>需由其他管理员审核</small>'}${isSenior() ? `<button class="btn sm danger" data-delete="${esc(`${w.task}/${w.id}`)}">删除</button>` : ''}</div></td>
+    <td><div class="actions"><button class="btn sm" data-preview="${esc(`${w.task}/${w.id}`)}">预览</button>${canDecide(w) ? `<button class="btn sm" data-calibrate="${esc(`${w.task}/${w.id}`)}">${label}取景</button>` : ''}${isSenior() ? `<button class="btn sm" data-task-note="${esc(w.task)}">${face === 'gallery' ? '策展笔记' : '题目点评'}</button>` : ''}<button class="btn sm" data-edit="${esc(`${w.task}/${w.id}`)}">编辑</button>${canDecide(w) ? `<a class="btn sm" href="${REVIEW_URL}" target="_blank" rel="noopener">审核</a>` : '<small>需要管理员权限</small>'}${isSenior() ? `<button class="btn sm danger" data-delete="${esc(`${w.task}/${w.id}`)}">删除</button>` : ''}</div></td>
   </tr>`;
 }
 function systemWorksView() {
@@ -1047,8 +1047,8 @@ function editDialog(w) {
   const homes = new Map([...(state.adminQuestions ?? []), ...(state.questions ?? [])].map((t) => [t.id, t.title]));
   if (!homes.has(w.task)) homes.set(w.task, taskTitle(w.task));
   const sheet = openDialog({ title: `编辑信息 · ${w.title}`, body: `<form class="admin-editor">
-    <label class="field"><span class="field-label">归属题目<small>${movable ? '改到其他题目后，盲评记录、评论和表情随作品一起迁移' : Object.hasOwn(w, 'reviewed') ? '自己发布的作品须由其他管理员调整' : '数据包作品的归属题目由数据仓库维护'}</small></span><select class="input" name="task"${movable ? '' : ' disabled'}>${[...homes].map(([id, title]) => `<option value="${esc(id)}"${id === w.task ? ' selected' : ''}>${esc(title)}</option>`).join('')}</select></label>
-    ${canDecide(w) ? '' : '<p class="fine">自己发布的作品须由其他管理员处理审核与开关</p>'}
+    <label class="field"><span class="field-label">归属题目<small>${movable ? '改到其他题目后，盲评记录、评论和表情随作品一起迁移' : Object.hasOwn(w, 'reviewed') ? '需要管理员权限' : '数据包作品的归属题目由数据仓库维护'}</small></span><select class="input" name="task"${movable ? '' : ' disabled'}>${[...homes].map(([id, title]) => `<option value="${esc(id)}"${id === w.task ? ' selected' : ''}>${esc(title)}</option>`).join('')}</select></label>
+    ${canDecide(w) ? '' : '<p class="fine">需要管理员权限</p>'}
     <label class="field"><span class="field-label">作品标题</span><input class="input" name="title" maxlength="40" value="${esc(w.title)}" required></label>
     <div class="field-row">
       <label class="field"><span class="field-label">模型名称</span><input class="input" name="modelName" maxlength="60" value="${esc(w.modelName)}" required></label>

@@ -764,7 +764,7 @@ test('admin package attribution edits resolve saved ballots without writing corr
   assert.equal(platform.db.prepare("SELECT COUNT(*) AS n FROM audit WHERE action = 'vote-identity-correction' AND work_id = 'a'").get().n, 0);
 }));
 
-test('moderator routes enforce senior permissions and forbid decisions on own works', async () => withPlatform(async ({ platform, call }) => {
+test('moderator routes preserve senior permissions and allow decisions on own works', async () => withPlatform(async ({ platform, call }) => {
   const senior = platform.db.prepare("SELECT * FROM users WHERE name = 'root'").get();
   const staff = await platform.auth.register('staff', 'correct horse');
   platform.auth.bindEmail(staff.id, 'staff@example.test');
@@ -796,19 +796,23 @@ test('moderator routes enforce senior permissions and forbid decisions on own wo
   const ownDecisions = [
     [`/api/works/one/${id}/review`, { status: 'verified' }],
     [`/api/works/one/${id}/moderation`, { status: 'approved' }],
-    [`/api/works/one/${id}/moderation/retry`, undefined],
     [`/api/admin/works/one/${id}/face-settings`, { show_gallery: false }],
-    [`/api/admin/works/one/${id}/calibration`, { face: 'gallery', calibration: {} }],
+    [`/api/admin/works/one/${id}/calibration`, { face: 'gallery', calibration: null }],
     ['/api/admin/works/batch-face-settings', { works: [{ task: 'one', id }], show_gallery: false }],
   ];
-  for (const [path, body] of ownDecisions) assert.equal((await call('staff', 'POST', path, body)).status, 403, path);
+  for (const [path, body] of ownDecisions) {
+    const result = await call('staff', 'POST', path, body);
+    assert.equal(result.status, 200, `${path}: ${JSON.stringify(result.data)}`);
+  }
+  assert.equal((await call('staff', 'POST', `/api/works/one/${id}/moderation/retry`)).status, 409, 'retry still requires enabled automatic moderation');
   platform.db.prepare('UPDATE works SET entertainment_route = 1 WHERE id = ?').run(id);
-  assert.equal((await call('staff', 'POST', '/api/admin/works/batch-inbox', { works: [{ task: 'one', id }], task: 'two' })).status, 403);
+  assert.equal((await call('staff', 'POST', '/api/admin/works/batch-inbox', { works: [{ task: 'one', id }], task: 'two' })).status, 200);
+  assert.equal((await call('staff', 'POST', `/api/admin/works/two/${id}/meta`, { task: 'one' })).status, 200);
   platform.db.prepare('UPDATE works SET entertainment_route = 0 WHERE id = ?').run(id);
   for (const endpoint of ['batch-review', 'batch-moderation']) {
     const result = await call('staff', 'POST', `/api/admin/works/${endpoint}`, { works: [{ task: 'one', id }], status: endpoint === 'batch-review' ? 'verified' : 'approved' });
     assert.equal(result.status, 200);
-    assert.equal(result.data.results[0].error.status, 403);
+    assert.equal(result.data.results[0].ok, true, JSON.stringify(result.data));
   }
   assert.equal((await call('staff', 'POST', `/api/admin/works/one/${id}/meta`, { title: '自己可编辑' })).status, 200);
   assert.equal((await call('staff', 'POST', `/api/admin/works/one/${id}/preview`)).status, 200);

@@ -1,3 +1,31 @@
+## 2026-10-27 · 桌面项目整理与提交
+
+- 用户授权提交推送并直接清理，不备份。同步 origin/main，保留远端 COS 清理、数据库读取和媒体权限修改；dots 邮箱豁免已在远端，去重后仅补普通管理员自审、后台提示、合同和回归。合并 Terra 调查与历史交接记录。
+- npm run check：177 文件/0错误；npm test：589/589。未部署、重启、操作生产数据库或重跑生产浏览器。
+- 推送核对后清理旧候选、历史本地输出、缓存与生成物；历史 .local/output 证据路径失效。正式源码、作品及 Git 历史保留。后续无需重复提交下节所述已上线改动。
+- [本轮归档](docs/archive/2026-10-27-workspace-cleanup-wsnxxxs.md)。
+
+## 2026-10-27 · GPT-6.1 Terra 历史归属归并（已上线）
+
+- 线上包 c5d12e5 已含 gpt-6.1-terra；将13件未删除的 GPT-6.1 Terra / GPT 6.1 Terra 手填作品通过现场 library.setMeta 单事务更正为既有正式ID，保留原档位、内容与其他业务字段。副本演练和线上实做均为28个相关历史票侧随同digest归属正式模型，原始票逐行不变，manual/digest异常0；未改生产源码或数据包、未重启。
+- 公网大众模型榜 UTC 09:33:31 合并为唯一条目：39场、14胜2平23负、17人、9题、992分、第59名，非暂定。配置榜 Max 8、Ultra 29、XHigh 4；与模型榜口径不同，合并后同模型内部比较不参与模型榜。
+- 精选榜不显示：使用生产最新一致副本、现场计分逻辑，仅在副本放宽显示门槛以观察未达资格的计算结果，UTC 09:34 核算14场（6胜0平8负），距30场门槛16场；非线上实际精选排名。公网精选榜仍按现有规则过滤，未改资格规则。
+- 生产前备份 /root/aob-terra-merge-20261027/preapply.db；演练和校验结果同目录。quick_check ok、外键0、服务active，线上未用旧库回滚覆盖新增业务。本地数据仓上轮准备的模型条目尚未提交或发布，线上包条目有其他字段，未来发布须先对齐现有线上来源，不可覆盖未知线上变更。
+
+## 2026-10-27 · 普通管理员允许审核本人作品（已上线，未提交）
+
+- 用户明确将普通管理员也纳入自审权限。移除 library 共用 requireStaff 的本人作品限制，普通/高级管理员均可执行本人作品内容审核、核验、重审、展示开关、校准与归属及对应批量操作；普通成员门禁和高级管理员专属题目/删除/角色权限保持。后台按钮和投稿提示同步。
+- 本地语法169/0、全量535/535通过；Gallery语法114/0、147/147通过。生产源码隔离候选在Linux Node22.23.4相关HTTP/库/后台/安全回归51/51通过。最初Linux全套停滞于capture文件后终止；初次相关回归缺测试helpers，补齐后曾用10秒文件上限导致admin文件超时，最终60秒上限51项全部通过。不称Linux全套通过。
+- 生产只增量server/library.mjs与admin/admin.js，精确替换保留现场补丁，重启后API session200、服务active；同步Gallery六JS及index/version。未迁移表结构或对真实作品作审核决定，未commit/push。后端备份/root/aob-moderator-self-review-20261027/backend-before，Gallery回退/www/wwwroot/gallery.before-moderator-self-review-20261027；回退只恢复代码/静态目录并重启，不覆盖业务数据库。
+- 公网后台JS和Gallery八文件SHA逐项一致，其他2374个Gallery文件保持。桌面1440/手机390本地真实模块夹具验证普通管理员本人作品内容审核、核验入口及展示设置可用、删除入口隐藏、页面异常0，并目检手机弹窗。未用生产普通管理员账号实际提交审核。私有证据在父目录.local/moderator-self-review-20261027/，服务器同名任务目录。
+
+## 2026-10-25 · dots 无邮箱登录与投稿豁免（已上线，未提交）
+
+- 用户要求现有 dots 使用账号密码登录，并在未绑定邮箱时拥有最高权限。复用既有独立 dots 高级管理员，设置随机密码并以 auth.login 验证；不记录明文密码、不改令牌绑定与 scopes。
+- 新增 canSkipEmail，仅 name_key=dots 且 role=admin 生效；邮箱门禁复用该判定，public DTO 显式 emailOptional，真实 email/emailBound 保持未绑定。降级立即撤销豁免，其他管理员和普通账号保持邮箱要求。
+- 生产仅按精确旧文本增量修改 roles/auth/app 三模块，保留现场其他补丁，重启后服务 active。备份 /root/aob-dots-email-20261025/backend-before；回退恢复三模块并重启，保留当前业务库。密码变更前一致库备份 /root/aob-dots-login-20261025/platform-before.db，仅供恢复参考，不覆盖后续业务。
+- 专项真实 HTTP 测试通过（dots 无邮箱 GET drafts 200、其他管理员 403、dots 降级 403）。语法检查169/0；全套529项通过，重截图测试在并发运行时停滞约93秒后手动终止，该文件单独带10秒超时重跑15/15通过；不称全套一次通过。日志见父目录 .local/dots-email-20261025/。公网短期会话核对 dots role=admin/level=3/emailBound=false/emailOptional=true，GET drafts 与 admin/users 均200，前端实际JS含豁免；临时会话已删除。未 commit/push。
+
 ## 2026-10-26 · 作品删除/拒绝后清理 COS 与 CDN（PR，未合并，未部署）
 
 - 问题：作品删除或被拒后，源站 `/media/<id>/` 已 404，但 `media.arenaofbias.icu`（COS 桶 `agi-1419403229` + 腾讯 CDN）上的副本仍可匿名直读。

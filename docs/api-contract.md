@@ -57,7 +57,7 @@ Gallery 的 `MEDIA_CDN_BASE_URL` 只切换静态 `assets/scenes/`，空或不设
 
 ### 1.3.1 三级权限
 
-`isStaff` 包含 admin / moderator，`isSenior` 仅 admin。高级管理员可审核自己的作品与题目；普通管理员不能对自己发布的作品作审核决定，返回 `403` 并提示需要其他管理员处理，编辑自己的作品信息可以。
+`isStaff` 包含 admin / moderator，`isSenior` 仅 admin。高级管理员可审核自己的作品与题目；普通管理员可审核自己发布的作品，并管理作品信息、展示与校准，题目管理仍仅限高级管理员。
 
 | 操作 | admin | moderator |
 | --- | --- | --- |
@@ -935,7 +935,7 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 - `DELETE /api/admin/inbox?id=<ID>`：移除暂存文件并写 inbox-remove 审计，不等于删除已发布作品。
 - `POST /api/admin/works/:task/:id/meta`：两种存储统一编辑 title/summary/note、promptVariant、modelId/modelName/vendor、effort、harnessId/harnessOther、providerId、generationMode/humanIntervention。未提供字段保持原值，校验与作品表单一致，旧停用字段沿用忽略规则。数据包写 work_overrides.display_json，数据库写本行；不触发重新内容审核，写 meta 审计。普通管理员可编辑自己作品的信息。响应 `{ "work": <管理员作品视图> }`。
 
-原 `POST /api/admin/works/:task/:id/display` 路由已删除，后台所有编辑统一调用 meta。核验、内容决定、开关、校准、收件箱归属及相应批量接口拒绝普通管理员处理自己的作品，403 提示需由其他管理员处理；高级管理员可以处理自己作品。
+原 `POST /api/admin/works/:task/:id/display` 路由已删除，后台所有编辑统一调用 meta。核验、内容决定、开关、校准、收件箱归属及相应批量接口均允许普通与高级管理员处理自己的作品；题目、删除及角色管理的高级管理员限制保持。
 
 ### 3.20 Show1 猜模型接口
 

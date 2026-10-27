@@ -595,9 +595,8 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     return next;
   }
 
-  function requireStaff(actor, work, decision = true) {
+  function requireStaff(actor) {
     if (!isStaff(actor)) fail(403, '需要管理员权限');
-    if (decision && !isSenior(actor) && work?.ownerId === actor.id) fail(403, '需由其他管理员处理自己发布的作品');
   }
   const displayIdentity = (work) => work.curated && Object.hasOwn(work, 'displayModelId')
     ? { ...work, modelId: work.displayModelId } : work;

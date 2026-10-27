@@ -78,7 +78,7 @@ test('catalog tolerates an old pack with no registries', () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('staff publishing waits for verification, preserves authorship and guards moderator decisions', async () => {
+test('staff publishing waits for verification, preserves authorship and allows moderator self review', async () => {
   const root = mkdtempSync(join(tmpdir(), 'staff-work-'));
   const db = openDatabase(join(root, 'platform.db'));
   const catalog = createCatalog(pack(root));
@@ -105,20 +105,20 @@ test('staff publishing waits for verification, preserves authorship and guards m
     assert.equal(library.adminWork(work, moderator).mine, true);
     library.setMeta(moderator, 'one', work.id, { title: 'Edited staff work' }, { author: true });
     assert.equal(library.work('one', work.id).moderation.status, 'approved', 'staff edits do not enter automatic review');
-    const ownDecision = (action) => assert.throws(action, (error) => error.status === 403 && /其他管理员/.test(error.message));
-    ownDecision(() => library.review(moderator, 'one', work.id, { status: 'verified' }));
-    ownDecision(() => library.reviewContent(moderator, 'one', work.id, { status: 'approved' }));
-    ownDecision(() => library.retryModeration(moderator, 'one', work.id));
-    ownDecision(() => library.setFaceSettings(moderator, 'one', work.id, { show_gallery: false }));
-    ownDecision(() => library.setFaceCalibration(moderator, 'one', work.id, 'gallery', null));
-    ownDecision(() => library.setCalibration(moderator, work.id, null));
-    ownDecision(() => library.batchSetFaceSettings(moderator, [{ task: 'one', id: 'a1' }, { task: 'one', id: work.id }], { show_gallery: false }));
-    assert.equal(library.flagsOf(library.work('one', 'a1')).show_gallery, true, 'a blocked batch rolls back earlier updates');
+    assert.equal(library.retryModeration(moderator, 'one', work.id).moderation.status, 'pending');
+    assert.equal(library.reviewContent(moderator, 'one', work.id, { status: 'approved' }).moderation.status, 'approved');
+    assert.equal(library.setFaceCalibration(moderator, 'one', work.id, 'gallery', null), null);
+    library.setCalibration(moderator, work.id, null);
+    library.batchSetFaceSettings(moderator, [{ task: 'one', id: 'a1' }, { task: 'one', id: work.id }], { show_gallery: false });
+    assert.equal(library.flagsOf(library.work('one', 'a1')).show_gallery, false);
+    assert.equal(library.review(moderator, 'one', work.id, { status: 'verified' }).status, 'verified');
+    assert.equal(library.setFaceSettings(moderator, 'one', work.id, { show_gallery: true }).show_gallery, true);
     assert.equal(library.review(senior, 'one', work.id, { status: 'verified' }).status, 'verified');
     assert.equal(library.visibleTo(library.work('one', work.id)), true);
     db.prepare("UPDATE users SET role = 'user' WHERE id = ?").run(moderator.id);
     assert.equal(library.toPublic(library.work('one', work.id)).author.role, 'moderator', 'authorship keeps the creation role');
     assert.equal(library.toPublic(library.work('one', work.id)).author.name, 'Mod nickname');
+    assert.throws(() => library.review({ ...moderator, role: 'user' }, 'one', work.id, { status: 'verified' }), (error) => error.status === 403);
     const adminDraft = library.createDraft(senior, 'one', 'admin.html', Buffer.from(PAGE));
     const own = library.submit(senior, { draftId: adminDraft.id, confirmed: true, title: 'Admin work', modelId: 'm-b', effort: 'High', providerId: 'official' });
     assert.equal(library.review(senior, 'one', own.id, { status: 'verified' }).status, 'verified', 'senior staff may verify their own work');

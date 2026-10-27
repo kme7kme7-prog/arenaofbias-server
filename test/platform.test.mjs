@@ -13,6 +13,7 @@ import { after, before, describe, test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { crc32, deflateRawSync } from 'node:zlib';
 import { createPlatform } from '../server/app.mjs';
+import { installCosMirror, resetCosMirror } from '../server/cos-dual-write.mjs';
 import { createAuth } from '../server/auth.mjs';
 import { verifiedUser } from './helpers/email.mjs';
 import { createArena } from '../server/arena.mjs';
@@ -883,7 +884,12 @@ describe('platform lifecycle', () => {
     assert.equal((await call('bob', 'GET', '/api/leaderboard?task=one')).data.totals.votes, counted, 'leaving the blind pool keeps the ballots');
 
     assert.equal((await call('alice', 'DELETE', `/api/works/one/${voted.id}`, { void: true, reason: 'x' })).status, 403, 'authors cannot void ballots');
-    assert.equal((await call('alice', 'DELETE', `/api/works/one/${voted.id}`)).status, 200, 'authors may withdraw a voted work');
+    const purged = [];
+    installCosMirror({ put() {}, purge: (id) => purged.push(id) });
+    try {
+      assert.equal((await call('alice', 'DELETE', `/api/works/one/${voted.id}`)).status, 200, 'authors may withdraw a voted work');
+    } finally { resetCosMirror(); }
+    assert.deepEqual(purged, [voted.id], 'withdrawal removes the mirrored media');
     assert.equal((await call('bob', 'GET', '/api/leaderboard?task=one')).data.totals.votes, counted, 'withdrawal keeps the ballots');
     assert.ok(!(await call('bob', 'GET', '/api/bootstrap')).data.works.some((work) => work.id === voted.id));
     assert.ok(existsSync(files), 'voted files stay for history');
@@ -1023,7 +1029,12 @@ describe('platform lifecycle', () => {
       assert.equal(created.data.work.status, 'unverified');
       assert.equal(created.data.work.root, 'dist');
       assert.equal(await fetchContent(created.data.work.scene).then((result) => result.status), 200);
-      assert.equal((await call('bob', 'DELETE', `/api/questions/${created.data.question.id}`)).status, 200);
+      const purged = [];
+      installCosMirror({ put() {}, purge: (id) => purged.push(id) });
+      try {
+        assert.equal((await call('bob', 'DELETE', `/api/questions/${created.data.question.id}`)).status, 200);
+      } finally { resetCosMirror(); }
+      assert.deepEqual(purged, [created.data.work.id], 'question deletion removes the mirrored media of its works');
     }
   });
 

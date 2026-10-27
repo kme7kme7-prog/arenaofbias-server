@@ -14,8 +14,15 @@
 // COS_SECRET_ID and COS_SECRET_KEY from the environment, or from
 // /root/.config/arenaofbias/cos.env, or from ./cos.env beside this repo.
 // A missing secret is logged once and never thrown to the upload or capture.
+//
+// Removal: when a work is deleted, rejected, or swept as an orphan, purgeWorkMedia
+// lists media/<workId>/ in the bucket, deletes each object (DeleteObject), then asks
+// Tencent Cloud CDN to refresh exactly those object URLs on MEDIA_CDN_PURGE_HOST with
+// PurgeUrlsCache (TC3-HMAC-SHA256). Only per-URL refresh is ever sent: never a directory
+// or site-wide refresh. Failures are logged and never block removal.
+// COS_DELETE_ON_REMOVE=0 turns removal off; MEDIA_CDN_PURGE_HOST=off skips the CDN step.
 import { createHash, createHmac } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import https from 'node:https';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,10 +35,21 @@ const WORK_ID = /^up-[a-z0-9]{8}$/;
 const PUBLIC_FILE = /^(?:cover(?:-[a-z0-9]{8,24})?\.(?:png|jpg|webp)|first(?:-[a-z0-9]{8,24})?\.jpg|mobile(?:-[a-z0-9]{8,24})?\.jpg|preview\.(?:sbox|webp|jpg)|preview-[a-z0-9]{8,24}\.(?:sbox|webp))$/;
 const TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.sbox': 'application/octet-stream' };
 const RETRY_DELAYS = [500, 2000, 8000];
+export const DEFAULT_CDN_PURGE_HOST = 'media.arenaofbias.icu';
+const CDN_API_HOST = 'cdn.tencentcloudapi.com';
+// The only CDN action this module sends. Directory and site-wide refreshes are not allowed.
+export const CDN_PURGE_ACTION = 'PurgeUrlsCache';
+const CDN_API_VERSION = '2018-06-06';
+const CDN_URLS_PER_CALL = 100;
 
 export function publicMediaKey(workId, name) {
   if (!WORK_ID.test(workId ?? '') || !PUBLIC_FILE.test(name ?? '')) return null;
   return `media/${workId}/${name}`;
+}
+
+// Every object of one work lives under this prefix (dual-write keys and the earlier bulk sync alike).
+export function workMediaPrefix(workId) {
+  return WORK_ID.test(workId ?? '') ? `media/${workId}/` : null;
 }
 
 export function contentTypeForMedia(name) {
@@ -102,9 +120,14 @@ export function loadCosSettings(env = process.env, { fileText, readFile, exists 
   if (!secretId) missing.push('COS_SECRET_ID');
   if (!secretKey) missing.push('COS_SECRET_KEY');
   if (file.problem && missing.length) missing.push(file.problem);
+  const deleteOnRemove = pick(env, file.values, 'COS_DELETE_ON_REMOVE') !== '0';
+  const purgeRaw = pick(env, file.values, 'MEDIA_CDN_PURGE_HOST');
+  const purgeHost = purgeRaw === '' ? DEFAULT_CDN_PURGE_HOST : purgeRaw.toLowerCase();
+  const cdnPurgeHost = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(purgeHost) ? purgeHost : '';
   return {
     ready: missing.length === 0,
     bucket, region, secretId, secretKey, service: SIGN_SERVICE,
+    deleteOnRemove, cdnPurgeHost,
     missing, fileProblem: file.problem || '', filePath: file.path || '',
   };
 }
@@ -183,6 +206,85 @@ export function buildCosPut({ bucket, region, secretId, secretKey, key, body, co
   };
 }
 
+function encodeQueryPart(value) {
+  return encodeURIComponent(String(value)).replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+export function canonicalQuery(params = {}) {
+  return Object.keys(params).sort().map((name) => `${encodeQueryPart(name)}=${encodeQueryPart(params[name])}`).join('&');
+}
+
+// Signed GET (bucket listing) or DELETE (one object) with an empty body.
+export function buildCosRequest({ bucket, region, secretId, secretKey, method, key = '', query = {}, now = new Date() }) {
+  const hostname = `${bucket}.cos.${region}.myqcloud.com`;
+  const path = `/${key ? encodeKey(key) : ''}`;
+  const queryString = canonicalQuery(query);
+  const stamp = amzDate(now);
+  const payloadHash = sha256Hex('');
+  const headers = { host: hostname, 'x-amz-content-sha256': payloadHash, 'x-amz-date': stamp };
+  const signed = aws4Authorization({
+    method, path, query: queryString, headers, payloadHash,
+    accessKey: secretId, secret: secretKey, region, service: SIGN_SERVICE, amzDate: stamp,
+  });
+  return {
+    method,
+    url: `https://${hostname}${path}${queryString ? `?${queryString}` : ''}`,
+    headers: { 'x-amz-content-sha256': payloadHash, 'x-amz-date': stamp, Authorization: signed.authorization },
+    signed,
+  };
+}
+
+function xmlText(value) {
+  return value.replace(/&(lt|gt|quot|apos|amp|#(\d+)|#x([0-9a-f]+));/gi, (all, name, dec, hex) => (
+    dec ? String.fromCodePoint(Number(dec)) : hex ? String.fromCodePoint(parseInt(hex, 16))
+      : { lt: '<', gt: '>', quot: '"', apos: "'", amp: '&' }[name.toLowerCase()] ?? all));
+}
+
+export function parseListBucket(xml) {
+  const text = String(xml ?? '');
+  const objects = [];
+  for (const [, block] of text.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)) {
+    const key = /<Key>([\s\S]*?)<\/Key>/.exec(block);
+    const size = /<Size>(\d+)<\/Size>/.exec(block);
+    if (key) objects.push({ key: xmlText(key[1]), size: size ? Number(size[1]) : 0 });
+  }
+  const truncated = /<IsTruncated>true<\/IsTruncated>/i.test(text);
+  const next = /<NextMarker>([\s\S]*?)<\/NextMarker>/.exec(text);
+  return { objects, truncated, nextMarker: next ? xmlText(next[1]) : (objects.at(-1)?.key ?? '') };
+}
+
+// Tencent Cloud API 3.0 signature (TC3-HMAC-SHA256) for a JSON POST.
+export function tc3Request({ secretId, secretKey, service, host, action, version, payload, timestamp }) {
+  const body = JSON.stringify(payload);
+  const date = new Date(timestamp * 1000).toISOString().slice(0, 10);
+  const contentType = 'application/json; charset=utf-8';
+  const canonical = `POST\n/\n\ncontent-type:${contentType}\nhost:${host}\n\ncontent-type;host\n${sha256Hex(body)}`;
+  const scope = `${date}/${service}/tc3_request`;
+  const stringToSign = `TC3-HMAC-SHA256\n${timestamp}\n${scope}\n${sha256Hex(canonical)}`;
+  const key = hmac(hmac(hmac(`TC3${secretKey}`, date), service), 'tc3_request');
+  const signature = createHmac('sha256', key).update(stringToSign, 'utf8').digest('hex');
+  return {
+    url: `https://${host}/`,
+    body,
+    canonical,
+    stringToSign,
+    headers: {
+      Authorization: `TC3-HMAC-SHA256 Credential=${secretId}/${scope}, SignedHeaders=content-type;host, Signature=${signature}`,
+      'Content-Type': contentType,
+      'X-TC-Action': action,
+      'X-TC-Version': version,
+      'X-TC-Timestamp': String(timestamp),
+    },
+  };
+}
+
+export function buildCdnPurge({ secretId, secretKey, urls, now = new Date() }) {
+  return tc3Request({
+    secretId, secretKey, service: 'cdn', host: CDN_API_HOST, action: CDN_PURGE_ACTION, version: CDN_API_VERSION,
+    payload: { Urls: urls }, timestamp: Math.floor(now.getTime() / 1000),
+  });
+}
+
 function asBuffer(body) {
   if (Buffer.isBuffer(body)) return body;
   if (body instanceof Uint8Array) return Buffer.from(body);
@@ -210,6 +312,7 @@ export function createCosMirror({
   readBytes = readFileSync,
   maxPending = 64,
   maxPendingBytes = 64 * 1024 * 1024,
+  fetch: fetchImpl = globalThis.fetch,
 } = {}) {
   const settings = loadCosSettings(env, { fileText, readFile, exists });
   // File names do not imply public visibility. Only an operator who has put
@@ -313,6 +416,80 @@ export function createCosMirror({
     log.warn(`COS dual-write failed ${job.key} after ${attempts} attempts: ${last}`);
   }
 
+  async function call(build, what) {
+    const attempts = retryDelays.length + 1;
+    let last = 'unknown';
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      try {
+        const req = build();
+        const res = await fetchImpl(req.url, { method: req.method ?? 'POST', headers: req.headers, body: req.body, signal: AbortSignal.timeout(timeoutMs) });
+        const text = await res.text();
+        if (res.status >= 200 && res.status < 300) return text;
+        last = `HTTP ${res.status}`;
+        if (res.status >= 400 && res.status < 500 && res.status !== 429) break;
+      } catch (error) {
+        last = brief(error);
+      }
+      if (attempt < attempts) await wait(retryDelays[attempt - 1]);
+    }
+    throw new Error(`${what}: ${last}`);
+  }
+
+  const cosArgs = () => ({ bucket: settings.bucket, region: settings.region, secretId: settings.secretId, secretKey: settings.secretKey, now: now() });
+
+  async function listWork(prefix) {
+    const objects = [];
+    let marker = '';
+    for (let page = 0; page < 100; page++) {
+      const query = { 'max-keys': '1000', prefix, ...(marker ? { marker } : {}) };
+      const xml = await call(() => buildCosRequest({ ...cosArgs(), method: 'GET', query }), `list ${prefix}`);
+      const result = parseListBucket(xml);
+      objects.push(...result.objects.filter((item) => item.key.startsWith(prefix)));
+      if (!result.truncated || !result.nextMarker || result.nextMarker === marker) break;
+      marker = result.nextMarker;
+    }
+    return objects;
+  }
+
+  async function purgeCdn(keys) {
+    if (!keys.length || !settings.cdnPurgeHost) return;
+    const urls = keys.map((key) => `https://${settings.cdnPurgeHost}/${encodeKey(key)}`);
+    for (let start = 0; start < urls.length; start += CDN_URLS_PER_CALL) {
+      const batch = urls.slice(start, start + CDN_URLS_PER_CALL);
+      try {
+        const text = await call(() => buildCdnPurge({ secretId: settings.secretId, secretKey: settings.secretKey, urls: batch, now: now() }), CDN_PURGE_ACTION);
+        let reply = {};
+        try { reply = JSON.parse(text)?.Response ?? {}; } catch { reply = {}; }
+        if (reply.Error) log.warn(`CDN purge failed ${batch.length} urls: ${reply.Error.Code ?? 'error'} ${String(reply.Error.Message ?? '').slice(0, 160)}`);
+        else log.log(`CDN purge ok ${batch.length} urls task ${reply.TaskId ?? '?'}`);
+      } catch (error) {
+        log.warn(`CDN purge failed ${batch.length} urls: ${brief(error)}`);
+      }
+    }
+  }
+
+  async function removeWork(workId) {
+    const prefix = workMediaPrefix(workId);
+    let objects;
+    try {
+      objects = await listWork(prefix);
+    } catch (error) {
+      log.warn(`COS purge failed ${prefix}: ${brief(error)}`);
+      return;
+    }
+    const removed = [];
+    for (const { key } of objects) {
+      try {
+        await call(() => buildCosRequest({ ...cosArgs(), method: 'DELETE', key }), `delete ${key}`);
+        removed.push(key);
+      } catch (error) {
+        log.warn(`COS purge failed ${brief(error)}`);
+      }
+    }
+    log.log(`COS purge ${prefix}: deleted ${removed.length}/${objects.length} objects`);
+    await purgeCdn(removed);
+  }
+
   function pump() {
     if (running) return;
     const job = queue.shift();
@@ -321,9 +498,9 @@ export function createCosMirror({
       return;
     }
     running = true;
-    send(job).finally(() => {
+    (job.type === 'purge' ? removeWork(job.workId) : send(job)).finally(() => {
       pending -= 1;
-      pendingBytes -= job.body.length;
+      if (job.type !== 'purge') pendingBytes -= job.body.length;
       running = false;
       pump();
     });
@@ -356,10 +533,26 @@ export function createCosMirror({
         }
         pending += 1;
         pendingBytes += body.length;
-        queue.push({ key, body, contentType: contentTypeForMedia(spec.name) });
+        queue.push({ type: 'put', key, body, contentType: contentTypeForMedia(spec.name) });
         pump();
       } catch (error) {
         log.warn(`COS dual-write skipped: ${brief(error)}`);
+      }
+    },
+    // Queued behind earlier puts, so a capture that finished just before removal is deleted too.
+    purge(workId) {
+      try {
+        if (!workMediaPrefix(workId)) return;
+        if (!settings.ready) {
+          warnSkip();
+          return;
+        }
+        if (!settings.deleteOnRemove) return;
+        pending += 1;
+        queue.push({ type: 'purge', workId });
+        pump();
+      } catch (error) {
+        log.warn(`COS purge skipped: ${brief(error)}`);
       }
     },
     settled() {
@@ -396,5 +589,25 @@ export function mirrorPublicMedia(spec) {
     activeMirror().put(spec);
   } catch (error) {
     console.warn(`COS dual-write skipped: ${brief(error)}`);
+  }
+}
+
+// Fire-and-forget removal of every object under media/<workId>/ plus a per-URL CDN refresh.
+export function purgeWorkMedia(workId) {
+  try {
+    if (!workMediaPrefix(workId)) return;
+    activeMirror().purge(workId);
+  } catch (error) {
+    console.warn(`COS purge skipped: ${brief(error)}`);
+  }
+}
+
+// Puts the public files still on disk back into COS (a rejected work reopened for review).
+export function remirrorWorkMedia(workId, dir, list = readdirSync) {
+  try {
+    if (!workMediaPrefix(workId)) return;
+    for (const name of list(dir)) if (publicMediaKey(workId, name)) mirrorPublicMedia({ workId, name, file: join(dir, name) });
+  } catch (error) {
+    if (error?.code !== 'ENOENT') console.warn(`COS dual-write skipped: ${brief(error)}`);
   }
 }

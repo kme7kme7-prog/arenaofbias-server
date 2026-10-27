@@ -14,7 +14,7 @@ import { inspectUpload } from './inspect.mjs';
 import { isTextTask, templatesOf } from './categories.mjs';
 import { GENERATION_FIELDS, IGNORED_GENERATION_FIELDS, generationFrom, generationOf, generationAudit, generationAuditView } from './generation.mjs';
 import { readWorkPreview } from './work-previews.mjs';
-import { mirrorPublicMedia } from './cos-dual-write.mjs';
+import { mirrorPublicMedia, purgeWorkMedia, remirrorWorkMedia } from './cos-dual-write.mjs';
 import { contentUrl } from './content-path.mjs';
 import { ALL_WORKS, catalogConflict, createRestricted, restrictedKeyOf, seesRestricted, workModelKey } from './restricted.mjs';
 
@@ -343,6 +343,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
         const target = join(orphans, `${item.name}-${Date.now()}-${randomBytes(4).toString('hex')}`);
         renameSync(join(dirs.works, item.name), target);
         console.warn(`Moved orphan work directory ${item.name} to ${target}`);
+        purgeWorkMedia(item.name);
       } else if (row.cover) {
         const pending = join(dirs.media, item.name, `${row.cover}.tmp`);
         const final = join(dirs.media, item.name, row.cover);
@@ -1212,11 +1213,14 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
 
     finishModeration(work, result, actor = null) {
       const next = { ...result, at: Date.now() };
-      return transaction(db, () => {
+      const applied = transaction(db, () => {
         const updated = q.moderationResult.run(JSON.stringify(next), work.id, work.moderationRaw).changes;
         if (updated) audit(actor, 'content-review', work, JSON.stringify(next));
         return Boolean(updated);
       });
+      // A rejected work is no longer served, so its COS copies go too. Disk files stay for reopening.
+      if (applied && next.status === 'rejected' && !work.curated) purgeWorkMedia(work.id);
+      return applied;
     },
     moderationState(admin, taskId, id) {
       const work = this.work(taskId, id, null, admin);
@@ -1246,6 +1250,8 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
         if (!updated) fail(409, '审核状态已变化，请重新读取', 'conflict');
         audit(admin, `content-${action}`, work, JSON.stringify({ reason: body.reason.trim(), version: state.version, before: state.moderation, after: next }));
       });
+      // Rejection removed the COS copies; a reopened work may be approved again, so put them back.
+      if (action === 'reopen') remirrorWorkMedia(id, join(dirs.media, id));
       return this.moderationState(admin, taskId, id);
     },
     reviewContent(admin, taskId, id, body) {
@@ -1420,6 +1426,8 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
         rmSync(join(dirs.works, id), { recursive: true, force: true });
         rmSync(join(dirs.media, id), { recursive: true, force: true });
       }
+      // Removed works are no longer served by /media/, even when ballots keep their files on disk.
+      if (!work.curated) purgeWorkMedia(id);
     },
 
     // ---- reactions -------------------------------------------------------------------------

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { createPlatform } from '../server/app.mjs';
+import { installCosMirror, resetCosMirror } from '../server/cos-dual-write.mjs';
 import { verifiedUser } from './helpers/email.mjs';
 import { limits } from '../server/config.mjs';
 import { MIGRATIONS, openDatabase } from '../server/db.mjs';
@@ -298,7 +299,12 @@ test('ordinary verification requires content approval while staff publication wa
     assert.equal(JSON.parse(manualAudit.detail).reason, '人工复核通过');
     assert.equal(JSON.parse(manualAudit.detail).reviewer, 'admin');
     assert.equal((await call('admin', 'POST', endpoint, { status: 'rejected', reason: ' ' })).status, 400);
-    assert.equal((await call('admin', 'POST', endpoint, { status: 'rejected', reason: '人工确认不适合公开' })).status, 200);
+    const purged = [];
+    installCosMirror({ put() {}, purge: (id) => purged.push(id) });
+    try {
+      assert.equal((await call('admin', 'POST', endpoint, { status: 'rejected', reason: '人工确认不适合公开' })).status, 200);
+    } finally { resetCosMirror(); }
+    assert.deepEqual(purged, [work.id], 'rejection removes the mirrored media');
     assert.equal((await call(null, 'GET', '/api/bootstrap')).data.works.length, 0);
     const hidden = platform.library.work('one', work.id);
     assert.equal(await readContent(platform.library.originOf(hidden.contentKey)), 410);

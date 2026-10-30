@@ -21,6 +21,13 @@
 // PurgeUrlsCache (TC3-HMAC-SHA256). Only per-URL refresh is ever sent: never a directory
 // or site-wide refresh. Failures are logged and never block removal.
 // COS_DELETE_ON_REMOVE=0 turns removal off; MEDIA_CDN_PURGE_HOST=off skips the CDN step.
+//
+// Question reference images use the same gate (COS_MEDIA_ACCESS_CONTROLLED=1) and the
+// same queue. Only images of public (approved or legacy) questions are put, under the key
+// equal to their URL path: media/references/<r-id>.<ext> and
+// media/pack-references/<taskId>/<name>. Drafts, pending and rejected questions never
+// reach the bucket; nginx sends those two prefixes back to the API so it checks access.
+// When an image stops being public its keys are deleted and refreshed per URL.
 import { createHash, createHmac } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import https from 'node:https';
@@ -52,9 +59,36 @@ export function workMediaPrefix(workId) {
   return WORK_ID.test(workId ?? '') ? `media/${workId}/` : null;
 }
 
+const UPLOADED_REFERENCE = /^media\/references\/r-[0-9a-f]{32}\.(?:png|jpg|webp)$/;
+const PACK_TASK = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const PACK_NAME = /^[^/\\\0-\x1f]{1,200}\.(?:png|jpe?g|webp)$/i;
+const safeSegment = (value) => typeof value === 'string' && value !== '.' && value !== '..' && !value.startsWith('.');
+
+// The COS key of an uploaded reference image is its public src (media/references/<r-id>.<ext>).
+export function uploadedReferenceKey(src) {
+  return typeof src === 'string' && UPLOADED_REFERENCE.test(src) ? src : null;
+}
+
+// Datapack reference images: the key holds the raw task id and file name; the URL encodes them.
+export function packReferenceKey(taskId, name) {
+  if (!PACK_TASK.test(taskId ?? '') || !safeSegment(name) || !PACK_NAME.test(name)) return null;
+  return `media/pack-references/${taskId}/${name}`;
+}
+
+export function packReferencePrefix(taskId) {
+  return PACK_TASK.test(taskId ?? '') ? `media/pack-references/${taskId}/` : null;
+}
+
+export function isReferenceKey(key) {
+  if (uploadedReferenceKey(key)) return true;
+  const match = /^media\/pack-references\/([^/]+)\/([^/]+)$/.exec(key ?? '');
+  return Boolean(match && packReferenceKey(match[1], match[2]) === key);
+}
+
 export function contentTypeForMedia(name) {
   const dot = name.lastIndexOf('.');
-  return TYPES[dot >= 0 ? name.slice(dot) : ''] ?? 'application/octet-stream';
+  const ext = dot >= 0 ? name.slice(dot).toLowerCase() : '';
+  return TYPES[ext === '.jpeg' ? '.jpg' : ext] ?? 'application/octet-stream';
 }
 
 export function parseEnvFile(text) {
@@ -468,8 +502,7 @@ export function createCosMirror({
     }
   }
 
-  async function removeWork(workId) {
-    const prefix = workMediaPrefix(workId);
+  async function removePrefix(prefix) {
     let objects;
     try {
       objects = await listWork(prefix);
@@ -490,6 +523,34 @@ export function createCosMirror({
     await purgeCdn(removed);
   }
 
+  // Known keys (reference images): DeleteObject each one, then refresh exactly those URLs.
+  async function removeKeys(keys) {
+    const removed = [];
+    for (const key of keys) {
+      try {
+        await call(() => buildCosRequest({ ...cosArgs(), method: 'DELETE', key }), `delete ${key}`);
+        removed.push(key);
+      } catch (error) {
+        log.warn(`COS purge failed ${brief(error)}`);
+      }
+    }
+    log.log(`COS purge references: deleted ${removed.length}/${keys.length} objects`);
+    await purgeCdn(removed);
+  }
+
+  const run = (job) => job.type === 'purge' ? removePrefix(job.prefix) : job.type === 'delete' ? removeKeys(job.keys) : send(job);
+
+  function queuePurge(job) {
+    if (!settings.ready) {
+      warnSkip();
+      return;
+    }
+    if (!settings.deleteOnRemove) return;
+    pending += 1;
+    queue.push(job);
+    pump();
+  }
+
   function pump() {
     if (running) return;
     const job = queue.shift();
@@ -498,9 +559,9 @@ export function createCosMirror({
       return;
     }
     running = true;
-    (job.type === 'purge' ? removeWork(job.workId) : send(job)).finally(() => {
+    run(job).finally(() => {
       pending -= 1;
-      if (job.type !== 'purge') pendingBytes -= job.body.length;
+      if (job.type === 'put') pendingBytes -= job.body.length;
       running = false;
       pump();
     });
@@ -508,9 +569,10 @@ export function createCosMirror({
 
   return {
     settings,
+    // spec: { workId, name, file|body } for work media, or { key, file|body } for a reference image key.
     put(spec) {
       try {
-        const key = publicMediaKey(spec?.workId, spec?.name);
+        const key = spec?.key != null ? (isReferenceKey(spec.key) ? spec.key : null) : publicMediaKey(spec?.workId, spec?.name);
         if (!key) return;
         if (!accessControlled) {
           if (!warned) log.warn('COS dual-write disabled: uploaded media requires authorization on every read; configure gated CDN access before setting COS_MEDIA_ACCESS_CONTROLLED=1.');
@@ -533,7 +595,7 @@ export function createCosMirror({
         }
         pending += 1;
         pendingBytes += body.length;
-        queue.push({ type: 'put', key, body, contentType: contentTypeForMedia(spec.name) });
+        queue.push({ type: 'put', key, body, contentType: contentTypeForMedia(key) });
         pump();
       } catch (error) {
         log.warn(`COS dual-write skipped: ${brief(error)}`);
@@ -542,15 +604,26 @@ export function createCosMirror({
     // Queued behind earlier puts, so a capture that finished just before removal is deleted too.
     purge(workId) {
       try {
-        if (!workMediaPrefix(workId)) return;
-        if (!settings.ready) {
-          warnSkip();
-          return;
-        }
-        if (!settings.deleteOnRemove) return;
-        pending += 1;
-        queue.push({ type: 'purge', workId });
-        pump();
+        const prefix = workMediaPrefix(workId);
+        if (prefix) queuePurge({ type: 'purge', prefix });
+      } catch (error) {
+        log.warn(`COS purge skipped: ${brief(error)}`);
+      }
+    },
+    // Reference image keys that stopped being public. Unknown keys are ignored.
+    purgeKeys(keys) {
+      try {
+        const valid = [...new Set((Array.isArray(keys) ? keys : []).filter(isReferenceKey))];
+        if (valid.length) queuePurge({ type: 'delete', keys: valid });
+      } catch (error) {
+        log.warn(`COS purge skipped: ${brief(error)}`);
+      }
+    },
+    // Every object under media/pack-references/<taskId>/ (a datapack question deleted or rejected).
+    purgePackReferences(taskId) {
+      try {
+        const prefix = packReferencePrefix(taskId);
+        if (prefix) queuePurge({ type: 'purge', prefix });
       } catch (error) {
         log.warn(`COS purge skipped: ${brief(error)}`);
       }
@@ -609,5 +682,34 @@ export function remirrorWorkMedia(workId, dir, list = readdirSync) {
     for (const name of list(dir)) if (publicMediaKey(workId, name)) mirrorPublicMedia({ workId, name, file: join(dir, name) });
   } catch (error) {
     if (error?.code !== 'ENOENT') console.warn(`COS dual-write skipped: ${brief(error)}`);
+  }
+}
+
+// Fire-and-forget put of one public reference image ({ key, file }). Other keys are ignored.
+export function mirrorReferenceMedia(spec) {
+  try {
+    if (!isReferenceKey(spec?.key)) return;
+    activeMirror().put(spec);
+  } catch (error) {
+    console.warn(`COS dual-write skipped: ${brief(error)}`);
+  }
+}
+
+// Fire-and-forget DeleteObject of reference image keys plus a per-URL CDN refresh.
+export function purgeReferenceMedia(keys) {
+  try {
+    const valid = (Array.isArray(keys) ? keys : []).filter(isReferenceKey);
+    if (valid.length) activeMirror().purgeKeys(valid);
+  } catch (error) {
+    console.warn(`COS purge skipped: ${brief(error)}`);
+  }
+}
+
+export function purgePackReferenceMedia(taskId) {
+  try {
+    if (!packReferencePrefix(taskId)) return;
+    activeMirror().purgePackReferences(taskId);
+  } catch (error) {
+    console.warn(`COS purge skipped: ${brief(error)}`);
   }
 }

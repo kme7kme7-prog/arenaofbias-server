@@ -451,6 +451,56 @@ Phase A 抽测（2026-10-25 16:45 UTC+8）曾返回 200，仅为历史键和字�
 
 当前方案从 API 读取动态媒体，CDN `/media/` 在用户完成云配置后应拒绝匿名 GET/HEAD；保留公开静态 `assets/scenes/`。未来若另建每次读取都验权的 CDN，须分别验证公开、撤下、私密、会话撤销与条件请求，不能以单个对象 200 作为启用镜像的依据。本服务不把对象设为 public-read，云策略和 CDN 仍须独立保证权限。
 
+### 题面参考图双写与 api `/media/` 例外（方案 A，2026-10-30）
+
+现状（site-ops 记录）：api vhost `/www/server/panel/vhost/nginx/api.arenaofbias.icu.conf` 里的 `location ^~ /media/ { return 301 https://media.arenaofbias.icu$request_uri; }` 对全部 `/media/**` 无条件跳 CDN（10-25 22:31 上线，10-26 15:30 被 `aob-performance-20261026` 的 `proxy` 步骤盖回反代，10-27 20:35 恢复 301 并给该发布脚本加护栏）。Gallery 也把 `media/` 全部拼到 CDN。草稿和待审题的参考图不在桶里，因此经 CDN 为 404。
+
+代码（本节对应 PR）：同一门控 `COS_MEDIA_ACCESS_CONTROLLED=1`、同一队列与重试，不新增变量。
+
+| 事件 | COS |
+| --- | --- |
+| 上传参考图（未绑定草稿）、新建题目、重新提交（都是 pending） | 不写 |
+| 审核通过（approved/legacy 才算公开） | Put 该题当前全部参考图，键 = src：`media/references/<r-id>.<ext>`；数据包题为 `media/pack-references/<taskId>/<name>`（键里是原始名，URL 再编码），文件取当前数据包快照 |
+| 公开题编辑换图 | 新图 Put，换下的旧图 DeleteObject + 单 URL 刷新 |
+| 公开题被拒、删除 | 上传图按已知键 DeleteObject；数据包题 List `media/pack-references/<taskId>/` 后逐个删除；随后只对删掉的对象发 `PurgeUrlsCache` |
+
+CDN 只用 `PurgeUrlsCache`（每次最多 100 条），不做目录或全站刷新；失败只写日志，不影响题目操作。`COS_DELETE_ON_REMOVE=0` 关删除，`MEDIA_CDN_PURGE_HOST=off` 关刷新，与作品一致。新数据包里新增的公开包题不会自动补传，仍由运维发包时补传。存量公开参考图（12 题 37 张）已于 10-28 18:47–18:51 由运维补传，草稿 `r-4e0532a1…` 未上传。
+
+nginx 例外（运维执行，研发不改线上）：
+
+1. 位置：上面那个 vhost 的 443 `server {}`，现有 `location ^~ /media/` 301 块所在处。若同一文件里还有 80 或其它 `server` 块也写了 `/media/` 301，是否同改需运维确认。
+2. 内容：仓库 `deploy/nginx/reference-media.conf`，两个 `location ^~ /media/references/`、`location ^~ /media/pack-references/` 反代 `127.0.0.1:5273` 并 include `api-proxy.conf`。在该 server 块中加一行 `include /www/wwwroot/arenaofbias-server/deploy/nginx/reference-media.conf;`。线上仓库实际路径与 `api-proxy.conf` 的 include 路径需运维确认，不一致就把两个 location 直接贴进 vhost。现有 `/media/` 301 块不改，`/media/up-*` 等其余路径继续 301。
+3. 优先级：nginx 先选最长匹配前缀，`^~` 命中后不再看正则。两个新块前缀比 `/media/` 长，所以写在 301 块之前或之后都行。不要写成不带 `^~` 的普通前缀，否则宝塔默认的 `location ~ .*\.(gif|jpg|jpeg|png|bmp|swf)$` 一类正则块会抢走图片请求；也不要用 `~` 正则版本替代。
+4. 备份与生效：
+
+```bash
+TS=$(date +%Y%m%d-%H%M%S); V=/www/server/panel/vhost/nginx/api.arenaofbias.icu.conf
+mkdir -p /root/backup-api-reference-media-$TS && cp -a "$V" /root/backup-api-reference-media-$TS/
+cp -a "$V" "$V.bak-reference-media-$TS"
+# 编辑 $V：在 443 server 块里加 include 行
+/www/server/nginx/sbin/nginx -t && /www/server/nginx/sbin/nginx -s reload
+```
+
+5. 回滚：`cp -a /root/backup-api-reference-media-$TS/api.arenaofbias.icu.conf "$V"`，再 `nginx -t && nginx -s reload`，即回到全部 301。代码不必回退：回滚后公开题照样能从 CDN 读，只是待审题的参考图又会 404。
+6. 防覆盖：
+   - `/root/aob-performance-20261026/` 的 `release/payload/nginx/api.conf`、`api.arenaofbias.icu.conf.candidate`、`nginx-candidate/api.arenaofbias.icu.conf` 要同步加入这行 include（或两个块），否则再跑 `release-apply.py proxy` 会把例外抹掉。
+   - 该脚本的护栏要求 `/media/` 块必须含 `return 301` 且禁止 `proxy_pass`。护栏是否会把 `/media/references/` 块也当成 `/media/` 块、从而拒绝写入或误判，需运维确认。确认后把护栏改成只检查精确的 `location ^~ /media/ {`，并在 `DO-NOT-OVERWRITE-MEDIA-301.txt` 里写明这两个例外要保留。
+   - 宝塔：这个 vhost 由面板管理。在面板里保存站点配置、改 SSL、加反代或伪静态时，是否会重写或保留手写的 include 行，需运维确认。改完后在宝塔里不要再点该站点的「配置文件」保存旧内容；每次改面板后 `grep reference-media "$V"` 复查。
+7. 冒烟（`<pub>` 取匿名 `/api/bootstrap` 里已公开题的 `references[].src`，`<pending>` 取一张待审题参考图）：
+
+| 请求 | 期望 |
+| --- | --- |
+| `curl -sSI https://media.arenaofbias.icu/<pub>` | 200 |
+| `curl -sSI https://api.arenaofbias.icu/<pub>` | 200（不再 301），`Cache-Control: private, no-cache…` |
+| `curl -sSI https://api.arenaofbias.icu/<pending>`（匿名） | 404（不是 301） |
+| 同上带作者或管理员 Cookie | 200，`Cache-Control: no-store` |
+| `curl -sSI https://media.arenaofbias.icu/<pending>` | 404（桶里没有） |
+| `curl -sSI https://api.arenaofbias.icu/media/<任一 up-* 作品文件>` | 仍 301 → media 同路径 |
+| `curl -sSI https://api.arenaofbias.icu/api/bootstrap` | 200 |
+| 新题审核通过后 journal | `COS dual-write ok media/references/r-…`；拒绝或删除后 `COS purge references: deleted n/n` 与 `CDN purge ok` |
+
+EdgeOne 和浏览器可能缓存了旧的 301（301 是永久重定向）。是否需要对这两个前缀在 EO 刷新 api 主机缓存，需运维确认；刷新时只按单个 URL 刷，不做目录或全站刷新。Gallery 目前仍把所有 `media/references/` 拼到 CDN，所以作者在 Gallery 里看自己待审题的参考图仍会 404（与现状一致，不是本次回归）；直接访问 api 主机的页面（如后台，是否全部走相对路径需确认）可正常显示。要彻底修好 Gallery 需另改前端：非公开题的参考图不走 CDN。
+
 ## 6. Luna Flex 内容审查
 
 实际运行状态以 HANDOFF 最新部署记录为准。首次启用时，按本文版本门禁与备份流程先发布配套后端（启动追加 v19），再发布前端。密钥只放受限服务器环境文件，不写入仓库、前端构建变量或验收日志：

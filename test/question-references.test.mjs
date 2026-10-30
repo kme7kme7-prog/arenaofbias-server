@@ -23,7 +23,7 @@ function work(db, taskId) {
 function referencesFixture(db) {
   const dto = row => ({ id: row.id, name: row.name, src: `/api/references/${row.id}`, caption: row.caption, width: row.width, height: row.height });
   const service = {
-    calls: [], removed: [],
+    calls: [], removed: [], synced: [],
     prepare(user, input, options) {
       this.calls.push({ user, input, options });
       return input.map(item => {
@@ -37,6 +37,7 @@ function referencesFixture(db) {
         .run(taskId, ref.name, ref.caption, position, ref.id));
     },
     forQuestion(taskId) { return db.prepare('SELECT * FROM reference_uploads WHERE task_id = ? ORDER BY position, id').all(taskId).map(dto); },
+    syncMedia(before, after) { this.synced.push({ before: before.map((ref) => ref.id), after: after.map((ref) => ref.id) }); },
     removeQuestion(taskId) {
       this.removed.push(taskId);
       db.prepare('DELETE FROM reference_uploads WHERE task_id = ?').run(taskId);

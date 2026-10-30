@@ -829,6 +829,8 @@ COS 镜像默认关闭，只有运维在已建成每次读取均验权的 CDN �
 
 **`GET /media/pack-references/<task>/<name>`**（亦支持 HEAD）：只提供当前包该题声明的图片，未声明文件或无题目读取权限返回 404；包题目撤回公开后只允许有权工作人员读取。返回原包字节及对应 MIME、nosniff、`Vary: Origin, Cookie`。公开图同样为 `private, no-cache, max-age=0, must-revalidate` 与弱 ETag、逐次验权后才可 304；私密读取为 `no-store`、无 ETag，文件打开后发送前复核当前会话、声明图片与题目权限。沿用前端源凭据 CORS 与 GET/HEAD 预检，不复用上传参考图表或文件存储。
 
+同一 `COS_MEDIA_ACCESS_CONTROLLED=1` 门控下，题目公开（approved / legacy）后其参考图按 src 原样作 COS 键异步写入（`media/references/<id>.<ext>`、`media/pack-references/<task>/<name>`）；未绑定草稿、pending、rejected 不写。公开题换下的图、公开后被拒或删除的题，按键删除 COS 对象并对删除的 URL 逐条刷新 CDN，失败只记日志。草稿和待审图仍只能经 API 源站上述两个路由验权读取，api 主机这两个前缀不能无条件跳 CDN（nginx 见 [deploy.md](deploy.md)「题面参考图双写」）。
+
 不附作品时传题目字段；附示例时另传 `draftId`、`confirmed:true`、`work`（同作品表单字段）。草稿须属于本人、未过期且 task=__new__。题目与示例及审计在同一事务写入，失败保留可重试草稿。响应 `{ "question": <题目作者视图>, "work"?: <作品作者视图> }`，统一 author/mine DTO。
 
 所有角色发起的新题目均为 pending，只有高级管理员可人工通过；普通用户至多 3 道未删除 pending 题目，工作人员免限额。附带作品按发布者角色决定内容审查：普通用户照常审查，工作人员 human / approved，但保持 unverified；题目与作品必须各自通过才公开。本人题目在 `GET /api/me` 中可见；rejected 题目另带 `resubmittable`，从未被 approved（无 question-review approved 审计）时为 true。保留的 `POST /api/admin/questions` 仅高级管理员可调用，也创建 pending。

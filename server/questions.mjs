@@ -2,11 +2,11 @@
 import { randomBytes } from 'node:crypto';
 import { avatarOf } from './auth.mjs';
 import { transaction } from './db.mjs';
-import { fail } from './http.mjs';
+import { fail, resolveInside } from './http.mjs';
 import { authorOf, isSenior, isStaff, roleOf } from './roles.mjs';
 import { compatibleTemplates, defaultTemplates, requireCategory, requireDomains } from './categories.mjs';
 import { seesRestricted } from './restricted.mjs';
-import { purgeWorkMedia } from './cos-dual-write.mjs';
+import { mirrorReferenceMedia, packReferenceKey, purgePackReferenceMedia, purgeWorkMedia } from './cos-dual-write.mjs';
 
 const tagName = (value) => String(value).normalize('NFKC').trim().replace(/^#+/, '').trim();
 const tagKey = (value) => tagName(value).toLowerCase();
@@ -163,6 +163,25 @@ export function createQuestions(db, { references = null, restricted = null } = {
     const tags = category !== question.category ? question.tags.filter((tag) => tagKey(tag) !== tagKey(category)) : question.tags;
     return { title, summary, prompt, category, domains, templates, tags, acceptsUploads, cover, references: refs, referenceCredit: credit };
   }
+  // COS keeps reference images of public questions only. Called after the change commits,
+  // with the question before and after it (after is null once deleted).
+  function syncReferenceMedia(before, after) {
+    try {
+      const shown = (question) => question && publicQuestion(question) ? question : null;
+      const was = shown(before), now = shown(after);
+      if (!(before ?? after)?.packaged) return references?.syncMedia(was?.references ?? [], now?.references ?? []);
+      if (was && !now) purgePackReferenceMedia(was.id);
+      else if (!was && now) catalog?.withSnapshot(() => {
+        const snapshot = catalog.snapshot();
+        for (const ref of snapshot.task(now.id)?.references ?? []) {
+          const key = packReferenceKey(now.id, ref.name), found = key && resolveInside(snapshot.root, `/${ref.src}`);
+          if (found) mirrorReferenceMedia({ key, file: found.file });
+        }
+      });
+    } catch (error) {
+      console.warn(`COS reference sync skipped: ${String(error?.message ?? error).split('\n')[0].slice(0, 200)}`);
+    }
+  }
   function saveMeta(actor, question, next, savePrompt = false) {
     if (question.packaged) writePack(actor, question, {
       display_json: JSON.stringify({ ...JSON.parse(override.get(question.id)?.display_json ?? '{}'),
@@ -247,7 +266,9 @@ export function createQuestions(db, { references = null, restricted = null } = {
       }
       if (next.prompt !== question.prompt) detail.prompt = { changed: '已修改', fromLength: question.prompt.length, toLength: next.prompt.length };
       transaction(db, () => { saveMeta(actor, question, next, Object.hasOwn(body, 'prompt') && next.prompt !== question.prompt); audit.run(Date.now(), actor.id, actor.name, 'question-edit', id, null, JSON.stringify(detail)); });
-      return dto(lookup(id), actor, 'admin', true);
+      const edited = lookup(id);
+      syncReferenceMedia(question, edited);
+      return dto(edited, actor, 'admin', true);
     },
     review(actor, id, body) {
       if (!isSenior(actor)) fail(403, '仅高级管理员可以操作');
@@ -269,7 +290,9 @@ export function createQuestions(db, { references = null, restricted = null } = {
         else db.prepare('UPDATE questions SET moderation = ? WHERE id = ?').run(JSON.stringify(moderation), id);
         audit.run(moderation.at, actor.id, actor.name, 'question-review', id, null, JSON.stringify(detail));
       });
-      return dto(lookup(id), actor, 'admin', true);
+      const reviewed = lookup(id);
+      syncReferenceMedia(question, reviewed);
+      return dto(reviewed, actor, 'admin', true);
     },
     // An author answers a rejection on a question that was never public: the edited question waits
     // for review again, keeping the last decision and content so reviewers can compare.
@@ -330,6 +353,7 @@ export function createQuestions(db, { references = null, restricted = null } = {
         audit.run(now, actor.id, actor.name, 'question-delete', id, null, question.title);
       });
       references?.removeQuestion(id);
+      syncReferenceMedia(question, null);
       for (const work of removed) purgeWorkMedia(work.id);
       return { ok: true, deletedWorks: [...removed.map((work) => work.id), ...(question.packaged ? packWorks(id).map((work) => work.id) : [])] };
     },

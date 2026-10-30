@@ -1,3 +1,10 @@
+## 2026-10-30 · 题面参考图 COS 双写（PR，未合并，未部署）
+
+- 方案 A：公开题（approved / legacy）参考图按 src 原样作键双写 COS（`media/references/`、`media/pack-references/`）；草稿、pending、rejected 不写。公开题换图、拒绝、删除时按键删除并只用 `PurgeUrlsCache` 逐 URL 刷新，失败只记日志。复用 `COS_MEDIA_ACCESS_CONTROLLED=1`，无新 env、无迁移。
+- nginx 例外由运维执行：api 主机 `/media/references/`、`/media/pack-references/` 改回源 API 验权，其余 `/media/` 仍 301。片段 `deploy/nginx/reference-media.conf`，步骤与防覆盖（发布脚本护栏、payload、宝塔，均需运维确认）见 deploy.md「题面参考图双写」。
+- npm run check 0 错误；npm test 596/596。Gallery 未改，作者在 Gallery 看待审题参考图仍 404。
+- [本轮归档](docs/archive/2026-10-30-cos-reference-dual-write-kme7kme7-prog.md)。
+
 ## 2026-10-27 · 桌面项目整理与提交
 
 - 用户授权提交推送并直接清理，不备份。同步 origin/main，保留远端 COS 清理、数据库读取和媒体权限修改；dots 邮箱豁免已在远端，去重后仅补普通管理员自审、后台提示、合同和回归。合并 Terra 调查与历史交接记录。

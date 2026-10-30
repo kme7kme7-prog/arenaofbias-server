@@ -4,6 +4,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import { fail } from './http.mjs';
 import { isStaff } from './roles.mjs';
+import { mirrorReferenceMedia, purgeReferenceMedia, uploadedReferenceKey } from './cos-dual-write.mjs';
 
 const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const mime = { jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
@@ -180,6 +181,14 @@ export function createReferences({ db, config, limits = {} }) {
       refs.forEach((ref, position) => attach.run(taskId, ref.name, ref.caption, position, ref.id));
     },
     removeQuestion(taskId) { for (const row of byQuestion.all(taskId)) deleteRow(row); },
+    // COS holds only images of public questions: before/after are the public reference lists
+    // (empty when the question is not public). Newly public images are put, the rest purged.
+    syncMedia(before = [], after = []) {
+      const keys = (list) => new Set(list.map((ref) => uploadedReferenceKey(ref?.src)).filter(Boolean));
+      const was = keys(before), now = keys(after), gone = [...was].filter((key) => !now.has(key));
+      if (gone.length) purgeReferenceMedia(gone);
+      for (const key of now) if (!was.has(key)) mirrorReferenceMedia({ key, file: join(root, key.slice('media/references/'.length)) });
+    },
     cleanup(now = Date.now()) {
       const rows = db.prepare('SELECT * FROM reference_uploads WHERE task_id IS NULL AND created_at <= ?').all(now - ttl);
       for (const row of rows) deleteRow(row);

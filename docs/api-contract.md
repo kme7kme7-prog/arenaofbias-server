@@ -23,6 +23,8 @@
 
 SQLite v53 仅追加有效 arena 票时间序、用户/题目历史、可清理对局过期时间及审计 action/id 四个查询索引；API 字段、业务行、投票归属、排名和权限口径保持。
 
+SQLite v54 为引导式盲评测试版新增 `guided_matches` 与 `guided_trial_votes` 两张独立表（见 §3.8、§3.9），不改 `votes`、`matches` 等旧表，任何榜单都不读这两张表。
+
 服务同时监听**两个端口**：
 
 | 端口 | 默认 | 职责 |
@@ -703,8 +705,9 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 - 登录用户（含管理员）的揭晓作品软冷却：先取本人最近 6 个 `choice` 为 `a` / `b` / `tie` 的对局（按 `created_at` 倒序），再保留 `decided_at` 严格晚于当前时间减 15 分钟的记录；两侧作品按「题目 + 作品 ID」回避，只影响同题抽样。其他题的揭晓也占这 6 组的位置；跳过和未投票不占轮数。作品在再揭晓满 6 组或经过 15 分钟时解除，先到先解除；不计票的登录揭晓也参与冷却。匿名用户沿用上一场回避。
 - 优先回避上一场与冷却作品，无候选时先放开上一场回避。仍无候选且 `avoidCooling=true` 时，如果放开冷却后还有未评组合，返回 `409 cooling`；真的评完则返回 `409 exhausted`。缺省或 `false` 时继续按上一场回避、完全放开的顺序退回，冷却不会使用户无题可评。
 - Gallery 随机模式带 `avoidCooling: true`，遇到 `cooling` 则本组略过该题；范围内全部冷却时再不带该参数请求一次，只评本题也不带该参数。前端等投票（含跳过）返回后才预取下一组，使刚揭晓的作品已进入冷却查询。
+- 引导式盲评测试版：请求体可加 `"guided": true`，仅普通与高级管理员可用，其他人返回 `403 + code:"guided-staff-only"`。抽样、冷却、ready 与计时规则不变；对局另记入 `guided_matches`，并从题目分类的测评点题库抽一题（`server/aspects.mjs`，本题答得最少的优先，同数随机），没有题库的分类不抽。响应另含 `guided: true` 与 `aspect: {id,dimension,dimensionName,question,keyword,hint} | null`，`counted` 为 false，`countableFor` 两项均为 false。不带 `guided` 的对局，请求与响应都不变。
 
-错误：`404 题目不存在`；`409 + code:"insufficient"` 对战池不足两个配置；`409 + code:"cooling"`（「这道题剩下的组合都有刚揭晓过的作品」）；`409 + code:"exhausted"` 该用户已评完全部组合；`429`。
+错误：`404 题目不存在`；`409 + code:"insufficient"` 对战池不足两个配置；`409 + code:"cooling"`（「这道题剩下的组合都有刚揭晓过的作品」）；`409 + code:"exhausted"` 该用户已评完全部组合；`403 + code:"guided-staff-only"`；`429`。
 
 ### 3.9 `POST /api/arena/matches/:id/vote` —— 投票并揭晓
 
@@ -724,6 +727,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 - `skip` 同样终局化对局并写入 `decided_at`，但不产生投票记录、不揭晓、不进入冷却；返回 `{ "choice": "skip", "counted": false, "reason": "skipped", "a": null, "b": null, "countedFor": {"public":false,"curated":false}, "curatedEligible":false, "voterLevel":null, "challenge":{...} }`，不返回作品或模型字段。
 - 对局绑定创建者：登录对局仅本人可投；匿名对局仅原访客 cookie 可投，之后登录也不能接管原匿名对局。
 - 作品被标记存疑 / 删除后，其参与的历史投票**即时退出**排行统计；恢复验证后自动回归。
+- 测试版对局（创建时带 `guided`）的请求体另可带 `tieKind`（`good` / `bad`，仅 `choice` 为 `tie` 时，表示都很好或都不好）与 `aspect: { id, choice: "a"|"b"|"tie", tieKind? }`（`id` 须为该局抽到的测评点；省略表示跳过这一题）。这一票写入 `guided_trial_votes`，不写 `votes`，不进入任何榜单，也不占用「已评组合」；对局照常终局与揭晓，风控证据照常记录（`vote_id` 为空）。响应 `counted: false`、`reason: "trial"`，另含 `guided: true`、`tieKind`、`aspect`（未答为 null）。普通对局带这两个字段返回 `400 选择无效`；测评点不符返回 `400 + code:"invalid_aspect"`。
 
 错误：`404 这一组已经失效`（对局不存在 / 过期 / 非本人）；`409 这一组已经提交过了`；`400 选择无效`；`429`。新增 409/match_not_ready、409/vote_too_early（voteAllowedAt、skipAllowedAt、serverNow、retryAfter）、403/turnstile_required、400/turnstile_failed、503/turnstile_unavailable；拒绝时不揭晓、不终局。
 

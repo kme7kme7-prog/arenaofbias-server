@@ -349,6 +349,8 @@ curl -fsS http://127.0.0.1:5273/api/bootstrap
 
 查询优化 v53 只在迁移末尾追加四个幂等索引：有效 arena 票的 `created_at`、投票 `user_id/task_id`、可清理对局的 `expires_at`，以及审计 `action/id`。不改历史迁移、表列、业务行、排名或权限规则。发布前在最新一致副本验证 52→53、全部旧行哈希、quick/integrity check 与外键，并验证旧代码可重开 v53；正式切换仍需最新备份。回退代码保留 v53 与当前业务库，不用演练或部署前的旧库覆盖后续投票。
 
+引导式盲评测试版 v54 只新建 `guided_matches`、`guided_trial_votes` 及一个索引，不改旧表、旧行。发布前同样在最新一致副本上验证 53→54、旧行哈希、integrity check 与外键，并确认旧代码可重开 v54。测试页是另一份 `GUIDED_VOTING=1` 构建，放在正式画廊的单独目录，不替换正式画廊。
+
 投稿模型预览不需要数据库迁移，但必须另安装已经审阅的运行媒体，步骤见 [投稿预览安装](upload-preview-adaptations.md)。每件先核对运行库记录所指入口 HTML 的 SHA-256 等于 `preview.json.sourceDigest`，再安装清单与模型 / 海报，保持原作字节不变；不安装临时 `extract/`。发布后核对 API 预览字段及实际媒体 GET / HEAD、权限和文件 SHA；只更新源码不会自动带上这些生成物。显式 `PENDING_PER_USER` 会覆盖新的默认 8，发布前核对服务环境中的额度值。
 
 ## 4. 回滚

@@ -766,6 +766,29 @@ const MIGRATIONS = [
   CREATE INDEX IF NOT EXISTS matches_disposable_expiry ON matches(expires_at)
     WHERE choice IS NULL OR user_id IS NULL;
   CREATE INDEX IF NOT EXISTS audit_action ON audit(action, id);`),
+  // Guided blind voting trial, staff only: the matches drawn for it with the aspect each asked,
+  // and its ballots, kept apart from votes so no board reads them. Ballot tables stay as they are.
+  (db) => db.exec(`CREATE TABLE IF NOT EXISTS guided_matches (
+    match_id TEXT PRIMARY KEY REFERENCES matches (id) ON DELETE CASCADE,
+    aspect_id TEXT
+  );
+  CREATE TABLE IF NOT EXISTS guided_trial_votes (
+    id TEXT PRIMARY KEY,
+    match_id TEXT NOT NULL UNIQUE,
+    user_id TEXT REFERENCES users (id) ON DELETE SET NULL,
+    task_id TEXT NOT NULL,
+    a_work TEXT NOT NULL,
+    b_work TEXT NOT NULL,
+    choice TEXT NOT NULL CHECK (choice IN ('a', 'b', 'tie')),
+    tie_kind TEXT CHECK (tie_kind IN ('good', 'bad')),
+    aspect_id TEXT,
+    aspect_choice TEXT CHECK (aspect_choice IN ('a', 'b', 'tie')),
+    aspect_tie_kind TEXT CHECK (aspect_tie_kind IN ('good', 'bad')),
+    a_identity TEXT,
+    b_identity TEXT,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS guided_trial_votes_task ON guided_trial_votes (task_id);`),
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

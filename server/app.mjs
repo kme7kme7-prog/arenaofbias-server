@@ -923,7 +923,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       await voters.beforeMatch(actor, body.turnstileToken, ctx.ip);
       const task = String(body.task ?? '');
       const match = await arena.createMatch(ctx.user, task, body.previous, checkDatapack(ctx, task), body.avoidCooling === true,
-        body.pin ? String(body.pin) : null, actor.visitorHash);
+        body.pin ? String(body.pin) : null, actor.visitorHash, body.guided === true);
       db.prepare('UPDATE matches SET draw_ip=?,draw_subnet=? WHERE id=?').run(normalizeIp(ctx.ip),subnetOf(ctx.ip),match.id);
       return { ...match, challenge: voters.challenge(actor) };
     });
@@ -936,15 +936,16 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   router.on('POST', '/api/arena/matches/:id/vote', async ctx => {
     limit.write(ctx.user?.id ?? ctx.ip);
     const body = await readJson(ctx.req), actor = voters.actor(ctx), choice = String(body.choice ?? '');
+    const ballot = { tieKind: body.tieKind ?? null, aspect: body.aspect ?? null };
     return voters.serial(actor, async () => {
       if (ctx.user) actor.user = auth.byId(ctx.user.id);
       const evidence = voteRisk.capture(actor,ctx.params.id,choice,ctx);
       let proof;
       try {
-        const match = arena.checkVote(actor.user, ctx.params.id, choice, actor.visitorHash);
+        const match = arena.checkVote(actor.user, ctx.params.id, choice, actor.visitorHash, ballot);
         proof = await voters.beforeVote(actor, match, choice, body.turnstileToken, ctx.ip, ctx.receivedAt);
         if (ctx.user) actor.user = auth.byId(ctx.user.id);
-        const result = arena.vote(actor.user, ctx.params.id, choice, { visitorHash: actor.visitorHash,
+        const result = arena.vote(actor.user, ctx.params.id, choice, { visitorHash: actor.visitorHash, ...ballot,
           accept: current => voters.accept(actor, current, choice, proof),
           recordDecision: () => voteRisk.record(evidence,{accepted:true,verified:proof.verified,lastVerifiedAt:voters.lastVerifiedAt(actor)}) });
         return { ...result, challenge: voters.challenge(actor) };

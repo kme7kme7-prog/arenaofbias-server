@@ -25,6 +25,7 @@ import { isSenior, isStaff, levelOf } from './roles.mjs';
 import { checkTiming, timing } from './arena-voter-state.mjs';
 import { manualCorrections, voteAttribution, votesBeforeTaskMove } from './vote-attribution.mjs';
 import { ALL_WORKS, createRestricted, seesRestricted } from './restricted.mjs';
+import { pickAspect, publicAspect } from './aspects.mjs';
 
 const MATCH = { tierWidth: 150, sameTierRate: 0.9, blowoutGap: 400, rerolls: 2, cooldownRounds: 6, cooldownMs: 15 * 60e3 };
 const ANONYMOUS_MATCH_MAX = 10000;
@@ -43,6 +44,26 @@ const identityOf = (work, digest = work.digest ?? null) => ({
   ...generationOf(work),
   modelKey: modelKey(work), configKey: entityKey(work), ownerId: work.ownerId,
 });
+// Guided blind voting trial. A staff member's match drawn with `guided` may ask one aspect question
+// (测评点) before the overall one; its ballot goes to guided_trial_votes and no board reads it.
+// An overall tie may say whether both works were good or both bad. Ordinary matches take neither.
+function ballotOf(guided, choice, { tieKind = null, aspect = null } = {}) {
+  if (!guided) {
+    if (tieKind != null || aspect != null) fail(400, '选择无效');
+    return { tieKind: null, aspect: null };
+  }
+  const kindOf = (kind, pick) => {
+    if (kind == null) return null;
+    if (pick !== 'tie' || !['good', 'bad'].includes(kind)) fail(400, '选择无效');
+    return kind;
+  };
+  const overall = kindOf(tieKind, choice);
+  // Leaving the aspect out skips only that question.
+  if (aspect == null || choice === 'skip') return { tieKind: overall, aspect: null };
+  if (typeof aspect !== 'object' || !guided.aspect_id || aspect.id !== guided.aspect_id || !['a', 'b', 'tie'].includes(aspect.choice))
+    fail(400, '细项选择无效', 'invalid_aspect');
+  return { tieKind: overall, aspect: { id: aspect.id, choice: aspect.choice, tieKind: kindOf(aspect.tieKind, aspect.choice) } };
+}
 const fromIdentity = (text) => {
   if (!text) return null;
   const { harnessVersion, modelVersion, generatedOn, evidenceUrl, providerOther, providerName, ...identity } = JSON.parse(text);
@@ -78,6 +99,10 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     correctA: db.prepare('UPDATE votes SET a_correction = ? WHERE id = ?'),
     correctB: db.prepare('UPDATE votes SET b_correction = ? WHERE id = ?'),
     vote: db.prepare('SELECT * FROM votes WHERE id = ?'),
+    guided: db.prepare('SELECT aspect_id FROM guided_matches WHERE match_id = ?'),
+    insertGuided: db.prepare('INSERT INTO guided_matches (match_id, aspect_id) VALUES (?, ?)'),
+    insertTrial: db.prepare('INSERT INTO guided_trial_votes (id, match_id, user_id, task_id, a_work, b_work, choice, tie_kind, aspect_id, aspect_choice, aspect_tie_kind, a_identity, b_identity, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+    trialAspects: db.prepare('SELECT aspect_id, COUNT(*) AS n FROM guided_trial_votes WHERE task_id = ? AND aspect_choice IS NOT NULL GROUP BY aspect_id'),
     audit: db.prepare('INSERT INTO audit (at, actor_id, actor_name, action, task_id, work_id, detail) VALUES (?, ?, ?, ?, ?, ?, ?)'),
   };
 
@@ -476,8 +501,9 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     poolStats,
     poolModels,
 
-    async createMatch(user, taskId, previousId, snapshot = catalog.snapshot(), avoidCooling = false, pin = null, visitorHash = null) {
+    async createMatch(user, taskId, previousId, snapshot = catalog.snapshot(), avoidCooling = false, pin = null, visitorHash = null, guided = false) {
       if (pin && !isSenior(user)) fail(403, '仅高级管理员可以固定模型');
+      if (guided && !isStaff(user)) fail(403, '引导式盲评测试版只对管理员开放', 'guided-staff-only');
       if (!snapshot.task(taskId) && !catalog.task(taskId)) fail(404, '题目不存在');
       if (isAiJudgedTask(catalog.task(taskId) ?? snapshot.task(taskId))) fail(409, '这道题由 AI 评分，暂不开放盲评', 'ai-judged');
       if (Date.now() - lastCleanup >= 60e3) cleanupExpiredMatches();
@@ -521,6 +547,8 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       const chosen = pick(candidates, await leaderboard({ task: taskId, snapshot, senior: seesRestricted(user) }), pin);
       const [first, second] = pickWorks(taskId, chosen, voted, random);
       const [a, b] = random() < 0.5 ? [first, second] : [second, first];
+      // The least answered aspect of the task's category pool, ties at random; none outside the pilot categories.
+      const aspect = guided ? pickAspect(catalog.task(taskId) ?? snapshot.task(taskId), q.trialAspects.all(taskId), random) : null;
       const id = randomBytes(12).toString('hex');
       const now = Date.now();
       const tokens = [token(), token()];
@@ -534,6 +562,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       q.insertMatch.run(id, user?.id ?? null, taskId, a.id, b.id, tokens[0], tokens[1], now, now + limits.matchTtl,
         snapshot.root, snapshot.version, JSON.stringify(identityOf(a, a.curated ? snapshot.entryDigest(a) : a.digest)),
         JSON.stringify(identityOf(b, b.curated ? snapshot.entryDigest(b) : b.digest)), pin, visitorHash);
+      if (guided) q.insertGuided.run(id, aspect?.id ?? null);
       return {
         id,
         task: taskId,
@@ -545,15 +574,17 @@ export function createArena({ db, catalog, library, limits, random = Math.random
           a: library.calibrationOf?.(a, 'arena')?.framing ?? null,
           b: library.calibrationOf?.(b, 'arena')?.framing ?? null,
         },
-        counted: true, createdAt: new Date(now).toISOString(), expiresAt: new Date(now + limits.matchTtl).toISOString(),
-        minViewSeconds: 5, minSkipSeconds: 3, countableFor: { public: true, curated: levelOf(user) >= 1 && curation.contains(taskId) },
+        counted: !guided, createdAt: new Date(now).toISOString(), expiresAt: new Date(now + limits.matchTtl).toISOString(),
+        minViewSeconds: 5, minSkipSeconds: 3, countableFor: { public: !guided, curated: !guided && levelOf(user) >= 1 && curation.contains(taskId) },
+        ...(guided ? { guided: true, aspect: publicAspect(aspect) } : {}),
       };
     },
 
-    checkVote(user, matchId, choice, visitorHash = null) {
+    checkVote(user, matchId, choice, visitorHash = null, ballot = {}) {
       const match = this.ownedMatch(user, matchId, visitorHash);
       if (match.choice) fail(409, '这一组已经提交过了');
       if (!['a','b','tie','skip'].includes(choice)) fail(400, '选择无效');
+      ballotOf(q.guided.get(match.id), choice, ballot);
       if (isAiJudgedTask(catalog.task(match.task_id))) fail(409, '这道题由 AI 评分', 'ai-judged');
       checkTiming(match, choice);
       return match;
@@ -570,8 +601,10 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       db.prepare('UPDATE matches SET ready_at=COALESCE(ready_at,?) WHERE id=?').run(Date.now(), match.id);
       return timing(q.match.get(match.id));
     },
-    vote(user, matchId, choice, { visitorHash = null, accept = () => {}, recordDecision = () => {} } = {}) {
-      const match = this.checkVote(user, matchId, choice, visitorHash);
+    vote(user, matchId, choice, { visitorHash = null, accept = () => {}, recordDecision = () => {}, tieKind = null, aspect = null } = {}) {
+      const match = this.checkVote(user, matchId, choice, visitorHash, { tieKind, aspect });
+      const guided = q.guided.get(match.id);
+      const ballot = ballotOf(guided, choice, { tieKind, aspect });
       if (choice === 'skip') {
         transaction(db, () => {
           if (!q.decide.run(choice, Date.now(), match.id).changes) fail(409, '这一组已经提交过了');
@@ -599,7 +632,12 @@ export function createArena({ db, catalog, library, limits, random = Math.random
             match.a_identity, match.b_identity, levelOf(user), visitorHash);
           counted = true;
         };
-        saveBallot();
+        // A trial ballot is kept apart and never counted.
+        if (guided) {
+          q.insertTrial.run(randomBytes(12).toString('hex'), match.id, user?.id ?? null, match.task_id, match.a_work, match.b_work, choice, ballot.tieKind,
+            guided.aspect_id, ballot.aspect?.choice ?? null, ballot.aspect?.tieKind ?? null, match.a_identity, match.b_identity, Date.now());
+          reason = 'trial';
+        } else saveBallot();
         recordDecision();
       });
       if (counted) invalidate({ votesOnly: true });
@@ -610,7 +648,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       // A pinned round says which side held the pinned model, for the admin's running tally.
       const pinned = match.pin ? (aIdentity.modelKey === match.pin ? 'a' : bIdentity.modelKey === match.pin ? 'b' : null) : undefined;
       const curatedEligible = counted && levelOf(user) >= 1 && Date.now() >= curation.startedAt();
-      return { choice, counted, reason, countedFor: { public: counted, curated: curatedEligible && curation.contains(match.task_id) }, curatedEligible, voterLevel: levelOf(user), a: reveal(a, aIdentity), b: reveal(b, bIdentity), ...(pinned !== undefined ? { pinned } : {}) };
+      return { choice, ...(guided ? { guided: true, tieKind: ballot.tieKind, aspect: ballot.aspect } : {}), counted, reason, countedFor: { public: counted, curated: curatedEligible && curation.contains(match.task_id) }, curatedEligible, voterLevel: levelOf(user), a: reveal(a, aIdentity), b: reveal(b, bIdentity), ...(pinned !== undefined ? { pinned } : {}) };
     },
 
     // The work behind a match token, for the content server.

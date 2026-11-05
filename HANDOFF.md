@@ -1,3 +1,11 @@
+## 2026-11-06 · 引导式盲评测试版（仅管理员，不计榜）
+
+- 用户要求部署只对管理员开放、有单独链接的测试版：共用正式后端，测试票不计入大众榜与精选榜。创建对局带 `guided: true` 才进入测试版，仅普通与高级管理员可用，其他人 `403 guided-staff-only`；不带该参数的对局、投票与榜单行为不变。
+- `server/aspects.mjs`：建模题测评点 6 道（工程完备/逻辑/审美/发散），每局取本题已答最少的一道，同数随机；其他分类只问综合题。投票可带 `tieKind`（good/bad，仅配 tie）与 `aspect {id, choice, tieKind?}`，写入 `guided_trial_votes`，返回 `reason:"trial"`，不写 votes；对局照常终局与揭晓，风控证据照常记录（vote_id 为空）。
+- v54 只新建 `guided_matches`、`guided_trial_votes` 及按题索引，不改旧表；任何榜单都不读这两张表，试用结束后可直接清空。新增 `test/guided-trial.test.mjs`；npm run check 180/0，npm test 597/597。api-contract（§1.1、§3.8、§3.9）与 deploy.md 已补说明。
+- 测试页由 Gallery 用 `GUIDED_VOTING=1` 另行构建，放在 `https://gallery.arenaofbias.icu/guided-trial/`。上线记录（备份、迁移演练、安装与验收）在服务器 `/root/aob-guided-trial-20261106/`。本地演示在工作区 `.demo/`，演示账号密码只记在 `.demo/README.md`。
+- [本轮归档](docs/archive/2026-11-06-guided-voting-trial-wsnxxxs.md)。
+
 ## 2026-10-30 · 题面参考图 COS 双写（PR，未合并，未部署）
 
 - 方案 A：公开题（approved / legacy）参考图按 src 原样作键双写 COS（`media/references/`、`media/pack-references/`）；草稿、pending、rejected 不写。公开题换图、拒绝、删除时按键删除并只用 `PurgeUrlsCache` 逐 URL 刷新，失败只记日志。复用 `COS_MEDIA_ACCESS_CONTROLLED=1`，无新 env、无迁移。

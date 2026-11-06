@@ -25,7 +25,7 @@ import { isSenior, isStaff, levelOf } from './roles.mjs';
 import { checkTiming, timing } from './arena-voter-state.mjs';
 import { manualCorrections, voteAttribution, votesBeforeTaskMove } from './vote-attribution.mjs';
 import { ALL_WORKS, createRestricted, seesRestricted } from './restricted.mjs';
-import { pickAspect, publicAspect } from './aspects.mjs';
+import { pickAspect, publicAspect, trialStandings } from './aspects.mjs';
 
 const MATCH = { tierWidth: 150, sameTierRate: 0.9, blowoutGap: 400, rerolls: 2, cooldownRounds: 6, cooldownMs: 15 * 60e3 };
 const ANONYMOUS_MATCH_MAX = 10000;
@@ -103,6 +103,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     insertGuided: db.prepare('INSERT INTO guided_matches (match_id, aspect_id) VALUES (?, ?)'),
     insertTrial: db.prepare('INSERT INTO guided_trial_votes (id, match_id, user_id, task_id, a_work, b_work, choice, tie_kind, aspect_id, aspect_choice, aspect_tie_kind, a_identity, b_identity, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
     trialAspects: db.prepare('SELECT aspect_id, COUNT(*) AS n FROM guided_trial_votes WHERE task_id = ? AND aspect_choice IS NOT NULL GROUP BY aspect_id'),
+    trialVotes: db.prepare('SELECT user_id, choice, aspect_id, aspect_choice, a_identity, b_identity, created_at FROM guided_trial_votes WHERE aspect_id IS NOT NULL ORDER BY created_at, rowid'),
     audit: db.prepare('INSERT INTO audit (at, actor_id, actor_name, action, task_id, work_id, detail) VALUES (?, ?, ?, ?, ?, ?, ?)'),
   };
 
@@ -692,5 +693,24 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     },
 
     votesBy: (userId) => q.userVotes.get(userId).n,
+
+    // Guided trial dimension chart (staff only): trial ballots per model or configuration, from the
+    // identities captured when each pair was drawn. Restricted works stay hidden from non-senior staff.
+    guidedDimensions(user, by = 'model') {
+      if (!isStaff(user)) fail(403, '引导式盲评测试版只对管理员开放', 'guided-staff-only');
+      const snapshot = catalog.snapshot();
+      const keyOf = by === 'config' ? (work) => work.configKey ?? entityKey(work) : (work) => work.modelKey ?? modelKey(work);
+      const hidden = (work) => !seesRestricted(user) && restricted.isRestrictedWork(work);
+      const ballots = [];
+      for (const row of q.trialVotes.all()) {
+        const a = fromIdentity(row.a_identity), b = fromIdentity(row.b_identity);
+        if (!a || !b || hidden(a) || hidden(b)) continue;
+        ballots.push({ a, b, choice: row.choice, aspectId: row.aspect_id, aspectChoice: row.aspect_choice, userId: row.user_id, createdAt: row.created_at });
+      }
+      return { by, ...trialStandings(ballots, keyOf, (work) => {
+        const model = work.modelId ? snapshot.model?.(work.modelId) : null;
+        return { model: work.modelId ?? null, modelName: model?.name ?? work.modelName, vendor: model?.vendor ?? work.vendor, effort: by === 'config' ? work.effort ?? '' : '' };
+      }) };
+    },
   };
 }

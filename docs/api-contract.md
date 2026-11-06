@@ -23,7 +23,7 @@
 
 SQLite v53 仅追加有效 arena 票时间序、用户/题目历史、可清理对局过期时间及审计 action/id 四个查询索引；API 字段、业务行、投票归属、排名和权限口径保持。
 
-SQLite v54 为引导式盲评测试版新增 `guided_matches` 与 `guided_trial_votes` 两张独立表（见 §3.8、§3.9），不改 `votes`、`matches` 等旧表，任何榜单都不读这两张表。
+SQLite v54 为引导式盲评测试版新增 `guided_matches` 与 `guided_trial_votes` 两张独立表（见 §3.8、§3.9），不改 `votes`、`matches` 等旧表，任何榜单都不读这两张表；只有管理员的测试版维度图（§3.9.1）读取 `guided_trial_votes`。
 
 服务同时监听**两个端口**：
 
@@ -730,6 +730,12 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 - 测试版对局（创建时带 `guided`）的请求体另可带 `tieKind`（`good` / `bad`，仅 `choice` 为 `tie` 时，表示都很好或都不好）与 `aspect: { id, choice: "a"|"b"|"tie", tieKind? }`（`id` 须为该局抽到的测评点；省略表示跳过这一题）。这一票写入 `guided_trial_votes`，不写 `votes`，不进入任何榜单，也不占用「已评组合」；对局照常终局与揭晓，风控证据照常记录（`vote_id` 为空）。响应 `counted: false`、`reason: "trial"`，另含 `guided: true`、`tieKind`、`aspect`（未答为 null）。普通对局带这两个字段返回 `400 选择无效`；测评点不符返回 `400 + code:"invalid_aspect"`。
 
 错误：`404 这一组已经失效`（对局不存在 / 过期 / 非本人）；`409 这一组已经提交过了`；`400 选择无效`；`429`。新增 409/match_not_ready、409/vote_too_early（voteAllowedAt、skipAllowedAt、serverNow、retryAfter）、403/turnstile_required、400/turnstile_failed、503/turnstile_unavailable；拒绝时不揭晓、不终局。
+
+### 3.9.1 `GET /api/arena/guided/dimensions` —— 测试版维度图（仅管理员）
+
+- 仅普通与高级管理员可用：未登录 `401`，其他人 `403 + code:"guided-staff-only"`。默认按模型统计，`?by=config` 按配置拆分。
+- 只统计 `guided_trial_votes` 中带测评点的测试票（`aspect_id` 非空）；两边属于同一模型（或配置）的一对不计。归属取抽组时记下的身份快照；非高级管理员看不到受限作品，与榜单一致。
+- 响应 `{ by, categories, dimensions, totals, entries }`：`dimensions` 为 `[{id, name, aspects: [{id, keyword}]}]`（顺序即 `server/aspects.mjs` 的维度顺序）；`totals` 为 `{pairs, answered, voters, since, until}`；`entries` 每项 `{key, model, modelName, vendor, effort, overall, dimensions}`，`overall` 是同一批对局综合题的 `{win, tie, loss, n}`，`dimensions.<维度>` 为 `{win, tie, loss, n, aspects: {<测评点>: {win, tie, loss, n}}}`。只给次数，胜率由页面计算（平局算半场）。
 
 ### 3.10 `GET /api/leaderboard` —— 排行榜
 

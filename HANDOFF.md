@@ -1,3 +1,10 @@
+## 2026-11-06 · 引导式盲评维度图接口（仅管理员）
+
+- `GET /api/arena/guided/dimensions?by=model|config`：从 `guided_trial_votes` 统计每个模型（或配置）在各维度、各测评点及同批综合题上的胜、平、负次数，供 Gallery 测试版的维度图使用。只计带测评点的测试对局，两边同属一个条目的一对不计；归属取抽组时的身份快照，非高级管理员看不到受限作品。未登录 401，非管理员 403 `guided-staff-only`。
+- `server/aspects.mjs` 新增 `trialStandings`，`server/arena.mjs` 新增 `guidedDimensions`，`server/app.mjs` 一条路由；无迁移，不影响 votes 与榜单。api-contract 新增 §3.9.1。npm run check 180/0，npm test 598/598。
+- 线上按上一轮做法叠加本轮文件，记录在 `/root/aob-guided-trial-20261106/RECEIPT.md`。
+- [本轮归档](docs/archive/2026-11-06-guided-dimension-chart-wsnxxxs.md)。
+
 ## 2026-11-06 · 引导式盲评测试版（仅管理员，不计榜）
 
 - 用户要求部署只对管理员开放、有单独链接的测试版：共用正式后端，测试票不计入大众榜与精选榜。创建对局带 `guided: true` 才进入测试版，仅普通与高级管理员可用，其他人 `403 guided-staff-only`；不带该参数的对局、投票与榜单行为不变。

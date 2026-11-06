@@ -1,6 +1,7 @@
 // Guided blind voting trial (staff only). Besides the overall question, a trial match may carry
 // one aspect question (测评点) from its category's pool. Trial answers are kept in guided_trial_votes,
-// which no board reads. Pilot: 建模 only. Aspect IDs are stable; the wording may change.
+// which no board reads; only the staff dimension chart (trialStandings) counts them.
+// Pilot: 建模 only. Aspect IDs are stable; the wording may change.
 export const DIMENSIONS = { aesthetic: '审美', craft: '工程完备', logic: '逻辑', diverge: '发散' };
 
 export const ASPECTS = {
@@ -34,3 +35,52 @@ export const publicAspect = (aspect) => aspect && {
   id: aspect.id, dimension: aspect.dimension, dimensionName: DIMENSIONS[aspect.dimension],
   question: aspect.question, keyword: aspect.keyword, hint: aspect.hint,
 };
+
+const ASPECT_BY_ID = new Map(Object.values(ASPECTS).flat().map((aspect) => [aspect.id, aspect]));
+const OUTCOMES = { a: ['win', 'loss'], b: ['loss', 'win'], tie: ['tie', 'tie'] };
+const tally = () => ({ win: 0, tie: 0, loss: 0, n: 0 });
+const add = (cell, outcome) => { cell[outcome]++; cell.n++; };
+
+// Counts behind the trial's dimension chart (staff only). Only pairs that carried an aspect question
+// count. Per entry: wins, ties and losses on each dimension and its aspects, and on the overall
+// question of the same pairs. A pair whose two works share an entry says nothing and is left out.
+// `ballots` are { a, b, choice, aspectId, aspectChoice, userId, createdAt } with parsed identities.
+export function trialStandings(ballots, keyOf, describe) {
+  const entries = new Map(), voters = new Set();
+  let pairs = 0, answered = 0, since = null, until = null;
+  const entry = (identity, key) => {
+    if (!entries.has(key)) entries.set(key, { key, ...describe(identity), overall: tally(),
+      dimensions: Object.fromEntries(Object.keys(DIMENSIONS).map((id) => [id, { ...tally(), aspects: {} }])) });
+    return entries.get(key);
+  };
+  for (const ballot of ballots) {
+    const aspect = ASPECT_BY_ID.get(ballot.aspectId);
+    const outcome = OUTCOMES[ballot.choice];
+    if (!aspect || !outcome || !ballot.a || !ballot.b) continue;
+    const leftKey = keyOf(ballot.a), rightKey = keyOf(ballot.b);
+    if (leftKey === rightKey) continue;
+    const sides = [entry(ballot.a, leftKey), entry(ballot.b, rightKey)];
+    pairs++;
+    if (ballot.userId) voters.add(ballot.userId);
+    since = since == null ? ballot.createdAt : Math.min(since, ballot.createdAt);
+    until = until == null ? ballot.createdAt : Math.max(until, ballot.createdAt);
+    sides.forEach((side, i) => add(side.overall, outcome[i]));
+    const picked = OUTCOMES[ballot.aspectChoice];
+    if (!picked) continue;
+    answered++;
+    sides.forEach((side, i) => {
+      const cell = side.dimensions[aspect.dimension];
+      add(cell, picked[i]);
+      add(cell.aspects[aspect.id] ??= tally(), picked[i]);
+    });
+  }
+  const answers = (row) => Object.values(row.dimensions).reduce((sum, cell) => sum + cell.n, 0);
+  return {
+    categories: Object.keys(ASPECTS),
+    dimensions: Object.entries(DIMENSIONS).map(([id, name]) => ({ id, name,
+      aspects: [...ASPECT_BY_ID.values()].filter((aspect) => aspect.dimension === id).map(({ id: aspectId, keyword }) => ({ id: aspectId, keyword })) })),
+    totals: { pairs, answered, voters: voters.size, since: since == null ? null : new Date(since).toISOString(), until: until == null ? null : new Date(until).toISOString() },
+    entries: [...entries.values()].sort((x, y) => answers(y) - answers(x) || y.overall.n - x.overall.n
+      || String(x.modelName).localeCompare(String(y.modelName), 'en', { numeric: true }) || String(x.effort).localeCompare(String(y.effort))),
+  };
+}

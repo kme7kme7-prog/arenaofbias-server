@@ -46,8 +46,42 @@ function fixture() {
     }
     arena.invalidate();
   };
-  return { arena, catalog, library, vote, selected, config, close() { db.close(); rmSync(root, { recursive: true, force: true }); } };
+  return { arena, catalog, library, db, vote, selected, config, close() { db.close(); rmSync(root, { recursive: true, force: true }); } };
 }
+
+test('published boards require 21 comparisons per entry and omit the mixed model without changing the fit', async () => {
+  const f = fixture();
+  try {
+    f.vote('ah', 'b', 20);
+    f.vote('al', 'b', 21);
+    f.vote('c', 'b', 1);
+    f.vote('unknown', 'b', 35);
+    const name = 'Claude Opus 5.5 + 9 个 DeepSeek V4.1 Flash 1017 子智能体';
+    const key = `x:${name.toLowerCase()}`;
+    for (const row of f.db.prepare("SELECT id,a_identity FROM votes WHERE a_work='unknown'").all()) {
+      const identity = { ...JSON.parse(row.a_identity), digest: 'earlier-content', modelId: null, modelName: name, modelKey: key, configKey: `${key}|high` };
+      f.db.prepare('UPDATE votes SET a_identity=? WHERE id=?').run(JSON.stringify(identity), row.id);
+    }
+    f.arena.invalidate();
+    for (const by of ['config', 'model']) {
+      const internal = await f.arena.leaderboard({ by });
+      assert.ok(internal.rows.some(r => r.key.startsWith(key)), 'mixed opponents still inform the fit');
+      for (const options of [{ by }, { by, task: f.selected }, { by, category: 'design' }, { by, audience: 'curated' }]) {
+        const board = await f.arena.leaderboardSnapshot(options);
+        assert.equal(board.minimumGames, 21);
+        assert.ok(board.rows.every(r => r.games >= 21 && !r.key.startsWith(key)));
+        assert.deepEqual(board.rows.map(r => r.rank), board.rows.map((_, i) => i + 1));
+        assert.deepEqual(board.unranked, []);
+        assert.ok(board.rows.some(r => r.key === (by === 'config' ? 'a|low' : 'a')));
+        if (by === 'config') assert.ok(!board.rows.some(r => r.key === 'a|high'));
+        if (!options.task && !options.category && !options.audience) {
+          assert.deepEqual(board.standings.design, Object.fromEntries(board.rows.map(r => [r.key, r.rank])));
+          for (const row of board.rows) assert.equal(row.score, internal.rows.find(r => r.key === row.key).score);
+        }
+      }
+    }
+  } finally { f.close(); }
+});
 
 test('an invalidated public fit retries with the current package instead of its captured archive', async () => {
   const f = fixture();
@@ -99,7 +133,7 @@ test('curated board uses exactly the selected questions and model-level qualific
   try {
     f.vote('ah', 'b', 15);
     f.vote('al', 'b', 15);
-    f.vote('c', 'b', 29);
+    f.vote('c', 'b', 20);
     f.vote('unknown', 'b', 35);
     f.vote('pool', 'b', 30); // Guessing-game registry presence does not mean Gallery has registered it.
     f.vote('dh', 'dl', 40); // Same-model votes cannot qualify a model.
@@ -107,7 +141,7 @@ test('curated board uses exactly the selected questions and model-level qualific
     const model = await f.arena.leaderboard({ board: 'frontend', by: 'model' });
     assert.equal(model.board, 'frontend');
     assert.deepEqual(model.scope.taskIds, [f.selected]);
-    assert.equal(model.totals.votes, 124);
+    assert.equal(model.totals.votes, 115);
     assert.deepEqual(new Set(model.rows.map((r) => r.model)), new Set(['a', 'b']));
     assert.ok(model.rows.every((r) => !r.provisional));
     const reference = await f.arena.leaderboard({ task: f.selected, by: 'model' });
@@ -116,13 +150,13 @@ test('curated board uses exactly the selected questions and model-level qualific
     assert.ok((await f.arena.leaderboard({ by: 'model' })).rows.some((r) => r.model === 'c' && !r.provisional));
     const config = await f.arena.leaderboard({ board: 'frontend' });
     assert.deepEqual(new Set(config.rows.map((r) => r.key)), new Set(['a|high', 'a|low', 'b|high']));
-    assert.equal(config.totals.votes, 164);
+    assert.equal(config.totals.votes, 155);
     assert.ok(config.rows.filter((r) => r.model === 'a').every((r) => r.provisional), 'a qualified model may have thin configurations');
     assert.deepEqual(config.rows.map((r) => r.rank), [1, 2, 3]);
     assert.ok(config.unranked.every((r) => ['a', 'b'].includes(r.model)));
     f.vote('c', 'b', 1);
     const boundary = await f.arena.leaderboard({ board: 'frontend', by: 'model' });
-    assert.ok(boundary.rows.some((r) => r.model === 'c' && r.games === 30 && !r.provisional));
+    assert.ok(boundary.rows.some((r) => r.model === 'c' && r.games === 21 && r.provisional));
     assert.ok((await f.arena.leaderboard({ board: 'frontend' })).rows.some((r) => r.model === 'c'));
   } finally { f.close(); }
 });

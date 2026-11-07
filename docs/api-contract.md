@@ -751,7 +751,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 - `unranked` 与 `works` 计数按作品当前的来源字段筛选。
 - 带筛选时响应多一个 `"filters": { "harness": …, "provider": … }`；不带筛选时响应形状、计票范围与缓存键都与不支持筛选时完全相同。
 
-大众榜使用 `audience=public`（默认），保持 source=arena 的有效历史票，并纳入上线后的访客和未绑邮箱票。精选榜使用 `audience=curated`；省略 sectionId 为精选总榜，`sectionId=<稳定ID>` 为分区榜；旧 `board=frontend` 兼容精选总榜，不能与 sectionId 同用。精选不可与 task/category/domain 混用，支持 by 与来源筛选。题集和分区来自数据库，可由 Lv3 动态维护，初始网页设计10题、三维建模26题；与大众 category 独立。当前 role=admin/moderator 账号的全部有效 arena 票直接参与，不受历史等级快照或新起点限制；其余账号仍只计 `voter_level>=1` 且 created_at 不早于一次性 counting_started_at 的有效票，历史快照不回填。新勾选的题使用同一资格规则。管理员身份变化立即使榜单缓存失效。每个范围独立重新拟合 Bradley–Terry，不平均单题分数。模型须已在 Gallery models/aliases 收录且本范围有效比较≥30；配置沿用同范围模型资格，配置仍可暂定。有效但未达资格的对手参与拟合，rows/unranked 按资格过滤，空榜正常。返回 audience/sectionId，以及 scope:{taskIds,countingStartedAt,revision,minimumVoterLevel:1,includesStaffHistory:true,qualifiedModels,provisionalModels,qualification:"registered-nonprovisional-model",provisionalGames:30}，兼容 board:"frontend"，不带大众 standings。题集/分区变更立即失效并丢弃在途旧计算；新票保持600秒公开快照。GET /api/curated 提供分区名称、次序及 taskIds，详见 §3.26。
+大众榜使用 `audience=public`（默认），保持 source=arena 的有效历史票，并纳入上线后的访客和未绑邮箱票。精选榜使用 `audience=curated`；省略 sectionId 为精选总榜，`sectionId=<稳定ID>` 为分区榜；旧 `board=frontend` 兼容精选总榜，不能与 sectionId 同用。精选不可与 task/category/domain 混用，支持 by 与来源筛选。题集和分区来自数据库，可由 Lv3 动态维护，初始网页设计10题、三维建模26题；与大众 category 独立。当前 role=admin/moderator 账号的全部有效 arena 票直接参与，不受历史等级快照或新起点限制；其余账号仍只计 `voter_level>=1` 且 created_at 不早于一次性 counting_started_at 的有效票，历史快照不回填。新勾选的题使用同一资格规则。管理员身份变化立即使榜单缓存失效。每个范围独立重新拟合 Bradley–Terry，不平均单题分数。模型须已在 Gallery models/aliases 收录且本范围有效比较≥21；配置同时要求同范围模型资格及本配置有效比较≥21。21–29场仍为暂定。有效但未达资格的对手参与拟合，rows 按资格过滤，unranked 为空，空榜正常。返回 audience/sectionId，以及 scope:{taskIds,countingStartedAt,revision,minimumVoterLevel:1,includesStaffHistory:true,qualifiedModels,provisionalModels,qualification:"registered-minimum-comparisons-model",minimumGames:21,provisionalGames:30}，兼容 board:"frontend"，不带大众 standings。题集/分区变更立即失效并丢弃在途旧计算；新票保持600秒公开快照。GET /api/curated 提供分区名称、次序及 taskIds，详见 §3.26。
 
 题型与领域：响应回显 `category`、`domain`（未指定为 `null`）。`totals.votes` / `totals.voters` 只计实际参与拟合的比较：同一计分单位（按配置为同一配置，按模型为同一模型）两件作品之间的票不计入；`totals.tasks` 为这些比较涉及的题目数，前端据此在领域榜少于 2 题或 50 次比较时提示样本不足。既无 `task`、`category` 也无 `domain` 的综合榜多一个 `standings`：`{ [题型]: { [key]: 该题型内名次 } }`，只列已有排名的题型，沿用同一计分单位与来源筛选。已公开的题目按 `category` 进入对应题型；迁移后分类仍为空的旧题只计入综合榜。
 
@@ -765,7 +765,8 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
       "effort": "High", "score": 1082, "interval": 96, "games": 41, "wins": 25, "draws": 4, "losses": 12,
       "winRate": 0.6585, "voters": 15, "tasks": 3, "works": 2, "provisional": false }
   ],
-  "unranked": [ { "key": "…", "model": "…", "modelName": "…", "vendor": "…", "effort": "…", "works": 1 } ],
+  "unranked": [],
+  "minimumGames": 21,
   "provisionalGames": 30,
   "updatedAt": "2026-09-27T08:00:00.000Z"
 }
@@ -773,7 +774,8 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 - 评分算法：Bradley–Terry 模型（平局各计半胜，弱先验 N(0,1)），映射到 Elo 刻度——均值 1000，400 分对应十倍胜率差；`interval` 为 95% 不确定区间半宽。与顺序无关。
 - `provisional`：对局数 < `provisionalGames`（30）者为暂定。
-- `unranked`：池内存在但尚无计入对局的配置，按模型名字典序排列。
+- `minimumGames: 21`：公开 rows 每个模型或配置在当前范围有效比较至少21场才显示；20场不显示，unranked 固定为空。混合条目 `x:claude opus 5.5 + 9 个 deepseek v4.1 flash 1017 子智能体` 不展示（含其配置）；未显示条目的有效票仍参与 BT 拟合与 totals，不改变盲评抽样。过滤后 rows 和 standings 名次连续。
+- `unranked`：固定为空；没有比较数据的条目不出现在公开榜单。
 - 内部实时榜在新票后失效；公开榜新票保持600秒快照。作品状态/归属、数据包、精选配置变更立即失效。
 
 非文字题的单件作品分供代表作选择使用，不改变上述配置榜响应与算法。先以当前两件作品均 `isEligible` 的 arena 票计算该题原配置级 Bradley–Terry 强度，再以作品为单位拟合，先验为 N(配置 logit 强度, 0.5²)。同配置内不同作品的票也参与作品拟合；旧快照或显式更正中的配置键保持原计分口径。内部 `arena.workScores(taskId)` 返回 `{ id, score, interval, games }[]`；`score` 在配置分的 Elo 刻度上估计作品偏差，保持配置中心，不按作品数量再次归零；`interval` 仍为 95% 后验不确定区间半宽（以配置先验均值为锚）。超过现有 200 条目阈值时沿用 worker。文字题不计算作品分。
@@ -1069,7 +1071,7 @@ v26 仅追加幂等建表 `featured_picks(task_id, scope, model_key, work_id, co
 
 兼容规则：无 audience/board/sectionId 时就是大众榜；旧 `board=frontend` 是**新精选总榜**的兼容别名，不再表示固定「前端分区」，新前端不发送 board。旧别名只允许不传 sectionId，且与 audience=public 冲突；未知 board 返回 invalid_query。canonical `audience=curated` 无需 board，sectionId 缺省表示总榜；sectionId 只允许配合精选，不与 task/category/domain 混用。大众继续支持原 task/category/domain。不存在的 sectionId 返回 404/section_not_found；存在但空的分区返回 200、totals=0、rows=[]。
 
-总榜和分区都重新对本范围有效票做 BT 拟合、各自判断模型 30 比较资格；不能把精选总榜 row 截取当分区榜。sectionId 是稳定技术 id，name 可任意改名，前端从 `/api/curated` 渲染分区，不把「网页设计/三维/Blender/视频」写死为枚举。
+总榜和分区都重新对本范围有效票做 BT 拟合、各自判断模型及配置 21 比较资格；不能把精选总榜 row 截取当分区榜。sectionId 是稳定技术 id，name 可任意改名，前端从 `/api/curated` 渲染分区，不把「网页设计/三维/Blender/视频」写死为枚举。
 
 challenge 的统一形状为 `{required:boolean,reason:null|'guest_entry'|'guest_interval'|'rapid_choices',siteKey:string|null,action:'arena',guestVotesRemaining:number|null}`。policy/match 仅提示当前状态，vote 再判定是最终权威；跨 tab 导致临时需要验证是正常分支。
 

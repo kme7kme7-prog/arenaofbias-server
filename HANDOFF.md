@@ -1,3 +1,13 @@
+## 2026-11-07 · HY4 排名核对与21场入榜门槛（已授权发布）
+
+- 用户确认：混合条目 Claude Opus 5.5 + 9 个 DeepSeek V4.1 Flash 1017 子智能体不显示；每个模型或配置在当前榜范围有效比较至少21场才显示；HY4只有High。已明确授权提交、推送并上线，负责人wsnxxxs（269096463）。
+- 只读一致副本复算大众HY4为200场（108胜17平75负）、1161±50、第11；30位投票者中一人119场。精选83场中同一人74场；移除该投票者全部票重拟合，大众1103分/第22、精选仅9场不够入榜。201条相关原票ID/对局唯一、用户作品组合无重复；未发现Preview并入。
+- 已通过现场library.setMeta单事务将29件未删除HY4作品的Max/Default改为High，仅同步自动生成标题，原始39972票逐条保持，quick_check ok、外键0；线上配置仅hy4|high，200场、1157±50。未删除投票、作品或Preview；备份/root/aob-hy4-ranking-20261107/before-effort.db。
+- arena.leaderboardSnapshot只过滤展示，内部完整拟合和抽样保持；rows/unranked不泄露未达21场条目，配置独立达标，分类standings同门槛并连续编号。精选已登记模型资格改为21场，21–29场仍暂定。后端契约与Gallery中英文说明同步。
+- 本地check通过、599/599；Gallery check通过、156/156；现场Linux Node22组合相关回归113/113。首次全量未加超时卡在既存recapture并终止，最终15秒上限全量599/599无跳过。完整Gallery build缺私有包读取认证；旧缓存intake176件/170个既存海报过期错误/7提示，不改海报或原作。
+- 发布仅叠加已核对同基线的server/arena.mjs与Gallery三JS及index/version；正式与测试页资产和现场其他补丁保留。源码提交、生产安装、回退路径及最终公网验收以/root/aob-hy4-ranking-20261107/RECEIPT.md为准，本节于提交前写入，不预称规则已上线。
+- [本轮归档](docs/archive/2026-11-07-hy4-ranking-wsnxxxs.md)。
+
 ## 2026-11-06 · 引导式盲评维度图接口（仅管理员）
 
 - `GET /api/arena/guided/dimensions?by=model|config`：从 `guided_trial_votes` 统计每个模型（或配置）在各维度、各测评点及同批综合题上的胜、平、负次数，供 Gallery 测试版的维度图使用。只计带测评点的测试对局，两边同属一个条目的一对不计；归属取抽组时的身份快照，非高级管理员看不到受限作品。未登录 401，非管理员 403 `guided-staff-only`。

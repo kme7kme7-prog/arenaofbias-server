@@ -258,7 +258,7 @@ test('standard-pair exam freezes sides, scores 16/20, resumes without expiry and
   assert.deepEqual([member.level,member.exam.attempts,member.exam.bestCorrect,member.exam.questionCount],[1,1,16,20]);
 }));
 
-test('curated starts at zero, filters level snapshots and history, and sections have their own 30-comparison qualification', async () => fixture(async f => {
+test('curated starts at zero, filters level snapshots and history, and sections have their own 21-comparison qualification', async () => fixture(async f => {
   assert.equal((await f.arena.leaderboard({audience:'curated'})).totals.votes,0);
   const epoch=f.db.prepare('SELECT counting_started_at FROM curated_settings').get().counting_started_at;
   let n=0;
@@ -272,8 +272,8 @@ test('curated starts at zero, filters level snapshots and history, and sections 
     }
     f.arena.invalidate({votesOnly:true});
   }
-  seed('supernovai',30,1); seed('supernovai',8,0); seed('supernovai',3,null); seed('supernovai',4,1,epoch-1); seed('other',29,2);
-  assert.equal((await f.arena.leaderboard()).totals.votes,74);
+  seed('supernovai',30,1); seed('supernovai',8,0); seed('supernovai',3,null); seed('supernovai',4,1,epoch-1); seed('other',20,2);
+  assert.equal((await f.arena.leaderboard()).totals.votes,65);
   assert.equal((await f.arena.leaderboard({audience:'curated',by:'model'})).totals.votes,30);
   f.auth.promote('member',1);
   assert.equal((await f.arena.leaderboard({audience:'curated'})).totals.votes,30,'promotion never changes saved level snapshots');
@@ -289,22 +289,22 @@ test('curated starts at zero, filters level snapshots and history, and sections 
   const metadata=(await f.call('member','GET','/api/curated')).data;
   assert.deepEqual(metadata.sections.map(s=>s.taskIds),[['supernovai'],['other']]);
   const total=await f.arena.leaderboardSnapshot({audience:'curated',by:'model'});
-  assert.equal(total.totals.votes,59); assert.equal(total.rows.length,2);
+  assert.equal(total.totals.votes,50); assert.equal(total.rows.length,2);
   const scoped=await f.arena.leaderboard({audience:'curated',sectionId:'three-dimensional',by:'model'});
-  assert.equal(scoped.totals.votes,29); assert.deepEqual(scoped.rows,[]);
+  assert.equal(scoped.totals.votes,20); assert.deepEqual(scoped.rows,[]);
   seed('other',1,1);
   assert.equal((await f.arena.leaderboard({audience:'curated',sectionId:'three-dimensional',by:'model'})).rows.length,2);
-  assert.equal((await f.arena.leaderboardSnapshot({audience:'curated',by:'model'})).totals.votes,59,'new votes keep public snapshot');
+  assert.equal((await f.arena.leaderboardSnapshot({audience:'curated',by:'model'})).totals.votes,50,'new votes keep public snapshot');
   config=(await f.call('root','GET','/api/admin/curated')).data;
   assert.equal((await f.call('root','DELETE','/api/admin/curated/sections/three-dimensional',{revision:config.revision})).data.code,'section_not_empty');
   const removed=await f.call('root','DELETE','/api/admin/curated/sections/three-dimensional',{revision:config.revision,moveQuestionsTo:'web-design'});
   assert.equal(removed.status,200);
-  assert.equal((await f.arena.leaderboardSnapshot({audience:'curated',by:'model'})).totals.votes,60,'config immediately invalidates snapshot');
+  assert.equal((await f.arena.leaderboardSnapshot({audience:'curated',by:'model'})).totals.votes,51,'config immediately invalidates snapshot');
   assert.equal((await f.call('root','PUT','/api/admin/curated/questions',{revision:config.revision,questions:[]})).data.code,'curated_revision_conflict');
   const empty=await f.call('root','PUT','/api/admin/curated/questions',{revision:removed.data.revision,questions:[]});
   assert.equal(empty.status,200);
   assert.equal((await f.arena.leaderboardSnapshot({audience:'curated'})).totals.votes,0);
-  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM votes').get().n,75,'no configuration change deletes history');
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM votes').get().n,66,'no configuration change deletes history');
 }));
 
 test('curated includes current admins and moderators historical ballots without rewriting votes', async () => fixture(async f => {

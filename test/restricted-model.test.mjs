@@ -81,17 +81,26 @@ test('restricted works are invisible to anonymous, members, moderators and autom
   const before = strip((await call('/api/leaderboard?by=model')).data);
   const work = await seed(f);
   const { library, arena } = platform;
+  // Give both public and restricted entries enough comparisons to exercise published rows.
+  for (const row of platform.db.prepare('SELECT * FROM votes').all()) {
+    for (let i = 0; i < 20; i++) {
+      const copy = { ...row, id: `${row.id}-threshold-${i}`, match_id: `${row.match_id}-threshold-${i}`,
+        user_id: null, visitor_hash: `${row.id}-visitor-${i}` };
+      platform.db.prepare(`INSERT INTO votes (${Object.keys(copy).join(',')}) VALUES (${Object.keys(copy).map(() => '?').join(',')})`).run(...Object.values(copy));
+    }
+  }
+  arena.invalidate();
 
   // Matrix over HTTP read paths.
   for (const who of [undefined, 'member', 'moderator']) {
     const boot = (await call('/api/bootstrap', who)).data;
     assert.ok(!boot.works.some((item) => item.id === work.id), `bootstrap hides it from ${who ?? 'anonymous'}`);
     assert.ok(!(boot.workAccess ?? []).some((item) => item.id === work.id));
-    assert.equal(boot.totals.votes, 1, 'totals count only public ballots');
+    assert.equal(boot.totals.votes, 21, 'totals count only public ballots');
     assert.deepEqual(boot.arena.one, { works: 2, entries: 2 });
     const board = await call('/api/leaderboard?by=model', who);
     assert.ok(!keysOf(board.data).includes(KEY));
-    assert.equal(board.data.totals.votes, 1);
+    assert.equal(board.data.totals.votes, 21);
     const missing = await call('/api/works/one/up-zzzzzzzz/comments', who);
     const hidden = await call(`/api/works/one/${work.id}/comments`, who);
     assert.deepEqual([hidden.status, hidden.text], [missing.status, missing.text], 'same 404 as a missing work');
@@ -128,7 +137,7 @@ test('restricted works are invisible to anonymous, members, moderators and autom
   const seniorBoard = await call('/api/leaderboard?by=model', 'senior');
   assert.equal(seniorBoard.headers.get('cache-control'), 'no-store');
   assert.ok(keysOf(seniorBoard.data).includes(KEY));
-  assert.equal(seniorBoard.data.totals.votes, 2);
+  assert.equal(seniorBoard.data.totals.votes, 42);
   assert.equal([...seniorBoard.data.rows, ...seniorBoard.data.unranked].find((row) => row.key === KEY).restricted, true);
   assert.ok(!keysOf((await call('/api/leaderboard?by=model')).data).includes(KEY), 'public cache unaffected after a senior read');
   assert.ok((await call('/api/admin/works', 'senior')).data.works.some((item) => item.id === work.id));

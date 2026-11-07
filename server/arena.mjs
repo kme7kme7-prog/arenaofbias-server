@@ -33,6 +33,10 @@ const ANONYMOUS_MATCH_MAX = 10000;
 // 112–128 ms locally, while 1000 blocked the main thread for 2.45 s. Use a
 // 40-entry cutoff so ordinary multi-model boards cannot block session requests.
 const RANK_WORKER_ENTRY_THRESHOLD = 40;
+const LEADERBOARD_MINIMUM_GAMES = 21;
+const EXCLUDED_LEADERBOARD_MODEL = 'x:claude opus 5.5 + 9 个 deepseek v4.1 flash 1017 子智能体';
+const publishedRows = (rows) => rows.filter((row) => row.games >= LEADERBOARD_MINIMUM_GAMES
+  && row.key.split('|')[0] !== EXCLUDED_LEADERBOARD_MODEL).map((row, i) => ({ ...row, rank: i + 1 }));
 export const pairKey = (taskId, a, b) => `${taskId}:${[a, b].sort().join('+')}`;
 const token = () => `m${randomBytes(16).toString('hex')}`;
 // `digest` pins the exact content: the packaged entry page or the uploaded file digest.
@@ -322,7 +326,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
         const ids = new Set(registered.map((model) => model.id));
         const names = new Set(registered.flatMap((model) => [model.name, ...(model.aliases ?? [])].map(nameKey)));
         const registeredRow = (row) => ids.has(row.sample?.modelId ?? row.model) || names.has(nameKey(row.sample?.modelName ?? row.modelName));
-        qualifiedModels = new Set(modelRows.filter((row) => !row.provisional && registeredRow(row))
+        qualifiedModels = new Set(modelRows.filter((row) => row.games >= LEADERBOARD_MINIMUM_GAMES && registeredRow(row))
           .map((row) => row.key));
         provisionalModels = modelBoard ? modelBoard.scope.provisionalModels : modelRows.filter(row => row.provisional && registeredRow(row)).length;
       }
@@ -360,7 +364,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
         category,
         domain,
         audience, sectionId,
-        ...(curated ? { board: 'frontend', scope: { taskIds: scoped.map(t => t.id), countingStartedAt: new Date(curated.startedAt).toISOString(), revision: curated.revision, minimumVoterLevel: 1, includesStaffHistory: true, qualifiedModels: qualifiedModels.size, provisionalModels, qualification: 'registered-nonprovisional-model', provisionalGames: limits.provisionalGames } } : {}),
+        ...(curated ? { board: 'frontend', scope: { taskIds: scoped.map(t => t.id), countingStartedAt: new Date(curated.startedAt).toISOString(), revision: curated.revision, minimumVoterLevel: 1, includesStaffHistory: true, qualifiedModels: qualifiedModels.size, provisionalModels, qualification: 'registered-minimum-comparisons-model', minimumGames: LEADERBOARD_MINIMUM_GAMES, provisionalGames: limits.provisionalGames } } : {}),
         by,
         ...(standings ? { standings } : {}),
         ...(filters ? { filters } : {}),
@@ -481,7 +485,20 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       const key = JSON.stringify([snapshot.version, ...['task', 'category', 'domain', 'board', 'audience', 'sectionId', 'by', 'harness', 'provider', 'senior']
         .map((field) => options[field] ?? null)]);
       // Senior boards never enter the shared ten-minute cache; they read the live calculation.
-      const read = () => leaderboard({ ...options, snapshot: options.snapshot ?? catalog.snapshot() });
+      const read = async () => {
+        const archive = options.snapshot ?? catalog.snapshot();
+        const data = await leaderboard({ ...options, snapshot: archive });
+        // Display eligibility never removes ballots or changes matchmaking's live fit.
+        const result = { ...data, minimumGames: LEADERBOARD_MINIMUM_GAMES, rows: publishedRows(data.rows), unranked: [] };
+        if (data.standings) {
+          result.standings = {};
+          for (const category of Object.keys(data.standings)) {
+            const board = await leaderboard({ ...options, category, snapshot: archive });
+            result.standings[category] = Object.fromEntries(publishedRows(board.rows).map((row) => [row.key, row.rank]));
+          }
+        }
+        return result;
+      };
       const result = await (options.senior ? read() : publishedBoards.get(key, read));
       // A withdrawal or external database write while fitting cannot publish an old board.
       if (before === currentRevision(options.snapshot ?? catalog.snapshot())) return result;

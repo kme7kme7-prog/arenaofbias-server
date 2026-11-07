@@ -730,7 +730,8 @@ describe('platform lifecycle', () => {
     assert.equal((await call('alice', 'POST', '/api/arena/matches', { task: 'one' })).data.code, 'exhausted');
     const board = await call('alice', 'GET', '/api/leaderboard?task=one');
     assert.equal(board.data.totals.votes, 1);
-    assert.equal(board.data.rows.length, 2);
+    assert.deepEqual(board.data.rows, [], 'one comparison is below the 21-game display threshold');
+    assert.equal((await platform.arena.leaderboard({ task: 'one' })).rows.length, 2, 'matchmaking retains the live fit');
   });
 
   test('unbound users record a public ballot without curated eligibility', async () => {
@@ -1243,7 +1244,8 @@ describe('platform lifecycle', () => {
     const board = await call('guest', 'GET', '/api/leaderboard?category=文学');
     assert.equal(board.status, 200);
     assert.equal(board.data.category, '文学');
-    assert.ok(board.data.unranked.some(row => row.key === 'm-b|high' && row.model === 'm-b' && row.works === 1));
+    assert.deepEqual(board.data.unranked, [], 'entries without comparisons are not published');
+    assert.ok((await platform.arena.leaderboard({ category: '文学' })).unranked.some(row => row.key === 'm-b|high' && row.model === 'm-b' && row.works === 1));
     const staticBoard = await call('guest', 'GET', '/api/leaderboard?category=静态网页');
     assert.equal(staticBoard.status, 200);
     assert.ok(![...staticBoard.data.rows, ...staticBoard.data.unranked].some(row => row.key === 'm-b|high'));

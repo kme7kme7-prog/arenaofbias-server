@@ -503,7 +503,11 @@ describe('question and sample review lifecycle', () => {
     await call('root', 'POST', `/api/works/${question.id}/${work.id}/review`, { status: 'verified', show_arena: true });
     const anchor = await call('editing', 'POST', '/api/questions', { ...questionBody, domains: ['化学'] });
     assert.equal(anchor.status, 200); await moderate(anchor.data.question.id, 'approved');
-    const board = (domain) => call('guest', 'GET', `/api/leaderboard?domain=${encodeURIComponent(domain)}`);
+    const board = async (domain) => {
+      const published = await call('guest', 'GET', `/api/leaderboard?domain=${encodeURIComponent(domain)}`);
+      assert.deepEqual(published.data.unranked, [], 'unrated works stay off published boards');
+      return { data: await platform.arena.leaderboard({ domain }) };
+    };
     assert.equal((await board('化学')).data.unranked.length, 1);
     const before = (await call('root', 'GET', '/api/admin/questions')).data.questions.find(item => item.id === question.id).moderation;
     const edit = await call('root', 'POST', path, { title: 'Edited public question', domains: ['天文'] });

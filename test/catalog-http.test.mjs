@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { createPlatform } from '../server/app.mjs';
+import { createCatalog } from '../server/catalog.mjs';
 import { EMOJIS, limits } from '../server/config.mjs';
 import { verifiedUser } from './helpers/email.mjs';
 
@@ -51,15 +52,25 @@ async function fixture(run) {
 
 test('published boards follow local/external withdrawals and discard an in-flight old pool', async () => fixture(async ({ platform, call, admin, data, dist, root }) => {
   Object.assign(data.tasks[0].results[0], { generationMode: 'single-turn', humanIntervention: 'none' });
+  data.models.push({ id: 'opponent', name: 'Opponent' });
+  data.tasks[0].results.push({ ...data.tasks[0].results[0], id: 'peer', model: 'opponent' });
   writeFileSync(join(dist, 'data.json'), JSON.stringify(data));
+  const identity = id => {
+    const work = platform.library.work('one', id);
+    return JSON.stringify({ ...work, digest: createCatalog(dist).snapshot().entryDigest(work) });
+  };
+  for (let i = 0; i < 21; i++) platform.db.prepare(`INSERT INTO votes
+    (id,match_id,task_id,a_work,b_work,pair_key,choice,created_at,source,a_identity,b_identity,visitor_hash)
+    VALUES (?,?, 'one','pack','peer','pack+peer','a',?,'arena',?,?,?)`)
+    .run(`threshold-${i}`, `threshold-match-${i}`, i, identity('pack'), identity('peer'), `visitor-${i}`);
   const path = '/api/leaderboard?by=model';
   const first = (await call(path)).data;
-  assert.equal(first.unranked[0].works, 1);
+  assert.equal(first.rows.find(row => row.model === 'model').works, 1);
   platform.library.setFaceSettings(admin, 'one', 'pack', { show_arena: false });
-  assert.deepEqual((await call(path)).data.unranked, [], 'local writes invalidate without waiting ten minutes');
+  assert.equal((await call(path)).data.rows.find(row => row.model === 'model').works, 0, 'local writes invalidate without waiting ten minutes');
   const external = new DatabaseSync(join(root, 'data/platform.db'));
   try { external.exec('UPDATE work_overrides SET show_arena = 1'); } finally { external.close(); }
-  assert.equal((await call(path)).data.unranked[0].works, 1);
+  assert.equal((await call(path)).data.rows.find(row => row.model === 'model').works, 1);
   platform.arena.invalidate();
   const eligible = platform.library.eligible;
   let changed = false;
@@ -70,7 +81,7 @@ test('published boards follow local/external withdrawals and discard an in-fligh
   };
   const results = await Promise.all([call(path), call(path)]);
   assert.ok(changed);
-  assert.ok(results.every((result) => result.status === 200 && result.data.unranked.length === 0));
+  assert.ok(results.every((result) => result.status === 200 && result.data.rows.find(row => row.model === 'model').works === 0));
 }));
 
 test('public catalog revalidates one anonymous snapshot without touching sessions or ranking', async () => fixture(async ({ platform, call, origin }) => {

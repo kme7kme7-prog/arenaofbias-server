@@ -467,6 +467,7 @@ test('submission, review, metadata and vote snapshots carry provenance', async (
     assert.equal((await board('harness=codex&provider=official')).data.totals.votes, 0, 'side b still has no provider');
     platform.arena.correctVote({ id: 'root', name: 'root', role: 'admin' }, vote.id, 'b', { providerId: 'official' }, 'test');
     const codex = (await board('harness=codex&provider=official')).data;
+    const internalCodex = await platform.arena.leaderboard({ task: 'one', harness: 'codex', provider: 'official' });
     assert.deepEqual([codex.totals.votes, codex.filters], [1, { harness: 'codex', provider: 'official' }]);
     assert.equal((await board('provider=unset')).data.totals.votes, 0);
     platform.arena.correctVote({ id: 'root', name: 'root', role: 'admin' }, vote.id, 'a', { providerId: 'unofficial' }, 'test');
@@ -500,10 +501,11 @@ test('submission, review, metadata and vote snapshots carry provenance', async (
     assert.deepEqual([current.modelName, current.vendor, current.tool], ['Renamed Model A', 'Renamed vendor', 'Renamed Codex']);
     assert.equal(platform.library.work('one', id, archive).modelName, 'Model A');
     assert.deepEqual(platform.db.prepare('SELECT a_identity, b_identity, a_correction, b_correction FROM votes ORDER BY id').all(), frozenVotes);
-    const renamed = (await board('harness=codex&provider=official')).data.rows;
+    assert.deepEqual((await board('harness=codex&provider=official')).data.rows, [], 'one vote remains below the display threshold');
+    const renamed = (await platform.arena.leaderboard({ task: 'one', harness: 'codex', provider: 'official' })).rows;
     assert.equal(renamed.find((row) => row.model === 'm-a').modelName, 'Renamed Model A');
     assert.equal(renamed.find((row) => row.model === 'm-a').vendor, 'Renamed vendor');
-    assert.deepEqual(renamed.map((row) => row.score), codex.rows.map((row) => row.score));
+    assert.deepEqual(renamed.map((row) => row.score), internalCodex.rows.map((row) => row.score));
   } finally {
     await new Promise((resolve) => site.close(resolve));
     await platform.close();

@@ -43,19 +43,55 @@ function fixture(entries = results(), textEntries = []) {
     arena.invalidate();
   };
   let n = 0;
-  const vote = (left, right, choice = 'a') => {
+  const vote = (left, right, choice = 'a', task = 'one') => {
     const identity = (id) => {
-      const item = library.work('one', id);
+      const item = library.work(task, id);
       return JSON.stringify({ ...item, digest: item.curated ? catalog.snapshot().entryDigest(item) : item.digest, dir: undefined, configKey: entityKey(item), modelKey: modelKey(item) });
     };
     const id = `vote-${++n}`;
     db.prepare(`INSERT INTO votes (id, match_id, task_id, a_work, b_work, pair_key, choice, created_at, source, a_identity, b_identity)
-      VALUES (?, ?, 'one', ?, ?, ?, ?, ?, 'arena', ?, ?)`).run(id, id, left, right, id, choice, n, identity(left), identity(right));
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'arena', ?, ?)`).run(id, id, task, left, right, id, choice, n, identity(left), identity(right));
     arena.invalidate();
   };
   return { root, dist, db, catalog, library, arena, data, save, enable, vote, config,
     close() { db.close(); rmSync(root, { recursive: true, force: true }); } };
 }
+
+test('a counted ballot refreshes its task fit and aggregate totals while preserving other task fits', async () => {
+  const f = fixture();
+  try {
+    f.data.tasks.push({ id: 'two', results: results() });
+    f.save();
+    const user = { id: 'voter', role: 'user' };
+    f.db.prepare("INSERT INTO users (id, name, name_key, role, salt, hash, created_at) VALUES (?, 'Voter', 'voter', ?, '', '', 1)")
+      .run(user.id, user.role);
+    f.vote('a1', 'b1');
+    f.vote('a1', 'b1', 'b', 'two');
+
+    const lookups = new Map();
+    const ballotWork = f.library.ballotWork;
+    f.library.ballotWork = (task, ...args) => {
+      lookups.set(task, (lookups.get(task) ?? 0) + 1);
+      return ballotWork(task, ...args);
+    };
+    const first = await f.arena.createMatch(user, 'one');
+    await f.arena.createMatch(user, 'two');
+    assert.equal((await f.arena.totals()).votes, 2);
+    const before = new Map(lookups);
+
+    assert.equal(voteAfterViewing(f, user, first.id, 'tie').counted, true);
+    await f.arena.createMatch(user, 'two');
+    assert.equal(lookups.get('two'), before.get('two'));
+    await f.arena.createMatch(user, 'one');
+    assert.ok(lookups.get('one') > before.get('one'));
+    assert.equal((await f.arena.totals()).votes, 3);
+
+    f.library.restricted.add('x:gray-fixture');
+    const beforeRevision = lookups.get('two');
+    await f.arena.createMatch(user, 'two');
+    assert.ok(lookups.get('two') > beforeRevision);
+  } finally { f.close(); }
+});
 
 test('eligibility normalizes agent and controls matches, counted scores and pool statistics together', async () => {
   const f = fixture([...results(), work('agent', 'a', { generationMode: 'agent' }),

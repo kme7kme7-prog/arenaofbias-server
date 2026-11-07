@@ -697,7 +697,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 - `a` / `b` 为两侧作品的**不透明令牌 origin**（`m` 令牌，对局有效期 3 小时），iframe 直接加载；页面与地址均不泄露作品 / 模型身份。左右顺序随机。
 - `calibration.a` / `calibration.b`：该侧竞技场取景校准（管理员按门面保存的 `framing`），无校准为 `null`；父页面据此裁切 iframe。已保存的 3D 视角（`camera`）不随接口下发，由内容服务器在对局页内嵌恢复（视角桥，见 §5）。
-- `counted` 表示可投大众票，固定 true；实际是否入库以 vote 响应为准。另返回 createdAt/expiresAt、minViewSeconds=5、minSkipSeconds=3、countableFor 与 challenge，详见 §3.26。两侧加载完成后必须调用 ready；预取和创建不开始倒计时。
+- `counted` 表示可投大众票，固定 true；实际是否入库以 vote 响应为准。另返回 createdAt/expiresAt、minViewSeconds、minSkipSeconds、countableFor 与 challenge，详见 §3.26。普通与高级管理员的最小时长均为 0，普通成员和访客分别为 5 秒、3 秒。两侧加载完成后必须调用 ready；预取和创建不开始倒计时。
 - 对局创建时一次捕获当前数据包目录和两侧身份。随后切换数据包，旧令牌仍从原目录提供 HTML 与相对资源，旧对局仍可揭晓/投票；部署应保留该目录到相关对局全部过期并经过清理宽限期。
 - 前端在写请求上携带 `X-Datapack-Version: <前端所构建的数据仓库 SHA>`（读请求不带，避免跨源 GET 预检）；创建数据包对局、数据包题目草稿及该草稿的正式投稿时，如果该值与服务端当前可信 SHA 不同，请求照常处理，响应头增加 `X-Datapack-Stale: 1`，响应体形状不变。对局仍绑定创建时的服务端快照。题目不参与此检查；缺少请求头时不增加提示头。
 - 抽样规则：按 `promptVariant`（缺失为空串）与「模型+档位」分组，只在同一提示词版本的不同配置间抽取，再各均匀抽一件作品；长短版不跨组，配置分仍跨版本合计。偏向对局数少的配置、偏向实力相近者（同档 90% 概率软匹配，分差过大重掷 2 次）；避开上一场两侧作品与已评组合。仅普通用户回避本人作品，普通管理员（`moderator`）与高级管理员（`admin`）可以配到本人作品并正常计票。无提示词变体的题目行为不变。
@@ -713,7 +713,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 **认证**：可选会话，必须持有创建该对局的账号或访客 cookie。访客与未绑邮箱账号均可计大众票。**限流**：write 桶。
 
-请求体：`{ "choice": "a", "turnstileToken": "选填验证token" }`（`a` / `b` / `tie` / `skip`）。a/b/tie 须 ready 后至少5秒；skip 为3秒，从未 ready 的加载失败对局可直接 skip。连续第三次≤10秒选择须先验证；细则见 §3.26。
+请求体：`{ "choice": "a", "turnstileToken": "选填验证token" }`（`a` / `b` / `tie` / `skip`）。普通成员和访客须 ready 后至少 5 秒才能投票、至少 3 秒才能跳过。普通与高级管理员 ready 后即可投票或跳过。所有人都可直接跳过从未 ready 的加载失败对局。适用人机验证的成员连续第三次在 10 秒内选择时须先验证，细则见 §3.26。
 
 成功 `200`（注意：**不计票也返回 200**，以 `counted` / `reason` 区分）：
 
@@ -729,7 +729,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 - 作品被标记存疑 / 删除后，其参与的历史投票**即时退出**排行统计；恢复验证后自动回归。
 - 测试版对局（创建时带 `guided`）的请求体另可带 `tieKind`（`good` / `bad`，仅 `choice` 为 `tie` 时，表示都很好或都不好）与 `aspect: { id, choice: "a"|"b"|"tie", tieKind? }`（`id` 须为该局抽到的测评点；省略表示跳过这一题）。这一票写入 `guided_trial_votes`，不写 `votes`，不进入任何榜单，也不占用「已评组合」；对局照常终局与揭晓，风控证据照常记录（`vote_id` 为空）。响应 `counted: false`、`reason: "trial"`，另含 `guided: true`、`tieKind`、`aspect`（未答为 null）。普通对局带这两个字段返回 `400 选择无效`；测评点不符返回 `400 + code:"invalid_aspect"`。
 
-错误：`404 这一组已经失效`（对局不存在 / 过期 / 非本人）；`409 这一组已经提交过了`；`400 选择无效`；`429`。新增 409/match_not_ready、409/vote_too_early（voteAllowedAt、skipAllowedAt、serverNow、retryAfter）、403/turnstile_required、400/turnstile_failed、503/turnstile_unavailable；拒绝时不揭晓、不终局。
+错误：`404 这一组已经失效`（对局不存在 / 过期 / 非本人）；`409 match_decided`（「这一组已经提交过了」，已终局的有效本人对局再次调用 vote 或 ready）；`400 选择无效`；`429`。新增 409/match_not_ready、409/vote_too_early（voteAllowedAt、skipAllowedAt、serverNow、retryAfter）、403/turnstile_required、400/turnstile_failed、503/turnstile_unavailable；拒绝时不揭晓、不终局。
 
 ### 3.9.1 `GET /api/arena/guided/dimensions` —— 测试版维度图（仅管理员）
 
@@ -1060,9 +1060,9 @@ v26 仅追加幂等建表 `featured_picks(task_id, scope, model_key, work_id, co
 | --- | --- | --- |
 | GET `/api/session`、`/api/bootstrap` | 现有 | 本人 `user.level:0..3,levelSince:string\|null,levelSource:'exam'\|'admin'\|null`，`user.capabilities:{canSubmitQuestion,canSubmitWork,canTakeQualificationExam}`；顶层 `qualification:{activeAnswered,questionCount}\|null`；`questionEligibility:{allowed,level,requiredLevel:1,reason?}`，替代100票/10作品口径 |
 | GET `/api/auth/me`；登录/注册响应 | 现有 | 本人 `user.level,levelSince,levelSource` 加法扩展；保留各自原 role 字段语义，尤其 Show1 的 admin/null 兼容响应；不向公开作者对象暴露升级信息 |
-| GET `/api/arena/policy` **新增** | 无 | `{level:null\|0..3,minViewSeconds:5,minSkipSeconds:3,rapidWindowSeconds:10,rapidStreakLimit:3,challenge:{required,reason,siteKey,action:'arena',guestVotesRemaining}}`；guest 缺 cookie 时下发 cookie，缺状态视为首次必验 |
-| POST `/api/arena/matches` **改动** | 原 `{task,previous?,avoidCooling?,pin?}` + `turnstileToken?` | 原 match 字段 + `createdAt,expiresAt,minViewSeconds:5,minSkipSeconds:3,challenge`；`counted:true` 表示可投大众票，另加 `countableFor:{public:true,curated:<当前等级lv1+且本题被勾选>}`，实际成功以 vote 响应为准 |
-| POST `/api/arena/matches/:id/ready` **新增** | `{}` | `{readyAt,voteAllowedAt,skipAllowedAt,serverNow}`，重复返回首次 readyAt；须验证 match 归属 |
+| GET `/api/arena/policy` **新增** | 无 | `{level:null\|0..3,minViewSeconds:0\|5,minSkipSeconds:0\|3,rapidWindowSeconds:10,rapidStreakLimit:3,challenge:{required,reason,siteKey,action:'arena',guestVotesRemaining}}`；guest 缺 cookie 时下发 cookie，缺状态视为首次必验 |
+| POST `/api/arena/matches` **改动** | 原 `{task,previous?,avoidCooling?,pin?}` + `turnstileToken?` | 原 match 字段 + `createdAt,expiresAt,minViewSeconds:0\|5,minSkipSeconds:0\|3,challenge`；`counted:true` 表示可投大众票，另加 `countableFor:{public:true,curated:<当前等级lv1+且本题被勾选>}`，实际成功以 vote 响应为准 |
+| POST `/api/arena/matches/:id/ready` **新增** | `{}` | `{readyAt,voteAllowedAt,skipAllowedAt,serverNow}`，重复返回首次 readyAt；普通与高级管理员的两个 AllowedAt 都等于 readyAt。须验证 match 归属 |
 | POST `/api/arena/matches/:id/vote` **改动** | `{choice:'a'\|'b'\|'tie'\|'skip',turnstileToken?}` | 保留 `{choice,counted,reason,a,b,pinned?}`；增加 `countedFor:{public:boolean,curated:boolean},curatedEligible:boolean,voterLevel:null\|0..3,challenge`。curatedEligible 表示已入库票具备等级/起点资格；countedFor.curated 还要求本题当前被勾选，表示当前计入精选输入，公开展示仍按十分钟更新 |
 | POST `/api/questions` **改动** | 原参数 | lv0 所有分支统一 403/level_required；lv1+ 不再受 100票/10作品门槛，但保留邮箱、审核、已有格式限制 |
 | POST `/api/drafts`、POST `/api/works` **改动** | 原参数 | lv0 新建统一403/level_required；旧内容的查看/编辑/撤回保持原权限 |

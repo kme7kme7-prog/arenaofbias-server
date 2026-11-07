@@ -726,7 +726,12 @@ describe('platform lifecycle', () => {
     const vote = await call('alice', 'POST', `/api/arena/matches/${match.data.id}/vote`, { choice: 'a' });
     assert.equal(vote.data.counted, true);
     assert.ok(['A1', 'B1'].includes(vote.data.a.title));
-    assert.equal((await call('alice', 'POST', `/api/arena/matches/${match.data.id}/vote`, { choice: 'b' })).status, 409);
+    const repeatedVote = await call('alice', 'POST', `/api/arena/matches/${match.data.id}/vote`, { choice: 'b' });
+    assert.equal(repeatedVote.status, 409);
+    assert.equal(repeatedVote.data.code, 'match_decided');
+    const repeatedReady = await call('alice', 'POST', `/api/arena/matches/${match.data.id}/ready`, {});
+    assert.equal(repeatedReady.status, 409);
+    assert.equal(repeatedReady.data.code, 'match_decided');
     assert.equal((await call('alice', 'POST', '/api/arena/matches', { task: 'one' })).data.code, 'exhausted');
     const board = await call('alice', 'GET', '/api/leaderboard?task=one');
     assert.equal(board.data.totals.votes, 1);

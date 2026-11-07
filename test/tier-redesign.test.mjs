@@ -102,7 +102,12 @@ test('view and skip boundaries use server ready time, not prefetch creation time
   }
   assert.doesNotThrow(() => checkTiming({ ready_at: null }, 'skip'));
   await fixture(async f => {
+    for (const who of ['member', 'guest']) {
+      const { data } = await f.call(who, 'GET', '/api/arena/policy');
+      assert.deepEqual([data.minViewSeconds, data.minSkipSeconds], [5, 3]);
+    }
     const m = await f.draw();
+    assert.deepEqual([m.minViewSeconds, m.minSkipSeconds], [5, 3]);
     assert.equal((await f.vote('member', m)).data.code, 'match_not_ready');
     const ready = await f.call('member', 'POST', `/api/arena/matches/${m.id}/ready`);
     assert.equal(Date.parse(ready.data.skipAllowedAt) - Date.parse(ready.data.readyAt), 3000);
@@ -115,8 +120,43 @@ test('view and skip boundaries use server ready time, not prefetch creation time
     const skipped = await f.vote('member', failed, { choice: 'skip' });
     assert.equal(skipped.status, 200); assert.equal(skipped.data.a, null);
     assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM votes').get().n, 0);
+
+    const guest = await f.draw('guest', { turnstileToken: f.proof() });
+    assert.deepEqual([guest.minViewSeconds, guest.minSkipSeconds], [5, 3]);
+    const guestReady = await f.call('guest', 'POST', `/api/arena/matches/${guest.id}/ready`);
+    assert.equal(Date.parse(guestReady.data.voteAllowedAt) - Date.parse(guestReady.data.readyAt), 5000);
+    assert.equal(Date.parse(guestReady.data.skipAllowedAt) - Date.parse(guestReady.data.readyAt), 3000);
   });
 });
+
+test('both administrator roles can vote and skip as soon as a match is ready', async () => fixture(async f => {
+  f.auth.promote('member', 'moderator');
+  for (const who of ['member', 'root']) {
+    const { data } = await f.call(who, 'GET', '/api/arena/policy');
+    assert.deepEqual([data.minViewSeconds, data.minSkipSeconds], [0, 0]);
+    for (const [choice, guided] of [['a', false], ['tie', true], ['skip', false]]) {
+      const match = await f.draw(who, { guided });
+      assert.deepEqual([match.minViewSeconds, match.minSkipSeconds], [0, 0]);
+      if (choice !== 'skip') assert.equal((await f.vote(who, match, { choice })).data.code, 'match_not_ready');
+      const ready = await f.call(who, 'POST', `/api/arena/matches/${match.id}/ready`);
+      assert.equal(ready.status, 200);
+      assert.ok(ready.data.readyAt);
+      assert.equal(ready.data.voteAllowedAt, ready.data.readyAt);
+      assert.equal(ready.data.skipAllowedAt, ready.data.readyAt);
+      const result = await f.vote(who, match, { choice });
+      assert.equal(result.status, 200);
+      assert.equal(result.data.reason, choice === 'skip' ? 'skipped' : guided ? 'trial' : '');
+    }
+  }
+  const prefetched = await f.draw('member');
+  f.auth.promote('member', 'user');
+  const ready = await f.call('member', 'POST', `/api/arena/matches/${prefetched.id}/ready`);
+  assert.equal(Date.parse(ready.data.voteAllowedAt) - Date.parse(ready.data.readyAt), 5000);
+  assert.equal((await f.vote('member', prefetched)).data.code, 'vote_too_early');
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM votes').get().n, 2);
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM guided_trial_votes').get().n, 2);
+}));
 
 test('level-zero creation is blocked while unbound public votes count', async () => fixture(async f => {
   for (const path of ['/api/questions','/api/drafts','/api/works']) {

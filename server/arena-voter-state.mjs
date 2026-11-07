@@ -4,19 +4,26 @@ import { isStaff, levelOf } from './roles.mjs';
 import { turnstileSiteKey, verifyTurnstile } from './turnstile.mjs';
 
 export const MIN_VIEW_MS = 5000, MIN_SKIP_MS = 3000;
-export function timing(match) {
-  return { readyAt: match.ready_at == null ? null : new Date(match.ready_at).toISOString(),
-    voteAllowedAt: match.ready_at == null ? null : new Date(match.ready_at + MIN_VIEW_MS).toISOString(),
-    skipAllowedAt: match.ready_at == null ? null : new Date(match.ready_at + MIN_SKIP_MS).toISOString(), serverNow: new Date().toISOString() };
+export function minimumViewingTimes(user) {
+  return isStaff(user) ? { minViewSeconds: 0, minSkipSeconds: 0 }
+    : { minViewSeconds: MIN_VIEW_MS / 1000, minSkipSeconds: MIN_SKIP_MS / 1000 };
 }
-export function checkTiming(match, choice, now = Date.now()) {
+export function timing(match, user) {
+  const { minViewSeconds, minSkipSeconds } = minimumViewingTimes(user);
+  return { readyAt: match.ready_at == null ? null : new Date(match.ready_at).toISOString(),
+    voteAllowedAt: match.ready_at == null ? null : new Date(match.ready_at + minViewSeconds * 1000).toISOString(),
+    skipAllowedAt: match.ready_at == null ? null : new Date(match.ready_at + minSkipSeconds * 1000).toISOString(), serverNow: new Date().toISOString() };
+}
+export function checkTiming(match, choice, now = Date.now(), user = null) {
   if (choice === 'skip' && match.ready_at == null) return;
   if (match.ready_at == null) throw new HttpError(409, '请等待两侧作品载入', 'match_not_ready');
-  const delay = choice === 'skip' ? MIN_SKIP_MS : MIN_VIEW_MS;
-  if (now < match.ready_at + delay) {
+  const { minViewSeconds, minSkipSeconds } = minimumViewingTimes(user);
+  const delay = (choice === 'skip' ? minSkipSeconds : minViewSeconds) * 1000;
+  const allowedAt = match.ready_at + delay;
+  if (delay && now < allowedAt) {
     const error = new HttpError(409, '请再观看一会儿', 'vote_too_early');
-    error.retryAfter = Math.ceil((match.ready_at + delay - now) / 1000);
-    error.details = timing(match);
+    error.retryAfter = Math.ceil((allowedAt - now) / 1000);
+    error.details = timing(match, user);
     throw error;
   }
 }
@@ -60,7 +67,7 @@ export function createArenaVoters({ db, config }) {
       const visitorHash = createHash('sha256').update(value).digest('hex');
       return { key: `g:${visitorHash}`, visitorHash, user: null };
     },
-    policy(voter) { return { level: levelOf(voter.user), minViewSeconds: 5, minSkipSeconds: 3,
+    policy(voter) { return { level: levelOf(voter.user), ...minimumViewingTimes(voter.user),
       rapidWindowSeconds: 10, rapidStreakLimit: 3, challenge: challenge(voter) }; },
     challenge,
     lastVerifiedAt: voter => state(voter.key).verified_at,

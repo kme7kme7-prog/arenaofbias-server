@@ -378,3 +378,27 @@ test('review reads keep staff boundaries and observe decisions and removals on t
   platform.auth.promote(member.name, 1);
   assert.equal((await call('/api/review', { who: 'member' })).status, 403, 'revoking staff access applies to the existing session');
 }));
+
+test('catalog, bootstrap and public work lists each acquire one metrics snapshot per response build', async () => fixture(async ({platform,call}) => {
+  const snapshot=platform.library.metricsSnapshot;
+  let builds=0;
+  platform.library.metricsSnapshot=()=>{builds++;return snapshot();};
+  for(const path of ['/api/catalog','/api/bootstrap','/api/show1/works']) {
+    const before=builds;
+    assert.equal((await call(path)).status,200);
+    assert.equal(builds-before,1,path);
+  }
+  // A metric change during a yielded build must rebuild all maps before publishing.
+  platform.db.prepare("INSERT INTO work_usage(task_id,work_id,input,source,created_at,updated_at) VALUES ('one','pack',1,'api',1,1)").run();
+  const original=platform.library.toPublic;
+  let changed=false;
+  platform.library.toPublic=function(...args){
+    const dto=original.apply(this,args);
+    if(!changed){changed=true;setImmediate(()=>platform.db.exec("UPDATE work_usage SET input=2 WHERE task_id='one' AND work_id='pack'"));}
+    return dto;
+  };
+  const before=builds;
+  const latest=await call('/api/catalog');
+  assert.equal(latest.data.works[0].usage.input,2);
+  assert.ok(builds-before>=2,'strict display revision retries with a new metrics snapshot');
+}));

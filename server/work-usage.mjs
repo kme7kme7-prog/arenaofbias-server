@@ -34,12 +34,28 @@ export function validateUsage(body) {
 export function createWorkMetrics(db, { showCost = false } = {}) {
   const usage = db.prepare('SELECT * FROM work_usage WHERE task_id=? AND work_id=?');
   const artifact = db.prepare('SELECT artifact FROM work_artifacts WHERE task_id=? AND work_id=?');
-  return (work) => {
-    const raw = usage.get(work.taskId, work.id), measured = artifact.get(work.taskId, work.id);
+  const allUsage = db.prepare('SELECT * FROM work_usage');
+  const allArtifacts = db.prepare('SELECT task_id,work_id,artifact FROM work_artifacts');
+  const render = (raw, measured) => {
     const visible = usageOf(raw);
     if (visible?.paid && !showCost) visible.paid = { basis: visible.paid.basis };
     return { ...(raw ? { usage: visible } : {}), ...(measured ? { artifact: JSON.parse(measured.artifact) } : {}) };
   };
+  const read = work => render(usage.get(work.taskId, work.id), artifact.get(work.taskId, work.id));
+  // Each response build owns its maps, including across galleryList's I/O yields.
+  read.snapshot = () => {
+    const index = rows => {
+      const tasks = new Map();
+      for (const row of rows) {
+        if (!tasks.has(row.task_id)) tasks.set(row.task_id, new Map());
+        tasks.get(row.task_id).set(row.work_id, row);
+      }
+      return tasks;
+    };
+    const usages = index(allUsage.all()), artifacts = index(allArtifacts.all());
+    return work => render(usages.get(work.taskId)?.get(work.id), artifacts.get(work.taskId)?.get(work.id));
+  };
+  return read;
 }
 
 // Internal entry point for the artifact backfill CLI; there is no public writer.

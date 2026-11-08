@@ -772,11 +772,12 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
         ...(!work.curated && viewer && (viewer.id === work.ownerId || isStaff(viewer)) ? { arena: arenaState(work) } : {}) };
     },
 
-    toPublic(work, viewer, { admin = false, preview = true, metrics = true } = {}) {
+    metricsSnapshot: () => workMetrics.snapshot(),
+    toPublic(work, viewer, { admin = false, preview = true, metrics = true, metricsOf = workMetrics } = {}) {
       work = withDisplay(work);
       if (!work) return null;
       if (work.curated) {
-        return { task: work.taskId, id: work.id, ...(metrics ? workMetrics(work) : {}), author: authorOf({ role: 'admin', name: null, avatar: null }, admin), mine: false,
+        return { task: work.taskId, id: work.id, ...(metrics ? metricsOf(work) : {}), author: authorOf({ role: 'admin', name: null, avatar: null }, admin), mine: false,
           title: work.title, summary: work.summary, model: Object.hasOwn(work, 'displayModelId') ? work.displayModelId : work.modelId, modelName: work.modelName, vendor: work.vendor,
           effort: work.effort, tool: work.tool, ...publicProvenance(work),
           ...(work.promptVariant ? { promptVariant: work.promptVariant } : {}), note: work.note ?? '',
@@ -787,7 +788,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       return {
         task: work.taskId,
         id: work.id,
-        ...(metrics ? workMetrics(work) : {}),
+        ...(metrics ? metricsOf(work) : {}),
         // Only senior responses can reach this: callers drop restricted works for everyone else.
         ...(isRestricted(work) ? { restricted: true } : {}),
         title: work.title,

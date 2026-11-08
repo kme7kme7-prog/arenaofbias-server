@@ -163,7 +163,10 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   };
   const adminOnly = (ctx) => (isSenior(signedIn(ctx)) ? ctx.user : fail(403, '仅高级管理员可以操作'));
   const staffOnly = (ctx) => (isStaff(signedIn(ctx)) ? ctx.user : fail(403, '仅管理员可以操作'));
-  const publicList = (works, viewer) => works.map((work) => library.toPublic(work, viewer));
+  const publicList = (works, viewer) => {
+    const metricsOf = library.metricsSnapshot();
+    return works.map(work => library.toPublic(work, viewer, { metricsOf }));
+  };
   const batchDecision = (body, statuses, reasonRequired) => {
     if (!body || typeof body !== 'object' || !statuses.includes(body.status)) fail(400, '审核结果无效');
     if (body.reason != null && typeof body.reason !== 'string') fail(400, '审核理由格式不正确');
@@ -217,9 +220,10 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     await yieldToRequests();
     const allWorks = catalog.withSnapshot(() => library.allWorks({ snapshot, viewer: user }));
     const works = [];
+    const metricsOf = library.metricsSnapshot();
     for (let i = 0; i < allWorks.length; i += 32) {
       catalog.withSnapshot(() => {
-        for (const work of allWorks.slice(i, i + 32)) if (library.visibleTo(work, 'show2')) works.push(library.toPublic(work, user));
+        for (const work of allWorks.slice(i, i + 32)) if (library.visibleTo(work, 'show2')) works.push(library.toPublic(work, user, { metricsOf }));
       });
       await yieldToRequests();
     }

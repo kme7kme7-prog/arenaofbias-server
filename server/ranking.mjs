@@ -40,7 +40,7 @@ function solveWith(lower, vector) {
   return x;
 }
 
-// comparisons: [{ a, b, y }] with entry indexes and y = 1 (a preferred), 0 (b), 0.5 (tie).
+// Comparisons have entry indexes, outcome y (1, 0, or 0.5), and optional weight w.
 // Numeric prior is the original precision. Per-entry priors use logit mean/variance.
 // Anchored work fits retain the configuration scale instead of recentering by work count.
 export function fitBradleyTerry(size, comparisons, prior = 1, { anchored = false, strength = false } = {}) {
@@ -56,11 +56,11 @@ export function fitBradleyTerry(size, comparisons, prior = 1, { anchored = false
       gradient[i] = -precision * (beta[i] - mean);
       hessian[i][i] = precision;
     }
-    for (const { a, b, y } of comparisons) {
+    for (const { a, b, y, w = 1 } of comparisons) {
       const p = 1 / (1 + Math.exp(beta[b] - beta[a]));
-      const weight = p * (1 - p);
-      gradient[a] += y - p;
-      gradient[b] -= y - p;
+      const weight = w * (p * (1 - p));
+      gradient[a] += w * (y - p);
+      gradient[b] -= w * (y - p);
       hessian[a][a] += weight;
       hessian[b][b] += weight;
       hessian[a][b] -= weight;
@@ -93,7 +93,7 @@ export function fitBradleyTerry(size, comparisons, prior = 1, { anchored = false
 
 // votes: [{ a: work, b: work, choice: 'a' | 'b' | 'tie', userId }] where work carries the fields
 // entityKey needs. Votes between two works of the same entry say nothing about the entry.
-export function rankEntries(votes, keyOf, { provisionalGames, strength = false }) {
+export function rankEntries(votes, keyOf, { provisionalGames, strength = false, voterModelKey = null }) {
   const entries = new Map();
   const touch = (work) => {
     const key = keyOf(work);
@@ -101,6 +101,7 @@ export function rankEntries(votes, keyOf, { provisionalGames, strength = false }
     return entries.get(key);
   };
   const comparisons = [];
+  const voterVolumes = new Map();
   for (const vote of votes) {
     const a = touch(vote.a);
     const b = touch(vote.b);
@@ -113,11 +114,23 @@ export function rankEntries(votes, keyOf, { provisionalGames, strength = false }
     if (vote.choice === 'tie') { a.draws++; b.draws++; }
     else if (vote.choice === 'a') { a.wins++; b.losses++; }
     else { b.wins++; a.losses++; }
-    comparisons.push({ a, b, y: vote.choice === 'a' ? 1 : vote.choice === 'b' ? 0 : 0.5 });
+    const comparison = { a, b, y: vote.choice === 'a' ? 1 : vote.choice === 'b' ? 0 : 0.5 };
+    if (voterModelKey) {
+      const left = voterModelKey(vote.a), right = voterModelKey(vote.b);
+      if (!voterVolumes.has(vote.userId)) voterVolumes.set(vote.userId, new Map());
+      const volumes = voterVolumes.get(vote.userId);
+      volumes.set(left, (volumes.get(left) ?? 0) + 1);
+      if (right !== left) volumes.set(right, (volumes.get(right) ?? 0) + 1);
+      Object.assign(comparison, { volumes, left, right, baseWeight: vote.publicWeight ?? 1 });
+    }
+    comparisons.push(comparison);
   }
   const ranked = [...entries.values()].filter((entry) => entry.games > 0);
   const index = new Map(ranked.map((entry, i) => [entry, i]));
-  const fitted = ranked.length ? fitBradleyTerry(ranked.length, comparisons.map(({ a, b, y }) => ({ a: index.get(a), b: index.get(b), y })), 1, { strength }) : [];
+  const fitted = ranked.length ? fitBradleyTerry(ranked.length, comparisons.map(({ a, b, y, volumes, left, right, baseWeight }) => ({
+    a: index.get(a), b: index.get(b), y,
+    w: volumes ? baseWeight * Math.min(1, Math.sqrt(20 / Math.max(volumes.get(left), volumes.get(right)))) : 1,
+  })), 1, { strength }) : [];
   return ranked.map((entry, i) => ({
     key: entry.key,
     sample: entry.sample,

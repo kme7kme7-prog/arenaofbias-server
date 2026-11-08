@@ -789,6 +789,11 @@ const MIGRATIONS = [
     created_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS guided_trial_votes_task ON guided_trial_votes (task_id);`),
+  // Recovered roles are separate from original vote snapshots and curated eligibility.
+  (db) => db.exec(`CREATE TABLE IF NOT EXISTS legacy_vote_levels (
+    vote_id TEXT PRIMARY KEY REFERENCES votes(id) ON DELETE CASCADE,
+    level INTEGER NOT NULL CHECK(level IN (2, 3))
+  );`),
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

@@ -7,10 +7,11 @@ import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { createPlatform } from '../server/app.mjs';
 import { createCatalog } from '../server/catalog.mjs';
+import { compress } from '../server/compress.mjs';
 import { EMOJIS, limits } from '../server/config.mjs';
 import { verifiedUser } from './helpers/email.mjs';
 
-async function fixture(run) {
+async function fixture(run, platformOptions = {}) {
   const root = mkdtempSync(join(tmpdir(), 'catalog-http-'));
   const dist = join(root, 'dist');
   mkdirSync(dist);
@@ -23,7 +24,7 @@ async function fixture(run) {
   const origin = 'https://gallery.example.test';
   const platform = createPlatform({ config: { dist, dataDir: join(root, 'data'), contentTemplate: 'http://{token}.localhost',
     siteOrigins: [origin], admins: [], cdn: [], capture: false, secureCookies: false,
-    moderation: { enabled: false }, readLimits: { api: 1000, catalog: 1000 } }, limits });
+    moderation: { enabled: false }, readLimits: { api: 1000, catalog: 1000 } }, limits, ...platformOptions });
   const site = createServer(platform.handleSite).listen(0, '127.0.0.1');
   await new Promise(resolve => site.once('listening', resolve));
   const base = `http://127.0.0.1:${site.address().port}`;
@@ -379,26 +380,59 @@ test('review reads keep staff boundaries and observe decisions and removals on t
   assert.equal((await call('/api/review', { who: 'member' })).status, 403, 'revoking staff access applies to the existing session');
 }));
 
-test('catalog, bootstrap and public work lists each acquire one metrics snapshot per response build', async () => fixture(async ({platform,call}) => {
+test('legacy catalog/bootstrap/work lists never read metrics; the separate endpoint bulk-reads and revalidates', async () => fixture(async ({platform,call}) => {
   const snapshot=platform.library.metricsSnapshot;
   let builds=0;
   platform.library.metricsSnapshot=()=>{builds++;return snapshot();};
   for(const path of ['/api/catalog','/api/bootstrap','/api/show1/works']) {
-    const before=builds;
     assert.equal((await call(path)).status,200);
-    assert.equal(builds-before,1,path);
+    assert.equal(builds,0,path);
   }
-  // A metric change during a yielded build must rebuild all maps before publishing.
   platform.db.prepare("INSERT INTO work_usage(task_id,work_id,input,source,created_at,updated_at) VALUES ('one','pack',1,'api',1,1)").run();
-  const original=platform.library.toPublic;
+  const first=await call('/api/works/metrics');
+  assert.equal(first.data.usage.one.pack.input,1);assert.equal(builds,1);
+  assert.equal(first.headers.get('cache-control'),'public, no-cache');
+  const cached=await call('/api/works/metrics',{headers:{'if-none-match':first.headers.get('etag')}});
+  assert.equal(cached.status,304);assert.equal(builds,1);
+  // A metric change while the snapshot is yielded must rebuild maps before publishing.
   let changed=false;
-  platform.library.toPublic=function(...args){
-    const dto=original.apply(this,args);
-    if(!changed){changed=true;setImmediate(()=>platform.db.exec("UPDATE work_usage SET input=2 WHERE task_id='one' AND work_id='pack'"));}
-    return dto;
+  platform.library.metricsSnapshot=()=>{
+    builds++;const read=snapshot();
+    if(!changed){changed=true;setImmediate(()=>platform.db.exec("UPDATE work_usage SET input=3 WHERE task_id='one' AND work_id='pack'"));}
+    return read;
   };
+  platform.db.exec("UPDATE work_usage SET input=2 WHERE task_id='one' AND work_id='pack'");
   const before=builds;
-  const latest=await call('/api/catalog');
-  assert.equal(latest.data.works[0].usage.input,2);
-  assert.ok(builds-before>=2,'strict display revision retries with a new metrics snapshot');
+  const latest=await call('/api/works/metrics');
+  assert.equal(latest.data.usage.one.pack.input,3);
+  assert.ok(builds-before>=2,'strict display revision retries with a fresh snapshot');
+  assert.notEqual(latest.headers.get('etag'),first.headers.get('etag'));
+  platform.library.setFaceSettings(platform.auth.byId(platform.db.prepare("SELECT id FROM users WHERE name='root'").get().id),'one','pack',{show_gallery:false});
+  assert.deepEqual((await call('/api/works/metrics')).data,{usage:{},artifact:{}});
 }));
+
+
+test('restricted metrics stay in the senior cache and cannot escape after demotion or logout during compression', async () => {
+  for(const action of ['demote','logout']) {
+    let enter,release,hold=false;
+    const entered=new Promise(resolve=>{enter=resolve;}), paused=new Promise(resolve=>{release=resolve;});
+    await fixture(async ({platform,call,data,dist,admin})=>{
+      data.tasks[0].results=Array.from({length:30},(_,i)=>({...data.tasks[0].results[0],id:`restricted-${i}`}));
+      writeFileSync(join(dist,'data.json'),JSON.stringify(data));
+      for(let i=0;i<30;i++)platform.db.prepare("INSERT INTO work_artifacts(task_id,work_id,artifact,updated_at) VALUES ('one',?,?,1)")
+        .run(`restricted-${i}`,JSON.stringify({files:1,lines:1,bytes:6,chars:2}));
+      platform.library.restricted.add('model','Synthetic restricted','root');
+      const publicResult=await call('/api/works/metrics');
+      assert.deepEqual(publicResult.data,{usage:{},artifact:{}});
+      hold=true;
+      const pending=call('/api/works/metrics',{who:'admin',headers:{'accept-encoding':'gzip'}});
+      await entered;
+      if(action==='demote')platform.db.prepare("UPDATE users SET role='user' WHERE id=?").run(admin.id);
+      else platform.db.prepare('DELETE FROM sessions WHERE user_id=?').run(admin.id);
+      release();
+      const denied=await pending;
+      assert.equal(denied.status,action==='demote'?403:401);
+      assert.equal(denied.text.includes('restricted-'),false);
+    },{compressBody:async(body,encoding)=>{if(hold){hold=false;enter();await paused;}return compress(body,encoding);}});
+  }
+});

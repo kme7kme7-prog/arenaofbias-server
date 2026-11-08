@@ -84,7 +84,7 @@ export function createSharedJson({ strict, loose = () => '', read, ttl = 30_000,
     }
     return entry.variants.get(encoding);
   };
-  const handler = async (req, res) => {
+  const handler = async (req, res, { beforeSend } = {}) => {
     const started = performance.now();
     for (;;) {
       const { entry, hit } = await current();
@@ -98,6 +98,7 @@ export function createSharedJson({ strict, loose = () => '', read, ttl = 30_000,
       };
       const timing = () => `${label};dur=${(performance.now() - started).toFixed(2)};desc="${hit ? 'hit' : 'miss'}"`;
       if (etagMatches(req.headers['if-none-match'], entry.hash)) {
+        beforeSend?.();
         res.writeHead(304, { ...headers, 'Server-Timing': timing() });
         return res.end();
       }
@@ -110,6 +111,7 @@ export function createSharedJson({ strict, loose = () => '', read, ttl = 30_000,
       // the plain-body fallback when a compressor fails during a withdrawal.
       if (strict() !== entry.strict) continue;
       if (!used) headers.ETag = etagFor(entry.hash, null);
+      beforeSend?.();
       res.writeHead(200, { ...headers, 'Server-Timing': timing(), 'Content-Type': 'application/json; charset=utf-8',
         ...(used ? { 'Content-Encoding': used } : {}), 'Content-Length': body.length });
       return res.end(req.method === 'HEAD' ? undefined : body);
@@ -119,11 +121,7 @@ export function createSharedJson({ strict, loose = () => '', read, ttl = 30_000,
   return handler;
 }
 
-export function createCatalogResponse(db, catalog, read, { mediaTtl = 30_000, revision = null } = {}) {
-  if (!revision) {
-    const catalogRevision = createCatalogRevision(db), metricsRevision = createMetricsRevision(db);
-    revision = () => `${catalogRevision()}|${metricsRevision()}`;
-  }
+export function createCatalogResponse(db, catalog, read, { mediaTtl = 30_000, revision = createCatalogRevision(db) } = {}) {
   return createSharedJson({
     strict: () => `${catalog.snapshot().version}|${revision()}`,
     read: () => read(catalog.snapshot()),

@@ -1395,9 +1395,9 @@ v49 给 `moderation_tokens` 加 `scopes`（已有令牌默认 `moderation`），
 
 所有用量、价格、汇率与产物统计均保存在平台 SQLite，不读取数据包的同名字段，不预置真实价格或汇率。
 
-公开作品 DTO（`/api/catalog`、bootstrap/works）可新增 `usage` 与 `artifact`，没有记录时省略整个字段。`usage` 为 `{input?,cacheRead?,cacheWrite?,output?,reasoning?,requests?,durationSec?,source,paid?:{basis,amount?,currency?}}`；数字原样透传，未填为数据库 NULL/响应省略，显式 0 保留。source 为 api/harness/bill/log；paid.basis 为 api/subscription/credits/reseller，金额出现时必须带三位币种代码。公开数据不含录入人及时间。模型、档位、Harness 身份继续使用作品原有字段，支持前端按模型/配置/Harness/模型+Harness分组。
+既有公开作品 DTO（`/api/catalog`、匿名及完整bootstrap/public works）不附 `usage` 或 `artifact`，保持577067e字段与顺序；新独立公开 `GET /api/works/metrics` 返回 `{usage:{[taskId]:{[workId]:Usage}},artifact:{[taskId]:{[workId]:Artifact}}}`，没有记录或不可见作品时省略键，空结果为两个空对象。`usage` 为 `{input?,cacheRead?,cacheWrite?,output?,reasoning?,requests?,durationSec?,source,paid?:{basis,amount?,currency?}}`；数字原样透传，未填为数据库 NULL/响应省略，显式 0 保留。source 为 api/harness/bill/log；paid.basis 为 api/subscription/credits/reseller，金额出现时必须带三位币种代码。公开数据不含录入人及时间。模型、档位、Harness 身份继续使用作品原有字段，支持前端按模型/配置/Harness/模型+Harness分组。
 
-`artifact` 是后端统计模块输出（files/lines/bytes，可有 tokens/chars 等统计方法字段），由回填 CLI 写入 `work_artifacts`，不在目录请求中扫描源码。普通投稿与数据包作品共用这张表，公开可见性规则不变。抽组、ready、投票及揭晓响应均不附用量/产物；前端揭晓后按作品ID查公开目录。
+`artifact` 是后端统计模块输出（files/lines/bytes，可有 tokens/chars 等统计方法字段），由回填 CLI 写入 `work_artifacts`，不在目录请求中扫描源码。普通投稿与数据包作品共用这张表，公开可见性规则不变。抽组、ready、投票及揭晓响应均不附用量/产物；前端揭晓后按公开作品task/id查独立指标接口。
 
 `GET /api/pricing` 公开返回 `{asOf,fxAsOf,fx,models}`；日期初始 null，fx/models 初始空对象。fx 记每一单位币种折合 CNY，CNY 隐含为1；models 按模型ID分组，条目为 `{since,currency,input,output,cacheRead?,cacheWrite?,url}`（每百万 token）。取 since<=asOf 的最新条目，缓存价缺省按输入价；无定价/无汇率不猜算。实付仅附注，不参与官方花费比较。
 
@@ -1420,4 +1420,7 @@ v49 给 `moderation_tokens` 加 `scopes`（已有令牌默认 `moderation`），
 产物统计落库：只读 `scripts/artifact-backfill.mjs`（usage-tools分支）输出JSON，再用 `node scripts/artifact-import.mjs --db <platform.db> --input <输出.json> [--dist <只读数据包>] [--dry-run|--apply]`。默认预演，全量检查后显式apply才写work_artifacts；同值不改时间。代码体量含tokens/tokenizer/approximate，文本体量含chars，算法定义见工具契约；不冒充o200k或计费token。公开读取不扫描文件，全部作品由该回填路径覆盖，缺原始文件只报缺失、不猜体量。
 
 
-缓存与导入事务：HTTP及同进程usage/artifact/pricing写入使用独立TEMP展示修订，目录/bootstrap立刻更新，但不会提前刷新v2发布快照、v3原子发布集合或guided拟合。外部CLI仍沿用PRAGMA data_version检测：实际导入后，公开目录与榜单缓存在下次请求时刷新，CLI会输出同样提示；这是保留的外部写库行为。usage-import整批预检、查重、upsert及审计处于同一事务，任何执行错误整批回滚；HTTP单件用量和审计也原子提交。产物校验严格互斥：代码必须files/lines/bytes/tokens/tokenizer=utf8-pretoken-4-v1/approximate=true；文本必须files/lines/bytes/chars，禁止混用。
+缓存与导入事务：HTTP及同进程usage/artifact/pricing写入使用独立TEMP展示修订，独立指标接口及时更新，既有目录/bootstrap不因进程内指标写入重建，且不会提前刷新v2发布快照、v3原子发布集合或guided拟合。外部CLI仍沿用PRAGMA data_version检测：实际导入后，公开目录与榜单缓存在下次请求时刷新，CLI会输出同样提示；这是保留的外部写库行为。usage-import整批预检、查重、upsert及审计处于同一事务，任何执行错误整批回滚；HTTP单件用量和审计也原子提交。产物校验严格互斥：代码必须files/lines/bytes/tokens/tokenizer=utf8-pretoken-4-v1/approximate=true；文本必须files/lines/bytes/chars，禁止混用。
+
+
+独立指标缓存：每次构建各读一次usage/artifact全表成Map；按displayRevision（目录修订+指标修订）及受限规则修订独立失效，沿用createSharedJson的ETag/304和gzip/br。匿名/普通请求按公开目录可见集合（public,no-cache），高级管理员按其完整bootstrap可见集合（private,no-cache，含受限但公开展示作品）单独缓存；隐藏、未公开及对当前角色不可见作品均不输出，且无录入人/时间。请求携带登录会话时，压缩或304发送前复核权限。新接口沿用完整目录读取限流和分页参数拒绝规则；前端按task/id与原目录合并使用，原目录不加载指标。

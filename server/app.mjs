@@ -163,10 +163,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   };
   const adminOnly = (ctx) => (isSenior(signedIn(ctx)) ? ctx.user : fail(403, '仅高级管理员可以操作'));
   const staffOnly = (ctx) => (isStaff(signedIn(ctx)) ? ctx.user : fail(403, '仅管理员可以操作'));
-  const publicList = (works, viewer) => {
-    const metricsOf = library.metricsSnapshot();
-    return works.map(work => library.toPublic(work, viewer, { metricsOf }));
-  };
+  const publicList = (works, viewer) => works.map((work) => library.toPublic(work, viewer));
   const batchDecision = (body, statuses, reasonRequired) => {
     if (!body || typeof body !== 'object' || !statuses.includes(body.status)) fail(400, '审核结果无效');
     if (body.reason != null && typeof body.reason !== 'string') fail(400, '审核理由格式不正确');
@@ -220,10 +217,9 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     await yieldToRequests();
     const allWorks = catalog.withSnapshot(() => library.allWorks({ snapshot, viewer: user }));
     const works = [];
-    const metricsOf = library.metricsSnapshot();
     for (let i = 0; i < allWorks.length; i += 32) {
       catalog.withSnapshot(() => {
-        for (const work of allWorks.slice(i, i + 32)) if (library.visibleTo(work, 'show2')) works.push(library.toPublic(work, user, { metricsOf }));
+        for (const work of allWorks.slice(i, i + 32)) if (library.visibleTo(work, 'show2')) works.push(library.toPublic(work, user));
       });
       await yieldToRequests();
     }
@@ -234,7 +230,31 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const publicCatalog = createCatalogResponse(db, catalog, async (snapshot) => ({
     ...versionInfo(snapshot), serverVersion, providers: snapshot.providers(), domains: DOMAINS, domainGroups: DOMAIN_GROUPS,
     site: siteInfo(), works: (await galleryList(null, snapshot)).map(withoutMine), questions: catalog.withSnapshot(() => questions.all().map(withoutMine)),
-  }), { revision: displayRevision });
+  }), { revision: catalogRevision });
+  // Separate from the legacy catalog: two permission scopes, no per-user fields.
+  const workMetrics = Object.fromEntries([false, true].map(senior => [String(senior), createSharedJson({
+    strict: () => `${catalog.snapshot().version}|${displayRevision()}|${restricted.revision()}`,
+    read: async () => {
+      await yieldToRequests();
+      const snapshot = catalog.snapshot(), viewer = senior ? { role: 'admin' } : null;
+      const allWorks = catalog.withSnapshot(() => library.allWorks({ snapshot, viewer }));
+      const metricsOf = library.metricsSnapshot(), usage = Object.create(null), artifact = Object.create(null);
+      for (let i = 0; i < allWorks.length; i += 32) {
+        catalog.withSnapshot(() => {
+          for (const work of allWorks.slice(i, i + 32)) {
+            if (!library.visibleTo(work, 'show2')) continue;
+            const measured = metricsOf(work);
+            for (const [field, target] of [['usage', usage], ['artifact', artifact]]) if (measured[field]) {
+              (target[work.taskId] ??= Object.create(null))[work.id] = measured[field];
+            }
+          }
+        });
+        await yieldToRequests();
+      }
+      return { usage, artifact };
+    },
+    cacheControl: senior ? 'private, no-cache' : 'public, no-cache', label: 'work-metrics', compressBody,
+  })]));
   function session(user) {
     return {
       ...versionInfo(),
@@ -306,7 +326,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   // Signed-in requests never touch it. private keeps CDNs from storing it.
   const bootstrapActivity = createActivityRevision(db);
   const anonymousBootstrap = (lite) => createSharedJson({
-    strict: () => `${catalog.snapshot().version}|${displayRevision()}|${capturer.available}|${moderator.enabled}`,
+    strict: () => `${catalog.snapshot().version}|${catalogRevision()}|${capturer.available}|${moderator.enabled}`,
     loose: bootstrapActivity,
     read: () => bootstrap(null, { lite }),
     ttl: config.bootstrapCacheMs ?? 15_000,
@@ -382,6 +402,10 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     return bootstrap(ctx.user, { lite });
   });
   router.on('GET', '/api/catalog', ({ req, res }) => publicCatalog(req, res));
+  router.on('GET', '/api/works/metrics', ctx => {
+    if (ctx.user) signedIn(ctx);
+    return workMetrics[String(seesRestricted(ctx.user))](ctx.req, ctx.res, { beforeSend: privateBeforeSend(ctx) });
+  });
   router.on('GET', '/api/session', (ctx) => session(ctx.user));
   router.on('GET', '/api/activity', (ctx) => activity(ctx.user));
   router.on('GET', '/api/show1/works', (ctx) => ({
@@ -1205,7 +1229,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         if (isTrustedOrigin(req, config)) {
           res.setHeader('Access-Control-Allow-Origin', req.headers.origin);
           res.setHeader('Access-Control-Allow-Credentials', 'true');
-          res.setHeader('Access-Control-Expose-Headers', ['/api/catalog', '/api/bootstrap'].includes(url.pathname) ? 'X-Datapack-Stale, ETag, Server-Timing' : 'X-Datapack-Stale');
+          res.setHeader('Access-Control-Expose-Headers', ['/api/catalog', '/api/bootstrap', '/api/works/metrics'].includes(url.pathname) ? 'X-Datapack-Stale, ETag, Server-Timing' : 'X-Datapack-Stale');
         }
       }
       const referenceMedia = url.pathname.startsWith('/media/references/') || url.pathname.startsWith('/media/pack-references/');
@@ -1234,7 +1258,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       if (/^bearer\s/i.test(String(req.headers.authorization ?? ''))) fail(403, '审核令牌不能访问此接口', 'token_forbidden');
       if (req.method === 'GET' || req.method === 'HEAD') readGuard.api(req, url.pathname);
       if (['GET', 'HEAD'].includes(req.method)
-        && ['/api/bootstrap', '/api/catalog', '/api/show1/works', '/api/works', '/api/prompts', '/api/votes', '/api/ratings'].includes(url.pathname)
+        && ['/api/bootstrap', '/api/catalog', '/api/works/metrics', '/api/show1/works', '/api/works', '/api/prompts', '/api/votes', '/api/ratings'].includes(url.pathname)
         && ['limit', 'offset', 'page'].some((key) => url.searchParams.has(key))) fail(400, '此接口返回完整目录，不支持分页参数', 'unsupported_pagination');
       const route = router.match(req.method, url.pathname);
       if (!route) fail(404, '接口不存在');
@@ -1249,7 +1273,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         // Request-local only: a selected text roster must also follow a
         // withdrawal while its compressed representation is being built.
         return await createSharedJson({
-          strict: () => `${catalog.snapshot().version}|${displayRevision()}`,
+          strict: () => `${catalog.snapshot().version}|${catalogRevision()}`,
           read: () => catalog.withSnapshot(() => route.handler(ctx)), ttl: 0, cacheControl: 'no-store', compressBody,
         })(req, res);
       }

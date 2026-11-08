@@ -977,19 +977,21 @@ test('usage and pricing APIs enforce roles, keep missing measurements null and n
   assert.equal('cacheRead' in publicPrice.models.ma[0],false);
   assert.ok(meta.data.entries[0].createdBy.id);
   const catalogBefore=(await call('guest','GET','/api/catalog')).data;
-  assert.equal(catalogBefore.works.find(w=>w.task==='one'&&w.id==='a').usage.input,100);
+  assert.equal('usage' in catalogBefore.works.find(w=>w.task==='one'&&w.id==='a'),false);
+  assert.equal((await call('guest','GET','/api/works/metrics')).data.usage.one.a.input,100);
   const stubArtifact=()=>({files:1,lines:4,tokens:12,bytes:60,tokenizer:'utf8-pretoken-4-v1',approximate:true});
   const uploaded=await call('root','POST','/api/admin/works/upload?task=one&name=usage-fixture.html&modelName=UsageTest&effort=High&providerId=official',html.replace('作品','Usage fixture'),true);
   assert.equal(uploaded.status,200);
   const uploadId=uploaded.data.work.id;
   putArtifact(platform.db,{task:'one',work:uploadId,artifact:stubArtifact()});
   assert.equal((await call('voter','PUT',`/api/admin/works/one/${uploadId}/usage`,{input:6,source:'harness'})).status,200);
-  const uploadPublic=(await call('guest','GET','/api/catalog')).data.works.find(w=>w.id===uploadId);
-  assert.equal(uploadPublic.usage.input,6);assert.deepEqual(uploadPublic.artifact,stubArtifact());
+  const uploadPublic=(await call('guest','GET','/api/works/metrics')).data;
+  assert.equal(uploadPublic.usage.one[uploadId].input,6);assert.deepEqual(uploadPublic.artifact.one[uploadId],stubArtifact());
 
   putArtifact(platform.db,{task:'one',work:'a',artifact:stubArtifact()});
   await call('root','PUT',path,{input:0,source:'log',paid:{basis:'subscription'}});
-  const publicWork=(await call('guest','GET','/api/catalog')).data.works.find(w=>w.task==='one'&&w.id==='a');
+  const measured=(await call('guest','GET','/api/works/metrics')).data;
+  const publicWork={usage:measured.usage.one.a,artifact:measured.artifact.one.a};
   assert.deepEqual(publicWork.usage,{input:0,source:'log',paid:{basis:'subscription'}});
   assert.deepEqual(publicWork.artifact,stubArtifact());
   assert.equal(JSON.stringify(publicWork.usage).includes('created'),false);
@@ -1018,8 +1020,8 @@ test('costs default to hidden publicly while senior price maintenance remains av
   assert.equal((await call('root','PUT','/api/admin/pricing/meta',{asOf:'2026-11-08',fxAsOf:'2026-11-08',fx:{USD:7}})).status,200);
   const pricing=(await call('guest','GET','/api/pricing')).data;
   assert.deepEqual(pricing,{showCost:false});
-  const work=(await call('guest','GET','/api/catalog')).data.works.find(w=>w.task==='one'&&w.id==='a');
-  assert.deepEqual(work.usage,{input:12,output:4,source:'bill',paid:{basis:'api'}});
+  const work=(await call('guest','GET','/api/works/metrics')).data;
+  assert.deepEqual(work.usage.one.a,{input:12,output:4,source:'bill',paid:{basis:'api'}});
   assert.equal((await call('root','GET',path)).data.usage.paid.amount,3);
   assert.equal((await call('root','GET','/api/admin/pricing')).data.entries[0].input,1);
   platform.library.restricted.add('ma','Test restricted model','root');
@@ -1028,9 +1030,13 @@ test('costs default to hidden publicly while senior price maintenance remains av
   platform.auth.setRole(senior,member.id,'moderator');
   assert.equal((await call('voter','GET',path)).status,404);
   assert.equal((await call('guest','GET','/api/catalog')).data.works.some(w=>w.id==='a'&&w.task==='one'),false);
+  assert.equal((await call('guest','GET','/api/works/metrics')).data.usage.one?.a,undefined);
+  assert.equal((await call('voter','GET','/api/works/metrics')).data.usage.one?.a,undefined);
+  const seniorMetrics=await call('root','GET','/api/works/metrics');
+  assert.equal(seniorMetrics.data.usage.one.a.input,12);assert.equal(seniorMetrics.status,200);
 }));
 
-test('local metrics update catalog/bootstrap without refreshing published scores; external imports retain data_version refresh', async () => withPlatform(async ({platform,call}) => {
+test('local metrics update their separate endpoint without changing legacy DTOs or published scores; external imports retain data_version refresh', async () => withPlatform(async ({platform,call}) => {
   const {putArtifact}=await import('../server/work-usage.mjs');
   const root=platform.db.prepare("SELECT * FROM users WHERE name='root'").get();
   const staff=platform.db.prepare("SELECT * FROM users WHERE name='voter'").get();
@@ -1062,12 +1068,14 @@ test('local metrics update catalog/bootstrap without refreshing published scores
   assert.equal('usage' in work((await call('guest','GET','/api/bootstrap')).data),false);
   const path='/api/admin/works/one/a/usage';
   assert.equal((await call('root','PUT',path,{input:11,source:'api'})).status,200);
-  assert.equal(work((await call('guest','GET','/api/catalog')).data).usage.input,11);
-  assert.equal(work((await call('guest','GET','/api/bootstrap')).data).usage.input,11);
+  assert.equal((await call('guest','GET','/api/works/metrics')).data.usage.one.a.input,11);
+  assert.equal('usage' in work((await call('guest','GET','/api/catalog')).data),false);
+  assert.equal('usage' in work((await call('root','GET','/api/bootstrap')).data),false);
   await unchanged();
   putArtifact(platform.db,{task:'one',work:'a',artifact:{files:1,lines:1,bytes:6,chars:2}});
-  assert.equal(work((await call('guest','GET','/api/catalog')).data).artifact.chars,2);
-  assert.equal(work((await call('guest','GET','/api/bootstrap')).data).artifact.chars,2);
+  assert.equal((await call('guest','GET','/api/works/metrics')).data.artifact.one.a.chars,2);
+  assert.equal('artifact' in work((await call('guest','GET','/api/catalog')).data),false);
+  assert.equal('artifact' in work((await call('guest','GET','/api/bootstrap')).data),false);
   await unchanged();
   // Illustrative prices only; price/meta mutations also stay outside score revision.
   assert.equal((await call('root','PUT','/api/admin/pricing/models/ma/2026-11-01',{currency:'USD',input:1,output:2,url:'https://example.test/illustrative-pricing'})).status,200);
@@ -1081,7 +1089,7 @@ test('local metrics update catalog/bootstrap without refreshing published scores
   await unchanged();
   const external=new DatabaseSync(platform.db.prepare('PRAGMA database_list').get().file);
   try {external.exec("UPDATE work_usage SET input=123 WHERE task_id='one' AND work_id='a'");}finally{external.close();}
-  assert.equal(work((await call('guest','GET','/api/catalog')).data).usage.input,123);
+  assert.equal((await call('guest','GET','/api/works/metrics')).data.usage.one.a.input,123);
   const after=await platform.arena.leaderboardSnapshot({by:'model',scoring:2});
   assert.notStrictEqual(after,v2);assert.equal(after.rows.length,2);
   assert.notEqual((await platform.arena.leaderboardSnapshot({by:'model',scoring:3})).generation,v3.generation);

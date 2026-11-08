@@ -764,6 +764,24 @@ test('admin package attribution edits resolve saved ballots without writing corr
   assert.equal(platform.db.prepare("SELECT COUNT(*) AS n FROM audit WHERE action = 'vote-identity-correction' AND work_id = 'a'").get().n, 0);
 }));
 
+test('work upload frequency limits exempt moderators and senior administrators', async () => withPlatform(async ({ platform, call }) => {
+  const senior = platform.db.prepare("SELECT * FROM users WHERE name = 'root'").get();
+  platform.auth.bindEmail(senior.id, 'root@example.test');
+  const staff = await platform.auth.register('staff', 'correct horse');
+  platform.auth.bindEmail(staff.id, 'staff@example.test');
+  platform.auth.setRole(senior, staff.id, 'moderator');
+  assert.equal((await call('staff', 'POST', '/api/auth/login', { name: 'staff', password: 'correct horse' })).status, 200);
+
+  const draft = '/api/drafts?task=one&name=work.html';
+  const upload = '/api/admin/works/upload?task=one&name=work.html&modelName=Test&effort=Max&providerId=official';
+  for (let attempt = 0; attempt < 13; attempt++) {
+    assert.equal((await call('voter', 'POST', draft, html, true)).status, attempt < 12 ? 200 : 429);
+    assert.equal((await call('staff', 'POST', draft, html, true)).status, 200);
+    assert.equal((await call('root', 'POST', draft, html, true)).status, 200);
+    assert.equal((await call('root', 'POST', upload, html.replaceAll('作品', `作品 ${attempt}`), true)).status, 200);
+  }
+}));
+
 test('moderator routes preserve senior permissions and allow decisions on own works', async () => withPlatform(async ({ platform, call }) => {
   const senior = platform.db.prepare("SELECT * FROM users WHERE name = 'root'").get();
   const staff = await platform.auth.register('staff', 'correct horse');

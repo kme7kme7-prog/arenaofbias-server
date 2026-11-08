@@ -534,7 +534,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     const user = requireContributor(signedIn(ctx));
     emailBound(ctx);
     limit.write(user.id);
-    limit.drafts(user.id);
+    if (!isStaff(user)) limit.drafts(user.id);
     const task = ctx.url.searchParams.get('task') ?? '';
     checkDatapack(ctx, task);
     const name = ctx.url.searchParams.get('name') ?? '';
@@ -853,7 +853,6 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   router.on('POST', '/api/admin/works/upload', async (ctx) => {
     const admin = adminOnly(ctx);
     limit.write(admin.id);
-    limit.drafts(admin.id);
     const params = ctx.url.searchParams;
     const task = params.get('task') ?? '';
     checkDatapack(ctx, task);

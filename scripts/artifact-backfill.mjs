@@ -64,8 +64,21 @@ export function artifactBackfill({ dist, works, database } = {}) {
         db.exec('BEGIN');
         for (const row of db.prepare('SELECT id, category, templates FROM questions').all()) tasks.set(row.id, { ...row, templates: JSON.parse(row.templates) });
         for (const row of db.prepare('SELECT id, task_id, checks FROM works WHERE deleted_at IS NULL').all()) {
-          const path = resolve(works, row.id), rel = relative(works, path);
-          if (rel === '..' || rel.startsWith('../') || isAbsolute(rel)) throw new Error('Work id escapes its root');
+          if (typeof row.id !== 'string' || !row.id || /[\\/]/.test(row.id) || ['.', '..'].includes(row.id)) {
+            warnings.push({ id: row.id, origin: 'upload', reason: 'invalid-work-id' }); continue;
+          }
+          let path;
+          try {
+            const original = join(works, row.id);
+            path = contained(works, original);
+            if (lstatSync(original).isSymbolicLink()) {
+              warnings.push({ id: row.id, origin: 'upload', reason: 'symbolic-work-root' }); continue;
+            }
+          } catch (error) {
+            if (error.code === 'ENOENT') warnings.push({ id: row.id, origin: 'upload', reason: 'missing-files' });
+            else warnings.push({ id: row.id, origin: 'upload', reason: 'outside-works-root' });
+            continue;
+          }
           const text = isTextTask(tasks.get(row.task_id)) || JSON.parse(row.checks).some(check => check.id === 'format' && check.template === 'text');
           record({ id: row.id, taskId: row.task_id }, path, text ? 'text' : 'code', 'upload');
         }

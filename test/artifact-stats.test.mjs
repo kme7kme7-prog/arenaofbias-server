@@ -71,3 +71,18 @@ test('directory-only report states missing task metadata and never follows symli
   const report = artifactBackfill({ works: root });
   assert.equal(report.artifacts.length, 1); assert.equal(report.warnings.at(-1).reason, 'no-database-task-and-kind-unknown');
 });
+
+test('upload ids cannot traverse nested symlinks or escape the real works root', t => {
+  const root = mkdtempSync(join(tmpdir(), 'artifact-escape-')); t.after(()=>rmSync(root,{recursive:true,force:true}));
+  const works=join(root,'works'), outside=join(root,'outside'); mkdirSync(works); mkdirSync(join(outside,'nested'),{recursive:true});
+  writeFileSync(join(outside,'nested/private.txt'),'SYNTHETIC SENTINEL');
+  symlinkSync(outside,join(works,'alias')); symlinkSync(join(outside,'nested'),join(works,'direct'));
+  mkdirSync(join(works,'real'));writeFileSync(join(works,'real','own.txt'),'SYNTHETIC OTHER WORK');symlinkSync(join(works,'real'),join(works,'internal'));
+  const database=join(root,'db'),db=new DatabaseSync(database);
+  db.exec(`CREATE TABLE works(id TEXT,task_id TEXT,checks TEXT,deleted_at INTEGER); CREATE TABLE questions(id TEXT,category TEXT,templates TEXT);
+    INSERT INTO works VALUES ('alias/nested','t','[]',NULL),('alias\\nested','t','[]',NULL),('direct','t','[]',NULL),('internal','t','[]',NULL);`);db.close();
+  const result=artifactBackfill({works,database}); assert.equal(result.artifacts.length,0);
+  assert.equal(result.warnings.filter(w=>w.reason==='invalid-work-id').length,2);
+  assert.equal(result.warnings.filter(w=>w.reason==='outside-works-root').length,1);
+  assert.equal(result.warnings.filter(w=>w.reason==='symbolic-work-root').length,1);
+});

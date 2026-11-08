@@ -13,7 +13,7 @@ const start = { type: 'user', sessionId: 'synthetic-session', timestamp: '2026-0
 test('Claude usage sums disjoint input/cache/output fields and observed duration per session', () => {
   const result = aggregateClaudeUsage([start, reply('r1', { input_tokens: 10, cache_read_input_tokens: 40, cache_creation_input_tokens: 20, output_tokens: 5 }),
     reply('r2', { input_tokens: 7, cache_read_input_tokens: 80, output_tokens: 9 }, '2026-01-01T00:00:25Z')]);
-  assert.deepEqual(result, [{ sessionId: 'synthetic-session', usage: { source: 'log', requests: 2, input: 17, cacheRead: 120, cacheWrite: 20, output: 14, durationSec: 25 } }]);
+  assert.deepEqual(result, [{ sessionId: 'synthetic-session', usage: { source: 'log', requests: 2, input: 17, cacheRead: 120, output: 14, durationSec: 25 }, incomplete: ['cacheWrite'] }]);
 });
 test('streaming and repeated file snapshots are counted once per message id', () => {
   const a = reply('r1', { input_tokens: 10, output_tokens: 1 });
@@ -43,7 +43,8 @@ test('CLI emits directly pasteable usage, leaves synthetic logs unchanged and ne
   writeFileSync(path, contents);
   const command = ['scripts/usage-from-logs.mjs', '--file', path, '--session', 'synthetic-session'];
   const run = spawnSync(process.execPath, command, { encoding: 'utf8' });
-  assert.equal(run.status, 0, run.stderr); assert.deepEqual(JSON.parse(run.stdout), { source: 'log', requests: 1, input: 3, output: 8, durationSec: 10 });
+  assert.equal(run.status, 0, run.stderr); assert.deepEqual(JSON.parse(run.stdout).usage, { source: 'log', requests: 1, input: 3, output: 8, durationSec: 10 });
+  assert.deepEqual(JSON.parse(run.stdout).incomplete, ['cacheRead', 'cacheWrite']);
   assert.equal(readFileSync(path, 'utf8'), contents); assert.ok(!run.stdout.includes('BODY'));
   writeFileSync(path, '{malformed SYNTHETIC BODY');
   const invalid = spawnSync(process.execPath, command, { encoding: 'utf8' });
@@ -54,4 +55,17 @@ test('CLI reports a missing file without unhandled stream errors or a fabricated
   const run = spawnSync(process.execPath, ['scripts/usage-from-logs.mjs', '--file', '/nonexistent/synthetic-usage.jsonl', '--session', 'synthetic-session'], { encoding: 'utf8' });
   assert.equal(run.status, 1); assert.equal(run.stdout, ''); assert.match(run.stderr, /日志回填失败/);
   assert.ok(!run.stderr.includes('Unhandled'));
+});
+
+test('Claude splits models and never exposes a merged pasteable usage', () => {
+  const a = reply('a', { input_tokens: 10, output_tokens: 2 }); a.message.model = 'fictional-one';
+  const b = reply('b', { input_tokens: 100, output_tokens: 20 }); b.message.model = 'fictional-two';
+  const row = aggregateClaudeUsage([a,b])[0];
+  assert.equal(row.mixedModels, true); assert.equal(Object.hasOwn(row,'usage'), false);
+  assert.deepEqual(row.byModel.map(g=>[g.model,g.usage.input,g.usage.output]), [['fictional-one',10,2],['fictional-two',100,20]]);
+});
+test('Claude incomplete coverage omits a partial field after reply deduplication', () => {
+  const row = aggregateClaudeUsage([reply('a',{input_tokens:100,output_tokens:10}), reply('a',{input_tokens:100,output_tokens:10}), reply('b',{output_tokens:20})])[0];
+  assert.equal(Object.hasOwn(row.usage,'input'),false); assert.equal(row.usage.output,30);
+  assert.equal(row.usage.requests,2); assert.ok(row.incomplete.includes('input'));
 });

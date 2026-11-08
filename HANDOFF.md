@@ -1,3 +1,11 @@
+## 2026-11-08 · 作品用量与花费（测试站已上线，金额默认关闭）
+
+- 新表 v57：work_usage、work_artifacts、model_prices、pricing_meta，只新增；缺省数字存 NULL。普通管理员及以上可录入、修改、删除作品用量，高级管理员在后台「价格表」维护官方标价与汇率；库里不预置任何价格。`USAGE_SHOW_COST`（默认关）控制金额：关闭时 `GET /api/pricing` 只返回 `{showCost:false}`，公开 paid 只留 basis。
+- 公开目录、bootstrap 与作品列表的原始响应与改动前逐字节相同，不带指标；用量与产物体量由新的公开接口 `GET /api/works/metrics` 提供，独立缓存、按可见性分 public/private。对局各接口不带指标。写用量、产物、价格只推进展示修订，不刷新 v2、v3 或维度图缓存；外部 CLI 写库会像其他外部写入一样让榜单缓存提前重算一次。
+- 工具：`scripts/artifact-backfill.mjs` 与 `artifact-import.mjs`（产物体量：代码按近似分词 `utf8-pretoken-4-v1` 计 token，写作计字数）；`scripts/usage-from-logs.mjs`（Claude Code 与 Codex 本地会话日志，含子代理、计数器重置、混用模型标记）；`scripts/usage-import.mjs`（默认 dry-run、整批事务、`--replace` 才覆盖）。
+- 生产安装后缀 `+usage.7751036db529`。生产 `app.mjs`、`read-guard.mjs` 由 Lead 三方合并（保留 isArenaOnlyQuestion 线上补丁；read-guard 仅 CRLF 差异），`library.mjs` 补丁干净叠加。安装后回填产物 3,703 件，导入 GPT-6.2 Sol 灰度 15 件用量（来自 Codex Desktop 本地会话，两份独立提取逐件一致）；公开指标为用量 15、产物 3,298。旧正式票与试运行票逐行保留，quick_check 与外键检查通过，导入前数据库备份在 `/root/aob-board-v3-20261108/usage-release/r2/`。
+- 本地 check 197/0、test 673/673。回执、脚本与回退在服务器 `/root/aob-board-v3-20261108/usage-release/r2/`，本地证据在父目录 `.local/board-v3-20261108/`。改动在本地分支 `lb/integration`，未推送。
+
 ## 2026-11-08 · v3 计分与盲评维度（测试站已上线，正式口径仍为 v2）
 
 - 新增 `GET /api/leaderboard/next`：v3 加权计分、每类覆盖门槛（3 道题、单题不超过一半、有效投票者 10 人）、含换题波动的加宽区间、95% 名次范围、三类等权综合；三张分类榜与综合榜同代发布。`/api/leaderboard` 按 `LEADERBOARD_SCORING`（默认 2）仍返回 v2，`/previous` 在 v2 期间为 404，`/weighted-trial` 保留，精选榜恒为 v2。

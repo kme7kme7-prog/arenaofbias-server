@@ -132,11 +132,17 @@ export function trialScores(ballots, keyOf, describe, priors = new Map()) {
       if (!ids.every(Boolean)) continue;
       const key = JSON.stringify([row.a.taskId, ...[...ids].sort()]);
       const choice = row.aspectChoice === 'tie' ? 'tie' : ids[row.aspectChoice === 'a' ? 0 : 1];
-      for (const previous of pairs.get(key) ?? []) if (row.userId && previous.userId && row.userId !== previous.userId) {
-        agreementN++; if (choice === previous.choice) agreement++;
-      }
-      if (!pairs.has(key)) pairs.set(key, []);
-      pairs.get(key).push({ userId: row.userId, choice });
+      if (!row.userId) continue;
+      if (!pairs.has(key)) pairs.set(key, { n: 0, choices: new Map(), users: new Map() });
+      const pair = pairs.get(key);
+      if (!pair.users.has(row.userId)) pair.users.set(row.userId, { n: 0, choices: new Map() });
+      const user = pair.users.get(row.userId);
+      // Count only earlier ballots from other voters, without enumerating their pairs.
+      agreementN += pair.n - user.n;
+      agreement += (pair.choices.get(choice) ?? 0) - (user.choices.get(choice) ?? 0);
+      pair.n++; user.n++;
+      pair.choices.set(choice, (pair.choices.get(choice) ?? 0) + 1);
+      user.choices.set(choice, (user.choices.get(choice) ?? 0) + 1);
     }
     const rate = (n, d) => d ? n / d : null;
     const cell = { pairs: rows.length, n: answered.length, skipped: rows.length - answered.length,

@@ -71,6 +71,9 @@ test('guided pairs are staff-only trials that ask one aspect question and stay o
     const dimension = ASPECTS['建模'].find((aspect) => aspect.id === first.aspect.id).dimension;
     const chart = await arena.guidedDimensions(moderator);
     assert.deepEqual([chart.by, chart.categories, chart.totals.pairs, chart.totals.answered, chart.totals.voters], ['model', ['建模'], 2, 1, 2]);
+    assert.strictEqual(await arena.guidedDimensions(moderator), chart, 'unchanged reads reuse the fitted result');
+    assert.notStrictEqual(await arena.guidedDimensions(admin), chart, 'senior visibility has a separate cache');
+    assert.notStrictEqual(await arena.guidedDimensions(moderator, 'config'), chart, 'configuration view has a separate cache');
     const entry = Object.fromEntries(chart.entries.map((row) => [row.model, row]));
     assert.deepEqual([entry[secondResult.b.model].overall, entry[secondResult.a.model].overall],
       [{ win: 1, tie: 1, loss: 0, n: 2 }, { win: 0, tie: 1, loss: 1, n: 2 }]);
@@ -88,7 +91,11 @@ test('guided pairs are staff-only trials that ask one aspect question and stay o
     const secret = JSON.stringify({ ...JSON.parse(sample.a_identity), modelId: null, modelName: 'Secret', modelKey: 'x:secret' });
     db.prepare('INSERT INTO guided_trial_votes (id, match_id, user_id, task_id, a_work, b_work, choice, aspect_id, aspect_choice, a_identity, b_identity, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run('secret', 'secret-match', 'admin', 'tower', 'x', 'y', 'a', first.aspect.id, 'a', secret, sample.b_identity, Date.now());
-    assert.equal((await arena.guidedDimensions(moderator)).totals.pairs, 2);
+    const fresh = await arena.guidedDimensions(moderator);
+    assert.notStrictEqual(fresh, chart, 'a new row invalidates without an explicit clear');
+    assert.equal(fresh.totals.pairs, 2);
+    arena.invalidate();
+    assert.notStrictEqual(await arena.guidedDimensions(moderator), fresh, 'prior/attribution invalidation also clears fitted results');
     assert.deepEqual((await arena.guidedDimensions(admin)).entries.find((row) => row.key === 'x:secret')?.dimensions[dimension].win, 1);
 
     // Release the fixture's sole ordinary pair for the following isolated trial checks.
@@ -226,4 +233,28 @@ test('v56 preserves old trial order and reruns idempotently', async () => {
     assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
     db.close();
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+
+test('agreement aggregates duplicate voters, flipped sides and missing voters without pair enumeration', () => {
+  const a = { id: 'a', taskId: 't', modelKey: 'a' }, b = { id: 'b', taskId: 't', modelKey: 'b' };
+  const rows = [
+    ['u1', 'a', false], ['u1', 'b', false], ['u2', 'b', true],
+    ['u2', 'tie', true], ['u3', 'tie', false], [null, 'a', false],
+  ].map(([userId, aspectChoice, flip], i) => ({ a: flip ? b : a, b: flip ? a : b,
+    userId, choice: 'a', aspectChoice, aspectId: 'floating', createdAt: i }));
+  let expectedN = 0, expectedSame = 0;
+  const pick = row => row.aspectChoice === 'tie' ? 'tie' : row[row.aspectChoice].id;
+  rows.forEach((row, i) => rows.slice(0, i).forEach(other => {
+    if (row.userId && other.userId && row.userId !== other.userId) {
+      expectedN++; if (pick(row) === pick(other)) expectedSame++;
+    }
+  }));
+  const health = trialScores(rows, w => w.modelKey, () => ({})).health[0];
+  assert.equal(health.agreementN, expectedN);
+  assert.equal(health.agreementRate, expectedSame / expectedN);
+  const many = Array.from({ length: 20000 }, (_, i) => ({ ...rows[0], userId: `u${i}` }));
+  const large = trialScores(many, w => w.modelKey, () => ({})).health[0];
+  assert.equal(large.agreementN, 199990000);
+  assert.equal(large.agreementRate, 1);
 });

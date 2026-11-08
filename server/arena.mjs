@@ -107,6 +107,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     insertGuided: db.prepare('INSERT INTO guided_matches (match_id, aspect_id, aspect_order) VALUES (?, ?, ?)'),
     insertTrial: db.prepare('INSERT INTO guided_trial_votes (id, match_id, user_id, task_id, a_work, b_work, choice, tie_kind, aspect_id, aspect_choice, aspect_tie_kind, a_identity, b_identity, created_at, aspect_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
     trialAspects: db.prepare('SELECT aspect_id, COUNT(*) AS n FROM guided_trial_votes WHERE task_id = ? AND aspect_choice IS NOT NULL GROUP BY aspect_id'),
+    trialRevision: db.prepare('SELECT COUNT(*) AS n, MAX(rowid) AS latest FROM guided_trial_votes'),
     trialVotes: db.prepare('SELECT user_id, choice, aspect_id, aspect_choice, a_identity, b_identity, created_at, aspect_order FROM guided_trial_votes WHERE aspect_id IS NOT NULL ORDER BY created_at, rowid'),
     audit: db.prepare('INSERT INTO audit (at, actor_id, actor_name, action, task_id, work_id, detail) VALUES (?, ?, ?, ?, ?, ?, ?)'),
   };
@@ -125,10 +126,12 @@ export function createArena({ db, catalog, library, limits, random = Math.random
   const publishedBoards = createLeaderboardCache();
   const publishedV3Families = createLeaderboardCache();
   const seniorV3Families = createLeaderboardCache();
+  const guidedCache = new Map();
   let readRevision = null;
   let warmup = null;
   const invalidate = ({ votesOnly = false, task = null } = {}) => {
     cache = new Map();
+    guidedCache.clear();
     if (votesOnly && task) matchRatings.delete(task);
     else matchRatings.clear();
     seniorV3Families.clear();
@@ -743,14 +746,14 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       for (const row of db.prepare('SELECT * FROM skip_reasons').all()) {
         const sides = [fromIdentity(row.a_identity), fromIdentity(row.b_identity)].filter(Boolean);
         for (const key of new Set(sides.map(side => side.modelKey ?? modelKey(side)))) {
-          if (!models.has(key)) models.set(key, { key, n: 0, recognized: 0 });
+          if (!models.has(key)) models.set(key, { key, modelName: sides.find(side => (side.modelKey ?? modelKey(side)) === key)?.modelName ?? key, n: 0, recognized: 0 });
           const cell = models.get(key); cell.n++; if (row.reason === 'recognized') cell.recognized++;
         }
-        if (!tasks.has(row.task_id)) tasks.set(row.task_id, { task: row.task_id, n: 0, unsure: 0 });
+        if (!tasks.has(row.task_id)) tasks.set(row.task_id, { task: row.task_id, taskTitle: catalog.task(row.task_id)?.title ?? row.task_id, n: 0, unsure: 0 });
         const cell = tasks.get(row.task_id); cell.n++; if (row.reason === 'unsure') cell.unsure++;
         if (row.reason === 'broken') for (const side of sides) {
           const key = JSON.stringify([row.task_id, side.id]);
-          if (!broken.has(key)) broken.set(key, { task: row.task_id, work: side.id, n: 0 });
+          if (!broken.has(key)) broken.set(key, { task: row.task_id, taskTitle: catalog.task(row.task_id)?.title ?? row.task_id, work: side.id, title: side.title ?? side.id, n: 0 });
           broken.get(key).n++;
         }
       }
@@ -877,6 +880,12 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     async guidedDimensions(user, by = 'model') {
       if (!isStaff(user)) fail(403, '引导式盲评测试版只对管理员开放', 'guided-staff-only');
       const snapshot = catalog.snapshot();
+      const senior = seesRestricted(user);
+      const priors = await guidedPriors(by, senior);
+      const stamp = JSON.stringify([currentRevision(snapshot), q.trialRevision.get(), [...priors]]);
+      const scope = `${by}|${senior}`;
+      const cached = guidedCache.get(scope);
+      if (cached?.stamp === stamp) return cached.result;
       const keyOf = by === 'config' ? (work) => work.configKey ?? entityKey(work) : (work) => work.modelKey ?? modelKey(work);
       const hidden = (work) => !seesRestricted(user) && restricted.isRestrictedWork(work);
       const ballots = [];
@@ -885,11 +894,12 @@ export function createArena({ db, catalog, library, limits, random = Math.random
         if (!a || !b || hidden(a) || hidden(b)) continue;
         ballots.push({ a, b, choice: row.choice, aspectId: row.aspect_id, aspectChoice: row.aspect_choice, userId: row.user_id, createdAt: row.created_at, aspectOrder: row.aspect_order });
       }
-      const priors = await guidedPriors(by, seesRestricted(user));
-      return { by, ...trialScores(ballots, keyOf, (work) => {
+      const result = { by, ...trialScores(ballots, keyOf, (work) => {
         const model = work.modelId ? snapshot.model?.(work.modelId) : null;
         return { model: work.modelId ?? null, modelName: model?.name ?? work.modelName, vendor: model?.vendor ?? work.vendor, effort: by === 'config' ? work.effort ?? '' : '' };
       }, priors) };
+      guidedCache.set(scope, { stamp, result });
+      return result;
     },
   };
 }

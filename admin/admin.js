@@ -189,7 +189,7 @@ const state = { user: undefined, data: null, works: null, audit: [], users: null
   system: ['arena', 'common'].includes(store.get('admin-system')) ? store.get('admin-system') : 'gallery', adminWorks: [], workTotal: 0,
   workCache: new Map(), workKey: '', workLoading: false, trafficLoading: false, requestId: 0,
   sidebarCollapsed: store.get('admin-sidebar-collapsed') === '1',
-  workPage: 1, workTask: '', workStatus: '', workShow: '', workHarness: '', workProvider: '', workSearch: '', traffic: null,
+  workPage: 1, workTask: '', workStatus: '', workShow: '', workHarness: '', workProvider: '', workSearch: '', traffic: null, skipReasons: null,
   workModel: '', workEffort: '', workAuthor: '', workGenerationMode: '', workHumanIntervention: '', workEfforts: [],
   inbox: null, inboxForms: {}, intake: null, adminQuestions: null, reviewCounts: null, domainGroups: [],
   curated: null, curatedDraft: null, curatedFilter: 'all', curatedSearch: '', curatedType: '', curatedTarget: '', curatedNote: '',
@@ -255,6 +255,7 @@ const TABS = [
   { id: 'works', label: '作品', icon: 'file' },
   { id: 'tasks', label: '题目', icon: 'guide' },
   { id: 'qualification', label: '资格考试', icon: 'check' },
+  { id: 'skip-reasons', label: '跳过原因', icon: 'list' },
   { id: 'vote-risk', label: '投票风控', icon: 'shield' },
   { id: 'changelog', label: '更新日志', icon: 'calendar' },
 ];
@@ -265,7 +266,7 @@ const COMMON_TABS = [
   { id: 'traffic', label: '流量', icon: 'clock' },
 ];
 const ARENA_NAV = [
-  ['内容管理', [['works', '作品管理', 'file', '#/works'], ['intake', '收件箱 · 娱乐作品', 'inbox', '#/intake'], ['tasks', '题目管理', 'guide', '#/tasks'], ['qualification', '资格考试', 'check', '#/qualification'], ['vote-risk', '投票风控', 'shield', '#/vote-risk'], ['gallery-review', '审核', 'shield', 'https://gallery.arenaofbias.icu/#/review']]],
+  ['内容管理', [['works', '作品管理', 'file', '#/works'], ['intake', '收件箱 · 娱乐作品', 'inbox', '#/intake'], ['tasks', '题目管理', 'guide', '#/tasks'], ['qualification', '资格考试', 'check', '#/qualification'], ['vote-risk', '投票风控', 'shield', '#/vote-risk'], ['skip-reasons', '跳过原因', 'list', '#/skip-reasons'], ['gallery-review', '审核', 'shield', 'https://gallery.arenaofbias.icu/#/review']]],
   ['玩法', [['guess', '模一把', 'game', '#/guess'], ['activity', '活动管理', 'calendar', '#/activity']]],
 ];
 const SUBMIT_URL = 'https://gallery.arenaofbias.icu/#/submit';
@@ -893,6 +894,17 @@ function intakeView() {
       <button class="btn primary" type="submit">归属所选</button>
     </form>
     ${rows ? `<div class="table-wrap"><table class="board"><thead><tr><th></th><th>作品</th><th>原题</th><th>进入时间</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="board-empty">收件箱是空的。</p>'}</section>`;
+}
+
+function skipReasonsView() {
+  const data = state.skipReasons;
+  const hero = pageHero('只读统计', '跳过原因', '比例以填写过跳过原因的组为分母，不代表所有展示组；同组两边是同一模型时只计一次。', []);
+  if (!data) return `${hero}<section class="block" aria-busy="true">${skeleton(4)}</section>`;
+  const percent = (value) => `${(value * 100).toFixed(1)}%`;
+  const table = (heads, rows) => `<div class="table-wrap"><table><thead><tr>${heads.map(head => `<th>${head}</th>`).join('')}</tr></thead><tbody>${rows.join('') || `<tr><td colspan="${heads.length}" class="muted">暂无记录</td></tr>`}</tbody></table></div>`;
+  return `${hero}<section class="block"><h2>按模型 · 认出了模型</h2>${table(['模型', '原因样本', '被认出', '比例'], data.models.map(row => `<tr><td>${esc(row.modelName ?? row.key)}</td><td>${row.n}</td><td>${row.recognized}</td><td>${percent(row.recognizedRate)}</td></tr>`))}</section>
+    <section class="block"><h2>按题目 · 不会判断</h2>${table(['题目', '原因样本', '不会判断', '比例'], data.tasks.map(row => `<tr><td>${esc(row.taskTitle ?? row.task)}</td><td>${row.n}</td><td>${row.unsure}</td><td>${percent(row.unsureRate)}</td></tr>`))}</section>
+    <section class="block"><h2>待人工核查</h2><p class="fine">同一作品被报「打不开」至少 3 次。报告未区分故障在哪一边，两侧均列为候选；作品状态保持不变。</p>${table(['题目', '作品', '报告数', '查看'], data.broken.filter(row => row.n >= 3).map(row => `<tr><td>${esc(row.taskTitle ?? row.task)}</td><td>${esc(row.title ?? row.work)}<small class="muted"> · ${esc(row.work)}</small></td><td>${row.n}</td><td><button class="btn sm" data-skip-preview="${esc(JSON.stringify([row.task, row.work]))}">预览作品</button></td></tr>`))}</section>`;
 }
 
 function trafficView() {
@@ -2024,6 +2036,7 @@ async function reload({ navigation = false } = {}) {
       state.qualification = await api('admin/qualification');
       await Promise.all([...new Set(state.qualification.pairs.map((pair) => pair.taskId))].map((taskId) => loadExamWorks(taskId).catch(() => [])));
     }
+    else if (route === 'skip-reasons') state.skipReasons = await api('admin/arena/skip-reasons');
     else if (route === 'changelog') state.changelog = (await api('admin/changelog')).entries;
     else if (route === 'vote-risk') { if (navigation || !state.risk.data) loadRisk(); }
     else if (route === 'works') {
@@ -2066,7 +2079,7 @@ function render({ soft = false, world = false } = {}) {
   if (!routeAllowed(route, sub)) { location.hash = state.system === 'common' ? (isSenior() ? '#/dashboard' : '#/upload') : '#/works'; return; }
   const body = state.system === 'common'
     ? route === 'upload' ? uploadView() : route === 'users' ? usersView() : route === 'traffic' ? trafficView() : dashboardView()
-    : route === 'works' ? systemWorksView() : route === 'intake' ? intakeView() : route === 'tasks' ? tasksView() : route === 'qualification' ? qualificationView() : route === 'vote-risk' ? voteRiskView() : route === 'changelog' ? changelogView() : placeholderView(route);
+    : route === 'works' ? systemWorksView() : route === 'intake' ? intakeView() : route === 'tasks' ? tasksView() : route === 'qualification' ? qualificationView() : route === 'skip-reasons' ? skipReasonsView() : route === 'vote-risk' ? voteRiskView() : route === 'changelog' ? changelogView() : placeholderView(route);
   const content = `${state.error ? `<p class="form-error page-error">${esc(state.error)}</p>` : ''}${body}`;
   const shellKey = `${state.system}/${route}/${sub || ''}`;
   const currentMain = $('main.page', app());
@@ -2229,6 +2242,16 @@ document.addEventListener('click', async (e) => {
   }
   const calibrate = e.target.closest('[data-calibrate]');
   if (calibrate) { const w = state.adminWorks.find((item) => `${item.task}/${item.id}` === calibrate.dataset.calibrate); if (w && canDecide(w)) calibrationDialog(w); return; }
+  const skipPreview = e.target.closest('[data-skip-preview]');
+  if (skipPreview) {
+    const [task, work] = JSON.parse(skipPreview.dataset.skipPreview);
+    const sheet = openDialog({ title: '待人工核查 · 作品预览', body: '<p class="fine">正在载入…</p>' });
+    try {
+      const data = await api(`admin/works/${encodeURIComponent(task)}/${encodeURIComponent(work)}/preview`, { method: 'POST' });
+      if (sheet.el.isConnected) $('.sheet-body', sheet.el).innerHTML = `<iframe src="${esc(data.url)}" title="待核查作品" sandbox="allow-scripts allow-pointer-lock" style="width:100%;height:65vh;border:0"></iframe>`;
+    } catch (error) { if (sheet.el.isConnected) $('.sheet-body', sheet.el).textContent = error.message; }
+    return;
+  }
   const preview = e.target.closest('[data-preview]');
   if (preview) {
     const work = state.adminWorks.find((item) => `${item.task}/${item.id}` === preview.dataset.preview);

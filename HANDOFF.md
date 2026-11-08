@@ -1,3 +1,11 @@
+## 2026-11-08 · v3 计分与盲评维度（测试站已上线，正式口径仍为 v2）
+
+- 新增 `GET /api/leaderboard/next`：v3 加权计分、每类覆盖门槛（3 道题、单题不超过一半、有效投票者 10 人）、含换题波动的加宽区间、95% 名次范围、三类等权综合；三张分类榜与综合榜同代发布。`/api/leaderboard` 按 `LEADERBOARD_SCORING`（默认 2）仍返回 v2，`/previous` 在 v2 期间为 404，`/weighted-trial` 保留，精选榜恒为 v2。
+- 引导式盲评：`GUIDED_ASPECT_ORDER`（默认 after，先综合）、测评点按维度轮换、按题关闭测评点（后台「测评点」）、对所有人开放的 `POST /api/arena/matches/:id/skip-reason`、高级管理员「跳过原因」视图。被报打不开 3 次以上的作品只列为待人工核查，不改作品状态。维度分按维度锚定拟合，先验取 v3 建模分类达标分；维度榜带名次范围；测评点体检按顺序分开统计。schema v56，只新增表和带默认值的列。
+- 本地 check 184/0、test 625/625。生产副本预演：v2 与 weighted-trial 共 20 个范围逐项相同；v3 按模型 22/31/47、按配置 21/92/103（排名/未覆盖/观察区），用时为 v2 的 1.19 倍；换题波动重估 91.5，与配置 85 相差不足 10，未改。只因有效投票者不足被挡的是 HY4（建模、网页）、LongCat 2.5（建模）、Qwen3.6-35B-A3B-…-abliterated（文学），正式切换前由用户决定是否降到 8 或改为只提示。
+- 生产安装版本后缀 `+board-v3.ad463c1e7ef9`。旧正式票 40,667、引导测试票 17 逐行保留，quick_check 与外键检查通过；安装期间没有新正式票，v2 逐项严格比对通过；后端安装到测试站静态安装之间没有新增测试票。回执与回退脚本在服务器 `/root/aob-board-v3-20261108/release/`，本地证据在父目录 `.local/board-v3-20261108/`。改动在本地分支 `lb/integration`，未推送。
+- 生产 `server/` 另有不在 git 中的线上补丁（`app.mjs` 的 isArenaOnlyQuestion 过滤、`questions.mjs`、`auth-email.mjs`、`library.mjs`、`mail.mjs`、`read-guard.mjs`、`show1compat.mjs`、仅生产有的 `mail-template.mjs`，以及他人同日改动的 `content.mjs`、`content-path.mjs`）。本轮以生产文件为底叠加，未纳入仓库。
+
 ## 2026-11-08 · 管理员上传自动核验
 
 - 两级管理员通过普通投稿、收件箱登记或提交题目示例时，在作品提交事务内自动通过核验。高级管理员直传同样适用并保留显式门面选择。普通用户仍待人工核验，新题仍须单独审核。线上回执见 `/root/aob-staff-auto-verify-20261108/`。

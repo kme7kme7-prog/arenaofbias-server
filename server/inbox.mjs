@@ -132,9 +132,8 @@ export function createInbox({ library, config, limits }) {
         library.discardDraft(admin, draft.id);
         throw error;
       }
-      // Staff publication clears content review, but still needs an explicit verification.
       destroy(id);
-      library.audit(admin, 'inbox-register', work, `${meta.name} · 登记为待核验`);
+      library.audit(admin, 'inbox-register', work, `${meta.name} · ${work.status === 'verified' ? '登记并通过核验' : '登记为待核验'}`);
       return work;
     },
 

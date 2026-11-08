@@ -284,7 +284,7 @@ test('pinned CDN versions and ordinary pages carry no signal', async () => {
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('ordinary verification requires content approval while staff publication waits for verification', async () => {
+test('ordinary verification requires content approval while senior administrators publish directly', async () => {
   await setup(async ({ platform, call, submit, readContent, received }) => {
     const work = await submit();
     await platform.moderator.idle();
@@ -327,7 +327,7 @@ test('ordinary verification requires content approval while staff publication wa
     assert.deepEqual(Object.keys((await call('owner', 'GET', '/api/me')).data.works[0].moderation).sort(), ['at', 'status']);
     const adminUpload = await call('admin', 'POST', '/api/admin/works/upload?task=one&name=a.html&title=管理员作品&modelId=m&effort=Default&providerId=official', PAGE, true);
     assert.equal(adminUpload.status, 200);
-    assert.equal(adminUpload.data.work.status, 'unverified');
+    assert.equal(adminUpload.data.work.status, 'verified');
     assert.equal(adminUpload.data.work.moderation.status, 'approved');
     assert.equal(adminUpload.data.work.moderation.source, 'human');
     assert.equal(adminUpload.data.work.moderation.reviewer, 'admin');
@@ -336,7 +336,7 @@ test('ordinary verification requires content approval while staff publication wa
     const inbox = (await call('admin', 'GET', '/api/admin/inbox')).data.entries[0];
     const registered = await call('admin', 'POST', '/api/admin/inbox/register', { id: inbox.id, task: 'one', title: '收件箱作品', modelId: 'm', effort: 'Default', providerId: 'official', publish: true });
     assert.equal(registered.status, 200);
-    assert.equal(registered.data.work.status, 'unverified');
+    assert.equal(registered.data.work.status, 'verified');
     assert.equal(registered.data.work.moderation.status, 'approved');
     assert.equal(registered.data.work.moderation.source, 'human');
     assert.equal(registered.data.work.moderation.reviewer, 'admin');
@@ -345,25 +345,21 @@ test('ordinary verification requires content approval while staff publication wa
     const privateInbox = (await call('admin', 'GET', '/api/admin/inbox')).data.entries[0];
     const privateRegistration = await call('admin', 'POST', '/api/admin/inbox/register', { id: privateInbox.id, task: 'one', title: '待审收件箱作品', modelId: 'm', effort: 'Default', providerId: 'official', publish: false });
     assert.equal(privateRegistration.status, 200);
-    assert.equal(privateRegistration.data.work.status, 'unverified');
+    assert.equal(privateRegistration.data.work.status, 'verified');
     assert.equal(privateRegistration.data.work.moderation.status, 'approved');
     await platform.moderator.idle();
     assert.equal(platform.library.work('one', privateRegistration.data.work.id).moderation.status, 'approved');
     assert.equal(platform.library.work('one', privateRegistration.data.work.id).moderation.source, 'human');
     for (const item of [adminUpload.data.work, registered.data.work]) {
       const saved = platform.library.work('one', item.id);
-      assert.equal(saved.status, 'unverified');
+      assert.equal(saved.status, 'verified');
       assert.deepEqual(saved.moderation, item.moderation);
       const audit = platform.library.auditLog().find(log => log.action === 'submit' && log.work === item.id);
       assert.ok(audit);
-      assert.equal(platform.library.visibleTo(saved, 'show2'), false);
+      assert.equal(platform.library.visibleTo(saved, 'show2'), true);
     }
     assert.equal(received.length, 0);
-    assert.equal((await call(null, 'GET', '/api/bootstrap')).data.works.length, 0);
-    for (const item of [adminUpload.data.work, registered.data.work]) {
-      assert.equal((await call('admin', 'POST', `/api/works/one/${item.id}/review`, { status: 'verified' })).status, 200);
-    }
-    assert.equal((await call(null, 'GET', '/api/bootstrap')).data.works.length, 2);
+    assert.equal((await call(null, 'GET', '/api/bootstrap')).data.works.length, 3);
   }, { capture: false });
 });
 

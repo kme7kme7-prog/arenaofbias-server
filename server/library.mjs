@@ -993,7 +993,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       q.deleteDraft.run(id);
     },
 
-    submit(user, body, { createQuestion = null } = {}) {
+    submit(user, body, { createQuestion = null, verificationFaces = {} } = {}) {
       const draft = q.draft.get(String(body.draftId ?? ''));
       if (!draft || draft.owner_id !== user.id || draft.expires_at <= Date.now()) fail(404, '试加载已过期，请重新选择文件');
       if (createQuestion ? draft.task_id !== '__new__' : draft.task_id === '__new__') fail(400, '新题目草稿只能用于发起题目');
@@ -1058,6 +1058,9 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
               : config.moderation?.enabled ? pendingModeration(moderationRoute()) : { status: 'legacy' }), promptVariant, roleOf(user.role));
           q.deleteDraft.run(draft.id);
           q.audit.run(now, user.id, user.name, 'submit', taskId, id, `${who.modelName}${effortOf(body.effort) ? ` · ${effortOf(body.effort)}` : ''}`);
+          if (isStaff(user)) {
+            this.review(user, taskId, id, { ...verificationFaces, status: 'verified', reason: '管理员上传' }, { inTransaction: true });
+          }
           if (cover) renameSync(pendingCover, join(media, coverName));
         });
       } catch (error) {

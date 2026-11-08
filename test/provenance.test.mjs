@@ -78,7 +78,7 @@ test('catalog tolerates an old pack with no registries', () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('staff publishing waits for verification, preserves authorship and allows moderator self review', async () => {
+test('staff publishing verifies automatically, preserves authorship and allows moderator self review', async () => {
   const root = mkdtempSync(join(tmpdir(), 'staff-work-'));
   const db = openDatabase(join(root, 'platform.db'));
   const catalog = createCatalog(pack(root));
@@ -93,17 +93,17 @@ test('staff publishing waits for verification, preserves authorship and allows m
     const draft = library.createDraft(moderator, 'one', 'staff.html', Buffer.from(PAGE));
     const work = library.submit(moderator, { draftId: draft.id, confirmed: true, title: 'Staff work', modelId: 'm-a',
       effort: 'High', providerId: 'official', generationMode: 'single-turn', humanIntervention: 'none' });
-    assert.equal(work.status, 'unverified');
+    assert.equal(work.status, 'verified');
     assert.deepEqual([work.moderation.status, work.moderation.source, work.moderation.reason], ['approved', 'human', '管理员发布']);
     assert.equal(library.pendingLimit(moderator), null);
-    assert.equal(library.publicContent(work), false);
-    assert.equal(library.visibleTo(work), false);
-    assert.ok(library.reviewQueue().some((item) => item.id === work.id));
+    assert.equal(library.publicContent(work), true);
+    assert.equal(library.visibleTo(work), true);
+    assert.ok(!library.reviewQueue().some((item) => item.id === work.id));
     assert.deepEqual(library.authorWorks(moderator)[0].author, { role: 'moderator', name: 'Mod nickname', avatar: avatarOf(moderator) });
     assert.equal(library.authorWorks(moderator)[0].mine, true);
     assert.equal(library.adminWork(work, moderator).author.name, 'Mod nickname');
     assert.equal(library.adminWork(work, moderator).mine, true);
-    library.setMeta(moderator, 'one', work.id, { title: 'Edited staff work' }, { author: true });
+    library.setMeta(moderator, 'one', work.id, { title: 'Edited staff work' });
     assert.equal(library.work('one', work.id).moderation.status, 'approved', 'staff edits do not enter automatic review');
     assert.equal(library.retryModeration(moderator, 'one', work.id).moderation.status, 'pending');
     assert.equal(library.reviewContent(moderator, 'one', work.id, { status: 'approved' }).moderation.status, 'approved');

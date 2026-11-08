@@ -870,6 +870,11 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         ...Object.fromEntries(['harnessId', 'harnessOther', 'providerId',
           'generationMode', 'humanIntervention', 'promptVariant']
           .filter((key) => params.has(key)).map((key) => [key, params.get(key)])),
+      }, {
+        verificationFaces: {
+          ...(gallery !== null ? { show_gallery: gallery === '1' } : {}),
+          ...(arenaFace !== null ? { show_arena: arenaFace === '1' } : {}),
+        },
       });
     } catch (error) {
       library.discardDraft(admin, draft.id);

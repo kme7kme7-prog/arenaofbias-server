@@ -501,11 +501,11 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 - `promptVariant`（schema v21）：题目在数据包里有 `promptVariants` 时，普通用户必须填写其中一个 `id`，管理员可留空；无效 ID 为 `400 invalid_prompt_variant`。单一提示词的题目忽略该字段并存为空串。作品视图仅在非空时输出 `promptVariant`，前端据此与同模型、同来源的其他版本合为一张卡片。
 - 生成信息只保留 `generationMode` 与 `humanIntervention`，取值规则见作品字段表；服务端不要求必填，未注明的非文字作品不进盲评池。旧请求中的 `modelVersion`、`generatedOn`、`evidenceUrl` 一律忽略（任何类型均不报错），公开/管理员视图、审计、送审声明与新身份快照均不输出。数据库旧列与值保留，不删除、不清空；历史审计日志和快照的结构化停用字段在读取时剥离，原记录不改写。
 
-成功 `200`：`{ "work": <作品公开视图> }`。作品初始状态 `unverified`，并自动排队无头截图（1440×900 与 390×844 两档，写回 `captures`；截图能力可用性见 `bootstrap.site.capture`）。
+成功 `200`：`{ "work": <作品公开视图> }`。普通用户的作品初始状态为 `unverified`，管理员的作品初始状态为 `verified`。提交后自动排队无头截图（1440×900 与 390×844 两档，写回 `captures`；截图能力可用性见 `bootstrap.site.capture`）。
 
 普通用户启用内容审查时，响应含作者特权字段 `moderation.status: "pending"`，上传请求不等待 Flex。此时 `scene` 是一小时有效的随机 `p<32hex>` 预览源，作品尚不公开；内容状态与 `unverified` 核验状态独立，详见 3.24 节。
 
-高级与普通管理员提交（含题目示例、收件箱登记）保存 `moderation={status:"approved",source:"human",reviewer,reason:"管理员发布",at}`，`status="unverified"`，跳过自动审查，直接等人工核验。
+高级与普通管理员提交（含题目示例、收件箱登记）保存 `moderation={status:"approved",source:"human",reviewer,reason:"管理员发布",at}` 并跳过自动内容审查。管理员的作品在提交事务中直接通过核验。题目示例的公开仍受题目审核约束。
 
 截图浏览器只允许当前作品源的文档，以及该源和 HTTPS CDN 白名单内的 GET/HEAD 资源。请求逐跳检查重定向，跨源导航、WebSocket、Service Worker 及未经过路由的浏览器连接被阻断；截图环境须预配置 Playwright ≥ 1.48 和 Chrome。
 
@@ -845,7 +845,7 @@ COS 镜像默认关闭，只有运维在已建成每次读取均验权的 CDN �
 
 不附作品时传题目字段；附示例时另传 `draftId`、`confirmed:true`、`work`（同作品表单字段）。草稿须属于本人、未过期且 task=__new__。题目与示例及审计在同一事务写入，失败保留可重试草稿。响应 `{ "question": <题目作者视图>, "work"?: <作品作者视图> }`，统一 author/mine DTO。
 
-所有角色发起的新题目均为 pending，只有高级管理员可人工通过；普通用户至多 3 道未删除 pending 题目，工作人员免限额。附带作品按发布者角色决定内容审查：普通用户照常审查，工作人员 human / approved，但保持 unverified；题目与作品必须各自通过才公开。本人题目在 `GET /api/me` 中可见；rejected 题目另带 `resubmittable`，从未被 approved（无 question-review approved 审计）时为 true。保留的 `POST /api/admin/questions` 仅高级管理员可调用，也创建 pending。
+所有角色发起的新题目均为 pending，只有高级管理员可人工通过；普通用户至多 3 道未删除 pending 题目，工作人员免限额。附带作品按发布者角色决定内容审查：普通用户照常审查，工作人员 human / approved；管理员提交的示例自动通过核验。题目与作品必须各自通过才公开。本人题目在 `GET /api/me` 中可见；rejected 题目另带 `resubmittable`，从未被 approved（无 question-review approved 审计）时为 true。保留的 `POST /api/admin/questions` 仅高级管理员可调用，也创建 pending。
 
 **`GET /api/admin/questions`**：仅高级管理员，返回全部未删除题目（数据包及数据库，含 pending / rejected / 已撤下）。统一 DTO 加 moderation、works、votes、samples；有账号的 author.name 为昵称。works 合计两种存储，samples 仅数据库题目发起者附带的示例。示例 scene 使用私密预览令牌。
 
@@ -934,7 +934,7 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 
 **`GET /api/admin/traffic?days=N`** `N` 默认 30，范围 1–90。响应 `{ "days": 30, "daily": [{ "day": "2026-09-28", "pv": 12, "uniqueIps": 8 }], "paths": [{ "path": "/", "pv": 9 }], "users": { "total": 24, "new": 2 } }`。`daily` 按 UTC 日补齐零值；`paths` 最多 20 条；错误 `400 invalid_query`。
 
-**`POST /api/admin/works/upload`** 仍仅高级管理员可用，适用 write 桶。原始 HTML / ZIP 参数与校验沿用原入口。创建时按工作人员发布规则保存 human / approved，理由「管理员发布」，核验状态 unverified，进入人工核验队列；不再自动 verified。可排队生成截图，响应 `{ "work": <管理员作品视图> }`。普通管理员可使用正常投稿或收件箱登记入口。
+**`POST /api/admin/works/upload`** 仍仅高级管理员可用，适用 write 桶。原始 HTML / ZIP 参数与校验沿用原入口。创建时按工作人员发布规则保存 human / approved，理由「管理员发布」，提交时直接通过核验，显式设置的 show_gallery / show_arena 生效。可排队生成截图，响应 `{ "work": <管理员作品视图> }`。普通管理员可使用正常投稿或收件箱登记入口。
 
 竞技场配对和 Bradley–Terry 计分都只纳入当前 `show_arena=1` 的已验证作品；数据包作品没有覆盖记录时竞技场开关默认开启，管理员关闭后按覆盖记录保持。`votes.source='arena'` 的限制不变。Show1 娱乐榜仍从全量历史票回放。
 
@@ -945,7 +945,7 @@ Show1 `/api/prompts` 在有 `arena` 覆盖时按题目映射合并 `commentary`�
 - `GET /api/admin/inbox`：按加入时间返回 entries，含 id/name/kind/size/addedAt/suggest/preview。
 - `POST /api/admin/inbox?name=<文件名>[&overwrite=1]`：原始 HTML/ZIP，最多 30 MB，先检查包。已存在同名文件且不覆盖返回 409 inbox_conflict；成功写 inbox-upload 审计。
 - `GET /admin/inbox/:id/...`：暂存文件预览，仅工作人员可读，其他请求返回 404，响应 no-store。
-- `POST /api/admin/inbox/register`：传 id/task/effort/providerId 及可选作品信息。保存 human / approved、unverified，仍须别次人工核验；旧 publish 参数不再直接公开。登记成功移除暂存文件并写 inbox-register 审计，返回管理员作品 DTO。
+- `POST /api/admin/inbox/register`：传 id/task/effort/providerId 及可选作品信息。保存 human / approved。管理员登记后自动通过核验；旧 publish 参数不影响核验。登记成功移除暂存文件并写 inbox-register 审计，返回管理员作品 DTO。
 - `DELETE /api/admin/inbox?id=<ID>`：移除暂存文件并写 inbox-remove 审计，不等于删除已发布作品。
 - `POST /api/admin/works/:task/:id/meta`：两种存储统一编辑 title/summary/note、promptVariant、modelId/modelName/vendor、effort、harnessId/harnessOther、providerId、generationMode/humanIntervention。未提供字段保持原值，校验与作品表单一致，旧停用字段沿用忽略规则。数据包写 work_overrides.display_json，数据库写本行；不触发重新内容审核，写 meta 审计。普通管理员可编辑自己作品的信息。响应 `{ "work": <管理员作品视图> }`。
 
@@ -1023,7 +1023,7 @@ prompts/works/playground/works 支持 promptId（单个）或 promptIds（逗号
 
 ### 3.24 自动内容审查（schema v19）
 
-追加幂等迁移，仅新增 `works.moderation` JSON 列；默认 `{ "status": "legacy" }`，既有作品保持原行为。`CONTENT_MODERATION=1` 时普通用户新作品先设 pending；高级与普通管理员新作品直接 human / approved、unverified，所有入口仍须人工核验（见 3.18 / 3.19）。作者修改送审声明后重新设 `pending`，管理员 meta 与 review 修改保持现有 `moderation`，随机 revision 防止旧调用结果覆盖新版声明；人工决定也不会被较早的自动结果覆盖。启动恢复持久化的 pending 队列。内容状态与来源核验 `status` 独立。
+追加幂等迁移，仅新增 `works.moderation` JSON 列；默认 `{ "status": "legacy" }`，既有作品保持原行为。`CONTENT_MODERATION=1` 时普通用户新作品先设 pending；高级与普通管理员新作品直接 human / approved、verified（见 3.18 / 3.19）。作者修改送审声明后重新设 `pending`，管理员 meta 与 review 修改保持现有 `moderation`，随机 revision 防止旧调用结果覆盖新版声明；人工决定也不会被较早的自动结果覆盖。启动恢复持久化的 pending 队列。内容状态与来源核验 `status` 独立。
 
 | `moderation.status` | 含义 | 可公开 |
 | --- | --- | --- |

@@ -96,7 +96,7 @@ describe('admin inbox', () => {
     assert.equal(forged.status, 404);
   });
 
-  test('registering as a draft, then publishing from the review queue', async () => {
+  test('senior registration publishes with automatic verification', async () => {
     const listed = await call('root', 'GET', '/api/admin/inbox');
     const entry = listed.data.entries[0];
     const registered = await call('root', 'POST', '/api/admin/inbox/register', {
@@ -104,22 +104,21 @@ describe('admin inbox', () => {
     });
     assert.equal(registered.status, 200);
     const work = registered.data.work;
-    assert.equal(work.status, 'unverified');
+    assert.equal(work.status, 'verified');
     assert.equal(work.title, '江南水乡');
     assert.equal(work.modelName, 'Model A');
     assert.equal(work.tool, '');
     assert.equal('harnessVersion' in work, false);
     assert.equal(platform.db.prepare('SELECT harness_version FROM works WHERE id = ?').get(work.id).harness_version, '');
     assert.equal(work.moderation.status, 'approved');
-    assert.equal((await call('root', 'GET', '/api/bootstrap')).data.works.some((item) => item.id === work.id), false, 'unverified staff work stays private');
+    assert.equal((await call('root', 'GET', '/api/bootstrap')).data.works.some((item) => item.id === work.id), true);
     assert.equal((await call('root', 'GET', '/api/admin/inbox')).data.entries.length, 0);
 
-    // The historical publish flag no longer bypasses manual verification.
     await call('root', 'POST', `/api/admin/inbox?name=published.html`, PAGE, { raw: true });
     const second = (await call('root', 'GET', '/api/admin/inbox')).data.entries[0];
     const direct = await call('root', 'POST', '/api/admin/inbox/register', { id: second.id, task: 'one', publish: true, effort: 'Default', providerId: 'official', modelName: '手工模型', show_gallery: true, show_arena: false, harnessVersion: '' });
     assert.equal(direct.status, 200);
-    assert.equal(direct.data.work.status, 'unverified');
+    assert.equal(direct.data.work.status, 'verified');
     assert.equal(direct.data.work.modelName, '手工模型');
     assert.equal('harnessVersion' in direct.data.work, false);
 
@@ -139,7 +138,7 @@ describe('admin inbox', () => {
 
   test('inline meta edits update uploads', async () => {
     const list = await call('root', 'GET', '/api/admin/works?task=one&source=upload');
-    const work = list.data.works.find((item) => item.status === 'unverified');
+    const work = list.data.works.find((item) => item.modelName === '手工模型');
     const edited = await call('root', 'POST', `/api/admin/works/${work.task}/${work.id}/meta`, { title: '新标题', summary: '新摘要', modelName: '新模型' });
     assert.equal(edited.status, 200);
     assert.equal(edited.data.work.title, '新标题');

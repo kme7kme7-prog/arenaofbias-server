@@ -392,9 +392,10 @@ test('admin API merges curated and upload works, applies face settings, calibrat
   const upload = await call('root', 'POST', '/api/admin/works/upload?effort=Default&providerId=official&task=one&name=work.html&title=代传作品&modelName=模型丙&show_gallery=1&show_arena=1', html, true);
   assert.equal(upload.status, 200, JSON.stringify(upload.data));
   const id = upload.data.work.id;
-  assert.equal(upload.data.work.status, 'unverified');
+  assert.equal(upload.data.work.status, 'verified');
   assert.equal(upload.data.work.moderation.status, 'approved');
-  assert.equal((await call('root', 'POST', `/api/works/one/${id}/review`, { status: 'verified' })).status, 200);
+  assert.ok(upload.data.work.reviewed.gallery);
+  assert.ok(upload.data.work.reviewed.arena);
   assert.equal(platform.db.prepare('SELECT COUNT(*) AS n FROM drafts').get().n, 0);
   assert.equal((await call('voter', 'GET', '/api/admin/works')).status, 403);
   let list = await call('root', 'GET', '/api/admin/works?task=one&pageSize=2&page=1');
@@ -605,10 +606,10 @@ test('editorial validates weights, traffic aggregates, and arena switches remove
 }));
 
 test('the entertainment switch opts uploads and curated works into the Show1 pool', async () => withPlatform(async ({ platform, call }) => {
-  const upload = await call('root', 'POST', '/api/admin/works/upload?effort=Default&providerId=official&task=one&name=work.html&title=娱乐作品&modelName=模型丙&show_gallery=1', html, true);
+  const upload = await call('root', 'POST', '/api/admin/works/upload?effort=Default&providerId=official&task=one&name=work.html&title=娱乐作品&modelName=模型丙&show_gallery=1&show_arena=0', html, true);
   const id = upload.data.work.id;
-  assert.equal(upload.data.work.status, 'unverified', 'admin uploads await manual verification');
-  assert.equal((await call('root', 'POST', `/api/works/one/${id}/review`, { status: 'verified' })).status, 200);
+  assert.equal(upload.data.work.status, 'verified');
+  assert.equal(upload.data.work.show_arena, false);
   const on = await call('root', 'POST', `/api/admin/works/one/${id}/face-settings`, { show_entertainment: true });
   assert.equal(on.status, 200);
   assert.equal(on.data.work.show_entertainment, true);
@@ -791,12 +792,19 @@ test('moderator routes preserve senior permissions and allow decisions on own wo
   assert.equal((await call('staff', 'GET', '/api/auth/me')).data.user.role, null, 'legacy Show1 role remains null for moderators');
   assert.equal((await call('staff', 'GET', '/api/bootstrap')).data.user.role, 'moderator');
   assert.equal((await call('staff', 'GET', '/api/bootstrap')).data.review.questions, 0);
+  platform.auth.bindEmail(senior.id, 'root@example.test');
+  const seniorDraft = await call('root', 'POST', '/api/drafts?task=one&name=senior.html', html, true);
+  const seniorWork = await call('root', 'POST', '/api/works', {
+    draftId: seniorDraft.data.draft.id, confirmed: true, modelName: '高级管理员模型', effort: 'Max', providerId: 'official',
+  });
+  assert.equal(seniorWork.status, 200, JSON.stringify(seniorWork.data));
+  assert.equal(seniorWork.data.work.status, 'verified');
   const draft = await call('staff', 'POST', '/api/drafts?task=one&name=staff.html', html, true);
   const submitted = await call('staff', 'POST', '/api/works', { draftId: draft.data.draft.id, confirmed: true,
     title: '管理员作品', modelName: '模型', effort: 'Default', providerId: 'official' });
   assert.equal(submitted.status, 200, JSON.stringify(submitted.data));
   const id = submitted.data.work.id;
-  assert.equal(submitted.data.work.status, 'unverified');
+  assert.equal(submitted.data.work.status, 'verified');
   assert.equal(submitted.data.work.moderation.status, 'approved');
   assert.equal(submitted.data.work.author.role, 'moderator');
   assert.equal(submitted.data.work.author.name, 'staff', 'staff publish under their own name');

@@ -582,6 +582,24 @@ describe('question and sample review lifecycle', () => {
     const rejected = await create('deletion'); await moderate(rejected.question.id, 'rejected', 'Remove test');
     assert.equal((await call('deletion', 'DELETE', `/api/questions/${rejected.question.id}`)).status, 200);
   });
+
+  test('staff samples are verified while their questions still require approval', async () => {
+    const senior = platform.db.prepare("SELECT * FROM users WHERE name_key = 'root'").get();
+    const moderator = platform.db.prepare("SELECT id FROM users WHERE name_key = 'other'").get();
+    platform.auth.setRole(senior, moderator.id, 'moderator');
+    try {
+      for (const who of ['root', 'other']) {
+        const { question, work } = await create(who);
+        assert.equal(work.status, 'verified');
+        const publiclyListed = () => platform.library.visibleTo(platform.library.work(question.id, work.id));
+        assert.equal(publiclyListed(), false);
+        assert.equal((await moderate(question.id, 'approved')).status, 200);
+        assert.equal(publiclyListed(), true);
+      }
+    } finally {
+      platform.auth.setRole(senior, moderator.id, 'user');
+    }
+  });
 });
 
 test('package and database questions share overrides, visibility, counts and deletion rules', () => {

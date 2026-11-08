@@ -906,3 +906,39 @@ test('bootstrap v2 unifies questions and works with package overrides and resour
   assert.equal((await call('root', 'GET', '/api/bootstrap')).data.works.length, 0);
   assert.equal(platform.db.prepare('SELECT COUNT(*) AS n FROM question_overrides WHERE deleted_at IS NOT NULL').get().n, 1);
 }));
+
+test('guided aspect settings, dimension scores and skip reasons enforce HTTP permissions', async () => {
+  await withPlatform(async ({ platform, call }) => {
+    assert.equal((await call('guest', 'GET', '/api/admin/tasks/one/aspects')).status, 401);
+    assert.equal((await call('voter', 'GET', '/api/admin/tasks/one/aspects')).status, 403);
+    const settings = await call('root', 'GET', '/api/admin/tasks/one/aspects');
+    assert.equal(settings.status, 200);
+    assert.equal(settings.data.aspects.find(row => row.id === 'fidelity').dimension, 'fit');
+    assert.equal((await call('root', 'POST', '/api/admin/tasks/one/aspects', { off: ['invalid'] })).status, 400);
+    const saved = await call('root', 'POST', '/api/admin/tasks/one/aspects', { off: ['lighting'] });
+    assert.deepEqual(saved.data.off, ['lighting']);
+    const match = (await call('root', 'POST', '/api/arena/matches', { task: 'one', guided: true })).data;
+    assert.equal(match.aspectOrder, 'after');
+    const voted = await call('root', 'POST', `/api/arena/matches/${match.id}/vote`, { choice: 'a', aspect: { id: match.aspect.id, choice: 'b' } });
+    assert.equal(voted.status, 200);
+    assert.equal(voted.data.counted, false);
+    const chart = await call('root', 'GET', '/api/arena/guided/dimensions');
+    assert.equal(chart.status, 200);
+    assert.equal(typeof chart.data.entries[0].dimensions[match.aspect.dimension].score, 'number');
+    assert.ok(chart.data.boards && chart.data.health);
+    assert.equal((await call('guest', 'GET', '/api/arena/guided/dimensions')).status, 401);
+    const guest = await call('root', 'POST', '/api/arena/matches', { task: 'one' });
+    assert.equal(guest.status, 200);
+    const reasonPath = `/api/arena/matches/${guest.data.id}/skip-reason`;
+    assert.equal((await call('root', 'POST', reasonPath, { reason: 'unsure' })).status, 409);
+    assert.equal((await call('root', 'POST', `/api/arena/matches/${guest.data.id}/vote`, { choice: 'skip' })).status, 200);
+    assert.equal((await call('voter', 'POST', reasonPath, { reason: 'unsure' })).status, 404);
+    assert.deepEqual((await call('root', 'POST', reasonPath, { reason: 'unsure' })).data, { ok: true });
+    assert.equal((await call('root', 'POST', reasonPath, { reason: 'broken' })).data.code, 'skip_reason_exists');
+    assert.equal((await call('voter', 'GET', '/api/admin/arena/skip-reasons')).status, 403);
+    const stats = await call('root', 'GET', '/api/admin/arena/skip-reasons');
+    assert.equal(stats.status, 200);
+    assert.equal(stats.data.tasks[0].unsureRate, 1);
+    assert.equal(platform.db.prepare('SELECT COUNT(*) n FROM votes').get().n, 0);
+  });
+});

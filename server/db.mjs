@@ -794,6 +794,23 @@ const MIGRATIONS = [
     vote_id TEXT PRIMARY KEY REFERENCES votes(id) ON DELETE CASCADE,
     level INTEGER NOT NULL CHECK(level IN (2, 3))
   );`),
+  // v56: legacy trial rows retain their original before order.
+  (db) => {
+    for (const table of ['guided_matches', 'guided_trial_votes']) {
+      if (!db.prepare(`PRAGMA table_info(${table})`).all().some(column => column.name === 'aspect_order'))
+        db.exec(`ALTER TABLE ${table} ADD COLUMN aspect_order TEXT NOT NULL DEFAULT 'before' CHECK (aspect_order IN ('before', 'after'))`);
+    }
+    db.exec(`CREATE TABLE IF NOT EXISTS task_aspects_off (
+      task_id TEXT NOT NULL, aspect_id TEXT NOT NULL,
+      user_id TEXT REFERENCES users(id) ON DELETE SET NULL, created_at INTEGER NOT NULL,
+      PRIMARY KEY(task_id, aspect_id));
+    CREATE TABLE IF NOT EXISTS skip_reasons (
+      match_id TEXT PRIMARY KEY, task_id TEXT NOT NULL,
+      reason TEXT NOT NULL CHECK (reason IN ('recognized', 'broken', 'unsure')),
+      a_identity TEXT, b_identity TEXT,
+      user_id TEXT REFERENCES users(id) ON DELETE SET NULL, visitor_hash TEXT, created_at INTEGER NOT NULL);
+    CREATE INDEX IF NOT EXISTS skip_reasons_task ON skip_reasons(task_id);`);
+  },
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

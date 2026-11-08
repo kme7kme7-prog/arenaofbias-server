@@ -25,7 +25,7 @@ import { isSenior, isStaff, levelOf } from './roles.mjs';
 import { checkTiming, minimumViewingTimes, timing } from './arena-voter-state.mjs';
 import { manualCorrections, voteAttribution, votesBeforeTaskMove } from './vote-attribution.mjs';
 import { ALL_WORKS, createRestricted, seesRestricted } from './restricted.mjs';
-import { pickAspect, publicAspect, trialStandings } from './aspects.mjs';
+import { ASPECTS, pickAspect, publicAspect, trialScores } from './aspects.mjs';
 
 const MATCH = { tierWidth: 150, sameTierRate: 0.9, blowoutGap: 400, rerolls: 2, cooldownRounds: 6, cooldownMs: 15 * 60e3 };
 const ANONYMOUS_MATCH_MAX = 10000;
@@ -49,7 +49,7 @@ const identityOf = (work, digest = work.digest ?? null) => ({
   modelKey: modelKey(work), configKey: entityKey(work), ownerId: work.ownerId,
 });
 // Guided blind voting trial. A staff member's match drawn with `guided` may ask one aspect question
-// (测评点) before the overall one; its ballot goes to guided_trial_votes and no board reads it.
+// (测评点) alongside the overall one; its ballot goes to guided_trial_votes and no board reads it.
 // An overall tie may say whether both works were good or both bad. Ordinary matches take neither.
 function ballotOf(guided, choice, { tieKind = null, aspect = null } = {}) {
   if (!guided) {
@@ -103,11 +103,11 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     correctA: db.prepare('UPDATE votes SET a_correction = ? WHERE id = ?'),
     correctB: db.prepare('UPDATE votes SET b_correction = ? WHERE id = ?'),
     vote: db.prepare('SELECT * FROM votes WHERE id = ?'),
-    guided: db.prepare('SELECT aspect_id FROM guided_matches WHERE match_id = ?'),
-    insertGuided: db.prepare('INSERT INTO guided_matches (match_id, aspect_id) VALUES (?, ?)'),
-    insertTrial: db.prepare('INSERT INTO guided_trial_votes (id, match_id, user_id, task_id, a_work, b_work, choice, tie_kind, aspect_id, aspect_choice, aspect_tie_kind, a_identity, b_identity, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+    guided: db.prepare('SELECT aspect_id, aspect_order FROM guided_matches WHERE match_id = ?'),
+    insertGuided: db.prepare('INSERT INTO guided_matches (match_id, aspect_id, aspect_order) VALUES (?, ?, ?)'),
+    insertTrial: db.prepare('INSERT INTO guided_trial_votes (id, match_id, user_id, task_id, a_work, b_work, choice, tie_kind, aspect_id, aspect_choice, aspect_tie_kind, a_identity, b_identity, created_at, aspect_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
     trialAspects: db.prepare('SELECT aspect_id, COUNT(*) AS n FROM guided_trial_votes WHERE task_id = ? AND aspect_choice IS NOT NULL GROUP BY aspect_id'),
-    trialVotes: db.prepare('SELECT user_id, choice, aspect_id, aspect_choice, a_identity, b_identity, created_at FROM guided_trial_votes WHERE aspect_id IS NOT NULL ORDER BY created_at, rowid'),
+    trialVotes: db.prepare('SELECT user_id, choice, aspect_id, aspect_choice, a_identity, b_identity, created_at, aspect_order FROM guided_trial_votes WHERE aspect_id IS NOT NULL ORDER BY created_at, rowid'),
     audit: db.prepare('INSERT INTO audit (at, actor_id, actor_name, action, task_id, work_id, detail) VALUES (?, ?, ?, ?, ?, ?, ?)'),
   };
 
@@ -338,6 +338,12 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     activeCache.set(cacheKey, pending);
     void pending.catch(() => { if (activeCache.get(cacheKey) === pending) activeCache.delete(cacheKey); });
     return pending;
+  }
+
+  // Temporary source until v3 integration: the existing v2 modeling category board.
+  async function guidedPriors(by, senior) {
+    const board = await leaderboard({ category: '建模', by, senior });
+    return new Map(publishedRows(board.rows).map(row => [row.key, row.score]));
   }
 
   // `category` (the datapack's task category, e.g. 建模) scores only that category's tasks;
@@ -672,8 +678,8 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       const chosen = pick(candidates, await ratingsForMatch(taskId, snapshot, seesRestricted(user)), pin);
       const [first, second] = pickWorks(taskId, chosen, voted, random);
       const [a, b] = random() < 0.5 ? [first, second] : [second, first];
-      // The least answered aspect of the task's category pool, ties at random; none outside the pilot categories.
-      const aspect = guided ? pickAspect(catalog.task(taskId) ?? snapshot.task(taskId), q.trialAspects.all(taskId), random) : null;
+      // Balance active dimensions, then their aspects; none outside the pilot categories.
+      const aspect = guided ? pickAspect(catalog.task(taskId) ?? snapshot.task(taskId), q.trialAspects.all(taskId), random, new Set(db.prepare('SELECT aspect_id FROM task_aspects_off WHERE task_id=?').all(taskId).map(row => row.aspect_id))) : null;
       const id = randomBytes(12).toString('hex');
       const now = Date.now();
       const tokens = [token(), token()];
@@ -687,7 +693,9 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       q.insertMatch.run(id, user?.id ?? null, taskId, a.id, b.id, tokens[0], tokens[1], now, now + limits.matchTtl,
         snapshot.root, snapshot.version, JSON.stringify(identityOf(a, a.curated ? snapshot.entryDigest(a) : a.digest)),
         JSON.stringify(identityOf(b, b.curated ? snapshot.entryDigest(b) : b.digest)), pin, visitorHash);
-      if (guided) q.insertGuided.run(id, aspect?.id ?? null);
+      const order = process.env.GUIDED_ASPECT_ORDER ?? 'after';
+      const aspectOrder = order === 'before' || (guided && order === 'random' && random() < 0.5) ? 'before' : 'after';
+      if (guided) q.insertGuided.run(id, aspect?.id ?? null, aspectOrder);
       return {
         id,
         task: taskId,
@@ -701,8 +709,53 @@ export function createArena({ db, catalog, library, limits, random = Math.random
         },
         counted: !guided, createdAt: new Date(now).toISOString(), expiresAt: new Date(now + limits.matchTtl).toISOString(),
         ...minimumViewingTimes(user), countableFor: { public: !guided, curated: !guided && levelOf(user) >= 1 && curation.contains(taskId) },
-        ...(guided ? { guided: true, aspect: publicAspect(aspect) } : {}),
+        ...(guided ? { guided: true, aspect: publicAspect(aspect), aspectOrder } : {}),
       };
+    },
+
+    taskAspects(user, taskId, body = null) {
+      if (!isSenior(user)) fail(403, '需要高级管理员权限');
+      const task = catalog.task(taskId);
+      if (!task) fail(404, '题目不存在', 'not_found');
+      const aspects = ASPECTS[task.category] ?? [];
+      if (body !== null) {
+        if (!Array.isArray(body.off) || body.off.some(id => !aspects.some(aspect => aspect.id === id))) fail(400, '测评点无效', 'invalid_aspects');
+        transaction(db, () => {
+          db.prepare('DELETE FROM task_aspects_off WHERE task_id=?').run(taskId);
+          const insert = db.prepare('INSERT INTO task_aspects_off (task_id,aspect_id,user_id,created_at) VALUES (?,?,?,?)');
+          for (const id of new Set(body.off)) insert.run(taskId, id, user.id, Date.now());
+        });
+      }
+      return { task: taskId, aspects: aspects.map(publicAspect), off: db.prepare('SELECT aspect_id FROM task_aspects_off WHERE task_id=? ORDER BY aspect_id').all(taskId).map(row => row.aspect_id) };
+    },
+    skipReason(user, id, reason, visitorHash = null) {
+      const match = this.ownedMatch(user, id, visitorHash);
+      if (!['recognized', 'broken', 'unsure'].includes(reason)) fail(400, '跳过原因无效', 'invalid_skip_reason');
+      if (match.choice !== 'skip') fail(409, '请先跳过这一组', 'match_not_skipped');
+      if (db.prepare('SELECT 1 FROM skip_reasons WHERE match_id=?').get(match.id)) fail(409, '这一组已填写原因', 'skip_reason_exists');
+      db.prepare('INSERT INTO skip_reasons (match_id,task_id,reason,a_identity,b_identity,user_id,visitor_hash,created_at) VALUES (?,?,?,?,?,?,?,?)')
+        .run(match.id, match.task_id, reason, match.a_identity, match.b_identity, user?.id ?? null, visitorHash, Date.now());
+      return { ok: true };
+    },
+    skipReasonStats(user) {
+      if (!isSenior(user)) fail(403, '需要高级管理员权限');
+      const models = new Map(), tasks = new Map(), broken = new Map();
+      for (const row of db.prepare('SELECT * FROM skip_reasons').all()) {
+        const sides = [fromIdentity(row.a_identity), fromIdentity(row.b_identity)].filter(Boolean);
+        for (const key of new Set(sides.map(side => side.modelKey ?? modelKey(side)))) {
+          if (!models.has(key)) models.set(key, { key, n: 0, recognized: 0 });
+          const cell = models.get(key); cell.n++; if (row.reason === 'recognized') cell.recognized++;
+        }
+        if (!tasks.has(row.task_id)) tasks.set(row.task_id, { task: row.task_id, n: 0, unsure: 0 });
+        const cell = tasks.get(row.task_id); cell.n++; if (row.reason === 'unsure') cell.unsure++;
+        if (row.reason === 'broken') for (const side of sides) {
+          const key = JSON.stringify([row.task_id, side.id]);
+          if (!broken.has(key)) broken.set(key, { task: row.task_id, work: side.id, n: 0 });
+          broken.get(key).n++;
+        }
+      }
+      return { models: [...models.values()].map(row => ({ ...row, recognizedRate: row.recognized / row.n })),
+        tasks: [...tasks.values()].map(row => ({ ...row, unsureRate: row.unsure / row.n })), broken: [...broken.values()] };
     },
 
     checkVote(user, matchId, choice, visitorHash = null, ballot = {}) {
@@ -760,7 +813,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
         // A trial ballot is kept apart and never counted.
         if (guided) {
           q.insertTrial.run(randomBytes(12).toString('hex'), match.id, user?.id ?? null, match.task_id, match.a_work, match.b_work, choice, ballot.tieKind,
-            guided.aspect_id, ballot.aspect?.choice ?? null, ballot.aspect?.tieKind ?? null, match.a_identity, match.b_identity, Date.now());
+            guided.aspect_id, ballot.aspect?.choice ?? null, ballot.aspect?.tieKind ?? null, match.a_identity, match.b_identity, Date.now(), guided.aspect_order);
           reason = 'trial';
         } else saveBallot();
         recordDecision();
@@ -821,7 +874,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
 
     // Guided trial dimension chart (staff only): trial ballots per model or configuration, from the
     // identities captured when each pair was drawn. Restricted works stay hidden from non-senior staff.
-    guidedDimensions(user, by = 'model') {
+    async guidedDimensions(user, by = 'model') {
       if (!isStaff(user)) fail(403, '引导式盲评测试版只对管理员开放', 'guided-staff-only');
       const snapshot = catalog.snapshot();
       const keyOf = by === 'config' ? (work) => work.configKey ?? entityKey(work) : (work) => work.modelKey ?? modelKey(work);
@@ -830,12 +883,13 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       for (const row of q.trialVotes.all()) {
         const a = fromIdentity(row.a_identity), b = fromIdentity(row.b_identity);
         if (!a || !b || hidden(a) || hidden(b)) continue;
-        ballots.push({ a, b, choice: row.choice, aspectId: row.aspect_id, aspectChoice: row.aspect_choice, userId: row.user_id, createdAt: row.created_at });
+        ballots.push({ a, b, choice: row.choice, aspectId: row.aspect_id, aspectChoice: row.aspect_choice, userId: row.user_id, createdAt: row.created_at, aspectOrder: row.aspect_order });
       }
-      return { by, ...trialStandings(ballots, keyOf, (work) => {
+      const priors = await guidedPriors(by, seesRestricted(user));
+      return { by, ...trialScores(ballots, keyOf, (work) => {
         const model = work.modelId ? snapshot.model?.(work.modelId) : null;
         return { model: work.modelId ?? null, modelName: model?.name ?? work.modelName, vendor: model?.vendor ?? work.vendor, effort: by === 'config' ? work.effort ?? '' : '' };
-      }) };
+      }, priors) };
     },
   };
 }

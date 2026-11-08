@@ -837,6 +837,12 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     if (!work) fail(404, '作品不存在', 'not_found');
     return { url: `${library.previewOrigin(work, admin)}/` };
   });
+  adminOn('GET', '/api/admin/tasks/:id/aspects', ctx => arena.taskAspects(adminOnly(ctx), ctx.params.id));
+  adminOn('POST', '/api/admin/tasks/:id/aspects', async ctx => {
+    const admin = adminOnly(ctx); limit.write(admin.id);
+    return arena.taskAspects(admin, ctx.params.id, await adminJson(ctx));
+  });
+  adminOn('GET', '/api/admin/arena/skip-reasons', ctx => arena.skipReasonStats(adminOnly(ctx)));
   adminOn('GET', '/api/admin/tasks/:id/editorial', (ctx) => {
     const admin = adminOnly(ctx);
     return adminService.getEditorial(ctx.params.id, ctx.url.searchParams.get('face'), admin);
@@ -933,6 +939,11 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       db.prepare('UPDATE matches SET draw_ip=?,draw_subnet=? WHERE id=?').run(normalizeIp(ctx.ip),subnetOf(ctx.ip),match.id);
       return { ...match, challenge: voters.challenge(actor) };
     });
+  });
+  router.on('POST', '/api/arena/matches/:id/skip-reason', async ctx => {
+    limit.write(ctx.user?.id ?? ctx.ip);
+    const body = await readJson(ctx.req), actor = voters.actor(ctx);
+    return voters.serial(actor, () => arena.skipReason(ctx.user, ctx.params.id, body.reason, actor.visitorHash));
   });
   router.on('POST', '/api/arena/matches/:id/ready', async ctx => {
     limit.write(ctx.user?.id ?? ctx.ip);

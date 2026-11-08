@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { createPlatform } from '../server/app.mjs';
 import { limits } from '../server/config.mjs';
-import { ASPECTS, trialStandings } from '../server/aspects.mjs';
+import { ASPECTS, pickAspect, trialScores, trialStandings } from '../server/aspects.mjs';
 
 test('guided pairs are staff-only trials that ask one aspect question and stay off every board', async () => {
   const root = mkdtempSync(join(tmpdir(), 'guided-trial-'));
@@ -67,18 +67,20 @@ test('guided pairs are staff-only trials that ask one aspect question and stay o
     assert.deepEqual([count('votes'), count('guided_trial_votes')], [1, 2]);
 
     // The staff dimension chart counts the trial pairs that carried an aspect question, per model or configuration.
-    assert.throws(() => arena.guidedDimensions(member), { status: 403, code: 'guided-staff-only' });
+    await assert.rejects(arena.guidedDimensions(member), { status: 403, code: 'guided-staff-only' });
     const dimension = ASPECTS['建模'].find((aspect) => aspect.id === first.aspect.id).dimension;
-    const chart = arena.guidedDimensions(moderator);
+    const chart = await arena.guidedDimensions(moderator);
     assert.deepEqual([chart.by, chart.categories, chart.totals.pairs, chart.totals.answered, chart.totals.voters], ['model', ['建模'], 2, 1, 2]);
     const entry = Object.fromEntries(chart.entries.map((row) => [row.model, row]));
     assert.deepEqual([entry[secondResult.b.model].overall, entry[secondResult.a.model].overall],
       [{ win: 1, tie: 1, loss: 0, n: 2 }, { win: 0, tie: 1, loss: 1, n: 2 }]);
     for (const row of chart.entries) {
-      assert.deepEqual(row.dimensions[dimension], { win: 0, tie: 1, loss: 0, n: 1, aspects: { [first.aspect.id]: { win: 0, tie: 1, loss: 0, n: 1 } } });
+      const { score, interval, thin, ...counts } = row.dimensions[dimension];
+      assert.ok(Number.isFinite(score) && interval > 0 && thin);
+      assert.deepEqual(counts, { win: 0, tie: 1, loss: 0, n: 1, aspects: { [first.aspect.id]: { win: 0, tie: 1, loss: 0, n: 1 } } });
       assert.equal(Object.values(row.dimensions).reduce((sum, cell) => sum + cell.n, 0), 1);
     }
-    assert.deepEqual(arena.guidedDimensions(admin, 'config').entries.map((row) => row.effort), ['High', 'High']);
+    assert.deepEqual((await arena.guidedDimensions(admin, 'config')).entries.map((row) => row.effort), ['High', 'High']);
 
     // Restricted works stay out of a non-senior staff member's chart, as on the boards.
     platform.library.restricted.add('x:secret', 'Secret', 'test');
@@ -86,8 +88,58 @@ test('guided pairs are staff-only trials that ask one aspect question and stay o
     const secret = JSON.stringify({ ...JSON.parse(sample.a_identity), modelId: null, modelName: 'Secret', modelKey: 'x:secret' });
     db.prepare('INSERT INTO guided_trial_votes (id, match_id, user_id, task_id, a_work, b_work, choice, aspect_id, aspect_choice, a_identity, b_identity, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run('secret', 'secret-match', 'admin', 'tower', 'x', 'y', 'a', first.aspect.id, 'a', secret, sample.b_identity, Date.now());
-    assert.equal(arena.guidedDimensions(moderator).totals.pairs, 2);
-    assert.deepEqual(arena.guidedDimensions(admin).entries.find((row) => row.key === 'x:secret')?.dimensions[dimension].win, 1);
+    assert.equal((await arena.guidedDimensions(moderator)).totals.pairs, 2);
+    assert.deepEqual((await arena.guidedDimensions(admin)).entries.find((row) => row.key === 'x:secret')?.dimensions[dimension].win, 1);
+
+    // Release the fixture's sole ordinary pair for the following isolated trial checks.
+    db.prepare('DELETE FROM votes').run();
+    // Senior-only settings replace the off set and affect subsequent draws.
+    assert.throws(() => arena.taskAspects(moderator, 'tower'), { status: 403 });
+    assert.throws(() => arena.taskAspects(admin, 'missing'), { status: 404, code: 'not_found' });
+    assert.throws(() => arena.taskAspects(admin, 'tower', { off: ['invalid'] }), { status: 400, code: 'invalid_aspects' });
+    const off = ASPECTS['建模'].filter(aspect => aspect.id !== 'floating').map(aspect => aspect.id);
+    assert.deepEqual(arena.taskAspects(admin, 'tower', { off }).off, [...off].sort());
+    const previousOrder = process.env.GUIDED_ASPECT_ORDER;
+    try {
+      for (const mode of ['after', 'before', 'random']) {
+        process.env.GUIDED_ASPECT_ORDER = mode;
+        const match = await guided(admin, 'tower');
+        assert.equal(match.aspect.id, 'floating');
+        assert.ok(['after', 'before'].includes(match.aspectOrder));
+        if (mode !== 'random') assert.equal(match.aspectOrder, mode);
+        finishViewing(db, match.id);
+        arena.vote(admin, match.id, 'a', { aspect: { id: match.aspect.id, choice: 'b' } });
+        assert.equal(db.prepare('SELECT aspect_order FROM guided_trial_votes WHERE match_id=?').get(match.id).aspect_order, match.aspectOrder);
+      }
+    } finally {
+      if (previousOrder === undefined) delete process.env.GUIDED_ASPECT_ORDER;
+      else process.env.GUIDED_ASPECT_ORDER = previousOrder;
+    }
+    arena.taskAspects(admin, 'tower', { off: ASPECTS['建模'].map(aspect => aspect.id) });
+    assert.equal((await guided(admin, 'tower')).aspect, null);
+
+    const skipped = await guided(admin, 'tower');
+    assert.throws(() => arena.skipReason(admin, skipped.id, 'broken'), { status: 409, code: 'match_not_skipped' });
+    finishViewing(db, skipped.id);
+    arena.vote(admin, skipped.id, 'skip');
+    assert.throws(() => arena.skipReason(moderator, skipped.id, 'broken'), { status: 404 });
+    assert.throws(() => arena.skipReason(admin, skipped.id, 'other'), { status: 400, code: 'invalid_skip_reason' });
+    assert.deepEqual(arena.skipReason(admin, skipped.id, 'broken'), { ok: true });
+    assert.throws(() => arena.skipReason(admin, skipped.id, 'unsure'), { status: 409, code: 'skip_reason_exists' });
+    const saved = db.prepare('SELECT * FROM skip_reasons WHERE match_id=?').get(skipped.id);
+    assert.ok(saved.a_identity && saved.b_identity);
+    const visitor = await arena.createMatch(null, 'tower', null, undefined, false, null, 'visitor');
+    finishViewing(db, visitor.id);
+    arena.vote(null, visitor.id, 'skip', { visitorHash: 'visitor' });
+    assert.throws(() => arena.skipReason(null, visitor.id, 'recognized', 'outsider'), { status: 404 });
+    assert.throws(() => arena.skipReason(admin, visitor.id, 'recognized', 'visitor'), { status: 404 });
+    assert.deepEqual(arena.skipReason(null, visitor.id, 'recognized', 'visitor'), { ok: true });
+    assert.throws(() => arena.skipReasonStats(moderator), { status: 403 });
+    const stats = arena.skipReasonStats(admin);
+    assert.equal(stats.tasks.find(row => row.task === 'tower').n, 2);
+    assert.equal(stats.broken.length, 2);
+    db.prepare('DELETE FROM matches WHERE id=?').run(visitor.id);
+    assert.ok(db.prepare('SELECT 1 FROM skip_reasons WHERE match_id=?').get(visitor.id));
   } finally {
     await platform.close();
     rmSync(root, { recursive: true, force: true });
@@ -103,7 +155,7 @@ test('the dimension chart skips pairs without an aspect question and pairs withi
     { a: work('m2'), b: work('m3'), choice: 'b', aspectId: 'floating', aspectChoice: null, userId: 'u3', createdAt: 4000 },
   ];
   const chart = trialStandings(ballots, (identity) => identity.modelKey, (identity) => ({ modelName: identity.modelName, effort: '' }));
-  assert.deepEqual(chart.dimensions.map((dimension) => dimension.id), ['aesthetic', 'craft', 'logic', 'diverge']);
+  assert.deepEqual(chart.dimensions.map((dimension) => dimension.id), ['aesthetic', 'craft', 'logic', 'fit', 'diverge']);
   assert.deepEqual(chart.dimensions[0].aspects.map((aspect) => aspect.id), ['atmosphere', 'lighting', 'material']);
   assert.deepEqual(chart.totals, { pairs: 2, answered: 1, voters: 2, since: new Date(2000).toISOString(), until: new Date(4000).toISOString() });
   const entry = Object.fromEntries(chart.entries.map((row) => [row.key, row]));
@@ -113,4 +165,65 @@ test('the dimension chart skips pairs without an aspect question and pairs withi
   assert.deepEqual(entry.m1.dimensions.aesthetic, { win: 0, tie: 0, loss: 1, n: 1, aspects: { lighting: { win: 0, tie: 0, loss: 1, n: 1 } } });
   assert.deepEqual(entry.m2.dimensions.aesthetic.aspects, { lighting: { win: 1, tie: 0, loss: 0, n: 1 } });
   assert.equal(entry.m3.dimensions.craft.n, 0);
+});
+
+test('dimension-first rotation balances 10,000 answers and respects disabled aspects', () => {
+  const counts = new Map(), dimensions = new Map();
+  let seed = 12345;
+  const random = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32);
+  for (let i = 0; i < 10000; i++) {
+    const aspect = pickAspect({ category: '建模' }, [...counts].map(([aspect_id, n]) => ({ aspect_id, n })), random);
+    counts.set(aspect.id, (counts.get(aspect.id) ?? 0) + 1);
+    dimensions.set(aspect.dimension, (dimensions.get(aspect.dimension) ?? 0) + 1);
+  }
+  assert.equal(dimensions.size, 4);
+  for (const n of dimensions.values()) assert.ok(n >= 2300 && n <= 2700);
+  const off = new Set(['floating', 'atmosphere', 'material']);
+  for (let i = 0; i < 1000; i++) assert.ok(!off.has(pickAspect({ category: '建模' }, [], random, off).id));
+  assert.equal(pickAspect({ category: '建模' }, [], random, new Set(ASPECTS['建模'].map(a => a.id))), null);
+});
+
+test('anchored dimension scores use category priors and health separates presentation order', () => {
+  const a = { id: 'a', taskId: 't', modelKey: 'a' }, b = { id: 'b', taskId: 't', modelKey: 'b' };
+  const ballots = Array.from({ length: 60 }, (_, i) => ({ a, b, choice: 'a', aspectChoice: i < 30 ? 'a' : 'tie',
+    aspectId: 'fidelity', aspectOrder: i < 30 ? 'before' : 'after', userId: `u${i}`, createdAt: i }));
+  const chart = trialScores(ballots, w => w.modelKey, () => ({}), new Map([['a', 1300], ['b', 1200]]));
+  const left = chart.entries.find(row => row.key === 'a');
+  assert.equal(left.prior, 1300);
+  assert.equal(left.dimensions.craft.score, 1300, 'no answers stays at its category prior');
+  assert.equal(left.dimensions.craft.thin, true);
+  assert.equal(left.dimensions.fit.n, 60);
+  assert.equal(left.dimensions.fit.thin, false);
+  assert.ok(left.dimensions.fit.score > left.dimensions.craft.score);
+  assert.ok(chart.boards.fit[0].score > chart.boards.fit[1].score);
+  const health = chart.health.find(row => row.id === 'fidelity');
+  assert.deepEqual(health.byOrder.before.flags, ['same-side']);
+  assert.deepEqual(health.byOrder.after.flags, ['ties']);
+  assert.equal(health.byOrder.before.agreementRate, 1);
+  assert.equal(health.byOrder.after.sameSideRate, null);
+  const thin = trialScores(ballots.slice(0, 19), w => w.modelKey, () => ({}));
+  assert.deepEqual(thin.health.find(row => row.id === 'fidelity').flags, []);
+  assert.equal(thin.entries[0].prior, null);
+});
+
+test('v56 preserves old trial order and reruns idempotently', async () => {
+  const { MIGRATIONS, openDatabase } = await import('../server/db.mjs');
+  const { DatabaseSync } = await import('node:sqlite');
+  const root = mkdtempSync(join(tmpdir(), 'guided-v56-'));
+  const file = join(root, 'platform.db');
+  try {
+    const old = new DatabaseSync(file);
+    old.exec('PRAGMA foreign_keys=ON');
+    for (const step of MIGRATIONS.slice(0, 55)) typeof step === 'function' ? step(old) : old.exec(step);
+    old.exec('PRAGMA user_version=55');
+    old.prepare("INSERT INTO guided_trial_votes (id,match_id,task_id,a_work,b_work,choice,created_at) VALUES ('old','old','t','a','b','a',1)").run();
+    old.close();
+    const db = openDatabase(file);
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 56);
+    assert.equal(db.prepare("SELECT aspect_order FROM guided_trial_votes WHERE id='old'").get().aspect_order, 'before');
+    MIGRATIONS[55](db);
+    assert.equal(db.prepare('PRAGMA quick_check').get().quick_check, 'ok');
+    assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
+    db.close();
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

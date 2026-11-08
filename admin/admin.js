@@ -478,7 +478,7 @@ function syncQuestionDomains(form) {
   $$('[name="domains"]', form).forEach((input) => { input.disabled = count >= MAX_DOMAINS && !input.checked; });
   $('[data-domain-count]', form).textContent = `已选 ${count} / ${MAX_DOMAINS}`;
 }
-const taskCard = (task, { lead = '', mark = '', note = '', cls = '', category = false } = {}) => `<article class="admin-task${cls}">${lead}<div class="admin-task-main"><h3>${esc(task.title)}${mark}</h3><p class="muted">${publisher(task)} · ${esc(QUESTION_STATUS[task.moderation?.status] ?? '')}${category ? ` · ${esc(QUESTION_TYPES[task.category] ?? task.category ?? '')}` : ''} · ${task.works ?? 0} 件作品 · ${task.votes ?? 0} 票</p>${note}</div><div class="actions"><button class="btn" data-question-edit="${esc(task.id)}">编辑与审核</button><button class="btn" data-task-note="${esc(task.id)}">${state.system === 'gallery' ? '编辑策展文案' : '编辑点评与权重'}</button><button class="btn danger" data-question-delete="${esc(task.id)}"${task.votes ? ' disabled title="有票题目不能删除"' : ''}>删除</button></div></article>`;
+const taskCard = (task, { lead = '', mark = '', note = '', cls = '', category = false } = {}) => `<article class="admin-task${cls}">${lead}<div class="admin-task-main"><h3>${esc(task.title)}${mark}</h3><p class="muted">${publisher(task)} · ${esc(QUESTION_STATUS[task.moderation?.status] ?? '')}${category ? ` · ${esc(QUESTION_TYPES[task.category] ?? task.category ?? '')}` : ''} · ${task.works ?? 0} 件作品 · ${task.votes ?? 0} 票</p>${note}</div><div class="actions"><button class="btn" data-question-edit="${esc(task.id)}">编辑与审核</button><button class="btn" data-task-aspects="${esc(task.id)}">测评点</button><button class="btn" data-task-note="${esc(task.id)}">${state.system === 'gallery' ? '编辑策展文案' : '编辑点评与权重'}</button><button class="btn danger" data-question-delete="${esc(task.id)}"${task.votes ? ' disabled title="有票题目不能删除"' : ''}>删除</button></div></article>`;
 function tasksView() {
   const tasks = state.adminQuestions ?? [];
   const curated = curatedOn() && state.curated;
@@ -1254,6 +1254,25 @@ function calibrationDialog(w) {
   });
   $('[data-clear-calibration]', sheet.el).addEventListener('click', () => save(null));
   setTimeout(paint);
+}
+
+async function aspectsDialog(taskId) {
+  const sheet = openDialog({ title: `测评点 · ${taskTitle(taskId)}`, body: skeleton(3) });
+  try {
+    const current = await api(`admin/tasks/${encodeURIComponent(taskId)}/aspects`);
+    if (!sheet.el.isConnected) return;
+    $('.sheet-body', sheet.el).innerHTML = `<form class="admin-editor"><p class="fine">勾选启用的测评点，仅影响之后抽取的测试对局。</p>${current.aspects.map(aspect => `<label class="field"><span><input type="checkbox" name="aspect" value="${esc(aspect.id)}"${current.off.includes(aspect.id) ? '' : ' checked'}> ${esc(aspect.dimensionName)} · ${esc(aspect.keyword)}</span></label>`).join('') || '<p>本题暂无测评点。</p>'}<p class="form-error" role="alert"></p><button class="btn primary" type="submit">保存</button></form>`;
+    const form = $('form', sheet.el);
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      const done = busy($('button[type="submit"]', form), '正在保存…');
+      try {
+        const off = $$('input[name="aspect"]', form).filter(input => !input.checked).map(input => input.value);
+        await api(`admin/tasks/${encodeURIComponent(taskId)}/aspects`, { method: 'POST', body: { off } });
+        sheet.close(); toast('测评点已保存');
+      } catch (error) { $('.form-error', form).textContent = error.message; done(); }
+    });
+  } catch (error) { if (sheet.el.isConnected) $('.sheet-body', sheet.el).innerHTML = `<p class="form-error" role="alert">${esc(error.message)}</p>`; }
 }
 
 async function editorialDialog(taskId) {
@@ -2234,6 +2253,8 @@ document.addEventListener('click', async (e) => {
     try { await api(`questions/${encodeURIComponent(questionDelete.dataset.questionDelete)}`, { method: 'DELETE' }); await reload(); toast('题目已删除'); } catch (error) { toast(error.message); }
     return;
   }
+  const aspects = e.target.closest('[data-task-aspects]');
+  if (aspects) { await aspectsDialog(aspects.dataset.taskAspects); return; }
   const note = e.target.closest('[data-task-note]');
   if (note) { await editorialDialog(note.dataset.taskNote); return; }
   if (e.target.closest('[data-logout]')) {

@@ -196,11 +196,15 @@ function effectiveCount(values) {
 export const widen = (intervalVotes, effectiveTasks, spread) =>
   Math.hypot(intervalVotes, 1.96 * spread / Math.sqrt(Math.max(1, effectiveTasks)));
 
+// Tolerate arithmetic roundoff only at policy boundaries; retain reported precision.
+const belowThreshold = (value, threshold) =>
+  value < threshold - 1e-12 * Math.max(1, Math.abs(value), Math.abs(threshold));
+
 export function eligibility(row, rule) {
   const reasons = [];
   if (rule.minimumTasks && row.tasks < rule.minimumTasks) reasons.push('tasks');
-  if (rule.minimumTasks && row.taskShare > rule.maxTaskShare) reasons.push('task-share');
-  if (row.effectiveVoters < rule.minimumEffectiveVoters) reasons.push('voters');
+  if (rule.minimumTasks && belowThreshold(rule.maxTaskShare, row.taskShare)) reasons.push('task-share');
+  if (belowThreshold(row.effectiveVoters, rule.minimumEffectiveVoters)) reasons.push('voters');
   return reasons;
 }
 

@@ -49,3 +49,26 @@ test('v3 groups enforce visibility, single-task noise and no false ranks in watc
   assert.ok(!('rank' in groupV3([row],options).watch[0]));
   assert.equal(WARM_BOARDS.filter(r=>r.scoring===3).length,2);
 });
+
+test('weighted rankEntries preserves exact voter and task-share eligibility boundaries', () => {
+  for (const baseWeight of [0.5,1,1.25]) {
+    const votes=Array.from({length:210},(_,i)=>({
+      a:{key:'a',taskId:'one'},b:{key:'b',taskId:'one'},choice:'a',
+      userId:`u${Math.floor(i/21)}`,publicWeight:baseWeight,
+    }));
+    const ranked=rankEntries(votes,w=>w.key,{provisionalGames:30,scoring:3,voterModelKey:w=>w.key});
+    const grouped=groupV3(ranked,{rule:limits.board,seed:1,singleTask:true});
+    assert.equal(grouped.rows.length,2);
+    assert.equal(grouped.watch.length,0);
+    assert.equal(grouped.rows[0].effectiveVoters,ranked[0].effectiveVoters,'retain raw floating output');
+    // Exactly half the weighted comparisons on one task; the rest split equally.
+    for (let i=0;i<votes.length;i++) {
+      votes[i].a.taskId=i<105?'one':i<158?'two':'three';
+    }
+    const category=rankEntries(votes,w=>w.key,{provisionalGames:30,scoring:3,voterModelKey:w=>w.key});
+    assert.ok(Math.abs(category[0].taskShare-.5)<1e-12);
+    assert.equal(groupV3(category,{rule:limits.board,seed:1}).rows.length,2);
+  }
+  assert.deepEqual(eligibility({tasks:3,taskShare:.5+Number.EPSILON,effectiveVoters:10-Number.EPSILON*10},limits.board),[]);
+  assert.deepEqual(eligibility({tasks:3,taskShare:.50000001,effectiveVoters:9.99},limits.board),['task-share','voters']);
+});

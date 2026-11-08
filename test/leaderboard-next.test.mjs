@@ -9,7 +9,6 @@ import { createArena } from '../server/arena.mjs';
 import { createCatalog, modelKey, entityKey } from '../server/catalog.mjs';
 import { createLibrary } from '../server/library.mjs';
 import { openDatabase } from '../server/db.mjs';
-import { rankEntries } from '../server/ranking.mjs';
 import { limits } from '../server/config.mjs';
 import { CURATED_BOARDS } from '../server/curated-boards.mjs';
 
@@ -34,7 +33,7 @@ function fixture(taskSpecs = null) {
   const arena = createArena({ db, catalog, library, limits });
   db.prepare('UPDATE curated_settings SET counting_started_at=? WHERE id=1').run(1700000000000);
   let n = 0;
-  const vote = (a, b, count, task = selected, extra = {}) => {
+  const vote = (a, b, count, task = selected, extra = {}, invalidation = {}) => {
     const identity = (id) => {
       const work = library.work(task, id);
       return JSON.stringify({ ...work, dir: undefined, digest: Object.keys(extra).length ? 'earlier-content' : catalog.snapshot().entryDigest(work),
@@ -46,7 +45,7 @@ function fixture(taskSpecs = null) {
         VALUES (?, ?, ?, ?, ?, ?, 'a', ?, 'arena', ?, ?, 1)`).run(id, id, task, a, b, id,
         db.prepare('SELECT counting_started_at FROM curated_settings WHERE id=1').get().counting_started_at, identity(a), identity(b));
     }
-    arena.invalidate();
+    arena.invalidate(invalidation);
   };
   return { arena, catalog, library, db, vote, selected, config, close() { db.close(); rmSync(root, { recursive: true, force: true }); } };
 }
@@ -91,6 +90,8 @@ test('/next selects v3; previous opens only after switching; curated and weighte
     const get = async (suffix) => { const response = await fetch(base + suffix); return [response.status, await response.json()]; };
     const [status, next] = await get('/next?by=model');
     assert.equal(status, 200); assert.equal(next.scoring.version, 3);
+    assert.equal((await get('/next?by=model&sectionId=invalid'))[0],400);
+    assert.equal((await get('/next?by=model&audience=invalid'))[0],400);
     const [, v2] = await get('?by=model');
     assert.equal(v2.scoring, undefined);
     const baseline = JSON.parse(readFileSync(new URL('./fixtures/leaderboard-v2.json', import.meta.url)));
@@ -148,4 +149,48 @@ test('warmup and HTTP scoring defaults share snapshots, including curated overri
     assert.equal(warmed.scoring.version,3);
     assert.equal(warmed, await switched.leaderboardSnapshot({by:'model',scoring:3,weightedTrial:false}));
   } finally {f.close();}
+});
+
+test('v3 publishes categories and composite atomically across votes and refreshes', async (t) => {
+  const categories = Object.keys(limits.board.composite);
+  const tasks = categories.flatMap((category,c) => Array.from({length:3},(_,i) => ({id:`t${c}-${i}`,category})));
+  t.mock.timers.enable({ apis: ['Date'], now: 1800000000000 });
+  const f = fixture(tasks);
+  try {
+    for (const task of tasks) f.vote('ah','b',10,task.id);
+    for (const by of ['model','config']) {
+      const read = category => f.arena.leaderboardSnapshot({ by,scoring:3,...(category ? {category} : {}) });
+      const initial = await Promise.all(categories.map(read));
+      const generation = initial[0].generation;
+      assert.ok(initial.every(b=>b.generation===generation && b.nextUpdateAt===initial[0].nextUpdateAt));
+      for (const task of tasks.slice(0,3)) f.vote('ah','b',30,task.id,{}, { votesOnly:true,task:task.id });
+      const check = async () => {
+        const overall = await read();
+        const boards = await Promise.all(categories.map(read));
+        assert.ok(boards.every(b=>b.generation===overall.generation && b.nextUpdateAt===overall.nextUpdateAt));
+        assert.deepEqual(overall.categoryGenerations,Object.fromEntries(categories.map(c=>[c,overall.generation])));
+        const full = overall.rows.map(r=>r.key);
+        const centres = boards.map(b=>b.rows.filter(r=>full.includes(r.key)).reduce((s,r)=>s+r.score,0)/full.length);
+        for (const row of overall.rows) {
+          const parts=boards.map(b=>b.rows.find(r=>r.key===row.key));
+          const aligned=parts.map((p,i)=>1000+p.score-centres[i]);
+          assert.ok(Math.abs(row.score-aligned.reduce((s,x)=>s+x,0)/3)<1e-9);
+          assert.ok(Math.abs(row.interval-Math.hypot(...parts.map(p=>p.interval/3)))<1e-9);
+          categories.forEach((c,i)=>assert.deepEqual(row.parts[c],{rank:parts[i].rank,aligned:aligned[i]}));
+          categories.forEach((c,i)=>assert.equal(overall.standings[c][row.key],parts[i].rank));
+        }
+        return overall;
+      };
+      const old = await check();
+      assert.equal(old.generation,generation,'new votes keep the complete published family');
+      assert.deepEqual(await Promise.all(categories.map(read)),initial);
+      // A category request after expiry renews the entire set, including its composite.
+      t.mock.timers.tick(600001);
+      const refreshedCategory = await read(categories[0]);
+      const renewed = await check();
+      assert.notEqual(renewed.generation,generation);
+      assert.equal(renewed.generation,refreshedCategory.generation);
+      assert.notEqual(renewed.rows[0].score,old.rows[0].score);
+    }
+  } finally { f.close(); }
 });

@@ -747,6 +747,8 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 - 单题榜：`scoring.minimumTasks=0,taskSpread=0`，不检查题数与占比，`interval=intervalVotes`；仍检查有效投票者，观察原因仅 `voters`。
 - 综合榜（无 task/category/domain）：对三张达标分类榜在共同条目池对齐中心至1000，再按配置权重平均；区间由加权分类区间平方和开根。`rows.parts[分类]={rank,aligned}`；`partial` 为部分分类达标，含 `parts/missing`，无总分/区间/名次；`watch.reasons=['coverage']` 为没有分类达标者，其分数/区间是混合池参考值。`standings[分类][key]` 仅含该分类达标名次。共同池为空时综合 rows 为空，partial 的 aligned 回退原分类分。综合行的 intervalVotes 是混合池诊断值，不用于合成区间。
 
+v3 综合和三张配置内分类（建模、静态网页、文学）按相同 by/harness/provider/权限作为一组原子发布：首次请求任一张时一并计算，三分类与综合共享十分钟有效期；新票不提前更新公开整组，过期后任一成员的请求刷新整组。每张返回不透明 `generation`，综合另带 `categoryGenerations:{分类:generation}`，明确合成所用代次；可从当前三分类 rows 独立复算综合。高级管理员仍隔离公开缓存，新票后其整组立即失效，HTTP继续 no-store。单题、领域榜及非配置内分类仍按自己的范围缓存。v2 发布与失效语义保持原样。
+
 按模型与按配置独立拟合、达标和合成，描述字段沿用各自 v2；harness/provider 筛选后再合成。名次范围按各行分数与区间独立正态抽样2000次取95%分位，包含当前名次；缓存键哈希作种子，结果可复现。watch/partial 均无 rank、rankLow、rankHigh。
 
 **认证**：无。**限流**：无。

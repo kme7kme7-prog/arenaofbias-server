@@ -123,13 +123,19 @@ export function createArena({ db, catalog, library, limits, random = Math.random
   let cache = new Map();
   const matchRatings = new Map();
   const publishedBoards = createLeaderboardCache();
+  const publishedV3Families = createLeaderboardCache();
+  const seniorV3Families = createLeaderboardCache();
   let readRevision = null;
   let warmup = null;
   const invalidate = ({ votesOnly = false, task = null } = {}) => {
     cache = new Map();
     if (votesOnly && task) matchRatings.delete(task);
     else matchRatings.clear();
-    if (!votesOnly) publishedBoards.clear();
+    seniorV3Families.clear();
+    if (!votesOnly) {
+      publishedBoards.clear();
+      publishedV3Families.clear();
+    }
   };
   const currentRevision = (snapshot) => {
     const staffRevision = JSON.stringify(q.staffVoters.all().map(user => user.id));
@@ -338,7 +344,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
   // `domain` (e.g. 化学) only tasks naming it, and the two combine. A task with two domains
   // counts fully in both. The unscoped board also reports each entry's rank inside every category.
   // Totals count only comparisons the fit used: votes between works of one entry drop out.
-  function leaderboard({ task = null, category = null, domain = null, board = null, audience = null, sectionId = null, by = 'config', snapshot = null, harness = null, provider = null, senior = false, weightedTrial = false, scoring = 2 } = {}) {
+  function leaderboard({ task = null, category = null, domain = null, board = null, audience = null, sectionId = null, by = 'config', snapshot = null, harness = null, provider = null, senior = false, weightedTrial = false, scoring = 2, categorySnapshots = null } = {}) {
     if (board && (board !== 'frontend' || audience === 'public' || sectionId)) fail(400, '精选榜筛选无效', 'invalid_query');
     audience ??= board ? 'curated' : 'public';
     if (!['public','curated'].includes(audience) || (sectionId && audience !== 'curated')) fail(400, '榜单筛选无效', 'invalid_query');
@@ -350,7 +356,8 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     currentRevision(archive);
     const filters = harness || provider ? { harness, provider } : null;
     const cacheKey = `${archive.version}|${task ?? '*'}|${category ?? '*'}|${domain ?? '*'}|${audience}|${sectionId ?? '*'}|${curated?.revision ?? ''}|${by}${filters ? `|${harness ?? ''}|${provider ?? ''}` : ''}${senior ? '|senior' : ''}${weightedTrial ? '|weighted-trial' : ''}${v3 ? '|v3' : ''}`;
-    if (cache.has(cacheKey)) return cache.get(cacheKey);
+    const publishedComposite = v3 && categorySnapshots;
+    if (!publishedComposite && cache.has(cacheKey)) return cache.get(cacheKey);
     const activeCache = cache;
     const pending = Promise.resolve().then(async () => {
       const keyOf = (work) => by === 'model' ? (work.modelKey ?? modelKey(work)) : (work.configKey ?? entityKey(work));
@@ -386,8 +393,8 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       const categoryBoards = {};
       if (!task && !category && !domain && !curated) {
         standings = {};
-        for (const name of new Set(rankedTasks.map((t) => t.category).filter(Boolean))) {
-          const board = await leaderboard({ category: name, by, snapshot: v3 ? archive : snapshot, harness, provider, senior, weightedTrial, scoring });
+        for (const name of publishedComposite ? Object.keys(categorySnapshots) : new Set(rankedTasks.map((t) => t.category).filter(Boolean))) {
+          const board = publishedComposite ? categorySnapshots[name] : await leaderboard({ category: name, by, snapshot: v3 ? archive : snapshot, harness, provider, senior, weightedTrial, scoring });
           categoryBoards[name] = board.rows;
           if (board.rows.length) standings[name] = Object.fromEntries(board.rows.map((row) => [row.key, row.rank]));
         }
@@ -461,8 +468,10 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       }
       return result;
     });
-    activeCache.set(cacheKey, pending);
-    void pending.catch(() => { if (activeCache.get(cacheKey) === pending) activeCache.delete(cacheKey); });
+    if (!publishedComposite) {
+      activeCache.set(cacheKey, pending);
+      void pending.catch(() => { if (activeCache.get(cacheKey) === pending) activeCache.delete(cacheKey); });
+    }
     return pending;
   }
 
@@ -552,6 +561,33 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     for (;;) {
       const snapshot = options.snapshot ?? catalog.snapshot();
       const before = currentRevision(snapshot);
+      const family = options.scoring >= 3 && (!options.audience || options.audience === 'public') && !options.board && !options.sectionId && !options.task && !options.domain
+        && (!options.category || Object.hasOwn(limits.board.composite, options.category));
+      if (family) {
+        const familyOptions = { ...options, category: null, by: options.by ?? 'config', audience: 'public' };
+        const key = JSON.stringify([snapshot.version, familyOptions.by, options.harness ?? null,
+          options.provider ?? null, Boolean(options.senior), options.weightedTrial]);
+        const readFamily = async () => {
+          for (;;) {
+            const archive = options.snapshot ?? catalog.snapshot(), activeCache = cache;
+            const categories = {};
+            for (const category of Object.keys(limits.board.composite)) {
+              categories[category] = await leaderboard({ ...familyOptions, category, snapshot: archive });
+            }
+            const overall = await leaderboard({ ...familyOptions, snapshot: archive, categorySnapshots: categories });
+            if (activeCache === cache) return { categories, overall, generation: randomBytes(12).toString('hex') };
+          }
+        };
+        const published = await (options.senior ? seniorV3Families : publishedV3Families).get(key, readFamily);
+        if (before !== currentRevision(options.snapshot ?? catalog.snapshot())) continue;
+        // Memoize the public DTOs so all family members share one generation and expiry.
+        published.boards ??= Object.fromEntries(Object.entries({ ...published.categories, overall: published.overall })
+          .map(([category, data]) => [category, { ...data, generation: published.generation,
+            ...(category === 'overall' ? { categoryGenerations: Object.fromEntries(Object.keys(published.categories)
+              .map(name => [name, published.generation])) } : {}),
+            refreshIntervalSeconds: published.refreshIntervalSeconds, nextUpdateAt: published.nextUpdateAt }]));
+        return published.boards[options.category || 'overall'];
+      }
       const key = JSON.stringify([snapshot.version, ...['task', 'category', 'domain', 'board', 'audience', 'sectionId', 'by', 'harness', 'provider', 'senior', 'weightedTrial', 'scoring']
         .map((field) => options[field] ?? null)]);
       // Senior boards never enter the shared ten-minute cache; they read the live calculation.

@@ -189,7 +189,7 @@ const state = { user: undefined, data: null, works: null, audit: [], users: null
   system: ['arena', 'common'].includes(store.get('admin-system')) ? store.get('admin-system') : 'gallery', adminWorks: [], workTotal: 0,
   workCache: new Map(), workKey: '', workLoading: false, trafficLoading: false, requestId: 0,
   sidebarCollapsed: store.get('admin-sidebar-collapsed') === '1',
-  workPage: 1, workTask: '', workStatus: '', workShow: '', workHarness: '', workProvider: '', workSearch: '', traffic: null, skipReasons: null,
+  workPage: 1, workTask: '', workStatus: '', workShow: '', workHarness: '', workProvider: '', workSearch: '', traffic: null, skipReasons: null, pricing: null,
   workModel: '', workEffort: '', workAuthor: '', workGenerationMode: '', workHumanIntervention: '', workEfforts: [],
   inbox: null, inboxForms: {}, intake: null, adminQuestions: null, reviewCounts: null, domainGroups: [],
   curated: null, curatedDraft: null, curatedFilter: 'all', curatedSearch: '', curatedType: '', curatedTarget: '', curatedNote: '',
@@ -264,6 +264,7 @@ const COMMON_TABS = [
   { id: 'upload', label: '上传入口', icon: 'inbox' },
   { id: 'users', label: '用户', icon: 'users' },
   { id: 'traffic', label: '流量', icon: 'clock' },
+  { id: 'pricing', label: '价格表', icon: 'list' },
 ];
 const ARENA_NAV = [
   ['内容管理', [['works', '作品管理', 'file', '#/works'], ['intake', '收件箱 · 娱乐作品', 'inbox', '#/intake'], ['tasks', '题目管理', 'guide', '#/tasks'], ['qualification', '资格考试', 'check', '#/qualification'], ['vote-risk', '投票风控', 'shield', '#/vote-risk'], ['skip-reasons', '跳过原因', 'list', '#/skip-reasons'], ['gallery-review', '审核', 'shield', 'https://gallery.arenaofbias.icu/#/review']]],
@@ -894,6 +895,35 @@ function intakeView() {
       <button class="btn primary" type="submit">归属所选</button>
     </form>
     ${rows ? `<div class="table-wrap"><table class="board"><thead><tr><th></th><th>作品</th><th>原题</th><th>进入时间</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="board-empty">收件箱是空的。</p>'}</section>`;
+}
+
+function pricingView() {
+  const data = state.pricing;
+  const hero = pageHero('官方标价', '价格表', '管理员维护每百万 token 单价。系统不预置或猜测价格；未录入的模型保持未定价。', []);
+  if (!data) return `${hero}<section class="block">${skeleton(4)}</section>`;
+  return `${hero}<section class="block"><div class="actions"><h2>模型价格</h2><button class="btn primary" data-price-new>新增价格条目</button></div><div class="table-wrap"><table style="min-width:640px"><thead><tr><th>模型 / 生效日</th><th>币种</th><th>输入 / 输出</th><th>缓存读 / 写</th><th>依据 / 修改人</th><th>操作</th></tr></thead><tbody>${data.entries.map(row => `<tr><td>${esc((state.data?.models ?? []).find(model => model.id === row.model)?.name ?? row.model)}<small> · ${esc(row.since)}</small></td><td>${esc(row.currency)}</td><td>${row.input} / ${row.output}</td><td>${row.cacheRead ?? '按输入价'} / ${row.cacheWrite ?? '按输入价'}</td><td><a href="${esc(row.url)}" target="_blank" rel="noopener">官方价格页</a><small> · ${esc(row.updatedBy?.name ?? '—')} · ${formatDate(row.updatedAt)}</small></td><td><button class="btn sm" data-price-edit="${esc(JSON.stringify([row.model,row.since]))}">修改</button> <button class="btn sm danger" data-price-delete="${esc(JSON.stringify([row.model,row.since]))}">删除</button></td></tr>`).join('') || '<tr><td colspan="6">尚无价格，所有模型未定价。</td></tr>'}</tbody></table></div></section>
+    <section class="block"><h2>价格表日期与汇率</h2><p class="fine">汇率为 1 单位外币折合 CNY。请据可靠来源录入，并填写汇率日期；留空不猜算。</p><form id="pricing-meta" class="admin-editor"><label class="field"><span>价格表日期</span><input class="input" type="date" name="asOf" value="${esc(data.asOf)}"></label><label class="field"><span>汇率日期</span><input class="input" type="date" name="fxAsOf" value="${esc(data.fxAsOf)}"></label><label class="field"><span>汇率 JSON（币种代码 → 人民币）</span><textarea class="input" name="fx" rows="4">${esc(JSON.stringify(data.fx,null,2))}</textarea></label><p class="form-error" role="alert"></p><div class="actions"><button class="btn primary" type="submit">保存日期与汇率</button><button class="btn danger" type="button" data-pricing-meta-delete>清空日期与汇率</button></div></form></section>`;
+}
+
+function priceDialog(row = null) {
+  const models = state.data?.models ?? [];
+  const sheet = openDialog({ title: row ? '修改官方标价' : '新增官方标价', body: `<form class="admin-editor" id="price-entry">
+    <p class="fine">每百万 token，按官方价格页原币登记。缓存价留空表示按输入价计算；长上下文分档未计。</p>
+    <label class="field"><span>模型</span><select class="input" name="model"${row ? ' disabled' : ''}>${models.map(model => `<option value="${esc(model.id)}"${row?.model === model.id ? ' selected' : ''}>${esc(model.name ?? model.id)}</option>`).join('')}</select></label>
+    <label class="field"><span>生效日期</span><input class="input" type="date" name="since" value="${esc(row?.since)}" required${row ? ' disabled' : ''}></label>
+    <label class="field"><span>币种代码</span><input class="input" name="currency" value="${esc(row?.currency)}" pattern="[A-Z]{3}" maxlength="3" required></label>
+    ${[['input','输入'],['output','输出（含推理）'],['cacheRead','缓存读'],['cacheWrite','缓存写']].map(([key,label]) => `<label class="field"><span>${label}</span><input class="input" type="number" min="0" step="any" name="${key}" value="${row?.[key] ?? ''}"${['input','output'].includes(key) ? ' required' : ''}></label>`).join('')}
+    <label class="field"><span>官方价格页 URL</span><input class="input" type="url" name="url" value="${esc(row?.url)}" required></label><p class="form-error" role="alert"></p><button class="btn primary" type="submit">保存价格</button></form>` });
+  const form = $('form', sheet.el);
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    const value = key => form.elements.namedItem(key).value;
+    const body = { currency: value('currency'), url: value('url'), input: Number(value('input')), output: Number(value('output')) };
+    for (const key of ['cacheRead','cacheWrite']) if (value(key) !== '') body[key] = Number(value(key));
+    const done = busy($('button[type="submit"]', form), '正在保存…');
+    try { await api(`admin/pricing/models/${encodeURIComponent(value('model'))}/${encodeURIComponent(value('since'))}`, {method:'PUT',body}); sheet.close(); await reload(); }
+    catch (error) { $('.form-error',form).textContent=error.message; done(); }
+  });
 }
 
 function skipReasonsView() {
@@ -2036,6 +2066,7 @@ async function reload({ navigation = false } = {}) {
       state.qualification = await api('admin/qualification');
       await Promise.all([...new Set(state.qualification.pairs.map((pair) => pair.taskId))].map((taskId) => loadExamWorks(taskId).catch(() => [])));
     }
+    else if (route === 'pricing') state.pricing = await api('admin/pricing');
     else if (route === 'skip-reasons') state.skipReasons = await api('admin/arena/skip-reasons');
     else if (route === 'changelog') state.changelog = (await api('admin/changelog')).entries;
     else if (route === 'vote-risk') { if (navigation || !state.risk.data) loadRisk(); }
@@ -2078,7 +2109,7 @@ function render({ soft = false, world = false } = {}) {
   if (route === 'review') { location.replace(REVIEW_URL); return; }
   if (!routeAllowed(route, sub)) { location.hash = state.system === 'common' ? (isSenior() ? '#/dashboard' : '#/upload') : '#/works'; return; }
   const body = state.system === 'common'
-    ? route === 'upload' ? uploadView() : route === 'users' ? usersView() : route === 'traffic' ? trafficView() : dashboardView()
+    ? route === 'pricing' ? pricingView() : route === 'upload' ? uploadView() : route === 'users' ? usersView() : route === 'traffic' ? trafficView() : dashboardView()
     : route === 'works' ? systemWorksView() : route === 'intake' ? intakeView() : route === 'tasks' ? tasksView() : route === 'qualification' ? qualificationView() : route === 'skip-reasons' ? skipReasonsView() : route === 'vote-risk' ? voteRiskView() : route === 'changelog' ? changelogView() : placeholderView(route);
   const content = `${state.error ? `<p class="form-error page-error">${esc(state.error)}</p>` : ''}${body}`;
   const shellKey = `${state.system}/${route}/${sub || ''}`;
@@ -2242,6 +2273,19 @@ document.addEventListener('click', async (e) => {
   }
   const calibrate = e.target.closest('[data-calibrate]');
   if (calibrate) { const w = state.adminWorks.find((item) => `${item.task}/${item.id}` === calibrate.dataset.calibrate); if (w && canDecide(w)) calibrationDialog(w); return; }
+  if (e.target.closest('[data-price-new]')) { priceDialog(); return; }
+  const priceEdit = e.target.closest('[data-price-edit]');
+  if (priceEdit) { const [model,since]=JSON.parse(priceEdit.dataset.priceEdit); priceDialog(state.pricing.entries.find(row=>row.model===model&&row.since===since)); return; }
+  const priceDelete = e.target.closest('[data-price-delete]');
+  if (priceDelete) {
+    if (!await confirmDialog({title:'删除价格条目',message:'删除后，使用该日期价格的作品花费可能变化。',confirm:'删除',danger:true})) return;
+    const [model,since]=JSON.parse(priceDelete.dataset.priceDelete);
+    try { await api(`admin/pricing/models/${encodeURIComponent(model)}/${encodeURIComponent(since)}`,{method:'DELETE'}); await reload(); } catch(error) {toast(error.message);} return;
+  }
+  if (e.target.closest('[data-pricing-meta-delete]')) {
+    if (!await confirmDialog({title:'清空日期与汇率',message:'保留模型历史价格，但暂停按价格表日期选择当前价及币种折算。',confirm:'清空',danger:true})) return;
+    try { await api('admin/pricing/meta',{method:'DELETE'}); await reload(); } catch(error) {toast(error.message);} return;
+  }
   const skipPreview = e.target.closest('[data-skip-preview]');
   if (skipPreview) {
     const [task, work] = JSON.parse(skipPreview.dataset.skipPreview);
@@ -2446,6 +2490,12 @@ document.addEventListener('submit', async (e) => {
       await reload();
     } catch (error) { toast(error.message); done(); }
     return;
+  }
+  if (e.target.id === 'pricing-meta') {
+    e.preventDefault(); const form=e.target;
+    const done=busy($('button[type="submit"]',form),'正在保存…');
+    try { await api('admin/pricing/meta',{method:'PUT',body:{asOf:form.elements.namedItem('asOf').value||null,fxAsOf:form.elements.namedItem('fxAsOf').value||null,fx:JSON.parse(form.elements.namedItem('fx').value)}}); await reload(); }
+    catch(error) {$('.form-error',form).textContent=error.message;done();} return;
   }
   if (e.target.id !== 'admin-work-filter') return;
   e.preventDefault();

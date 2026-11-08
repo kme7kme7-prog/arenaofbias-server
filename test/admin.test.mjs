@@ -942,3 +942,90 @@ test('guided aspect settings, dimension scores and skip reasons enforce HTTP per
     assert.equal(platform.db.prepare('SELECT COUNT(*) n FROM votes').get().n, 0);
   });
 });
+
+test('usage and pricing APIs enforce roles, keep missing measurements null and never expose editors publicly or in matches', async () => withPlatform(async ({ platform, call }) => {
+  const { putArtifact } = await import('../server/work-usage.mjs');
+  const root = platform.db.prepare("SELECT * FROM users WHERE name='root'").get();
+  const path = '/api/admin/works/one/a/usage';
+  assert.deepEqual((await call('guest', 'GET', '/api/pricing')).data, { showCost:true, asOf:null, fxAsOf:null, fx:{}, models:{} });
+  assert.equal((await call('guest', 'PUT', path, {input:1,source:'api'})).status,401);
+  assert.equal((await call('voter', 'PUT', path, {input:1,source:'api'})).status,403);
+  const voter = platform.db.prepare("SELECT * FROM users WHERE name='voter'").get();
+  platform.auth.setRole(root, voter.id, 'moderator');
+  const saved = await call('voter', 'PUT', path, {input:100,output:20,source:'api'});
+  assert.equal(saved.status,200);
+  assert.equal(saved.data.usage.createdBy.id,voter.id);
+  assert.equal(saved.data.usage.createdBy.name,'voter');
+  assert.equal('cacheRead' in saved.data.usage,false);
+  const row=platform.db.prepare("SELECT * FROM work_usage WHERE task_id='one' AND work_id='a'").get();
+  assert.equal(row.cache_read,null); assert.equal(row.reasoning,null); assert.equal(row.duration_sec,null);
+  assert.equal((await call('voter','GET','/api/admin/pricing')).status,403);
+  assert.equal((await call('voter','PUT','/api/admin/pricing/meta',{asOf:null,fxAsOf:null,fx:{}})).status,403);
+  // Synthetic test-only values, not real model prices or exchange rates.
+  const price={currency:'USD',input:2,output:4,url:'https://example.test/illustrative-pricing'};
+  assert.equal((await call('root','PUT','/api/admin/pricing/models/ma/2026-11-01',price)).status,200);
+  assert.equal((await call('root','PUT','/api/admin/pricing/models/unknown/2026-11-01',price)).data.code,'invalid_price');
+  assert.equal((await call('root','PUT','/api/admin/pricing/models/ma/2026-02-30',price)).status,400);
+  assert.equal((await call('root','PUT','/api/admin/pricing/models/ma/2026-11-01',{...price,url:'javascript:alert(1)'})).status,400);
+  const meta=await call('root','PUT','/api/admin/pricing/meta',{asOf:'2026-11-08',fxAsOf:'2026-11-01',fx:{USD:7}});
+  assert.equal(meta.status,200);
+  assert.equal((await call('root','PUT','/api/admin/pricing/meta',{asOf:'2026-11-08',fxAsOf:null,fx:{USD:7}})).status,400);
+  const publicPrice=(await call('guest','GET','/api/pricing')).data;
+  assert.equal(publicPrice.models.ma[0].input,2);
+  assert.equal('createdBy' in publicPrice.models.ma[0],false);
+  assert.equal('updatedBy' in publicPrice,false);
+  assert.equal('cacheRead' in publicPrice.models.ma[0],false);
+  assert.ok(meta.data.entries[0].createdBy.id);
+  const catalogBefore=(await call('guest','GET','/api/catalog')).data;
+  assert.equal(catalogBefore.works.find(w=>w.task==='one'&&w.id==='a').usage.input,100);
+  const stubArtifact=()=>({files:1,lines:4,tokens:12,bytes:60,tokenizer:'utf8-pretoken-4-v1',approximate:true});
+  const uploaded=await call('root','POST','/api/admin/works/upload?task=one&name=usage-fixture.html&modelName=UsageTest&effort=High&providerId=official',html.replace('作品','Usage fixture'),true);
+  assert.equal(uploaded.status,200);
+  const uploadId=uploaded.data.work.id;
+  putArtifact(platform.db,{task:'one',work:uploadId,artifact:stubArtifact()});
+  assert.equal((await call('voter','PUT',`/api/admin/works/one/${uploadId}/usage`,{input:6,source:'harness'})).status,200);
+  const uploadPublic=(await call('guest','GET','/api/catalog')).data.works.find(w=>w.id===uploadId);
+  assert.equal(uploadPublic.usage.input,6);assert.deepEqual(uploadPublic.artifact,stubArtifact());
+
+  putArtifact(platform.db,{task:'one',work:'a',artifact:stubArtifact()});
+  await call('root','PUT',path,{input:0,source:'log',paid:{basis:'subscription'}});
+  const publicWork=(await call('guest','GET','/api/catalog')).data.works.find(w=>w.task==='one'&&w.id==='a');
+  assert.deepEqual(publicWork.usage,{input:0,source:'log',paid:{basis:'subscription'}});
+  assert.deepEqual(publicWork.artifact,stubArtifact());
+  assert.equal(JSON.stringify(publicWork.usage).includes('created'),false);
+  assert.equal((await call('root','GET',path)).data.usage.createdBy.id,voter.id);
+  assert.equal((await call('root','GET',path)).data.usage.updatedBy.id,root.id);
+  for(const bad of [{input:-1,source:'api'},{output:1.2,source:'api'},{source:'other',input:1},{source:'api'},{output:1,reasoning:2,source:'api'},{source:'bill',paid:{basis:'api',amount:2}}]) {
+    assert.equal((await call('root','PUT',path,bad)).data.code,'invalid_usage');
+  }
+  const match=(await call('root','POST','/api/arena/matches',{task:'one'})).data;
+  assert.equal('usage' in match,false);assert.equal('artifact' in match,false);
+  const reveal=(await call('root','POST',`/api/arena/matches/${match.id}/vote`,{choice:'a'})).data;
+  for(const side of [reveal.a,reveal.b]) {assert.equal('usage' in side,false);assert.equal('artifact' in side,false);}
+  assert.equal((await call('root','DELETE',path)).status,200);
+  assert.equal((await call('voter','GET',path)).data.usage,null);
+  assert.equal((await call('root','DELETE','/api/admin/pricing/models/ma/2026-11-01')).status,200);
+  assert.equal((await call('root','DELETE','/api/admin/pricing/meta')).status,200);
+  assert.deepEqual((await call('guest','GET','/api/pricing')).data,{showCost:true,asOf:null,fxAsOf:null,fx:{},models:{}});
+}, {usage:{showCost:true}}));
+
+test('costs default to hidden publicly while senior price maintenance remains available', async () => withPlatform(async ({platform,call}) => {
+  const path='/api/admin/works/one/a/usage';
+  const usage={input:12,output:4,source:'bill',paid:{basis:'api',amount:3,currency:'USD'}};
+  assert.equal((await call('root','PUT',path,usage)).status,200);
+  // All money values in this fixture are illustrative, not real pricing.
+  assert.equal((await call('root','PUT','/api/admin/pricing/models/ma/2026-11-01',{input:1,output:2,currency:'USD',url:'https://example.test/illustrative-price'})).status,200);
+  assert.equal((await call('root','PUT','/api/admin/pricing/meta',{asOf:'2026-11-08',fxAsOf:'2026-11-08',fx:{USD:7}})).status,200);
+  const pricing=(await call('guest','GET','/api/pricing')).data;
+  assert.deepEqual(pricing,{showCost:false});
+  const work=(await call('guest','GET','/api/catalog')).data.works.find(w=>w.task==='one'&&w.id==='a');
+  assert.deepEqual(work.usage,{input:12,output:4,source:'bill',paid:{basis:'api'}});
+  assert.equal((await call('root','GET',path)).data.usage.paid.amount,3);
+  assert.equal((await call('root','GET','/api/admin/pricing')).data.entries[0].input,1);
+  platform.library.restricted.add('ma','Test restricted model','root');
+  const member=platform.db.prepare("SELECT * FROM users WHERE name='voter'").get();
+  const senior=platform.db.prepare("SELECT * FROM users WHERE name='root'").get();
+  platform.auth.setRole(senior,member.id,'moderator');
+  assert.equal((await call('voter','GET',path)).status,404);
+  assert.equal((await call('guest','GET','/api/catalog')).data.works.some(w=>w.id==='a'&&w.task==='one'),false);
+}));

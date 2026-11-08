@@ -60,6 +60,7 @@ const contentPort = int(env.CONTENT_PORT, 5180);
 export const THREE_MIRROR_PATH = '/three/0.170.0/files/';
 
 export const config = {
+  usage: { showCost: env.USAGE_SHOW_COST === '1' },
   host: env.HOST || '127.0.0.1',
   port,
   contentPort,

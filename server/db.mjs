@@ -811,6 +811,24 @@ const MIGRATIONS = [
       user_id TEXT REFERENCES users(id) ON DELETE SET NULL, visitor_hash TEXT, created_at INTEGER NOT NULL);
     CREATE INDEX IF NOT EXISTS skip_reasons_task ON skip_reasons(task_id);`);
   },
+  // v57: raw measurements and administrator-maintained official prices; no seeded rates.
+  (db) => db.exec(`CREATE TABLE IF NOT EXISTS work_usage (
+    task_id TEXT NOT NULL, work_id TEXT NOT NULL,
+    input INTEGER, cache_read INTEGER, cache_write INTEGER, output INTEGER, reasoning INTEGER, requests INTEGER, duration_sec REAL,
+    created_name TEXT, updated_name TEXT, paid TEXT, source TEXT NOT NULL CHECK(source IN ('api','harness','bill','log')),
+    created_by TEXT REFERENCES users(id) ON DELETE SET NULL, updated_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(task_id,work_id));
+  CREATE TABLE IF NOT EXISTS model_prices (
+    model_id TEXT NOT NULL, since TEXT NOT NULL, currency TEXT NOT NULL, input REAL NOT NULL, output REAL NOT NULL,
+    cache_read REAL, cache_write REAL, url TEXT NOT NULL,
+    created_by TEXT REFERENCES users(id) ON DELETE SET NULL, updated_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(model_id,since));
+  CREATE TABLE IF NOT EXISTS pricing_meta (
+    id INTEGER PRIMARY KEY CHECK(id=1), as_of TEXT, fx_as_of TEXT, fx TEXT NOT NULL DEFAULT '{}',
+    updated_by TEXT REFERENCES users(id) ON DELETE SET NULL, updated_at INTEGER NOT NULL);
+  CREATE TABLE IF NOT EXISTS work_artifacts (
+    task_id TEXT NOT NULL, work_id TEXT NOT NULL, artifact TEXT NOT NULL, updated_at INTEGER NOT NULL,
+    PRIMARY KEY(task_id,work_id));`),
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

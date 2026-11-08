@@ -1390,3 +1390,31 @@ v49 给 `moderation_tokens` 加 `scopes`（已有令牌默认 `moderation`），
 ### 作品声明、读取与截图替换（无迁移）
 
 `scopes` 仍是文本。新增 `works:read`（`GET /api/dots/works/:task/:id`，安全声明，文件列表默认关，`?files=1` 才列路径）、`meta:write`（`PATCH /api/dots/works/:task/:id/meta`，完整声明字段，不含 `task`；默认不重送审，`resubmitModeration: true` 才在送审文本变化时重送；条件更新，冲突 409）、`captures:write`（`PUT /api/dots/works/:task/:id/captures/:slot`，`slot` 为 `first` 或 `mobile`，只收 JPEG，新文件名，只改 `captures` 的对应键）。不提供 dots 回滚，不清审核错误，不改封面。`/media/<作品>/` 同时接受 `first.jpg`、`mobile.jpg` 和 `first-<8–24 位>.jpg`、`mobile-<8–24 位>.jpg`。详见 [dots 审核 API](dots-moderation-api.md) 第 10–12 节。写操作另有 `DOTS_WRITES_PER_MIN`（默认 30）。
+
+## 用量、官方价格与产物体量（v57，后端数据库）
+
+所有用量、价格、汇率与产物统计均保存在平台 SQLite，不读取数据包的同名字段，不预置真实价格或汇率。
+
+公开作品 DTO（`/api/catalog`、bootstrap/works）可新增 `usage` 与 `artifact`，没有记录时省略整个字段。`usage` 为 `{input?,cacheRead?,cacheWrite?,output?,reasoning?,requests?,durationSec?,source,paid?:{basis,amount?,currency?}}`；数字原样透传，未填为数据库 NULL/响应省略，显式 0 保留。source 为 api/harness/bill/log；paid.basis 为 api/subscription/credits/reseller，金额出现时必须带三位币种代码。公开数据不含录入人及时间。模型、档位、Harness 身份继续使用作品原有字段，支持前端按模型/配置/Harness/模型+Harness分组。
+
+`artifact` 是后端统计模块输出（files/lines/bytes，可有 tokens/chars 等统计方法字段），由回填 CLI 写入 `work_artifacts`，不在目录请求中扫描源码。普通投稿与数据包作品共用这张表，公开可见性规则不变。抽组、ready、投票及揭晓响应均不附用量/产物；前端揭晓后按作品ID查公开目录。
+
+`GET /api/pricing` 公开返回 `{asOf,fxAsOf,fx,models}`；日期初始 null，fx/models 初始空对象。fx 记每一单位币种折合 CNY，CNY 隐含为1；models 按模型ID分组，条目为 `{since,currency,input,output,cacheRead?,cacheWrite?,url}`（每百万 token）。取 since<=asOf 的最新条目，缓存价缺省按输入价；无定价/无汇率不猜算。实付仅附注，不参与官方花费比较。
+
+管理接口均沿用 adminOn 的 Cookie 与 dots-admin 双入口、读写权限复核及写限流：
+
+| 方法 | 路径 | 权限及响应 |
+|---|---|---|
+| GET / PUT / DELETE | `/api/admin/works/:task/:id/usage` | 普通管理员及以上；PUT body 为公开usage对象，全量替换。GET/PUT 返回 `{task,id,usage}`，usage额外含createdBy/updatedBy（`{id,name}`或null）及ISO createdAt/updatedAt；无记录usage=null。DELETE返回ok |
+| GET | `/api/admin/pricing` | 高级管理员；公开pricing字段加entries数组（含model及录入/修改人和时间），并含元信息updatedBy/updatedAt |
+| PUT / DELETE | `/api/admin/pricing/models/:model/:since` | 高级管理员；模型必须已登记，since有效日期。PUT为currency/input/output/cacheRead?/cacheWrite?/url；必填基础单价与http(s)官方价格页，返回管理pricing；DELETE返回ok |
+| PUT / DELETE | `/api/admin/pricing/meta` | 高级管理员；PUT body `{asOf,fxAsOf,fx}`全量替换，汇率为正有限数且有汇率时必须带日期；DELETE清空日期汇率、保留价格历史，返回ok |
+
+错误：400 invalid_usage/invalid_price/invalid_pricing_meta；不可见或不存在作品404 not_found；未登录401，普通账号/非高级管理员越权403。所有价格必须人工提供，不会自动抓取或猜测官方价。
+
+
+金额默认关闭：`config.usage.showCost`（`USAGE_SHOW_COST=1` 开启），`GET /api/pricing` 在关闭时**仅返回 `{showCost:false}`**，不下发日期/汇率/价格；开启时返回完整价格表并带showCost:true。公开usage.paid在关闭时只留basis。管理员接口仍显示完整价格与实付。前端关闭时仅展示token/耗时/请求/产物，不显示任何花费金额、倍数或花费图。
+
+批量导入：`node scripts/usage-import.mjs --db <platform.db> --input <usage.json> [--dry-run|--apply] [--replace] [--admin-id <id>]`，默认只读预演，输入works[].uploadId匹配未删除站内作品ID。全量预检，有非法字段/不存在作品/冲突则整批不写；相同记录不改时间，覆盖差异须replace。可指定管理员或记录「系统导入」，不更改模型/Harness/作品内容。每件打印计划与实际写入状态，冲突/错误退出1。
+
+产物统计落库：只读 `scripts/artifact-backfill.mjs`（usage-tools分支）输出JSON，再用 `node scripts/artifact-import.mjs --db <platform.db> --input <输出.json> [--dist <只读数据包>] [--dry-run|--apply]`。默认预演，全量检查后显式apply才写work_artifacts；同值不改时间。代码体量含tokens/tokenizer/approximate，文本体量含chars，算法定义见工具契约；不冒充o200k或计费token。公开读取不扫描文件，全部作品由该回填路径覆盖，缺原始文件只报缺失、不猜体量。

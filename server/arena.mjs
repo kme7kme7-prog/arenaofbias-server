@@ -824,7 +824,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       // A ballot changes this task's live fit and aggregate reads; other tasks keep their fits.
       if (counted) invalidate({ votesOnly: true, task: match.task_id });
       const reveal = (work, identity) => work ? {
-        ...library.toPublic(work, user),
+        ...library.toPublic(work, user, { metrics: false }),
         title: identity.title, model: identity.modelId, modelName: identity.modelName, vendor: identity.vendor, effort: identity.effort,
       } : null;
       // A pinned round says which side held the pinned model, for the admin's running tally.

@@ -1,4 +1,5 @@
 // Wires the platform together: the site (static build + API) and the content handler.
+import { createUsageService } from './work-usage.mjs';
 import { extname, join, relative, resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -79,6 +80,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const moderationMode = createModerationMode(db, config);
   const library = createLibrary({ db, catalog, config, limits, legacyRounds: new Set(show1Snapshot.works.map((work) => work.promptId)),
     moderationRoute: () => moderationMode.current, restricted });
+  const usage = createUsageService({ db, catalog, library, showCost: config.usage?.showCost === true });
   const adminService = createAdmin({ db, catalog, library });
   const inbox = createInbox({ library, config, limits });
   const catalogRevision = createCatalogRevision(db);
@@ -836,6 +838,32 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     const work = library.work(ctx.params.task, ctx.params.id, null, admin);
     if (!work) fail(404, '作品不存在', 'not_found');
     return { url: `${library.previewOrigin(work, admin)}/` };
+  });
+  router.on('GET', '/api/pricing', () => usage.pricing());
+  adminOn('GET', '/api/admin/works/:task/:id/usage', ctx => usage.getUsage(staffOnly(ctx), ctx.params.task, ctx.params.id));
+  adminOn('PUT', '/api/admin/works/:task/:id/usage', async ctx => {
+    const actor = staffOnly(ctx); limit.write(actor.id);
+    return usage.saveUsage(actor, ctx.params.task, ctx.params.id, await adminJson(ctx));
+  });
+  adminOn('DELETE', '/api/admin/works/:task/:id/usage', ctx => {
+    const actor = staffOnly(ctx); limit.write(actor.id);
+    return usage.deleteUsage(actor, ctx.params.task, ctx.params.id);
+  });
+  adminOn('GET', '/api/admin/pricing', ctx => usage.adminPricing(adminOnly(ctx)));
+  adminOn('PUT', '/api/admin/pricing/models/:model/:since', async ctx => {
+    const actor = adminOnly(ctx); limit.write(actor.id);
+    return usage.savePrice(actor, ctx.params.model, ctx.params.since, await adminJson(ctx));
+  });
+  adminOn('DELETE', '/api/admin/pricing/models/:model/:since', ctx => {
+    const actor = adminOnly(ctx); limit.write(actor.id);
+    return usage.deletePrice(actor, ctx.params.model, ctx.params.since);
+  });
+  adminOn('PUT', '/api/admin/pricing/meta', async ctx => {
+    const actor = adminOnly(ctx); limit.write(actor.id);
+    return usage.saveMeta(actor, await adminJson(ctx));
+  });
+  adminOn('DELETE', '/api/admin/pricing/meta', ctx => {
+    const actor = adminOnly(ctx); limit.write(actor.id); return usage.deleteMeta(actor);
   });
   adminOn('GET', '/api/admin/tasks/:id/aspects', ctx => arena.taskAspects(adminOnly(ctx), ctx.params.id));
   adminOn('POST', '/api/admin/tasks/:id/aspects', async ctx => {

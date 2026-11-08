@@ -226,7 +226,7 @@ test('v56 preserves old trial order and reruns idempotently', async () => {
     old.prepare("INSERT INTO guided_trial_votes (id,match_id,task_id,a_work,b_work,choice,created_at) VALUES ('old','old','t','a','b','a',1)").run();
     old.close();
     const db = openDatabase(file);
-    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 56);
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, MIGRATIONS.length);
     assert.equal(db.prepare("SELECT aspect_order FROM guided_trial_votes WHERE id='old'").get().aspect_order, 'before');
     MIGRATIONS[55](db);
     assert.equal(db.prepare('PRAGMA quick_check').get().quick_check, 'ok');

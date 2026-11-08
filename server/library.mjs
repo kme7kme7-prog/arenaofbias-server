@@ -1,6 +1,7 @@
 // Every work the platform knows: data package files plus submitted uploads.
 // Uploads move through unverified → verified | questioned; drafts hold a staged upload
 // until its author has watched the trial load and submits it.
+import { createWorkMetrics } from './work-usage.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
@@ -65,6 +66,7 @@ function writeTree(target, files) {
 }
 
 export function createLibrary({ db, catalog, config, limits, legacyRounds = new Set(), moderationRoute = () => 'machine', restricted = createRestricted(db), maintenance = true }) {
+  const workMetrics = createWorkMetrics(db, config.usage);
   const isRestricted = (work) => restricted.isRestrictedWork(work);
   const hidden = (work, viewer) => restricted.hiddenFrom(work, viewer);
   const contentAllowedEffective = (work) => Boolean(work && !work.curatedAs && catalog.task(work.taskId) &&
@@ -770,11 +772,11 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
         ...(!work.curated && viewer && (viewer.id === work.ownerId || isStaff(viewer)) ? { arena: arenaState(work) } : {}) };
     },
 
-    toPublic(work, viewer, { admin = false, preview = true } = {}) {
+    toPublic(work, viewer, { admin = false, preview = true, metrics = true } = {}) {
       work = withDisplay(work);
       if (!work) return null;
       if (work.curated) {
-        return { task: work.taskId, id: work.id, author: authorOf({ role: 'admin', name: null, avatar: null }, admin), mine: false,
+        return { task: work.taskId, id: work.id, ...(metrics ? workMetrics(work) : {}), author: authorOf({ role: 'admin', name: null, avatar: null }, admin), mine: false,
           title: work.title, summary: work.summary, model: Object.hasOwn(work, 'displayModelId') ? work.displayModelId : work.modelId, modelName: work.modelName, vendor: work.vendor,
           effort: work.effort, tool: work.tool, ...publicProvenance(work),
           ...(work.promptVariant ? { promptVariant: work.promptVariant } : {}), note: work.note ?? '',
@@ -785,6 +787,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       return {
         task: work.taskId,
         id: work.id,
+        ...(metrics ? workMetrics(work) : {}),
         // Only senior responses can reach this: callers drop restricted works for everyone else.
         ...(isRestricted(work) ? { restricted: true } : {}),
         title: work.title,
@@ -1187,6 +1190,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
         }
         if (moved) {
           q.moveWorkTask.run(moved.to, Date.now(), id);
+          for (const table of ['work_usage', 'work_artifacts']) db.prepare(`UPDATE ${table} SET task_id=? WHERE task_id=? AND work_id=?`).run(moved.to, moved.from, id);
           q.moveVotes.run(moved.to, moved.from, id, id);
           q.moveMatches.run(moved.to, moved.from, id, id);
           q.moveComments.run(moved.to, moved.from, id);

@@ -5,7 +5,7 @@ import { MIN_COMPRESS_BYTES, compress, etagFor, etagMatches, pickEncoding, withV
 
 export function createCatalogRevision(db) {
   db.exec('CREATE TEMP TABLE catalog_revision (revision INTEGER NOT NULL); INSERT INTO catalog_revision VALUES (0);');
-  const tables = ['works', 'questions', 'work_overrides', 'question_overrides', 'reference_uploads'];
+  const tables = ['works', 'questions', 'work_overrides', 'question_overrides', 'reference_uploads', 'work_usage', 'work_artifacts'];
   for (const table of [...tables, 'users']) {
     for (const event of ['INSERT', 'UPDATE', 'DELETE']) {
       const change = table === 'users' && event === 'UPDATE' ? 'UPDATE OF name, nickname, avatar, role' : event;

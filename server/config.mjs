@@ -136,6 +136,15 @@ export const limits = {
   matchTtl: 3 * 3600e3,
   sessionTtl: 30 * 24 * 3600e3,
   provisionalGames: 30,
+  board: {
+    scoring: Number(env.LEADERBOARD_SCORING ?? 2),
+    minimumTasks: 3,
+    maxTaskShare: 0.5,
+    minimumEffectiveVoters: 10,
+    taskSpread: 85,
+    rankRange: { level: 0.95, draws: 2000 },
+    composite: { 建模: 1, 静态网页: 1, 文学: 1 },
+  },
 };
 
 // Effort levels offered on the upload form; curated works keep their own labels.

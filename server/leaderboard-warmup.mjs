@@ -1,9 +1,10 @@
-// Warm only the four common public boards, one at a time. The public cache still
+// Warm common boards, one at a time. The public cache still
 // owns its ten-minute boundary and moderation invalidation; no stale response is served.
 import { LEADERBOARD_INTERVAL_MS } from './leaderboard-cache.mjs';
 
 export const WARM_BOARDS = [{ by: 'config' }, { by: 'model' },
-  { board: 'frontend', by: 'config' }, { board: 'frontend', by: 'model' }];
+  { board: 'frontend', by: 'config' }, { board: 'frontend', by: 'model' },
+  { by: 'config', scoring: 3 }, { by: 'model', scoring: 3 }];
 
 export function startLeaderboardWarmup({ read, schedule = setTimeout, cancel = clearTimeout,
   onError = () => console.warn('排行榜后台预热失败，下次请求将重试。') }) {

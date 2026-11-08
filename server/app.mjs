@@ -992,7 +992,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   adminOn('POST', '/api/admin/qualification/pairs', async ctx => qualification.savePair(adminOnly(ctx), await adminJson(ctx)));
   adminOn('PATCH', '/api/admin/qualification/pairs/:id', async ctx => qualification.savePair(adminOnly(ctx), await adminJson(ctx), ctx.params.id));
   adminOn('DELETE', '/api/admin/qualification/pairs/:id', async ctx => qualification.deletePair(adminOnly(ctx), ctx.params.id, await adminJson(ctx)));
-  const readLeaderboard = (ctx, weightedTrial = false) => {
+  const readLeaderboard = (ctx, weightedTrial = false, scoring = limits.board.scoring) => {
     const board = ctx.url.searchParams.get('board') || null;
     const audience = ctx.url.searchParams.get('audience') || null, sectionId = ctx.url.searchParams.get('sectionId') || null;
     const task = ctx.url.searchParams.get('task') || null;
@@ -1007,11 +1007,16 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       return [field, value];
     }));
     // Senior admins read a separately cached board that also counts restricted works; sendJson keeps it no-store.
-    return arena.leaderboardSnapshot({ task, category, domain, board, audience, sectionId, weightedTrial, by: ctx.url.searchParams.get('by') === 'model' ? 'model' : 'config', ...filters,
+    return arena.leaderboardSnapshot({ task, category, domain, board, audience, sectionId, weightedTrial, scoring, by: ctx.url.searchParams.get('by') === 'model' ? 'model' : 'config', ...filters,
       ...(seesRestricted(ctx.user) ? { senior: true } : {}) });
   };
   router.on('GET', '/api/leaderboard', ctx => readLeaderboard(ctx));
-  router.on('GET', '/api/leaderboard/weighted-trial', ctx => readLeaderboard(ctx, true));
+  router.on('GET', '/api/leaderboard/weighted-trial', ctx => readLeaderboard(ctx, true, 2));
+  router.on('GET', '/api/leaderboard/next', ctx => readLeaderboard(ctx, false, 3));
+  router.on('GET', '/api/leaderboard/previous', ctx => {
+    if (limits.board.scoring < 3) fail(404, '旧版榜单尚未开放');
+    return readLeaderboard(ctx, false, 2);
+  });
 
   registerShow1Compat(router, { db, catalog, library, snapshot: show1Snapshot, config, limit });
   registerShow1Guess(router, { db, limit, config, adminOnly, adminOn, adminJson });

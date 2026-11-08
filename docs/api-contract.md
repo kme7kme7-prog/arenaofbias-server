@@ -739,6 +739,16 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 ### 3.10 `GET /api/leaderboard` —— 排行榜
 
+`LEADERBOARD_SCORING` 默认为 2，控制正式接口计分；新增 `GET /api/leaderboard/next` 固定请求 v3，`GET /api/leaderboard/previous` 在配置 >=3 时返回 v2，否则 404。精选榜始终 v2（不含 `scoring`），`/weighted-trial` 保持原计分。预热另含 v3 综合的模型、配置两项。版本进入独立计算及公开快照缓存键。
+
+大众 v3 新增 `scoring:{version:3,weighted:true,minimumGames:21,minimumTasks:3,maxTaskShare:0.5,minimumEffectiveVoters:10,taskSpread:85,rankRange:0.95,composite:{建模:1,静态网页:1,文学:1}}`、`partial:[]`、`watch:[]`。所有行保留 v2 描述及原始胜平负、场次、人数、题数、作品数。新增 `intervalVotes`（投票噪声）、`effectiveTasks`、`taskShare`（最大题加权比较占比）、`effectiveVoters`（权重集中度折算人数）。有效数公式 `(Σw)²/Σw²`，权重沿用加权试运行。未满21场或排除的混合条目在所有分组都不公开，`unranked=[]`。
+
+- 分类/领域榜：`rows` 仅含覆盖达标行，附 `rank/rankLow/rankHigh`；`interval=hypot(intervalVotes,1.96*taskSpread/sqrt(max(1,effectiveTasks)))`。`watch` 有分数/区间但无名次，`reasons` 可为 `tasks`、`task-share`、`voters` 的组合；`partial=[]`。
+- 单题榜：`scoring.minimumTasks=0,taskSpread=0`，不检查题数与占比，`interval=intervalVotes`；仍检查有效投票者，观察原因仅 `voters`。
+- 综合榜（无 task/category/domain）：对三张达标分类榜在共同条目池对齐中心至1000，再按配置权重平均；区间由加权分类区间平方和开根。`rows.parts[分类]={rank,aligned}`；`partial` 为部分分类达标，含 `parts/missing`，无总分/区间/名次；`watch.reasons=['coverage']` 为没有分类达标者，其分数/区间是混合池参考值。`standings[分类][key]` 仅含该分类达标名次。共同池为空时综合 rows 为空，partial 的 aligned 回退原分类分。综合行的 intervalVotes 是混合池诊断值，不用于合成区间。
+
+按模型与按配置独立拟合、达标和合成，描述字段沿用各自 v2；harness/provider 筛选后再合成。名次范围按各行分数与区间独立正态抽样2000次取95%分位，包含当前名次；缓存键哈希作种子，结果可复现。watch/partial 均无 rank、rankLow、rankHigh。
+
 **认证**：无。**限流**：无。
 
 公开榜单按题目/题型/领域/精选范围、计分单位与来源筛选分别共享十分钟计算快照。首次访问按需生成，并合并同范围并发请求；成功后十分钟内新投票不会触发公开榜单重算，到期后下一次访问更新。响应的`updatedAt`为实际计算时间，新增`refreshIntervalSeconds: 600`及`nextUpdateAt`（该快照下一次可更新时间）。失败不缓存。换包、作品审核/撤下与归属更正仍立即失效；盲评抽样和统计总计继续使用实时内部缓存。此快照跨账号共享，响应不含身份数据，不写磁盘。正式入口监听后串行预热综合/精选前端的配置与模型四个常用榜，并在一轮完成600秒后再次读取公开缓存；其它范围按需生成。预热不延长已有快照或提前纳入新票；变更期间的在途旧结果也会丢弃重读。服务重启后重新生成，`LEADERBOARD_WARMUP=0`可关闭后台预热。

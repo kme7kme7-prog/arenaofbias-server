@@ -10,7 +10,7 @@
 // round's works, ordinary voters' own uploads and pairs the voter has already judged.
 // A senior admin may pin a model: every pair then holds one of its works, on a random side, against
 // an established entry of another model, and the ballot counts as usual.
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHash } from 'node:crypto';
 import { Worker } from 'node:worker_threads';
 import { effortKey, entityKey, modelKey, providerOf } from './catalog.mjs';
 import { transaction } from './db.mjs';
@@ -74,7 +74,7 @@ const fromIdentity = (text) => {
   return { ...identity, ...generationOf(identity), providerId: providerOf(identity.providerId, providerOther || providerName) };
 };
 
-export function createArena({ db, catalog, library, limits, random = Math.random, revision = () => '', curated: curation = null }) {
+export function createArena({ db, catalog, library, limits, random = Math.random, revision = () => '', curated: curation = null, maintenance = true }) {
   curation ??= createCurated({ db, catalog, library });
   const readBatch = (read) => catalog.withSnapshot ? catalog.withSnapshot(read) : read();
   // Restricted (gray) works: public boards drop every ballot that touches one, so public
@@ -117,7 +117,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     lastCleanup = now;
     return result.changes;
   };
-  cleanupExpiredMatches();
+  if (maintenance) cleanupExpiredMatches();
 
   // Match sampling and totals stay live; public boards publish on a ten-minute cadence.
   let cache = new Map();
@@ -289,16 +289,16 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     return pending;
   }
 
-  function rankOffThread(votes, by, rankedEntryCount, diminishVoterWeight = false) {
+  function rankOffThread(votes, by, rankedEntryCount, diminishVoterWeight = false, scoring = 2) {
     if (by === 'work' && rankedEntryCount <= RANK_WORKER_ENTRY_THRESHOLD)
       return Promise.resolve(rankWorks(votes, (work) => work.configKey ?? entityKey(work)));
-    if (rankedEntryCount <= RANK_WORKER_ENTRY_THRESHOLD) {
+    if (scoring < 3 && rankedEntryCount <= RANK_WORKER_ENTRY_THRESHOLD) {
       const modelOf = (work) => work.modelKey ?? modelKey(work);
       const keyOf = by === 'model' ? modelOf : (work) => work.configKey ?? entityKey(work);
       return Promise.resolve(rankEntries(votes, keyOf, { ...limits, voterModelKey: diminishVoterWeight ? modelOf : null }));
     }
     return new Promise((resolve, reject) => {
-      const worker = new Worker(new URL('./ranking-worker.mjs', import.meta.url), { workerData: { votes, by, limits, diminishVoterWeight } });
+      const worker = new Worker(new URL('./ranking-worker.mjs', import.meta.url), { workerData: { votes, by, limits, diminishVoterWeight, scoring } });
       worker.once('message', resolve);
       worker.once('error', reject);
       worker.once('exit', (code) => { if (code !== 0) reject(new Error(`Ranking worker exited with ${code}`)); });
@@ -338,16 +338,18 @@ export function createArena({ db, catalog, library, limits, random = Math.random
   // `domain` (e.g. 化学) only tasks naming it, and the two combine. A task with two domains
   // counts fully in both. The unscoped board also reports each entry's rank inside every category.
   // Totals count only comparisons the fit used: votes between works of one entry drop out.
-  function leaderboard({ task = null, category = null, domain = null, board = null, audience = null, sectionId = null, by = 'config', snapshot = null, harness = null, provider = null, senior = false, weightedTrial = false } = {}) {
+  function leaderboard({ task = null, category = null, domain = null, board = null, audience = null, sectionId = null, by = 'config', snapshot = null, harness = null, provider = null, senior = false, weightedTrial = false, scoring = 2 } = {}) {
     if (board && (board !== 'frontend' || audience === 'public' || sectionId)) fail(400, '精选榜筛选无效', 'invalid_query');
     audience ??= board ? 'curated' : 'public';
     if (!['public','curated'].includes(audience) || (sectionId && audience !== 'curated')) fail(400, '榜单筛选无效', 'invalid_query');
+    if (audience === 'curated') scoring = 2;
+    const v3 = scoring >= 3;
     const curated = audience === 'curated' ? curation.scope(sectionId) : null;
     if (curated && (task || category || domain)) fail(400, '精选榜筛选无效', 'invalid_query');
     const archive = snapshot ?? catalog.snapshot();
     currentRevision(archive);
     const filters = harness || provider ? { harness, provider } : null;
-    const cacheKey = `${archive.version}|${task ?? '*'}|${category ?? '*'}|${domain ?? '*'}|${audience}|${sectionId ?? '*'}|${curated?.revision ?? ''}|${by}${filters ? `|${harness ?? ''}|${provider ?? ''}` : ''}${senior ? '|senior' : ''}${weightedTrial ? '|weighted-trial' : ''}`;
+    const cacheKey = `${archive.version}|${task ?? '*'}|${category ?? '*'}|${domain ?? '*'}|${audience}|${sectionId ?? '*'}|${curated?.revision ?? ''}|${by}${filters ? `|${harness ?? ''}|${provider ?? ''}` : ''}${senior ? '|senior' : ''}${weightedTrial ? '|weighted-trial' : ''}${v3 ? '|v3' : ''}`;
     if (cache.has(cacheKey)) return cache.get(cacheKey);
     const activeCache = cache;
     const pending = Promise.resolve().then(async () => {
@@ -356,7 +358,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       const selected = curated && new Set(curated.taskIds);
       const scoped = curated || category || domain ? rankedTasks.filter((t) => (!selected || selected.has(t.id)) && (!category || t.category === category) && (!domain || t.domains?.includes(domain))) : null;
       const { votes, rankedEntryCount } = await countedVotes(task, archive, keyOf, filters, scoped && new Set(scoped.map((t) => t.id)), curated, senior);
-      const ranked = await rankOffThread(votes, by, rankedEntryCount, weightedTrial && audience === 'public');
+      const ranked = await rankOffThread(votes, by, rankedEntryCount, (weightedTrial || v3) && audience === 'public', scoring);
       // Qualification always uses the same scoped model fit, including in configuration view.
       // Keep all valid opponents in the fit; qualification changes membership, not ballot history.
       let qualifiedModels, provisionalModels;
@@ -381,10 +383,12 @@ export function createArena({ db, catalog, library, limits, random = Math.random
         await new Promise((resolve) => setImmediate(resolve));
       }
       let standings;
+      const categoryBoards = {};
       if (!task && !category && !domain && !curated) {
         standings = {};
         for (const name of new Set(rankedTasks.map((t) => t.category).filter(Boolean))) {
-          const board = await leaderboard({ category: name, by, snapshot, harness, provider, senior, weightedTrial });
+          const board = await leaderboard({ category: name, by, snapshot: v3 ? archive : snapshot, harness, provider, senior, weightedTrial, scoring });
+          categoryBoards[name] = board.rows;
           if (board.rows.length) standings[name] = Object.fromEntries(board.rows.map((row) => [row.key, row.rank]));
         }
       }
@@ -419,6 +423,8 @@ export function createArena({ db, catalog, library, limits, random = Math.random
           ...(senior && restricted.isRestrictedWork(works.get(row.key)?.sample ?? latest.get(row.key) ?? row.sample) ? { restricted: true } : {}),
           score: row.score,
           interval: row.interval,
+          ...(v3 ? { intervalVotes: row.intervalVotes, effectiveTasks: row.effectiveTasks,
+            taskShare: row.taskShare, effectiveVoters: row.effectiveVoters } : {}),
           games: row.games,
           wins: row.wins,
           draws: row.draws,
@@ -435,6 +441,24 @@ export function createArena({ db, catalog, library, limits, random = Math.random
         provisionalGames: limits.provisionalGames,
         updatedAt: new Date().toISOString(),
       }));
+      if (v3) {
+        const rule = limits.board;
+        const groups = await new Promise((resolve, reject) => {
+          const worker = new Worker(new URL('./ranking-worker.mjs', import.meta.url), { workerData: {
+            rows: result.rows, groupV3: { rule, singleTask: Boolean(task), boards: standings ? categoryBoards : null,
+              minimumGames: LEADERBOARD_MINIMUM_GAMES, excludedModel: EXCLUDED_LEADERBOARD_MODEL,
+              seed: createHash('sha256').update(cacheKey).digest().readUInt32BE(0) },
+          } });
+          worker.once('message', resolve);
+          worker.once('error', reject);
+          worker.once('exit', (code) => { if (code !== 0) reject(new Error(`Ranking worker exited with ${code}`)); });
+        });
+        return { ...result, ...groups, unranked: [], minimumGames: LEADERBOARD_MINIMUM_GAMES,
+          scoring: { version: 3, weighted: true, minimumGames: LEADERBOARD_MINIMUM_GAMES,
+            minimumTasks: task ? 0 : rule.minimumTasks, maxTaskShare: rule.maxTaskShare,
+            minimumEffectiveVoters: rule.minimumEffectiveVoters, taskSpread: task ? 0 : rule.taskSpread,
+            rankRange: rule.rankRange.level, composite: rule.composite } };
+      }
       return result;
     });
     activeCache.set(cacheKey, pending);
@@ -522,15 +546,19 @@ export function createArena({ db, catalog, library, limits, random = Math.random
   }
 
   async function leaderboardSnapshot(options = {}) {
+    // Warmup and HTTP reads must address the same published snapshot.
+    options = { ...options, weightedTrial: options.weightedTrial ?? false,
+      scoring: options.board || options.audience === 'curated' ? 2 : options.scoring ?? limits.board.scoring };
     for (;;) {
       const snapshot = options.snapshot ?? catalog.snapshot();
       const before = currentRevision(snapshot);
-      const key = JSON.stringify([snapshot.version, ...['task', 'category', 'domain', 'board', 'audience', 'sectionId', 'by', 'harness', 'provider', 'senior', 'weightedTrial']
+      const key = JSON.stringify([snapshot.version, ...['task', 'category', 'domain', 'board', 'audience', 'sectionId', 'by', 'harness', 'provider', 'senior', 'weightedTrial', 'scoring']
         .map((field) => options[field] ?? null)]);
       // Senior boards never enter the shared ten-minute cache; they read the live calculation.
       const read = async () => {
         const archive = options.snapshot ?? catalog.snapshot();
         const data = await leaderboard({ ...options, snapshot: archive });
+        if (data.scoring?.version >= 3) return data;
         // Display eligibility never removes ballots or changes matchmaking's live fit.
         const result = { ...data, minimumGames: LEADERBOARD_MINIMUM_GAMES, rows: publishedRows(data.rows), unranked: [] };
         if (data.standings) {

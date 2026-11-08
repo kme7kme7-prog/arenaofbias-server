@@ -3,11 +3,15 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { openDatabase } from '../server/db.mjs';
+import { openDatabase, transaction } from '../server/db.mjs';
 import { createUsageService, validateUsage } from '../server/work-usage.mjs';
 import { isStaff } from '../server/roles.mjs';
 
-export function importUsage({ db, data, adminId = null, apply = false, replace = false }) {
+export function importUsage(options) {
+  return options.apply ? transaction(options.db, () => prepareAndImport(options)) : prepareAndImport(options);
+}
+
+function prepareAndImport({ db, data, adminId = null, apply = false, replace = false }) {
   if (!data || !Array.isArray(data.works)) throw new Error('输入必须含 works 数组');
   const actor = adminId ? db.prepare('SELECT * FROM users WHERE id=?').get(adminId) : {id:null,name:'系统导入',role:'admin'};
   if (!isStaff(actor)) throw new Error('录入人必须是现有管理员');
@@ -31,7 +35,7 @@ export function importUsage({ db, data, adminId = null, apply = false, replace =
     } catch(error) {plan.push({id:id??null,status:'invalid',error:error.message});}
   }
   const blocked = plan.some(row=>['invalid','conflict'].includes(row.status));
-  if (apply && !blocked) for (const row of plan) if (row.status !== 'unchanged') service.saveUsage(actor,row.task,row.id,row.usage);
+  if (apply && !blocked) for (const row of plan) if (row.status !== 'unchanged') service.saveUsage(actor,row.task,row.id,row.usage,{inTransaction:true});
   return {apply,replace,blocked,results:plan};
 }
 
@@ -51,7 +55,8 @@ function main() {
   try {
     const report=importUsage({db,data,adminId:options['admin-id'],apply:options.apply,replace:options.replace});
     for(const row of report.results)console.log(JSON.stringify({...row,mode:report.apply?'apply':'dry-run',written:report.apply&&!report.blocked&&['insert','replace'].includes(row.status)}));
-    console.log(JSON.stringify({mode:report.apply?'apply':'dry-run',blocked:report.blocked,count:report.results.length}));
+    console.log(JSON.stringify({mode:report.apply?'apply':'dry-run',blocked:report.blocked,count:report.results.length,
+      ...(report.apply&&!report.blocked&&report.results.some(row=>row.status!=='unchanged') ? {notice:'导入后公开目录与榜单缓存会在下次请求时刷新'} : {})}));
     if(report.blocked)process.exitCode=1;
   } finally {db.close();}
 }

@@ -42,6 +42,7 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).hr
     try {
       const report=importArtifacts({db,data,apply:options.apply,catalog:options.dist?createCatalog(resolve(options.dist)):null});
       for(const row of report.results)console.log(JSON.stringify({...row,mode:options.apply?'apply':'dry-run',written:options.apply&&!report.blocked&&row.status!=='unchanged'}));
+      if(report.apply&&!report.blocked&&report.results.some(row=>row.status!=='unchanged'))console.log(JSON.stringify({notice:'导入后公开目录与榜单缓存会在下次请求时刷新'}));
       if(report.blocked)process.exitCode=1;
     }finally{db.close();}
   }catch(error){console.error(error.message);process.exitCode=1;}

@@ -16,7 +16,7 @@ import { createLoginSecurity } from './login-security.mjs';
 import { createCapturer } from './capture.mjs';
 import { createModerator } from './moderation.mjs';
 import { createCatalog } from './catalog.mjs';
-import { createActivityRevision, createCatalogResponse, createCatalogRevision, createSharedJson } from './catalog-response.mjs';
+import { createActivityRevision, createCatalogResponse, createCatalogRevision, createMetricsRevision, createSharedJson } from './catalog-response.mjs';
 import { createSharedRead } from './shared-read.mjs';
 import { createComments } from './comments.mjs';
 import { createChangelog } from './changelog.mjs';
@@ -84,6 +84,8 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const adminService = createAdmin({ db, catalog, library });
   const inbox = createInbox({ library, config, limits });
   const catalogRevision = createCatalogRevision(db);
+  const metricsRevision = createMetricsRevision(db);
+  const displayRevision = () => `${catalogRevision()}|${metricsRevision()}`;
   const curated = createCurated({ db, catalog, library, questions });
   const arena = createArena({ db, catalog, library, limits, revision: catalogRevision, curated });
   const qualification = createQualification({ db, catalog, library, auth });
@@ -228,7 +230,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const publicCatalog = createCatalogResponse(db, catalog, async (snapshot) => ({
     ...versionInfo(snapshot), serverVersion, providers: snapshot.providers(), domains: DOMAINS, domainGroups: DOMAIN_GROUPS,
     site: siteInfo(), works: (await galleryList(null, snapshot)).map(withoutMine), questions: catalog.withSnapshot(() => questions.all().map(withoutMine)),
-  }), { revision: catalogRevision });
+  }), { revision: displayRevision });
   function session(user) {
     return {
       ...versionInfo(),
@@ -300,7 +302,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   // Signed-in requests never touch it. private keeps CDNs from storing it.
   const bootstrapActivity = createActivityRevision(db);
   const anonymousBootstrap = (lite) => createSharedJson({
-    strict: () => `${catalog.snapshot().version}|${catalogRevision()}|${capturer.available}|${moderator.enabled}`,
+    strict: () => `${catalog.snapshot().version}|${displayRevision()}|${capturer.available}|${moderator.enabled}`,
     loose: bootstrapActivity,
     read: () => bootstrap(null, { lite }),
     ttl: config.bootstrapCacheMs ?? 15_000,
@@ -1243,7 +1245,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         // Request-local only: a selected text roster must also follow a
         // withdrawal while its compressed representation is being built.
         return await createSharedJson({
-          strict: () => `${catalog.snapshot().version}|${catalogRevision()}`,
+          strict: () => `${catalog.snapshot().version}|${displayRevision()}`,
           read: () => catalog.withSnapshot(() => route.handler(ctx)), ttl: 0, cacheControl: 'no-store', compressBody,
         })(req, res);
       }

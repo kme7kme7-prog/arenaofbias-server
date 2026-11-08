@@ -1029,3 +1029,61 @@ test('costs default to hidden publicly while senior price maintenance remains av
   assert.equal((await call('voter','GET',path)).status,404);
   assert.equal((await call('guest','GET','/api/catalog')).data.works.some(w=>w.id==='a'&&w.task==='one'),false);
 }));
+
+test('local metrics update catalog/bootstrap without refreshing published scores; external imports retain data_version refresh', async () => withPlatform(async ({platform,call}) => {
+  const {putArtifact}=await import('../server/work-usage.mjs');
+  const root=platform.db.prepare("SELECT * FROM users WHERE name='root'").get();
+  const staff=platform.db.prepare("SELECT * FROM users WHERE name='voter'").get();
+  platform.auth.setRole(root,staff.id,'moderator');
+  const trial=(await call('voter','POST','/api/arena/matches',{task:'one',guided:true})).data;
+  assert.equal((await call('voter','POST',`/api/arena/matches/${trial.id}/vote`,{choice:'a',aspect:{id:trial.aspect.id,choice:'tie'}})).status,200);
+  const match=(await call('root','POST','/api/arena/matches',{task:'one'})).data;
+  assert.equal((await call('root','POST',`/api/arena/matches/${match.id}/vote`,{choice:'a'})).status,200);
+  const v2=await platform.arena.leaderboardSnapshot({by:'model',scoring:2});
+  const v3=await platform.arena.leaderboardSnapshot({by:'model',scoring:3});
+  const curated=await platform.arena.leaderboardSnapshot({by:'model',audience:'curated'});
+  assert.equal(v2.rows.length,0);
+  const seed=platform.db.prepare('SELECT * FROM votes LIMIT 1').get();
+  for(let i=0;i<24;i++) {
+    const row={...seed,id:`metrics-extra-${i}`,match_id:`metrics-match-${i}`,user_id:null,visitor_hash:`metrics-visitor-${i}`};
+    const keys=Object.keys(row);
+    platform.db.prepare(`INSERT INTO votes (${keys.join(',')}) VALUES (${keys.map(()=>'?').join(',')})`).run(...keys.map(key=>row[key]));
+  }
+  platform.arena.invalidate({votesOnly:true,task:'one'});
+  const guided=await platform.arena.guidedDimensions(root,'model');
+  const unchanged=async()=>{
+    assert.strictEqual(await platform.arena.leaderboardSnapshot({by:'model',scoring:2}),v2);
+    assert.strictEqual(await platform.arena.leaderboardSnapshot({by:'model',scoring:3}),v3);
+    assert.strictEqual(await platform.arena.leaderboardSnapshot({by:'model',audience:'curated'}),curated);
+    assert.strictEqual(await platform.arena.guidedDimensions(root,'model'),guided);
+  };
+  const work=data=>data.works.find(row=>row.task==='one'&&row.id==='a');
+  assert.equal('usage' in work((await call('guest','GET','/api/catalog')).data),false);
+  assert.equal('usage' in work((await call('guest','GET','/api/bootstrap')).data),false);
+  const path='/api/admin/works/one/a/usage';
+  assert.equal((await call('root','PUT',path,{input:11,source:'api'})).status,200);
+  assert.equal(work((await call('guest','GET','/api/catalog')).data).usage.input,11);
+  assert.equal(work((await call('guest','GET','/api/bootstrap')).data).usage.input,11);
+  await unchanged();
+  putArtifact(platform.db,{task:'one',work:'a',artifact:{files:1,lines:1,bytes:6,chars:2}});
+  assert.equal(work((await call('guest','GET','/api/catalog')).data).artifact.chars,2);
+  assert.equal(work((await call('guest','GET','/api/bootstrap')).data).artifact.chars,2);
+  await unchanged();
+  // Illustrative prices only; price/meta mutations also stay outside score revision.
+  assert.equal((await call('root','PUT','/api/admin/pricing/models/ma/2026-11-01',{currency:'USD',input:1,output:2,url:'https://example.test/illustrative-pricing'})).status,200);
+  assert.equal((await call('root','PUT','/api/admin/pricing/meta',{asOf:'2026-11-08',fxAsOf:'2026-11-08',fx:{USD:7}})).status,200);
+  await unchanged();
+  assert.equal((await call('root','DELETE',path)).status,200);
+  assert.equal('usage' in work((await call('guest','GET','/api/catalog')).data),false);
+  assert.equal('usage' in work((await call('guest','GET','/api/bootstrap')).data),false);
+  await unchanged();
+  assert.equal((await call('root','PUT',path,{input:12,source:'api'})).status,200);
+  await unchanged();
+  const external=new DatabaseSync(platform.db.prepare('PRAGMA database_list').get().file);
+  try {external.exec("UPDATE work_usage SET input=123 WHERE task_id='one' AND work_id='a'");}finally{external.close();}
+  assert.equal(work((await call('guest','GET','/api/catalog')).data).usage.input,123);
+  const after=await platform.arena.leaderboardSnapshot({by:'model',scoring:2});
+  assert.notStrictEqual(after,v2);assert.equal(after.rows.length,2);
+  assert.notEqual((await platform.arena.leaderboardSnapshot({by:'model',scoring:3})).generation,v3.generation);
+  assert.notStrictEqual(await platform.arena.guidedDimensions(root,'model'),guided);
+}));

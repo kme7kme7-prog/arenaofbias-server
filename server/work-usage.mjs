@@ -1,4 +1,5 @@
 // Raw administrator measurements and official-price records. No cost calculations or network reads.
+import { transaction } from './db.mjs';
 import { fail } from './http.mjs';
 import { isStaff, isSenior } from './roles.mjs';
 
@@ -43,14 +44,14 @@ export function createWorkMetrics(db, { showCost = false } = {}) {
 
 // Internal entry point for the artifact backfill CLI; there is no public writer.
 export function validateArtifact(artifact) {
-  if (!plain(artifact)
-    || !['files','lines','bytes'].every(key => Number.isSafeInteger(artifact[key]) && artifact[key] >= 0)
-    || Object.entries(artifact).some(([key,value]) => {
-      if (['files','lines','bytes','tokens','chars'].includes(key)) return !Number.isSafeInteger(value) || value < 0;
-      if (key === 'tokenizer') return typeof value !== 'string';
-      if (key === 'approximate') return typeof value !== 'boolean';
-      return true;
-    })) throw new Error('Invalid artifact measurement');
+  const codeKeys = ['files','lines','bytes','tokens','tokenizer','approximate'];
+  const textKeys = ['files','lines','bytes','chars'];
+  const keys = plain(artifact) ? Object.keys(artifact) : [];
+  const exact = expected => keys.length === expected.length && expected.every(key => keys.includes(key));
+  const code = exact(codeKeys), text = exact(textKeys);
+  if ((!code && !text)
+    || !['files','lines','bytes',code ? 'tokens' : 'chars'].every(key => Number.isSafeInteger(artifact[key]) && artifact[key] >= 0)
+    || (code && (artifact.tokenizer !== 'utf8-pretoken-4-v1' || artifact.approximate !== true))) throw new Error('Invalid artifact measurement');
   return artifact;
 }
 
@@ -99,21 +100,27 @@ export function createUsageService({ db, catalog, library, showCost = false }) {
       const row = measured.get(task, id);
       return { task, id, usage: row ? { ...usageOf(row), ...metadata(row) } : null };
     },
-    saveUsage(user, task, id, body) {
+    saveUsage(user, task, id, body, { inTransaction = false } = {}) {
       workFor(user, task, id);
       body = validateUsage(body);
-      const now = Date.now();
-      db.prepare(`INSERT INTO work_usage (task_id,work_id,${COLUMNS.join(',')},paid,source,created_by,updated_by,created_at,updated_at,created_name,updated_name)
-        VALUES (${Array(17).fill('?').join(',')}) ON CONFLICT(task_id,work_id) DO UPDATE SET
-        ${COLUMNS.map(name => `${name}=excluded.${name}`).join(',')},paid=excluded.paid,source=excluded.source,updated_by=excluded.updated_by,updated_at=excluded.updated_at,updated_name=excluded.updated_name`)
-        .run(task, id, ...NUMBERS.map(name => body[name] ?? null), body.paid == null ? null : JSON.stringify(present(body.paid)), body.source, user.id ?? null, user.id ?? null, now, now, user.name ?? '导入', user.name ?? '导入');
-      audit(user, 'usage-save', task, id);
+      const save = () => {
+        const now = Date.now();
+        db.prepare(`INSERT INTO work_usage (task_id,work_id,${COLUMNS.join(',')},paid,source,created_by,updated_by,created_at,updated_at,created_name,updated_name)
+          VALUES (${Array(17).fill('?').join(',')}) ON CONFLICT(task_id,work_id) DO UPDATE SET
+          ${COLUMNS.map(name => `${name}=excluded.${name}`).join(',')},paid=excluded.paid,source=excluded.source,updated_by=excluded.updated_by,updated_at=excluded.updated_at,updated_name=excluded.updated_name`)
+          .run(task, id, ...NUMBERS.map(name => body[name] ?? null), body.paid == null ? null : JSON.stringify(present(body.paid)), body.source, user.id ?? null, user.id ?? null, now, now, user.name ?? '导入', user.name ?? '导入');
+        audit(user, 'usage-save', task, id);
+      };
+      if (inTransaction) save();
+      else transaction(db, save);
       return this.getUsage(user, task, id);
     },
     deleteUsage(user, task, id) {
       workFor(user, task, id);
-      db.prepare('DELETE FROM work_usage WHERE task_id=? AND work_id=?').run(task, id);
-      audit(user, 'usage-delete', task, id);
+      transaction(db, () => {
+        db.prepare('DELETE FROM work_usage WHERE task_id=? AND work_id=?').run(task, id);
+        audit(user, 'usage-delete', task, id);
+      });
       return { ok: true };
     },
     savePrice(user, model, since, body) {

@@ -5,7 +5,7 @@ import { MIN_COMPRESS_BYTES, compress, etagFor, etagMatches, pickEncoding, withV
 
 export function createCatalogRevision(db) {
   db.exec('CREATE TEMP TABLE catalog_revision (revision INTEGER NOT NULL); INSERT INTO catalog_revision VALUES (0);');
-  const tables = ['works', 'questions', 'work_overrides', 'question_overrides', 'reference_uploads', 'work_usage', 'work_artifacts'];
+  const tables = ['works', 'questions', 'work_overrides', 'question_overrides', 'reference_uploads'];
   for (const table of [...tables, 'users']) {
     for (const event of ['INSERT', 'UPDATE', 'DELETE']) {
       const change = table === 'users' && event === 'UPDATE' ? 'UPDATE OF name, nickname, avatar, role' : event;
@@ -16,6 +16,18 @@ export function createCatalogRevision(db) {
   const revision = db.prepare('SELECT revision FROM catalog_revision');
   const external = db.prepare('PRAGMA data_version');
   return () => `${revision.get().revision}|${external.get().data_version}`;
+}
+
+// Display-only measurements never invalidate arena's fits or published score snapshots.
+// External writes still reach both readers through catalogRevision's data_version.
+export function createMetricsRevision(db) {
+  db.exec('CREATE TEMP TABLE metrics_revision (revision INTEGER NOT NULL); INSERT INTO metrics_revision VALUES (0);');
+  for (const table of ['work_usage', 'work_artifacts', 'model_prices', 'pricing_meta']) {
+    for (const event of ['INSERT', 'UPDATE', 'DELETE']) db.exec(`CREATE TEMP TRIGGER metrics_${table}_${event.toLowerCase()}
+      AFTER ${event} ON main.${table} BEGIN UPDATE metrics_revision SET revision = revision + 1; END;`);
+  }
+  const read = db.prepare('SELECT revision FROM metrics_revision');
+  return () => String(read.get().revision);
 }
 
 // Writes that change the public activity block (votes, reactions, featured picks).
@@ -107,7 +119,11 @@ export function createSharedJson({ strict, loose = () => '', read, ttl = 30_000,
   return handler;
 }
 
-export function createCatalogResponse(db, catalog, read, { mediaTtl = 30_000, revision = createCatalogRevision(db) } = {}) {
+export function createCatalogResponse(db, catalog, read, { mediaTtl = 30_000, revision = null } = {}) {
+  if (!revision) {
+    const catalogRevision = createCatalogRevision(db), metricsRevision = createMetricsRevision(db);
+    revision = () => `${catalogRevision()}|${metricsRevision()}`;
+  }
   return createSharedJson({
     strict: () => `${catalog.snapshot().version}|${revision()}`,
     read: () => read(catalog.snapshot()),

@@ -28,8 +28,18 @@ test('v57 is additive/idempotent and usage import dry-runs, validates, deduplica
     const dry=spawnSync(process.execPath,['scripts/usage-import.mjs','--db',file,'--input',input],{encoding:'utf8'});
     assert.equal(dry.status,0,dry.stderr);assert.match(dry.stdout,/dry-run/);
     assert.equal(db.prepare('SELECT COUNT(*) n FROM work_usage').get().n,0);
+    db.exec(`CREATE TEMP TRIGGER fail_second_usage BEFORE INSERT ON work_usage WHEN NEW.work_id='${ids[1]}' BEGIN SELECT RAISE(ABORT,'synthetic second insert failure'); END`);
+    assert.throws(()=>importUsage({db,data,apply:true}),/synthetic second insert failure/);
+    assert.equal(db.prepare('SELECT COUNT(*) n FROM work_usage').get().n,0);
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM audit WHERE action='usage-save'").get().n,0);
+    db.exec('DROP TRIGGER fail_second_usage');
+    db.exec(`CREATE TEMP TRIGGER fail_usage_audit BEFORE INSERT ON audit WHEN NEW.action='usage-save' AND NEW.work_id='${ids[1]}' BEGIN SELECT RAISE(ABORT,'synthetic second audit failure'); END`);
+    assert.throws(()=>importUsage({db,data,apply:true}),/synthetic second audit failure/);
+    assert.equal(db.prepare('SELECT COUNT(*) n FROM work_usage').get().n,0);
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM audit WHERE action='usage-save'").get().n,0);
+    db.exec('DROP TRIGGER fail_usage_audit');
     const applied=spawnSync(process.execPath,['scripts/usage-import.mjs','--db',file,'--input',input,'--apply'],{encoding:'utf8'});
-    assert.equal(applied.status,0,applied.stderr);assert.match(applied.stdout,/\"written\":true/);
+    assert.equal(applied.status,0,applied.stderr);assert.match(applied.stdout,/\"written\":true/);assert.match(applied.stdout,/导入后公开目录与榜单缓存会在下次请求时刷新/);
     assert.equal(db.prepare('SELECT COUNT(*) n FROM work_usage').get().n,15);
     assert.equal(db.prepare('SELECT created_name FROM work_usage LIMIT 1').get().created_name,'系统导入');
     assert.equal(db.prepare('SELECT cache_write FROM work_usage LIMIT 1').get().cache_write,null);
@@ -65,4 +75,16 @@ test('artifact backfill JSON persists package and upload measurements idempotent
     assert.equal(importArtifacts({db,data:invalid,catalog,apply:true}).blocked,true);
     assert.equal(JSON.parse(db.prepare("SELECT artifact FROM work_artifacts WHERE work_id='pack'").get().artifact).tokens,3);
   }finally{db.close();}
+});
+
+
+test('artifact validation accepts only the declared code and text shapes', async () => {
+  const {validateArtifact}=await import('../server/work-usage.mjs');
+  const code={files:0,lines:0,bytes:0,tokens:0,tokenizer:'utf8-pretoken-4-v1',approximate:true};
+  const text={files:0,lines:0,bytes:0,chars:0};
+  assert.deepEqual(validateArtifact(code),code);assert.deepEqual(validateArtifact(text),text);
+  for(const artifact of [{files:1,lines:1,bytes:1,tokens:100},{...code,chars:0},{...code,approximate:false},
+    {...code,tokenizer:''},{...code,tokenizer:'unknown'},{files:1,lines:1,bytes:1},{...text,tokens:0},{...text,approximate:true}]) {
+    assert.throws(()=>validateArtifact(artifact),/Invalid artifact/);
+  }
 });

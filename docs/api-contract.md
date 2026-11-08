@@ -1418,3 +1418,6 @@ v49 给 `moderation_tokens` 加 `scopes`（已有令牌默认 `moderation`），
 批量导入：`node scripts/usage-import.mjs --db <platform.db> --input <usage.json> [--dry-run|--apply] [--replace] [--admin-id <id>]`，默认只读预演，输入works[].uploadId匹配未删除站内作品ID。全量预检，有非法字段/不存在作品/冲突则整批不写；相同记录不改时间，覆盖差异须replace。可指定管理员或记录「系统导入」，不更改模型/Harness/作品内容。每件打印计划与实际写入状态，冲突/错误退出1。
 
 产物统计落库：只读 `scripts/artifact-backfill.mjs`（usage-tools分支）输出JSON，再用 `node scripts/artifact-import.mjs --db <platform.db> --input <输出.json> [--dist <只读数据包>] [--dry-run|--apply]`。默认预演，全量检查后显式apply才写work_artifacts；同值不改时间。代码体量含tokens/tokenizer/approximate，文本体量含chars，算法定义见工具契约；不冒充o200k或计费token。公开读取不扫描文件，全部作品由该回填路径覆盖，缺原始文件只报缺失、不猜体量。
+
+
+缓存与导入事务：HTTP及同进程usage/artifact/pricing写入使用独立TEMP展示修订，目录/bootstrap立刻更新，但不会提前刷新v2发布快照、v3原子发布集合或guided拟合。外部CLI仍沿用PRAGMA data_version检测：实际导入后，公开目录与榜单缓存在下次请求时刷新，CLI会输出同样提示；这是保留的外部写库行为。usage-import整批预检、查重、upsert及审计处于同一事务，任何执行错误整批回滚；HTTP单件用量和审计也原子提交。产物校验严格互斥：代码必须files/lines/bytes/tokens/tokenizer=utf8-pretoken-4-v1/approximate=true；文本必须files/lines/bytes/chars，禁止混用。

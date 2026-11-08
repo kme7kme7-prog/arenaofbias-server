@@ -1,4 +1,5 @@
-import { fitBradleyTerry } from './ranking.mjs';
+import { createHash } from 'node:crypto';
+import { fitBradleyTerry, rankRanges } from './ranking.mjs';
 
 // Guided blind voting trial (staff only). Besides the overall question, a trial match may carry
 // one aspect question (测评点) from its category's pool. Trial answers are kept in guided_trial_votes,
@@ -97,7 +98,7 @@ export function trialStandings(ballots, keyOf, describe) {
 }
 
 // Anchored per-dimension fits; priors is a map of category-board Elo scores.
-export function trialScores(ballots, keyOf, describe, priors = new Map()) {
+export function trialScores(ballots, keyOf, describe, priors = new Map(), { seedKey = '', rankRange = { draws: 2000, level: 0.95 } } = {}) {
   const result = trialStandings(ballots, keyOf, describe);
   result.dimensions = result.dimensions.filter(dimension => dimension.aspects.length);
   result.boards = {};
@@ -121,6 +122,10 @@ export function trialScores(ballots, keyOf, describe, priors = new Map()) {
     result.boards[dimension.id] = entries.filter(row => row.dimensions[dimension.id].n > 0)
       .map(row => { const { score, interval, n, thin } = row.dimensions[dimension.id]; return { key: row.key, score, interval, n, thin }; })
       .sort((a, b) => b.score - a.score || a.key.localeCompare(b.key)).map((row, i) => ({ ...row, rank: i + 1 }));
+    const board = result.boards[dimension.id];
+    const seed = createHash('sha256').update(`${seedKey}|${dimension.id}`).digest().readUInt32BE(0);
+    const ranges = rankRanges(board, { ...rankRange, seed });
+    board.forEach((row, i) => { [row.rankLow, row.rankHigh] = ranges[i]; });
   }
   const metrics = rows => {
     const answered = rows.filter(row => OUTCOMES[row.aspectChoice]);

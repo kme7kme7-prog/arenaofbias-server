@@ -343,10 +343,10 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     return pending;
   }
 
-  // Temporary source until v3 integration: the existing v2 modeling category board.
+  // Reuse the v3 published category family, including its qualification and refresh policy.
   async function guidedPriors(by, senior) {
-    const board = await leaderboard({ category: '建模', by, senior });
-    return new Map(publishedRows(board.rows).map(row => [row.key, row.score]));
+    const board = await leaderboardSnapshot({ category: '建模', audience: 'public', by, senior, scoring: 3 });
+    return new Map(board.rows.filter(row => Number.isFinite(row.score)).map(row => [row.key, row.score]));
   }
 
   // `category` (the datapack's task category, e.g. 建模) scores only that category's tasks;
@@ -897,7 +897,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       const result = { by, ...trialScores(ballots, keyOf, (work) => {
         const model = work.modelId ? snapshot.model?.(work.modelId) : null;
         return { model: work.modelId ?? null, modelName: model?.name ?? work.modelName, vendor: model?.vendor ?? work.vendor, effort: by === 'config' ? work.effort ?? '' : '' };
-      }, priors) };
+      }, priors, { seedKey: JSON.stringify([by, senior, stamp]), rankRange: limits.board.rankRange }) };
       guidedCache.set(scope, { stamp, result });
       return result;
     },

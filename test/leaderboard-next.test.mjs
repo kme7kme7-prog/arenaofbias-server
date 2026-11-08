@@ -194,3 +194,54 @@ test('v3 publishes categories and composite atomically across votes and refreshe
     }
   } finally { f.close(); }
 });
+
+test('guided priors use qualified published v3 category scores even when the default is v2', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 1800000000000 });
+  const tasks = Array.from({ length: 3 }, (_, i) => ({ id: `model-${i}`, category: '建模' }));
+  const f = fixture(tasks);
+  try {
+    for (const task of tasks) f.vote('ah', 'b', 30, task.id);
+    f.vote('c', 'dh', 21, tasks[0].id);
+    f.db.exec("UPDATE votes SET visitor_hash='heavy' WHERE CAST(substr(id,6) AS INTEGER)%3=0");
+    f.arena.invalidate();
+    // Both the qualified pair and the one-task watch pair appear in the trial chart.
+    const samples = f.db.prepare('SELECT * FROM votes WHERE id IN (?,?) ORDER BY id').all('vote-1', 'vote-91');
+    for (const [i, row] of samples.entries()) f.db.prepare(`INSERT INTO guided_trial_votes
+      (id,match_id,task_id,a_work,b_work,choice,aspect_id,aspect_choice,a_identity,b_identity,created_at)
+      VALUES (?,?,?,?,?,'tie','floating','tie',?,?,1)`)
+      .run(`trial-${i}`, `trial-match-${i}`, row.task_id, row.a_work, row.b_work, row.a_identity, row.b_identity);
+    const staff = { id: 'staff', role: 'moderator' };
+    for (const by of ['model', 'config']) {
+      const old = await f.arena.leaderboardSnapshot({ category: '建模', by, scoring: 2 });
+      const published = await f.arena.leaderboardSnapshot({ category: '建模', by, scoring: 3 });
+      assert.equal(published.rows.length, 2);
+      assert.equal(published.watch.length, 2);
+      assert.ok(published.rows.some(row => row.score !== old.rows.find(other => other.key === row.key).score));
+      const chart = await f.arena.guidedDimensions(staff, by);
+      for (const entry of chart.entries) {
+        const qualified = published.rows.find(row => row.key === entry.key);
+        assert.equal(entry.prior, qualified?.score ?? null);
+        assert.equal(entry.dimensions.aesthetic.score, qualified?.score ?? 1000);
+        assert.equal(entry.dimensions.aesthetic.interval, Math.round(1.96 * 400 / Math.LN10 * (qualified ? 0.5 : 1)));
+      }
+      assert.strictEqual(await f.arena.leaderboardSnapshot({ category: '建模', by, scoring: 3 }), published);
+      assert.strictEqual(await f.arena.guidedDimensions(staff, by), chart);
+      const board = chart.boards.craft;
+      for (const row of board) assert.ok(row.rankLow <= row.rank && row.rank <= row.rankHigh && row.rankLow >= 1 && row.rankHigh <= board.length);
+    }
+    const before = await f.arena.guidedDimensions(staff, 'model');
+    const published = await f.arena.leaderboardSnapshot({ category: '建模', by: 'model', scoring: 3 });
+    // New formal votes leave the public atomic family in its published generation.
+    for (const task of tasks) f.vote('b', 'ah', 30, task.id, {}, { votesOnly: true, task: task.id });
+    const held = await f.arena.guidedDimensions(staff, 'model');
+    assert.deepEqual(held.entries.map(row => [row.key, row.prior]), before.entries.map(row => [row.key, row.prior]));
+    assert.strictEqual(await f.arena.leaderboardSnapshot({ category: '建模', by: 'model', scoring: 3 }), published);
+    t.mock.timers.tick(600001);
+    const refreshed = await f.arena.guidedDimensions(staff, 'model');
+    assert.notStrictEqual(refreshed, held);
+    assert.notDeepEqual(refreshed.entries.map(row => row.prior), held.entries.map(row => row.prior));
+    const next = await f.arena.leaderboardSnapshot({ category: '建模', by: 'model', scoring: 3 });
+    assert.notEqual(next.generation, published.generation);
+    for (const row of next.rows) assert.equal(refreshed.entries.find(entry => entry.key === row.key).prior, row.score);
+  } finally { f.close(); }
+});

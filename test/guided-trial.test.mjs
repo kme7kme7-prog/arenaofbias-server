@@ -258,3 +258,13 @@ test('agreement aggregates duplicate voters, flipped sides and missing voters wi
   assert.equal(large.agreementN, 199990000);
   assert.equal(large.agreementRate, 1);
 });
+
+test('dimension rank ranges reflect tied scores and are deterministic for a fixed snapshot', () => {
+  const a = { id: 'a', modelKey: 'a' }, b = { id: 'b', modelKey: 'b' };
+  const rows = [{ a, b, choice: 'tie', aspectId: 'floating', aspectChoice: 'tie', createdAt: 1 }];
+  const read = () => trialScores(rows, w => w.modelKey, () => ({}), new Map(), { seedKey: 'model|false|fixed-trial-revision' });
+  const first = read(), second = read();
+  assert.deepEqual(first.boards, second.boards);
+  assert.deepEqual(first.boards.craft.map(row => [row.rankLow, row.rankHigh]), [[1, 2], [1, 2]]);
+  assert.deepEqual(first.boards.aesthetic, []);
+});

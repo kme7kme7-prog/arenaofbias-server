@@ -71,11 +71,17 @@ Codex 默认根为 `$CODEX_HOME`（未设置则 `~/.codex`），读取其 sessio
 
 首个 session_meta 定义该文件所属会话；fork 日志可能重放祖先 session_meta，后续 meta 不能改写所属会话。Desktop 也可能复用同一 id 先写一个无 token 的放弃 rollout、再写正式 rollout；无 token 的尝试单独列 skipped，不合入正式尝试的模型、用户消息和起止时间。有 token 的同 id rollout 以累计事件去重汇总。turn_context 的 model/effort 用于标注。只保留 token 数字、时间、型号、父子关系与消息计数；不保存正文或工具参数。用户消息计数来自 response_item/message/role=user，前缀去空白以 `<` 开始的环境注入不计。turns 是主会话 task_started 数，userMessages 或 turns 大于 1 时 multiTurn=true；两者均不叠加子代理的内部轮次。
 
-每会话 token_count.info=null 忽略。单型号用最后非空累计 total_token_usage，不对快照累加。input=input_tokens-cached_input_tokens，cacheRead=cached_input_tokens；output 已含 reasoning_output_tokens，reasoning 单列但不重复相加。cache_write_input_tokens 明确0时省略 cacheWrite（已知0不标缺失）；字段在最终累计里缺失时省略并列入 incomplete。requests 是累计 total_tokens 相对前值增长的次数，重复快照不多算。
+每会话 token_count.info=null 忽略。无重置的单型号会话用最后非空累计 total_token_usage，不对快照累加；发生下降时按下述 epoch 规则处理。input=input_tokens-cached_input_tokens，cacheRead=cached_input_tokens；output 已含 reasoning_output_tokens，reasoning 单列但不重复相加。cache_write_input_tokens 明确0时省略 cacheWrite（已知0不标缺失）；字段在最终累计里缺失时省略并列入 incomplete。requests 是累计 total_tokens 相对前值增长的次数，重复快照不多算。
+
+累计比较与字段覆盖分开维护：空/缺字段快照不会清除已知计数基线，因而「完整110 → 空对象 → 相同110」的 requests 仍为1；但最终快照缺失的字段仍省略并标 incomplete，不能回填旧数字。
+
+任一已知原始累计字段下降时，按新 epoch 分段：上一段只计最终累计一次，新段从0开始；跨型号段仍减其段前累计。计数不取全局最大值，也不逐条快照求和。根记录新增 `counterReset:[{sessionId,snapshot,fields,before,after}]`：snapshot 为该会话按时间排序的 token_count 累计快照序号（从1起，包含空对象快照），before/after 是发生位置两侧的已知原始计数，fields 列出下降字段；子代理的重置也汇总到主记录。未检测到重置时省略此字段。
+
+下降也可能来自陈旧事件或日志异常；这里的 epoch 是明确标注的处理规则，不证明真实计费发生重置。带 counterReset 的报告需管理员复核，不能无视告警直接录入。重置边界缺字段，无法确认其前后状态时，相关字段永久列入该模型 incomplete，即使后面又出现数字也不猜补；同一模型任一贡献段未知，整个字段省略。最终空/缺字段记录仍保持未知。
 
 若 turn_context.model 在有消费的快照之间改变，按型号分段：各段末累计减段前累计，再按型号汇总，不能把整个累计归给最后一个型号；缺段前字段则不推算对应差值。没有 token 的上下文型号不触发混模。不同子代理型号也按型号分组。任一贡献段/会话的字段未知，则该模型整个字段省略并标 incomplete。
 
-Codex 输出 `{sessions:[{sessionId,cwd?,model?,effort?,efforts?,userMessages,turns,multiTurn,subagentIds,subagents,usage?,incomplete?,incompleteSessions?,mixedModels?,byModel?,durationSec?}],skipped:[{sessionId,reason}]}`。单型号有 usage；混模仅 byModel，无合并 usage。没有 token 的会话跳过并报告；若主会话无 token 而后代有，则保留后代消费，并用 skipped/incompleteSessions 明示主会话缺失，不冒称完整生成用量。subagents 包含整棵后代树（也列出被跳过的后代 id），不是主会话数量。
+Codex 输出 `{sessions:[{sessionId,cwd?,model?,effort?,efforts?,userMessages,turns,multiTurn,subagentIds,subagents,usage?,incomplete?,incompleteSessions?,counterReset?,mixedModels?,byModel?,durationSec?}],skipped:[{sessionId,reason}]}`。单型号有 usage；混模仅 byModel，无合并 usage。没有 token 的会话跳过并报告；若主会话无 token 而后代有，则保留后代消费，并用 skipped/incompleteSessions 明示主会话缺失，不冒称完整生成用量。subagents 包含整棵后代树（也列出被跳过的后代 id），不是主会话数量。
 
 durationSec 为主会话首个 task_started 至最后 task_complete 的秒数，保留毫秒精度，不相加子代理时长；后一轮尚在进行或已放弃、最后完成事件早于最新消费时省略，避免拿旧完成时间配新 token。混模型时只在顶层给出会话耗时，不假造逐模型耗时。effort 为主会话最后已知档位、efforts 列出其上下文档位；模型以有消费的分组为准。
 

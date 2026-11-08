@@ -117,3 +117,66 @@ test('Codex an empty final cumulative snapshot cannot reuse older complete field
   const row=aggregateCodexUsage([[meta('a'),tokens(10,0,2,0,12,1),event('token_count',2,{info:{total_token_usage:{}}})]]).sessions[0];
   assert.deepEqual(row.usage,{source:'log'});assert.ok(row.incomplete.includes('input'));assert.ok(row.incomplete.includes('requests'));
 });
+
+test('Codex decreasing counters start a new epoch, preserve previous consumption and report numeric reset position', () => {
+  const row=aggregateCodexUsage([[meta('a'),tokens(100,40,10,2,110,1),tokens(20,5,3,1,23,2),tokens(40,10,6,2,46,3)]]).sessions[0];
+  assert.deepEqual(row.usage,{source:'log',input:90,cacheRead:50,output:16,reasoning:4,requests:3});
+  assert.equal(row.counterReset.length,1);assert.equal(row.counterReset[0].sessionId,'a');assert.equal(row.counterReset[0].snapshot,2);
+  assert.equal(row.counterReset[0].before.total_tokens,110);assert.equal(row.counterReset[0].after.total_tokens,23);
+  assert.ok(row.counterReset[0].fields.includes('input_tokens'));assert.equal(row.incomplete,undefined);
+});
+test('Codex empty or partial intermediate snapshots do not clear the last known request baseline', () => {
+  for(const counts of [{},{output_tokens:10}]) {
+    const row=aggregateCodexUsage([[meta('a'),tokens(100,40,10,2,110,1),event('token_count',2,{info:{total_token_usage:counts}}),tokens(100,40,10,2,110,3)]]).sessions[0];
+    assert.equal(row.usage.requests,1);assert.equal(row.usage.input,60);assert.equal(row.usage.output,10);
+    assert.equal(row.counterReset,undefined);assert.equal(row.incomplete,undefined);
+  }
+});
+test('Codex reset across reused-id rollouts counts epochs instead of taking the maximum', () => {
+  const row=aggregateCodexUsage([[meta('same'),tokens(100,40,10,2,110,1)],
+    [meta('same'),tokens(20,5,3,1,23,2),tokens(40,10,6,2,46,3)]]).sessions[0];
+  assert.equal(row.usage.input,90);assert.equal(row.usage.cacheRead,50);assert.equal(row.usage.output,16);assert.equal(row.usage.requests,3);
+  assert.equal(row.counterReset.length,1);
+});
+test('Codex stale-looking decrease and recovery is explicitly flagged as an epoch assumption', () => {
+  const row=aggregateCodexUsage([[meta('a'),tokens(100,40,10,2,110,1),tokens(20,5,3,1,23,2),tokens(100,40,10,2,110,3)]]).sessions[0];
+  assert.equal(row.counterReset.length,1);assert.equal(row.usage.input,120);assert.equal(row.usage.cacheRead,80);
+  assert.equal(row.usage.output,20);assert.equal(row.usage.requests,3);
+});
+test('Codex reset plus empty snapshot plus duplicate retains request baseline; final empty stays incomplete', () => {
+  const logs=[[meta('a'),tokens(100,40,10,2,110,1),tokens(20,5,3,1,23,2),event('token_count',3,{info:{total_token_usage:{}}}),tokens(20,5,3,1,23,4)]];
+  const row=aggregateCodexUsage(logs).sessions[0];
+  assert.equal(row.usage.requests,2);assert.equal(row.usage.input,75);assert.equal(row.counterReset.length,1);
+  logs[0].push(event('token_count',5,{info:{total_token_usage:{}}}));
+  const incomplete=aggregateCodexUsage(logs).sessions[0];
+  assert.deepEqual(incomplete.usage,{source:'log'});assert.ok(incomplete.incomplete.includes('requests'));
+  assert.equal(incomplete.counterReset.length,1);
+});
+test('Codex reset with unknown boundary fields omits those fields even when later filled', () => {
+  const logs=[[meta('a'),tokens(100,40,10,2,110,1),event('token_count',2,{info:{total_token_usage:{output_tokens:3,total_tokens:23}}}),tokens(40,10,6,2,46,3)]];
+  const row=aggregateCodexUsage(logs).sessions[0];
+  assert.equal(row.usage.input,undefined);assert.equal(row.usage.cacheRead,undefined);assert.equal(row.usage.output,16);assert.equal(row.usage.requests,3);
+  assert.ok(row.incomplete.includes('input'));assert.ok(row.incomplete.includes('cacheRead'));assert.equal(row.counterReset.length,1);
+  // Per-field last-known values can come from different snapshots; do not treat them as one complete input/cache pair.
+  const partialBefore=aggregateCodexUsage([[meta('b'),tokens(100,40,10,2,110,1),event('token_count',2,{info:{total_token_usage:{cached_input_tokens:120}}}),tokens(20,5,3,1,23,3)]]).sessions[0];
+  assert.equal(partialBefore.usage.input,undefined);assert.ok(partialBefore.incomplete.includes('input'));assert.equal(partialBefore.counterReset.length,1);
+});
+test('Codex model switch and reset are reported separately, including descendant reset diagnostics', () => {
+  const report=aggregateCodexUsage([[meta('a'),record('turn_context',{model:'one'}),tokens(100,40,10,2,110,1),
+    record('turn_context',{model:'two'},2),tokens(20,5,3,1,23,3),tokens(40,10,6,2,46,4)]]);
+  const row=report.sessions[0];assert.equal(row.mixedModels,true);assert.equal(row.counterReset.length,1);
+  assert.deepEqual(row.byModel.map(g=>[g.model,g.usage.input,g.usage.requests]),[['one',60,1],['two',30,2]]);
+  const child=aggregateCodexUsage([[meta('a'),tokens(1,0,1,0,2,1)],[meta('c','a'),tokens(100,40,10,2,110,1),tokens(20,5,3,1,23,2)]]).sessions[0];
+  assert.equal(child.counterReset[0].sessionId,'c');
+});
+
+test('Codex empty snapshots on a tokenless model switch do not erase the previous model boundary', () => {
+  const logs=[[meta('a'),record('turn_context',{model:'one'}),tokens(100,40,10,2,110,1),
+    record('turn_context',{model:'two'},2),event('token_count',3,{info:{total_token_usage:{}}})]];
+  const unused=aggregateCodexUsage(logs).sessions[0];
+  assert.equal(unused.model,'one');assert.equal(unused.usage.input,60);assert.equal(unused.incomplete,undefined);
+  logs[0].push(tokens(150,60,30,6,180,4));
+  const row=aggregateCodexUsage(logs).sessions[0];
+  assert.equal(row.mixedModels,true);assert.deepEqual(row.byModel.map(g=>[g.model,g.usage.input,g.usage.output,g.usage.requests]),[['one',60,10,1],['two',30,20,1]]);
+  assert.ok(row.byModel.every(g=>!g.incomplete));assert.equal(row.counterReset,undefined);
+});

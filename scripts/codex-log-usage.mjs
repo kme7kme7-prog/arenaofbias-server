@@ -25,27 +25,49 @@ function mapped(counts) {
 }
 function ownUsage(state) {
   const events = state.tokens.toSorted((a, b) => (a.at ?? 0) - (b.at ?? 0) || a.order - b.order);
-  if (!events.some(event => Object.keys(event.counts).length)) return [];
-  const segments = [];
-  let previous = {}, segment;
-  for (const event of events) {
-    const changed = Object.entries(event.counts).some(([key, value]) => value !== previous[key]);
-    if (!segment || (event.model !== segment.model && changed)) {
-      segment = { model: event.model, baseline: previous, last: event.counts, requests: 0 };
+  if (!events.some(event => Object.keys(event.counts).length)) return { parts: [], resets: [] };
+  const segments = [], resets = [];
+  const zero = Object.fromEntries(tokenFields.map(field => [field, 0]));
+  // Known counters are for comparison only; the raw last snapshot controls coverage.
+  let known = {}, lastSnapshot = {}, segment;
+  for (const [index, event] of events.entries()) {
+    const decreased = Object.keys(event.counts).filter(key => valid(known[key]) && event.counts[key] < known[key]);
+    const reset = decreased.length > 0;
+    if (reset) resets.push({ sessionId: state.id, snapshot: index + 1, fields: decreased, before: { ...known }, after: { ...event.counts } });
+    const changed = Object.entries(event.counts).some(([key, value]) => value !== known[key]);
+    if (!segment || reset || (event.model !== segment.model && changed)) {
+      const baseline = !segment || reset ? zero : mapped(lastSnapshot);
+      const uncertain = new Set();
+      if (reset) {
+        const before = mapped(lastSnapshot), after = mapped(event.counts);
+        for (const field of tokenFields.filter(field => field !== 'requests')) {
+          if (!Object.hasOwn(before, field) || !Object.hasOwn(after, field)) uncertain.add(field);
+        }
+        if (!valid(known.total_tokens) || !valid(event.counts.total_tokens)) uncertain.add('requests');
+      }
+      segment = { model: event.model, baseline, last: event.counts, requests: 0, uncertain };
       segments.push(segment);
     }
-    if (event.model === segment.model || changed) segment.last = event.counts;
-    if (valid(event.counts.total_tokens) && event.counts.total_tokens > (previous.total_tokens ?? 0)) segment.requests++;
-    previous = event.counts;
+    if (reset) known = {};
+    if (event.model === segment.model || changed) {
+      segment.last = event.counts;
+      lastSnapshot = event.counts;
+    }
+    if (valid(event.counts.total_tokens) && event.counts.total_tokens > (known.total_tokens ?? 0)) segment.requests++;
+    // Unknown fields and empty records never turn an observed counter back into zero.
+    Object.assign(known, event.counts);
   }
-  return segments.map(segment => {
-    const end = mapped(segment.last), baseline = Object.keys(segment.baseline).length ? mapped(segment.baseline) : Object.fromEntries(tokenFields.map(field => [field, 0]));
-    const usage = {};
-    for (const [field, value] of Object.entries(end)) if (Object.hasOwn(baseline, field) && value >= baseline[field]) usage[field] = value - baseline[field];
-    if (valid(segment.last.total_tokens)) usage.requests = segment.requests;
+  const parts = segments.map(segment => {
+    const end = mapped(segment.last), usage = {};
+    for (const [field, value] of Object.entries(end)) {
+      if (!segment.uncertain.has(field) && Object.hasOwn(segment.baseline, field) && value >= segment.baseline[field]) usage[field] = value - segment.baseline[field];
+    }
+    if (valid(segment.last.total_tokens) && !segment.uncertain.has('requests')) usage.requests = segment.requests;
     return { model: segment.model, usage };
   });
+  return { parts, resets };
 }
+
 function groupedUsage(contributions) {
   const models = new Map();
   for (const item of contributions) {
@@ -139,12 +161,13 @@ export function createCodexCollector() {
       }).sort((a, b) => a.id.localeCompare(b.id, 'en'));
       const result = [], skipped = [];
       for (const root of selected) {
-        const subs = descendants(root), contributions = [], incompleteSessions = [];
+        const subs = descendants(root), contributions = [], incompleteSessions = [], counterReset = [];
         for (const state of [root, ...subs]) {
           for (let i = 0; i < state.emptyAttempts; i++) skipped.push({ sessionId: state.id, reason: 'no-token-records' });
           const own = ownUsage(state);
-          if (!own.length) { skipped.push({ sessionId: state.id, reason: 'no-token-records' }); incompleteSessions.push(state.id); }
-          else contributions.push(...own);
+          counterReset.push(...own.resets);
+          if (!own.parts.length) { skipped.push({ sessionId: state.id, reason: 'no-token-records' }); incompleteSessions.push(state.id); }
+          else contributions.push(...own.parts);
         }
         if (!contributions.length) continue;
         const groups = groupedUsage(contributions);
@@ -161,6 +184,7 @@ export function createCodexCollector() {
           userMessages: root.users.size, turns: root.starts.size, multiTurn: root.users.size > 1 || root.starts.size > 1,
           subagentIds: subs.map(s => s.id).sort(), subagents: subs.length,
           ...(incompleteSessions.length ? { incompleteSessions } : {}),
+          ...(counterReset.length ? { counterReset } : {}),
           ...(groups.length > 1 ? { mixedModels: true, byModel: groups, ...(duration != null ? { durationSec: duration } : {}) } : groups[0]) });
       }
       return { sessions: result, skipped };

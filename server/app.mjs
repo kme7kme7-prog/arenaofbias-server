@@ -26,7 +26,8 @@ import { createDotsModeration, createModerationMode, createModerationTokens } fr
 import { createCaptureStore } from './work-captures.mjs';
 import { createCoverStore } from './work-covers.mjs';
 import { createPreviewStore } from './preview-uploads.mjs';
-import { AVATARS, EFFORTS, EMOJIS } from './config.mjs';
+import { AVATARS, EFFORTS, EMOJIS, batchConfig } from './config.mjs';
+import { createBatch } from './batch.mjs';
 import { createContentHandler } from './content.mjs';
 import { CONTENT_REVALIDATE, streamRevalidatedFile } from './content-cache.mjs';
 import { openDatabase, transaction } from './db.mjs';
@@ -125,6 +126,11 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     drafts: rateLimit(10 * 60e3, 12, '上传太频繁，请稍后再试'),
     matches: rateLimit(60e3, 60),
   };
+  const batch = createBatch({
+    db, config, limits, library, catalog, moderator, capturer, auth,
+    settings: { ...batchConfig(process.env), ...(config.batch ?? {}) },
+    writeLimit: (id) => limit.write(id),
+  });
   const siteCsp = [
     "default-src 'self'",
     "script-src 'self' https://challenges.cloudflare.com",
@@ -559,6 +565,23 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     queueWork(work);
     arena.invalidate();
     return { work: library.toPublic(work, user) };
+  });
+
+  // Batch grants never share the cookie session's staff auto-verify path.
+  router.on('POST', '/api/batch/device', (ctx) => batch.register(ctx));
+  router.on('GET', '/api/batch/device/:userCode', (ctx) => batch.view(ctx, ctx.params.userCode));
+  router.on('POST', '/api/batch/device/poll', async (ctx) => {
+    const result = await batch.poll(ctx);
+    if (result.pending) return sendJson(ctx.res, 202, { status: 'pending', interval: result.interval });
+    return sendJson(ctx.res, 200, { token: result.token, tokenType: result.tokenType, batchId: result.batchId, expiresAt: result.expiresAt });
+  });
+  router.on('POST', '/api/batch/:id/approve', (ctx) => batch.approve(ctx));
+  router.on('POST', '/api/batch/:id/revoke', (ctx) => batch.revoke(ctx));
+  router.on('POST', '/api/batch/:id/cancel', (ctx) => batch.cancel(ctx));
+  router.on('GET', '/api/batch/:id', (ctx) => batch.status(ctx));
+  router.on('PUT', '/api/batch/:id/works/:key', async (ctx) => {
+    const result = await batch.upload(ctx);
+    return sendJson(ctx.res, result.status, result.body);
   });
   adminOn('DELETE', '/api/works/:task/:id', async (ctx) => {
     const user = signedIn(ctx);
@@ -1165,10 +1188,16 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         if (!route) fail(404, '接口不存在');
         if (route.methodNotAllowed) fail(405, '不支持这个操作');
         const headers = String(req.headers['access-control-request-headers'] ?? '').toLowerCase().split(',').map((header) => header.trim()).filter(Boolean);
-        if (headers.some((header) => !['content-type', 'x-datapack-version', 'if-none-match'].includes(header))) fail(403, '请求头无效');
+        const batchPath = url.pathname.startsWith('/api/batch/');
+        const allowedHeaders = batchPath
+          ? ['content-type', 'x-datapack-version', 'if-none-match', 'authorization', 'idempotency-key']
+          : ['content-type', 'x-datapack-version', 'if-none-match'];
+        if (headers.some((header) => !allowedHeaders.includes(header))) fail(403, '请求头无效');
         res.writeHead(204, {
           'Access-Control-Allow-Methods': method,
-          'Access-Control-Allow-Headers': 'Content-Type, X-Datapack-Version, If-None-Match',
+          'Access-Control-Allow-Headers': batchPath
+            ? 'Content-Type, X-Datapack-Version, If-None-Match, Authorization, Idempotency-Key'
+            : 'Content-Type, X-Datapack-Version, If-None-Match',
           'Access-Control-Max-Age': '600',
         });
         return res.end();
@@ -1179,7 +1208,10 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       }
       // Moderation tokens open only the dots whitelist; every other API refuses them.
       if (url.pathname.startsWith('/api/dots/')) return dots.handle(req, res, url);
-      if (/^bearer\s/i.test(String(req.headers.authorization ?? ''))) fail(403, '审核令牌不能访问此接口', 'token_forbidden');
+      // Batch routes accept only a batch-grant. Every other API still rejects Bearer.
+      if (/^bearer\s/i.test(String(req.headers.authorization ?? '')) && !url.pathname.startsWith('/api/batch/')) {
+        fail(403, '审核令牌不能访问此接口', 'token_forbidden');
+      }
       if (req.method === 'GET' || req.method === 'HEAD') readGuard.api(req, url.pathname);
       if (['GET', 'HEAD'].includes(req.method)
         && ['/api/bootstrap', '/api/catalog', '/api/show1/works', '/api/works', '/api/prompts', '/api/votes', '/api/ratings'].includes(url.pathname)
@@ -1187,7 +1219,9 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       const route = router.match(req.method, url.pathname);
       if (!route) fail(404, '接口不存在');
       if (route.methodNotAllowed) fail(405, '不支持这个操作');
-      if (req.method !== 'GET' && req.method !== 'HEAD') assertSameOrigin(req, config);
+      // Batch routes enforce same-origin themselves, and only on the cookie actions.
+      // The CLI has no Origin and must not be given a way to skip the check elsewhere.
+      if (req.method !== 'GET' && req.method !== 'HEAD' && !url.pathname.startsWith('/api/batch/')) assertSameOrigin(req, config);
       const ctx = { req, res, url, params: route.params, receivedAt: Date.now(), ip: clientIp(req, config.trustProxy),
         user: url.pathname === '/api/catalog' ? null : auth.userFrom(req) };
       if (ctx.user && ['GET', 'HEAD'].includes(req.method) && (
@@ -1229,6 +1263,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     closeStreams() { guessRooms.closeStreams(); },
     handleContent: createContentHandler({ config, library, arena, qualification, catalog, siteOrigins: config.siteOrigins, readGuard }),
     async close() {
+      batch.close();
       guessRooms.close();
       clearInterval(matchCleanup);
       clearInterval(referenceCleanup);

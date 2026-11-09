@@ -24,6 +24,8 @@ test('read indexes upgrade v52 without changing records, ballot order or expired
   };
   const records = () => Object.fromEntries(['users', 'votes', 'matches', 'audit'].map(table =>
     [table, db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]));
+  // Later migrations may append a defaulted column. Compare the v52 fields, not that addition.
+  const comparable = (rows) => ({ ...rows, users: rows.users.map(({ role_security_version, ...user }) => user) });
   const plan = (sql, ...args) => db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...args).map(row => row.detail).join('\n');
   try {
     for (const migration of MIGRATIONS.slice(0, 52)) typeof migration === 'function' ? migration(db) : db.exec(migration);
@@ -56,7 +58,7 @@ test('read indexes upgrade v52 without changing records, ballot order or expired
     db.close();
     db = openDatabase(file);
     assert.equal(db.prepare('PRAGMA user_version').get().user_version, MIGRATIONS.length);
-    assert.deepEqual(records(), before);
+    assert.deepEqual(comparable(records()), comparable(before));
     assert.deepEqual(db.prepare(ballots).all(), beforeBallots);
     assert.deepEqual(db.prepare(pairs).all('u', 'task').map(JSON.stringify).sort(), beforePairs.map(JSON.stringify).sort());
     assert.deepEqual(db.prepare(corrections).all(), beforeCorrections);
@@ -69,11 +71,12 @@ test('read indexes upgrade v52 without changing records, ballot order or expired
     assert.match(plan(corrections), /USING INDEX audit_action/);
     assert.match(plan(moves), /USING INDEX audit_action/);
     transaction(db, () => MIGRATIONS[52](db));
-    assert.deepEqual(records(), before, 'the index migration is safe to rerun');
+    assert.deepEqual(comparable(records()), comparable(before), 'the index migration is safe to rerun');
     assert.equal(db.prepare('PRAGMA quick_check').get().quick_check, 'ok');
     assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
     db.close();
     db = openDatabase(file);
-    assert.deepEqual(records(), before, 'reopening the upgraded database preserves every existing record');
+    assert.deepEqual(comparable(records()), comparable(before), 'reopening the upgraded database preserves every existing record');
+    assert.equal(db.prepare('SELECT role_security_version FROM users WHERE id = ?').get('u').role_security_version, 0);
   } finally { db.close(); rmSync(root, { recursive: true, force: true }); }
 });

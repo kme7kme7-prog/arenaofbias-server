@@ -156,33 +156,40 @@ test('client-supplied forwarded prefixes cannot reset the login rate limit', asy
     socket: { remoteAddress: '127.0.0.1' } }, true), '127.0.0.1', 'invalid proxy values fall back to the socket');
 });
 
-test('capture routing blocks foreign navigation, WebSockets and private redirects before fetching them', async () => {
+test('capture routing blocks foreign navigation, WebSockets, private redirects and rebinding before fetching them', async () => {
   let routeHandler, socketHandler;
+  const fetched = [];
+  let responses = {};
+  let privateName = '';
   const context = {
     route: async (_pattern, handler) => { routeHandler = handler; },
     routeWebSocket: async (_pattern, handler) => { socketHandler = handler; },
   };
-  await guardCaptureContext(context, { origin: 'http://work.localhost:5180', cdn: ['cdn.example', 'registry.npmmirror.com'] });
+  await guardCaptureContext(context, {
+    origin: 'http://work.localhost:5180',
+    cdn: ['cdn.example', 'registry.npmmirror.com'],
+    lookup: async (hostname) => [{ address: hostname === privateName ? '169.254.169.254' : '8.8.8.8', family: 4 }],
+    requestHop: async (target, headers) => {
+      fetched.push(target.href);
+      if (headers?.host) assert.equal(headers.host, 'work.localhost:5180');
+      const value = responses[target.href] ?? { status: 200, headers: {} };
+      return { status: value.status, headers: value.headers, body: Buffer.alloc(0) };
+    },
+  });
   let socketClosed = false;
   await socketHandler({ close: () => { socketClosed = true; } });
   assert.equal(socketClosed, true);
 
-  async function request(url, resourceType, responses = {}) {
-    const fetched = [];
+  async function request(url, resourceType, next = {}) {
+    fetched.length = 0;
+    responses = next;
     let outcome;
     await routeHandler({
       request: () => ({ url: () => url, method: () => 'GET', resourceType: () => resourceType, allHeaders: async () => ({}) }),
       abort: async () => { outcome = 'aborted'; },
       fulfill: async () => { outcome = 'fulfilled'; },
-      fetch: async (options) => {
-        fetched.push(options.url);
-        assert.equal(options.maxRedirects, 0);
-        if (options.headers) assert.equal(options.headers.host, new URL(url).host);
-        const value = responses[options.url] ?? { status: 200, headers: {} };
-        return { status: () => value.status, headers: () => value.headers, dispose: async () => {} };
-      },
     });
-    return { fetched, outcome };
+    return { fetched: [...fetched], outcome };
   }
   assert.deepEqual(await request('http://127.0.0.1:9999/internal', 'document'), { fetched: [], outcome: 'aborted' });
   assert.deepEqual(await request('https://cdn.example/page', 'document'), { fetched: [], outcome: 'aborted' });
@@ -199,4 +206,7 @@ test('capture routing blocks foreign navigation, WebSockets and private redirect
   assert.deepEqual(await request('https://cdn.example/module', 'script', {
     'https://cdn.example/module': { status: 302, headers: { location: '/module.js' } },
   }), { fetched: ['https://cdn.example/module', 'https://cdn.example/module.js'], outcome: 'fulfilled' });
+  privateName = 'cdn.example';
+  assert.deepEqual(await request('https://cdn.example/module', 'script'), { fetched: [], outcome: 'aborted' });
+  privateName = '';
 });

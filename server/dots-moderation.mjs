@@ -478,6 +478,7 @@ export function createDotsModeration({ db, config, library, mode, tokens, covers
         if (switches.off) fail(503, 'dots 接口已被运维临时关闭', 'dots_disabled');
         const header = String(req.headers.authorization ?? '');
         const bearer = /^Bearer\s+(\S+)$/i.exec(header)?.[1];
+        if (bearer?.startsWith('aobb_')) fail(403, '批量投稿令牌不能访问此接口', 'batch_forbidden');
         if (!bearer) { failures(ip); fail(401, '缺少审核令牌', 'unauthorized'); }
         token = tokens.verify(bearer);
         if (!token) { failures(ip); fail(401, '审核令牌无效或已吊销', 'unauthorized'); }

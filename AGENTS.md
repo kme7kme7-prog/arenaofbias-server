@@ -14,3 +14,4 @@
 - **完成与归档**：任务过程中只更新根目录 `HANDOFF.md`；归档日志按 `docs/archive/_TEMPLATE.md` 在整轮完成、推送前写入；验证结果如实记录，未执行的验证注明原因。
 - **生成物**：`dist/`、`.data/`、`node_modules/`、日志均为本地生成物，不提交、不手动修改。
 - **决策日志**：永不创建 `DECISIONS.md` 或同类决策记录；长期约定集中在本文件，轮次拍板进 `docs/archive/`。
+- **批量投稿**：普通管理员本地批量上传使用独立的 `batch-grant`，默认 `BATCH_UPLOAD` 关闭。它不继承 Cookie 会话的工作人员自动核验，也不接受 dots 令牌。操作说明见 `docs/batch-upload.md`，没有密钥。

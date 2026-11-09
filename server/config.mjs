@@ -138,6 +138,36 @@ export const limits = {
   provisionalGames: 30,
 };
 
+// Pilot defaults for ordinary-moderator batch upload. BATCH_UPLOAD is off unless
+// it is exactly "1". Callers may override any field via createPlatform({ config: { batch } }).
+function nonNegative(source, name, fallback) {
+  const raw = source[name];
+  if (raw == null || raw === '') return fallback;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+export function batchConfig(source = env) {
+  const ratio = Number(source.BATCH_DISK_FLOOR_RATIO);
+  return {
+    enabled: source.BATCH_UPLOAD === '1',
+    maxWorks: nonNegative(source, 'BATCH_MAX_WORKS', 10),
+    maxCompressed: nonNegative(source, 'BATCH_MAX_COMPRESSED', 100 * 1024 * 1024),
+    maxExpanded: nonNegative(source, 'BATCH_MAX_EXPANDED', 300 * 1024 * 1024),
+    screenshotReserve: nonNegative(source, 'BATCH_SCREENSHOT_RESERVE', 8 * 1024 * 1024),
+    diskFloorBytes: nonNegative(source, 'BATCH_DISK_FLOOR_BYTES', 8 * 1024 * 1024 * 1024),
+    diskFloorRatio: Number.isFinite(ratio) && ratio >= 0 && ratio <= 1 ? ratio : 0.12,
+    inodeFloor: nonNegative(source, 'BATCH_INODE_FLOOR', 100_000),
+    grantTtlMs: nonNegative(source, 'BATCH_GRANT_TTL_MS', 2 * 60 * 60 * 1000) || 2 * 60 * 60 * 1000,
+    deviceTtlMs: nonNegative(source, 'BATCH_DEVICE_TTL_MS', 15 * 60 * 1000) || 15 * 60 * 1000,
+    inflateBudgetMs: nonNegative(source, 'BATCH_INFLATE_BUDGET_MS', 10_000) || 10_000,
+    worksPerWindow: nonNegative(source, 'BATCH_WORKS_PER_10MIN', 6) || 6,
+    moderationQueueMax: nonNegative(source, 'BATCH_MODERATION_QUEUE_MAX', 64),
+    captureQueueMax: nonNegative(source, 'BATCH_CAPTURE_QUEUE_MAX', 32),
+    deviceBodyBytes: nonNegative(source, 'BATCH_DEVICE_BODY_BYTES', 64 * 1024) || 64 * 1024,
+  };
+}
+
 // Effort levels offered on the upload form; curated works keep their own labels.
 export const EFFORTS = ['Low', 'Medium', 'High', 'XHigh', 'Max', 'Ultra', 'Ultracode'];
 // Gallery reaction sticker ids; each frontend ships the art. Show1's legacy 👍/👀/🤯 votes share

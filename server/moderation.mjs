@@ -251,6 +251,7 @@ export function createModerator({ config, library, capturer, onChange = () => {}
 
   const service = {
     get enabled() { return Boolean(settings.enabled); },
+    get depth() { return queue.length; },
     enqueue(work) {
       if (closed || !settings.enabled || work?.moderation.status !== 'pending' || queued.has(work.id)) return;
       // Restricted (gray) works never reach the external model or dots.

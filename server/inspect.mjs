@@ -3,7 +3,7 @@
 import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
 import * as zlib from 'node:zlib';
-import { fail, formatBytes } from './http.mjs';
+import { HttpError, fail, formatBytes } from './http.mjs';
 import { renderTextUpload } from './text.mjs';
 import { THREE_MIRROR_PATH } from './config.mjs';
 
@@ -12,6 +12,28 @@ const IGNORED = /(^|\/)(node_modules|\.git|\.svn|\.hg)(\/|$)/i;
 const FORBIDDEN = /(^|\/)(\.env(\.[^/]*)?|\.npmrc|\.pypirc|id_rsa|id_ed25519)$/i;
 const WINDOWS_RESERVED = /^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/i;
 const sha256 = (data) => createHash('sha256').update(data).digest('hex');
+const BATCH_EXT = new Set(['html', 'htm', 'css', 'js', 'mjs', 'json', 'svg', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'woff2', 'txt', 'md', 'markdown', 'map']);
+
+let inflating = 0;
+
+export function imageKind(buffer) {
+  if (!buffer || buffer.length < 3) return null;
+  if (buffer.length >= 8 && buffer.readUInt32BE(0) === 0x89504e47) return 'png';
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'jpeg';
+  if (buffer.length >= 6 && (buffer.toString('ascii', 0, 6) === 'GIF87a' || buffer.toString('ascii', 0, 6) === 'GIF89a')) return 'gif';
+  if (buffer.length >= 12 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP') return 'webp';
+  return null;
+}
+
+function occupyInflate(exclusive) {
+  if (exclusive && inflating > 0) {
+    const error = new HttpError(429, '正在解压其他作品，请稍后再试', 'inflate_busy');
+    error.retryAfter = 2;
+    throw error;
+  }
+  if (exclusive) inflating += 1;
+  return () => { if (exclusive) inflating = Math.max(0, inflating - 1); };
+}
 
 function decodeName(bytes, utf8) {
   if (utf8) return bytes.toString('utf8');
@@ -33,7 +55,10 @@ function cleanPath(raw) {
   return { path: parts.join('/'), isDir };
 }
 
-export function readZip(buffer, limits) {
+export function readZip(buffer, limits, options = {}) {
+  const started = Date.now();
+  const budget = Number.isFinite(options.inflateBudgetMs) ? options.inflateBudgetMs : Infinity;
+  const overBudget = () => { if (Date.now() - started > budget) fail(400, '解压超过时间上限'); };
   const b = buffer;
   let eocd = -1;
   for (let i = b.length - 22; i >= Math.max(0, b.length - 65557); i--) {
@@ -72,7 +97,7 @@ export function readZip(buffer, limits) {
     if (isDir || JUNK.test(path)) continue;
     if (IGNORED.test(path)) { ignored++; continue; }
     if (FORBIDDEN.test(path)) fail(400, `请移除 ${path}：压缩包不能包含密钥文件`);
-    if (madeBy === 3 && ((external >>> 16) & 0xf000) === 0xa000) fail(400, `不支持符号链接：${path}`);
+    if (((external >>> 16) & 0xf000) === 0xa000) fail(400, `不支持符号链接：${path}`);
     if (flags & 1) fail(400, '不支持加密的 ZIP');
     if (method !== 0 && method !== 8) fail(400, `不支持的压缩方式：${path}（请使用标准 ZIP）`);
     if (rawSize === 0xffffffff || packedSize === 0xffffffff || local === 0xffffffff) fail(400, '不支持 ZIP64 格式');
@@ -83,7 +108,8 @@ export function readZip(buffer, limits) {
     if (rawSize > limits.fileBytes) fail(413, `单个文件超过 ${formatBytes(limits.fileBytes)}：${path}`);
     total += rawSize;
     if (total > limits.unpackedBytes) fail(413, `解压后超过 ${formatBytes(limits.unpackedBytes)} 上限`);
-    if (rawSize > 1024 * 1024 && rawSize > Math.max(packedSize, 1) * 400) fail(400, `压缩比例异常：${path}`);
+    if (rawSize > Math.max(packedSize, 1) * 400) fail(400, `压缩比例异常：${path}`);
+    overBudget();
 
     if (local + 30 > b.length || b.readUInt32LE(local) !== 0x04034b50) fail(400, 'ZIP 数据已损坏');
     const start = local + 30 + b.readUInt16LE(local + 26) + b.readUInt16LE(local + 28);
@@ -92,9 +118,11 @@ export function readZip(buffer, limits) {
     let data;
     try {
       data = method === 0 ? Buffer.from(packed) : zlib.inflateRawSync(packed, { maxOutputLength: rawSize + 1 });
-    } catch {
+    } catch (error) {
+      if (error instanceof HttpError) throw error;
       fail(400, `无法解压：${path}`);
     }
+    overBudget();
     if (data.length !== rawSize || (zlib.crc32 && zlib.crc32(data) >>> 0 !== crc)) fail(400, `文件校验失败：${path}`);
     files.set(path, data);
   }
@@ -168,20 +196,41 @@ function references(html) {
 
 const hostOf = (url) => { try { return new URL(url, 'https://local.invalid/').host; } catch { return ''; } };
 
-export function inspectUpload(buffer, filename, { limits, cdn, template }) {
+function assertBatchFiles(files) {
+  for (const [path, data] of files) {
+    const ext = (path.includes('.') ? path.split('.').pop() : '').toLowerCase();
+    if (!BATCH_EXT.has(ext)) fail(400, `批量投稿不接受此文件类型：${path}`);
+    const kind = imageKind(data.subarray(0, 16));
+    const expected = ext === 'jpg' || ext === 'jpeg' ? 'jpeg' : ext === 'png' ? 'png' : ext === 'gif' ? 'gif' : ext === 'webp' ? 'webp' : null;
+    if (expected && kind !== expected) fail(400, `图片内容与扩展名不符：${path}`);
+    if (!expected && kind) fail(400, `文件内容是图片，不能按文本解析：${path}`);
+  }
+}
+
+export function inspectUpload(buffer, filename, options) {
+  const release = occupyInflate(Boolean(options?.exclusive));
+  try { return inspectUploadBody(buffer, filename, options); }
+  finally { release(); }
+}
+
+function inspectUploadBody(buffer, filename, { limits, cdn, template, policy, inflateBudgetMs }) {
   if (!buffer.length) fail(400, '文件是空的');
   const textUpload = template === 'text' ? renderTextUpload(buffer, filename) : null;
   const isZip = buffer.length >= 4 && buffer.readUInt32LE(0) === 0x04034b50;
-  const isHtml = !isZip && (/\.html?$/i.test(filename) || /^\s*(<!doctype html|<html|<head|<body|<meta|<script|<!--)/i.test(buffer.subarray(0, 512).toString('utf8').replace(/^﻿/, '')));
+  const magic = !isZip ? imageKind(buffer.subarray(0, 16)) : null;
+  if (!textUpload && magic) fail(400, '图片不能当作网页上传');
+  const isHtml = !isZip && !magic && (/\.html?$/i.test(filename) || /^\s*(<!doctype html|<html|<head|<body|<meta|<script|<!--)/i.test(buffer.subarray(0, 512).toString('utf8').replace(/^﻿/, '')));
   if (!textUpload && !isZip && !isHtml) fail(400, '请上传 ZIP 压缩包或单个 HTML 文件');
 
-  const archive = textUpload ? { files: textUpload.files, ignored: 0 } : isZip ? readZip(buffer, limits) : { files: new Map([['index.html', buffer]]), ignored: 0 };
+  const archive = textUpload ? { files: textUpload.files, ignored: 0 } : isZip ? readZip(buffer, limits, { inflateBudgetMs }) : { files: new Map([['index.html', buffer]]), ignored: 0 };
+  if (policy === 'batch') assertBatchFiles(archive.files);
   const files = stripWrapper(archive.files);
   const builtRoot = (template === 'vite' || (!template && files.has('package.json')))
     && ['dist', 'build', 'out'].find((dir) => files.has(`${dir}/index.html`));
   const { root, entry } = builtRoot ? { root: builtRoot, entry: 'index.html' } : findEntry(files);
   const served = new Map([...files].filter(([path]) => !root || path.startsWith(`${root}/`)).map(([path, data]) => [root ? path.slice(root.length + 1) : path, data]));
   const entryData = served.get(entry);
+  if (imageKind(entryData.subarray(0, 16))) fail(400, `${entry} 是图片，不是网页入口`);
   const html = entryData.toString('utf8');
   if (!/<(html|head|body|script|canvas|div|main|svg|h1|p|style)\b/i.test(html)) fail(400, `${entry} 不是可以识别的网页入口`);
 

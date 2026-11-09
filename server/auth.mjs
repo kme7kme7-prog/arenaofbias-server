@@ -37,6 +37,7 @@ export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', 
     userByEmail: db.prepare('SELECT * FROM users WHERE email = ? COLLATE NOCASE'),
     upgradeHash: db.prepare('UPDATE users SET salt = ?, hash = ?, hash_params = NULL WHERE id = ?'),
     setLevel: db.prepare('UPDATE users SET role=?, member_level=?, level_since=?, level_source=? WHERE id=?'),
+    bumpSecurity: db.prepare('UPDATE users SET role_security_version = COALESCE(role_security_version, 0) + 1 WHERE id = ?'),
     setNickname: db.prepare('UPDATE users SET nickname = ? WHERE id = ?'),
     setAvatar: db.prepare('UPDATE users SET avatar = ? WHERE id = ?'),
     setEmail: db.prepare('UPDATE users SET email = ?, email_verified_at = ? WHERE id = ?'),
@@ -63,8 +64,8 @@ export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', 
     if (role !== user.role) {
       const at = Date.now();
       q.setLevel.run(role, user.member_level, at, 'admin', user.id);
-      user.role = role;
-      user.level_since = at; user.level_source = 'admin';
+      q.bumpSecurity.run(user.id);
+      return q.userById.get(user.id);
     }
     return user;
   }
@@ -78,7 +79,9 @@ export function createAuth(db, { admins, secureCookies, cookieSameSite = 'Lax', 
     const { role, member } = assignedRole(value);
     if (admins.includes(user.name_key) && role !== 'admin') fail(409, '该账号由 ADMIN_USERNAMES 固定为管理员，请先修改服务器配置');
     const changed = levelOf(user) !== levelOf({ role, member_level: member });
+    const securityChanged = user.role !== role || (user.member_level ?? 0) !== member;
     q.setLevel.run(role, member, changed ? Date.now() : user.level_since, changed ? 'admin' : user.level_source, user.id);
+    if (securityChanged) q.bumpSecurity.run(user.id);
     return q.userById.get(user.id);
   }
   function validName(raw) {

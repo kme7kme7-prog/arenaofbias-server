@@ -789,6 +789,74 @@ const MIGRATIONS = [
     created_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS guided_trial_votes_task ON guided_trial_votes (task_id);`),
+  // Batch grants for ordinary moderators. role_security_version invalidates a grant
+  // when the role changes, including a later promotion back to moderator.
+  (db) => {
+    const columns = new Set(db.prepare('PRAGMA table_info(users)').all().map((column) => column.name));
+    if (!columns.has('role_security_version')) {
+      db.exec('ALTER TABLE users ADD COLUMN role_security_version INTEGER NOT NULL DEFAULT 0');
+    }
+    db.exec(`CREATE TABLE IF NOT EXISTS batch_devices (
+      id TEXT PRIMARY KEY,
+      device_code_hash TEXT NOT NULL UNIQUE,
+      user_code TEXT NOT NULL UNIQUE,
+      batch_id TEXT NOT NULL,
+      client_name TEXT NOT NULL,
+      payload_digest TEXT NOT NULL,
+      plan_json TEXT NOT NULL,
+      declared_compressed INTEGER NOT NULL,
+      declared_expanded INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      user_id TEXT,
+      approved_at INTEGER,
+      role_security_version INTEGER,
+      consumed_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS batch_devices_batch ON batch_devices(batch_id, status);
+    CREATE TABLE IF NOT EXISTS batch_grants (
+      id TEXT PRIMARY KEY,
+      token_hash TEXT NOT NULL UNIQUE,
+      user_id TEXT NOT NULL,
+      batch_id TEXT NOT NULL,
+      device_id TEXT NOT NULL,
+      payload_digest TEXT NOT NULL,
+      allowed_tasks TEXT NOT NULL,
+      role_security_version INTEGER NOT NULL,
+      quotas_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      revoked_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS batch_grants_user ON batch_grants(user_id, batch_id);
+    CREATE TABLE IF NOT EXISTS batch_works (
+      user_id TEXT NOT NULL,
+      batch_id TEXT NOT NULL,
+      work_key TEXT NOT NULL,
+      payload_digest TEXT NOT NULL,
+      status TEXT NOT NULL,
+      work_id TEXT,
+      task_id TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (user_id, batch_id, work_key)
+    );
+    CREATE TABLE IF NOT EXISTS batch_reservations (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      batch_id TEXT NOT NULL,
+      work_key TEXT NOT NULL,
+      compressed_bytes INTEGER NOT NULL,
+      expanded_bytes INTEGER NOT NULL,
+      staging_bytes INTEGER NOT NULL,
+      screenshot_bytes INTEGER NOT NULL,
+      inodes INTEGER NOT NULL,
+      state TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS batch_reservations_state ON batch_reservations(state);`);
+  },
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

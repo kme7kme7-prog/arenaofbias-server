@@ -505,7 +505,7 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 普通用户启用内容审查时，响应含作者特权字段 `moderation.status: "pending"`，上传请求不等待 Flex。此时 `scene` 是一小时有效的随机 `p<32hex>` 预览源，作品尚不公开；内容状态与 `unverified` 核验状态独立，详见 3.24 节。
 
-高级与普通管理员提交（含题目示例、收件箱登记）保存 `moderation={status:"approved",source:"human",reviewer,reason:"管理员发布",at}` 并跳过自动内容审查。管理员的作品在提交事务中直接通过核验。题目示例的公开仍受题目审核约束。
+高级与普通管理员提交（含题目示例、收件箱登记）保存 `moderation={status:"approved",source:"human",reviewer,reason:"管理员发布",at}` 并跳过自动内容审查。管理员的作品在提交事务中直接通过核验。题目示例的公开仍受题目审核约束。这条自动核验只属于网站 Cookie 会话。`batch-grant` 不进入该分支，见 3.27 节。
 
 截图浏览器只允许当前作品源的文档，以及该源和 HTTPS CDN 白名单内的 GET/HEAD 资源。请求逐跳检查重定向，跨源导航、WebSocket、Service Worker 及未经过路由的浏览器连接被阻断；截图环境须预配置 Playwright ≥ 1.48 和 Chrome。
 
@@ -1185,6 +1185,29 @@ readyElapsedMs沿用该match首次有效选择时间（验证码等待/重试不
 
 软作废只在votes增加voided_at/voided_by/void_reason，历史行/组合唯一约束不删，不释放重复投票资格；两榜及作品分的有效输入排除作废票，操作后立即清内部与600秒公开缓存，并递增独立风控revision保证在途旧计算丢弃。撤销也写audit；audit不复制原始IP。后端不自动封号/作废，不开放Lv2读取。新建arena_choice_evidence及索引，matches增加draw_ip/draw_subnet；清理复用现有每分钟周期及启动检查，不增加服务或日志系统。schema v45追加在v44之后，保证已准备的本地v44联调库可增量升级；不会重置题库、认证或精选起点。model-voters只聚合有voteId且两侧不同模型的选择。所有查询另返回recordingStartedAt，标明证据覆盖起点。
 
+
+### 3.27 普通管理员本地批量投稿（默认关闭）
+
+`BATCH_UPLOAD` 未设置为 `1` 时，登记、确认、轮询和上传都返回 `403 batch_forbidden`。已写入的作品不回滚。这是另一类凭证，不继承 Cookie 会话的工作人员自动核验，也不接受 dots Bearer。同一请求里同时带会话 Cookie 和 `Authorization: Bearer` 为 `403 batch_forbidden`。
+
+批量令牌只绑定一个普通管理员、一批题目、一个批次编号、一份计划摘要、配额、过期时间和批准时的 `role_security_version`。角色下降或之后重新升回普通管理员都不会让旧令牌恢复。令牌没有刷新，也不能审核、公开、删除或调用 dots。
+
+| 方法与路径 | 认证 | 作用 |
+| --- | --- | --- |
+| `POST /api/batch/device` | 无。只接受计划 JSON，不接受作品正文 | 登记摘要。返回一次性 `device_code`、给人看的 `user_code` 和确认页路径 |
+| `GET /api/batch/device/:userCode` | 已登录的普通管理员或高级管理员 | 展示完整摘要和文件清单，不返回 `device_code` |
+| `POST /api/batch/:id/approve` | 普通管理员 Cookie，且须同源 | 请求体必须回传页面上的完整 `payloadDigest`。冻结摘要并绑定该账号 |
+| `POST /api/batch/device/poll` | 正文里的 `device_code` | 未确认 `202`；确认后只返回一次 `aobb_` 上传令牌 |
+| `PUT /api/batch/:id/works/:key` | `batch-grant` | 一件作品的原始 HTML 或 ZIP。`Idempotency-Key` 必须等于作品键 |
+| `GET /api/batch/:id` | 该批次的令牌或本人/高级管理员 Cookie，不能混用 | 每件状态。不返回令牌 |
+| `POST /api/batch/:id/revoke` | 本人或高级管理员 Cookie，且须同源 | 吊销。不删除已提交作品 |
+| `POST /api/batch/:id/cancel` | 令牌或本人/高级管理员 Cookie，不能混用 | 只取消尚未提交的暂存 |
+
+上传成功为 `201 { workId, status:"unverified", moderation:"pending" }`。同一账号、同一批次、同一作品键且内容仍等于已批准摘要时重放为 `200` 和原来的 `workId`。内容或摘要不同为 `409 digest_mismatch`。作品保持 `show_gallery=0`、`show_arena=0`、`show_entertainment=0`。客户端送来的 `pipeline`、`role`、`autoVerify`、`publish`、`show_*` 被忽略，不参与摘要。内容审查关闭时也不降级为 `legacy`。只在 `moderation.status=pending` 时进入现有审查队列，不直接调用截图入队。
+
+工作人员免草稿次数不免除批量配额。默认试点上限是每批 10 件、压缩合计 100 MiB、解压合计 300 MiB，可用 `BATCH_MAX_*` 调整。磁盘或 inode 低于水位、或无法读取文件系统余量时返回 `507 insufficient_storage`。审查队列或截图队列达到试点水位时，在写入作品行之前返回 `429` 或 `503`，并带 `Retry-After`。
+
+审计只记批次、作品键、摘要前 12 位、动作和结果，不记令牌、Cookie 或正文。确认页是 `/admin/batch.html`。操作说明见 `docs/batch-upload.md`。
 
 ## 4. 数据包契约（`dist/data.json`）
 

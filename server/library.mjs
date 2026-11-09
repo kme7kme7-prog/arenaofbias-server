@@ -1072,6 +1072,59 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       return upload(taskId, id);
     },
 
+    // Batch-grant submissions. The caller must not pass this through submit(): that
+    // path still auto-verifies staff. This one always stays unverified and pending,
+    // with every public face closed, even when content moderation is switched off.
+    submitMemberPipeline(owner, spec, guard) {
+      if (!owner?.id) fail(400, '缺少作品所有者');
+      const task = catalog.task(spec.taskId, owner);
+      if (!task) fail(404, '题目不存在');
+      if (!task.acceptsUploads) fail(409, '这道题暂不接受上传');
+      const source = provenance(spec);
+      const generation = generationFrom(spec);
+      const effort = effortOf(spec.effort);
+      if (!effort) fail(400, '请选择或填写推理档位');
+      if (!source.providerId) fail(400, '请选择服务商');
+      if (!source.harnessId && !source.harnessOther) fail(400, '请选择或填写 Harness');
+      const promptVariant = promptVariantFrom(spec.taskId, spec, '', true);
+      const who = identity(spec, owner);
+      if (!who.modelId && restricted.claims(who.modelName) && !grayHome(spec.taskId)) fail(409, GRAY_HOME);
+      const title = clip(spec.title, 40) || defaultTitle(who.modelName, effort);
+      if (!title) fail(400, '请填写作品标题');
+      const inspected = spec.inspected;
+      const format = inspected.checks.find((check) => check.id === 'format')?.template
+        ?? (inspected.root && inspected.files.has('package.json') ? 'vite' : 'static');
+      if (!templatesOf(task).includes(format)) fail(400, '该题不支持此提交格式');
+      let id = workId();
+      while (q.work.get(id)) id = workId();
+      const stored = join(dirs.works, id);
+      writeTree(stored, inspected.files);
+      const now = Date.now();
+      try {
+        transaction(db, () => {
+          if (guard) guard();
+          q.insertWork.run(id, spec.taskId, owner.id, title, clip(spec.summary, 200), who.modelId, who.modelId ? '' : who.modelName,
+            who.modelId ? '' : who.vendor, effort, source.harnessId, source.harnessOther, source.providerId,
+            source.providerOther, clip(spec.note, 1000), token('w'), clip(spec.filename, 120) || 'batch', inspected.root, inspected.entry,
+            inspected.count, inspected.bytes, inspected.digest, JSON.stringify(inspected.checks), JSON.stringify(sanitizeTrial({})), null, now, now,
+            ...GENERATION_FIELDS.map((key) => generation[key]), JSON.stringify(pendingModeration(moderationRoute())), promptVariant, roleOf(owner.role));
+          db.prepare('UPDATE works SET show_gallery = 0, show_arena = 0, show_entertainment = 0 WHERE id = ?').run(id);
+          q.audit.run(now, owner.id, owner.name, 'batch-submit', spec.taskId, id, spec.auditDetail || '批量投稿');
+          if (spec.onCommit) spec.onCommit(id);
+        });
+      } catch (error) {
+        rmSync(stored, { recursive: true, force: true });
+        throw error;
+      }
+      const work = upload(spec.taskId, id);
+      if (!work || work.status !== 'unverified' || work.moderation?.status !== 'pending' || work.showGallery || work.showArena || work.showEntertainment) {
+        rmSync(stored, { recursive: true, force: true });
+        db.prepare('DELETE FROM works WHERE id = ?').run(id);
+        fail(500, '批量投稿未能保持未公开状态');
+      }
+      return work;
+    },
+
     // Server-side import of a restricted (gray) model's result (server/cli.mjs restricted-import).
     // Files pass the same inspection as an upload; the work is stored verified with both
     // faces on, skips drafts, trial loads and automatic content review, and keeps the exact

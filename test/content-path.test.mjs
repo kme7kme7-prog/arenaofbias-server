@@ -161,12 +161,20 @@ test('shell storage and message broker accepts only its opaque child and configu
 
 test('capture restricts same-host requests to the current capability, including redirects', async () => {
   let intercept;
+  let redirectTo = '';
+  let calls = 0;
   await guardCaptureContext({ routeWebSocket: async () => {}, route: async (_, handler) => { intercept = handler; } },
-    { origin: `${origin}/v/${key('p')}`, cdn: [] });
+    { origin: `${origin}/v/${key('p')}`, cdn: [],
+      lookup: async () => [{ address: '8.8.8.8', family: 4 }],
+      requestHop: async () => {
+        calls += 1;
+        return { status: redirectTo ? 302 : 200, headers: { location: redirectTo }, body: Buffer.alloc(0) };
+      } });
   const run = async (url, redirect) => {
-    let result = '', calls = 0;
-    await intercept({ request: () => ({ method: () => 'GET', resourceType: () => 'document', url: () => url }),
-      fetch: async () => { calls++; return { status: () => redirect ? 302 : 200, headers: () => ({ location: redirect }), dispose: async () => {} }; },
+    let result = '';
+    calls = 0;
+    redirectTo = redirect || '';
+    await intercept({ request: () => ({ method: () => 'GET', resourceType: () => 'document', url: () => url, allHeaders: async () => ({}) }),
       abort: async () => { result = 'blocked'; }, fulfill: async () => { result = 'allowed'; } });
     return { result, calls };
   };

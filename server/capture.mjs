@@ -15,6 +15,7 @@ import { createServer } from 'node:net';
 import { THREE_MIRROR_PATH } from './config.mjs';
 import { contentRuntimePath } from './content-path.mjs';
 import { mirrorPublicMedia } from './cos-dual-write.mjs';
+import { guardedRequest, screenEgress } from './egress.mjs';
 
 const SHOTS = [
   { id: 'first', viewport: { width: 1440, height: 900 }, mobile: false },
@@ -98,8 +99,16 @@ async function pageText(page) {
 
 // Browser redirects are not all intercepted by route(). Fetch each permitted hop
 // ourselves so a CDN redirect can never send Chromium to another network target.
+// Every hop is screened again after DNS, then connected only to those addresses.
+// route.fetch() is not used: it would resolve the name a second time.
 // CDN bodies are hashed into resources so a later capture can tell when one changed.
-export async function guardCaptureContext(context, { origin, cdn, resources = null }) {
+function hopHeader(headers, name) {
+  if (!headers) return '';
+  const found = headers[name] ?? headers[name.toLowerCase()] ?? headers[name.toUpperCase()];
+  return Array.isArray(found) ? found[0] : found ?? '';
+}
+
+export async function guardCaptureContext(context, { origin, cdn, resources = null, lookup = null, requestHop = null } = {}) {
   const workOrigin = new URL(origin).origin;
   const workPath = /^\/v\/[wmdpc][0-9a-f]{32}(?:\/|$)/.exec(new URL(origin).pathname)?.[0].replace(/\/$/, '');
   const workKey = workPath?.slice('/v/'.length);
@@ -109,11 +118,11 @@ export async function guardCaptureContext(context, { origin, cdn, resources = nu
   const allowed = (url, document) => !url.username && !url.password &&
     (ownResource(url) || (!document && url.protocol === 'https:' && cdnOrigins.has(url.origin)
       && (url.hostname !== 'registry.npmmirror.com' || url.pathname.startsWith(THREE_MIRROR_PATH))));
+  const fetchHop = requestHop ?? ((target, headers, allowLoopback) => guardedRequest(target, { method: 'GET', headers, lookup: lookup ?? undefined, allowLoopback, timeout: 15000 }));
   await context.routeWebSocket('**/*', (socket) => socket.close());
   await context.route('**/*', async (route) => {
     const request = route.request();
     const document = request.resourceType() === 'document';
-    let response;
     try {
       if (!['GET', 'HEAD'].includes(request.method())) return await route.abort();
       let url = new URL(request.url());
@@ -124,24 +133,24 @@ export async function guardCaptureContext(context, { origin, cdn, resources = nu
         const localWork = url.origin === workOrigin && url.protocol === 'http:' && url.hostname.endsWith('.localhost');
         const target = new URL(url);
         if (localWork) target.hostname = '127.0.0.1';
-        response = await route.fetch({ url: target.href, ...(localWork ? { headers: { ...await request.allHeaders(), host: url.host } } : {}),
-          maxRedirects: 0, timeout: 15000 });
-        if (response.status() < 300 || response.status() >= 400) {
-          if (resources && url.origin !== workOrigin) resources.set(request.url(), createHash('sha256').update(await response.body()).digest('hex'));
-          return await route.fulfill({ response });
+        const verdict = await screenEgress(target, { lookup: lookup ?? undefined, allowLoopback: localWork });
+        if (!verdict.ok) return await route.abort();
+        const headers = localWork ? { ...await request.allHeaders(), host: url.host } : {};
+        const response = await fetchHop(target, headers, localWork);
+        if (!response || response.status == null) return await route.abort();
+        if (response.status < 300 || response.status >= 400) {
+          const body = Buffer.isBuffer(response.body) ? response.body : Buffer.from(response.body ?? '');
+          if (resources && url.origin !== workOrigin) resources.set(request.url(), createHash('sha256').update(body).digest('hex'));
+          return await route.fulfill({ status: response.status, headers: response.headers ?? {}, body });
         }
-        const location = response.headers().location;
+        const location = hopHeader(response.headers, 'location');
         if (!location) return await route.abort();
         url = new URL(location, url);
-        await response.dispose();
-        response = null;
       }
       await route.abort();
     } catch {
       // A closed context or failed resource must not reject an event callback.
       await route.abort().catch(() => {});
-    } finally {
-      await response?.dispose().catch(() => {});
     }
   });
 }
@@ -661,6 +670,7 @@ export function createCapturer({ config, library, loadChromium = async () => (aw
 
   return {
     get available() { return available; },
+    get depth() { return queue.length; },
     initialize,
     enqueue(work, settings) {
       if (settings?.signal?.aborted) return Promise.resolve(settings.detailed ? { error: { code: 'capture_cancelled', stage: 'queue' }, captures: {} } : null);

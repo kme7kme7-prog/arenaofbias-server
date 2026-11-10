@@ -1,7 +1,22 @@
 // Fixed production origin. Redirects are refused so Authorization cannot leave this host.
 import https from 'node:https';
+import { parseStrictJson } from './json.mjs';
 
 export const ORIGIN = 'https://api.arenaofbias.icu';
+
+// The confirmation page is printed for a person to open. It must stay on ORIGIN.
+export function assertVerificationUrl(value) {
+  if (typeof value !== 'string' || !value.trim() || value.length > 2048) {
+    throw Object.assign(new Error('确认页地址无效'), { status: 0 });
+  }
+  let page;
+  try { page = new URL(value, ORIGIN); }
+  catch { throw Object.assign(new Error('确认页地址无效'), { status: 0 }); }
+  if (page.origin !== ORIGIN || page.protocol !== 'https:' || page.username || page.password) {
+    throw Object.assign(new Error('确认页地址无效'), { status: 0 });
+  }
+  return page;
+}
 
 export function endpoint(path) {
   if (typeof path !== 'string' || path.startsWith('http:') || path.startsWith('https:') || !path.startsWith('/')) {
@@ -56,7 +71,10 @@ export async function apiJson(method, path, { headers, body, transport } = {}) {
     transport,
   });
   let data = {};
-  try { data = JSON.parse(response.body.toString('utf8') || '{}'); }
-  catch { data = {}; }
+  try { data = parseStrictJson(response.body.toString('utf8') || '{}'); }
+  catch (error) {
+    if (error.message === '拒绝特殊字段名') throw error;
+    data = {};
+  }
   return { status: response.status, headers: response.headers, data };
 }

@@ -1,3 +1,9 @@
+## 2026-11-10 · 批量投稿 CLI 安全修复（PR，未合并，未部署）
+
+- 只改本地 CLI、测试和说明。`plan.mjs` 成为 CLI 与服务器共用的唯一摘要实现；独立压缩包不再缺这个文件。`manifest.json` / `plan.json` 按普通文件、非符号链接、非硬链接和 `O_NOFOLLOW` 读写，`plan.json` 用临时文件加 `rename` 替换。macOS 钥匙串不再把秘密放进 argv。`status` / `cancel` 只读本地 `plan.json`。设备码在失败和超时路径删除。作品键拒绝 `__proto__` / `constructor` / `prototype` 等特殊名。`BATCH_UPLOAD` 默认值未改。
+- 本地 `npm run check` 194/0。串行测试 621 项里 620 通过、1 失败：`test/blind-pool.test.mjs` 的厂商改名断言在 `origin/main` 上整文件运行同样失败，单独运行通过，不是这次改动引入的。没有对生产地址执行 `auth` 或 `upload`。
+- 不要合并，不要部署，不要重启，不要制造生产令牌。等 kme7 明确说可以之后再动。[本轮归档](docs/archive/2026-11-10-batch-cli-security-kme7kme7-prog.md)。
+
 ## 2026-11-09 · 普通管理员本地批量投稿（PR，未合并，未部署）
 
 - 新增独立认证种类 `batch-grant`：设备码确认计划摘要后签发一次性上传令牌。服务端强制未核验且内容审查 pending，不调用工作人员自动核验，不打开画廊或竞技场。Cookie 会话的管理员投稿行为不变。`BATCH_UPLOAD` 默认关闭。

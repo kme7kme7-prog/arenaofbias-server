@@ -1203,7 +1203,7 @@ readyElapsedMs沿用该match首次有效选择时间（验证码等待/重试不
 | `POST /api/batch/:id/revoke` | 本人或高级管理员 Cookie，且须同源 | 吊销。不删除已提交作品 |
 | `POST /api/batch/:id/cancel` | 令牌或本人/高级管理员 Cookie，不能混用 | 只取消尚未提交的暂存 |
 
-上传成功为 `201 { workId, status:"unverified", moderation:"pending" }`。同一账号、同一批次、同一作品键且内容仍等于已批准摘要时重放为 `200` 和原来的 `workId`。内容或摘要不同为 `409 digest_mismatch`。作品保持 `show_gallery=0`、`show_arena=0`、`show_entertainment=0`。客户端送来的 `pipeline`、`role`、`autoVerify`、`publish`、`show_*` 被忽略，不参与摘要。内容审查关闭时也不降级为 `legacy`。只在 `moderation.status=pending` 时进入现有审查队列，不直接调用截图入队。
+上传成功为 `201 { workId, status:"unverified", moderation:"pending" }`。同一账号、同一批次、同一作品键且内容仍等于已批准摘要时重放为 `200` 和原来的 `workId`。内容或摘要不同为 `409 digest_mismatch`。作品保持 `show_gallery=0`、`show_arena=0`、`show_entertainment=0`。客户端送来的 `pipeline`、`role`、`autoVerify`、`publish`、`show_*` 被忽略，不参与摘要。内容审查关闭时也不降级为 `legacy`。只在 `moderation.status=pending` 时进入现有审查队列，不直接调用截图入队。作品键和批次编号不能是 `__proto__`、`constructor`、`prototype` 或 `__defineGetter__` 一类对象特殊名，重复作品键返回 400。
 
 工作人员免草稿次数不免除批量配额。默认试点上限是每批 10 件、压缩合计 100 MiB、解压合计 300 MiB，可用 `BATCH_MAX_*` 调整。磁盘或 inode 低于水位、或无法读取文件系统余量时返回 `507 insufficient_storage`。审查队列或截图队列达到试点水位时，在写入作品行之前返回 `429` 或 `503`，并带 `Retry-After`。
 

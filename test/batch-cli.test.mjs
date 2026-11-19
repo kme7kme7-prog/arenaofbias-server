@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { closeSync, ftruncateSync, linkSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, ftruncateSync, linkSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { authCommand, planCommand, readLocalState, statusCommand, cancelCommand } from '../tools/batch-upload/aob-batch.mjs';
+import { loadLiveVariants, variantsByTask } from '../tools/batch-upload/variants.mjs';
 import { MAX_DARWIN_SECRET_BYTES, planCredentialCall } from '../tools/batch-upload/credentials.mjs';
 import { assertVerificationUrl } from '../tools/batch-upload/http.mjs';
 import { parseStrictJson } from '../tools/batch-upload/json.mjs';
@@ -17,6 +18,14 @@ import { batchConfig, limits } from '../server/config.mjs';
 import { readTree } from '../tools/batch-upload/walk.mjs';
 
 const cli = join(process.cwd(), 'tools/batch-upload/aob-batch.mjs');
+const offlineCatalog = () => ({ questions: [{ id: 'one', title: 'One', promptVariants: [] }] });
+const offlineVariants = () => variantsByTask(offlineCatalog());
+
+function catalogEnv(directory, catalog = offlineCatalog()) {
+  const file = join(directory, 'catalog.json');
+  writeFileSync(file, JSON.stringify(catalog));
+  return { AOB_BATCH_CATALOG_FILE: file };
+}
 
 function run(args, env = {}, timeout) {
   return spawnSync(process.execPath, [cli, ...args], {
@@ -54,7 +63,7 @@ test('local planning refuses links, hidden names, and paths outside the allow ro
     batch: 'lampcli',
     works: [{ key: 'lamp-01', task: 'one', dir: 'works/lamp-01', title: '台灯', modelId: 'ma', effort: 'High', providerId: 'official', harnessOther: 'local' }],
   }));
-  const env = { HOME: home };
+  const env = { HOME: home, ...catalogEnv(root) };
   const planned = run(['plan', '--dir', batch], env);
   assert.equal(planned.status, 0, planned.stderr);
   assert.match(planned.stdout, /^[a-f0-9]{64} 1\n$/);
@@ -105,6 +114,8 @@ function fixture() {
   }));
   return {
     root, home, allow, batch,
+    env: { HOME: home, ...catalogEnv(root) },
+    loadVariants: async () => offlineVariants(),
     cleanup() {
       rmSync(root, { recursive: true, force: true });
       rmSync(home, { recursive: true, force: true });
@@ -114,7 +125,7 @@ function fixture() {
 
 test('metadata refuses symlinks, hard links, and fifos before reading or truncating them', () => {
   const box = fixture();
-  const env = { HOME: box.home };
+  const env = box.env;
   const secret = 'OUTSIDE-MANIFEST-SECRET';
   const outside = join(box.root, 'outside-manifest.json');
   writeFileSync(outside, `{"secret":"${secret}"}`);
@@ -156,7 +167,7 @@ test('metadata refuses symlinks, hard links, and fifos before reading or truncat
 
 test('a normal plan writes a regular plan.json and status does not need the work files', async () => {
   const box = fixture();
-  const digest = await planCommand(box.batch, box.home);
+  const digest = await planCommand(box.batch, box.home, { loadVariants: box.loadVariants });
   assert.match(digest, /^[a-f0-9]{64}$/);
   const planStat = lstatSync(join(box.batch, 'plan.json'));
   assert.equal(planStat.isSymbolicLink(), false);
@@ -197,7 +208,7 @@ test('a normal plan writes a regular plan.json and status does not need the work
 
 test('duplicate and special work keys are rejected before they can be used as object keys', () => {
   const box = fixture();
-  const env = { HOME: box.home };
+  const env = box.env;
   const manifest = (works) => writeFileSync(join(box.batch, 'manifest.json'), JSON.stringify({ batch: 'lampcli', works }));
   const base = { task: 'one', dir: 'works/lamp-01', title: '台灯', modelId: 'ma', effort: 'High', providerId: 'official', harnessOther: 'local' };
   manifest([{ key: 'lamp-01', ...base }, { key: 'lamp-01', ...base, dir: 'missing' }]);
@@ -248,7 +259,7 @@ test('local batch limits match the server pilot defaults and stop before a huge 
   assert.throws(() => assertWorkBudget({ fileBytes: LOCAL_LIMITS.maxFileBytes + 1 }), /单个文件超过上限/);
 
   const box = fixture();
-  const env = { HOME: box.home };
+  const env = box.env;
   const works = Array.from({ length: 11 }, (_, index) => ({
     key: `lamp-${index}`, task: 'one', dir: 'works/lamp-01', title: '台灯', modelId: 'ma', effort: 'High', providerId: 'official', harnessOther: 'local',
   }));
@@ -280,11 +291,12 @@ test('confirmation URL must stay on the fixed origin', () => {
 
 test('auth deletes the device code on failure and refuses a foreign confirmation page', async () => {
   const box = fixture();
-  await planCommand(box.batch, box.home);
+  await planCommand(box.batch, box.home, { loadVariants: box.loadVariants });
   const stored = [];
   const deleted = [];
   const deps = {
     home: box.home,
+    loadVariants: box.loadVariants,
     assertStore() {},
     storeSecret(account, secret) { stored.push([account, secret]); },
     deleteSecret(account) { deleted.push(account); },
@@ -374,6 +386,122 @@ test('credential commands keep the secret off argv, including Windows deletion',
     if (!name.endsWith('.mjs')) continue;
     assert.equal(readFileSync(join(process.cwd(), 'tools/batch-upload', name), 'utf8').includes('server/'), false, name);
   }
+});
+
+test('plan rejects a missing, unknown, or labeled prompt variant and accepts an id', async () => {
+  const box = fixture();
+  const prompt = 'DO-NOT-LEAK-PROMPT-TEXT';
+  const catalog = {
+    questions: [
+      {
+        id: 'voxel-mountain-city',
+        title: '云山巨城',
+        promptVariants: [
+          { id: 'long', label: '长提示词', prompt },
+          { id: 'short', label: '短提示词', prompt: 'DO-NOT-LEAK-SHORT' },
+        ],
+      },
+      { id: 'plain', title: '普通题', promptVariants: [] },
+    ],
+  };
+  const loadVariants = async () => variantsByTask(catalog);
+  const manifest = (work) => writeFileSync(join(box.batch, 'manifest.json'), JSON.stringify({
+    batch: 'lampcli',
+    works: [{ key: 'lamp-01', dir: 'works/lamp-01', title: '台灯', modelId: 'ma', effort: 'High', providerId: 'official', harnessOther: 'local', ...work }],
+  }));
+  const plan = () => planCommand(box.batch, box.home, { loadVariants });
+
+  manifest({ task: 'voxel-mountain-city' });
+  await assert.rejects(plan, (error) => {
+    assert.match(error.message, /缺少 promptVariant/);
+    assert.match(error.message, /long（长提示词）/);
+    assert.match(error.message, /short（短提示词）/);
+    assert.equal(error.message.includes(prompt), false);
+    return true;
+  });
+  assert.equal(existsSync(join(box.batch, 'plan.json')), false);
+
+  manifest({ task: 'voxel-mountain-city', promptVariant: 'medium' });
+  await assert.rejects(plan, /promptVariant「medium」不是版本 id/);
+  await assert.rejects(plan, /请填写版本 id，不要填写标签/);
+
+  manifest({ task: 'voxel-mountain-city', promptVariant: '长提示词' });
+  await assert.rejects(plan, (error) => {
+    assert.match(error.message, /promptVariant「长提示词」不是版本 id/);
+    assert.match(error.message, /long（长提示词）/);
+    assert.match(error.message, /short（短提示词）/);
+    assert.equal(error.message.includes(prompt), false);
+    return true;
+  });
+  assert.equal(existsSync(join(box.batch, 'plan.json')), false);
+
+  manifest({ task: 'voxel-mountain-city', promptVariant: ' long ' });
+  const digest = await plan();
+  const saved = JSON.parse(readFileSync(join(box.batch, 'plan.json'), 'utf8'));
+  assert.equal(saved.works[0].promptVariant, 'long');
+  assert.equal(saved.payloadDigest, digest);
+  assert.equal(JSON.stringify(saved).includes(prompt), false);
+
+  manifest({ task: 'plain' });
+  await plan();
+  const plain = JSON.parse(readFileSync(join(box.batch, 'plan.json'), 'utf8'));
+  assert.equal(plain.works[0].task, 'plain');
+  assert.equal(plain.works[0].promptVariant, '');
+
+  manifest({ task: 'not-in-catalog' });
+  await plan();
+  const absent = JSON.parse(readFileSync(join(box.batch, 'plan.json'), 'utf8'));
+  assert.equal(absent.works[0].task, 'not-in-catalog');
+  assert.equal(absent.works[0].promptVariant, '');
+  box.cleanup();
+});
+
+test('the plan command rejects a Chinese prompt label and does not write plan.json', () => {
+  const box = fixture();
+  const prompt = 'DO-NOT-LEAK-PROMPT-TEXT';
+  writeFileSync(join(box.batch, 'manifest.json'), JSON.stringify({
+    batch: 'lampcli',
+    works: [{
+      key: 'lamp-01', task: 'q-346be7b35d9f3e6a', dir: 'works/lamp-01', title: '船',
+      modelId: 'ma', effort: 'High', providerId: 'official', harnessOther: 'local', promptVariant: '短提示词',
+    }],
+  }));
+  const env = {
+    ...box.env,
+    ...catalogEnv(box.root, {
+      questions: [{
+        id: 'q-346be7b35d9f3e6a',
+        title: '忒修斯之船 · 3D',
+        promptVariants: [
+          { id: 'long', label: '长提示词', prompt },
+          { id: 'short', label: '短提示词', prompt },
+        ],
+      }],
+    }),
+  };
+  const result = run(['plan', '--dir', box.batch], env);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /忒修斯之船 · 3D/);
+  assert.match(result.stderr, /promptVariant「短提示词」不是版本 id/);
+  assert.match(result.stderr, /long（长提示词）/);
+  assert.match(result.stderr, /short（短提示词）/);
+  assert.equal(`${result.stdout}${result.stderr}`.includes(prompt), false);
+  assert.equal(existsSync(join(box.batch, 'plan.json')), false);
+  box.cleanup();
+});
+
+test('plan stops when the official catalog cannot be read', async () => {
+  const box = fixture();
+  const failing = async () => { throw new Error('无法读取官方题库，不能核对提示词版本'); };
+  await assert.rejects(() => planCommand(box.batch, box.home, { loadVariants: failing }), /无法读取官方题库/);
+  assert.equal(existsSync(join(box.batch, 'plan.json')), false);
+
+  await assert.rejects(() => loadLiveVariants(async () => { throw new Error('connect'); }), /无法读取官方题库，不能核对提示词版本/);
+  await assert.rejects(() => loadLiveVariants(async () => ({ status: 500, data: { questions: [] } })), /无法读取官方题库，不能核对提示词版本（500）/);
+  await assert.rejects(() => loadLiveVariants(async () => ({ status: 200, data: {} })), /无法读取官方题库，不能核对提示词版本/);
+  await assert.rejects(() => loadLiveVariants(async () => ({ status: 200, data: { questions: [{ id: 'one', title: 'One' }] } })), /没有提示词版本字段/);
+  assert.equal(existsSync(join(box.batch, 'plan.json')), false);
+  box.cleanup();
 });
 
 test('HTTP client refuses a redirect that would carry Authorization', async () => {

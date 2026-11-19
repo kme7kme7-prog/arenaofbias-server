@@ -10,6 +10,6 @@
 node tools/batch-upload/aob-batch.mjs plan --dir <允许根内的批次目录>
 ```
 
-`plan` 不访问网络。它在本地限额内计算摘要（每批 10 件、压缩 100 MiB、解压 300 MiB，另有单件上限），并安全地写出 `plan.json`。`status` 和 `cancel` 之后只读这份本地记录，不再重读作品文件。`auth` 和 `upload` 只连接 `https://api.arenaofbias.icu`。令牌进操作系统凭据库，不进命令参数。功能默认关闭；在 kme7 明确允许试点之前，不要运行 `auth`、`upload`、`status` 或 `cancel`。
+`plan` 在本地限额内计算摘要（每批 10 件、压缩 100 MiB、解压 300 MiB，另有单件上限），并安全地写出 `plan.json`。它会读取一次 `https://api.arenaofbias.icu/api/catalog`，用来核对有提示词版本的题目是否填写了版本 id（例如 `long`），而不是中文标签（例如 `长提示词`）。读不到题库就不写 `plan.json`。`status` 和 `cancel` 之后只读这份本地记录，不再重读作品文件。`auth` 和 `upload` 只连接 `https://api.arenaofbias.icu`。令牌进操作系统凭据库，不进命令参数。功能默认关闭；在 kme7 明确允许试点之前，不要运行 `auth`、`upload`、`status` 或 `cancel`。
 
-独立压缩包必须带上本目录里 CLI 会 import 的全部文件（含 `plan.mjs`），不能只带入口脚本。
+独立压缩包必须带上本目录里 CLI 会 import 的全部文件（含 `plan.mjs` 和 `variants.mjs`），不能只带入口脚本。

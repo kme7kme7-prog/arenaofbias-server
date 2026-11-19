@@ -1,3 +1,10 @@
+## 2026-11-19 · 批量投稿 plan 核对提示词版本（PR，未合并，未部署）
+
+- `plan` 对有 `promptVariants` 的题目要求 manifest 填写版本 id。缺省、错误 id、中文标签（如 `长提示词`）都会在写 `plan.json` 之前失败，并列出可用 id 和标签。没有版本的题目仍可不写该字段。版本名单来自 `GET https://api.arenaofbias.icu/api/catalog` 的 `questions[].promptVariants`，不写死三道题。读不到题库，或整份题库都没有这个字段时，`plan` 停止。
+- 2026-11-19 线上题库（`pr31.3a7eaf2`，digest `89c3acac…`）里需要填写的是 `voxel-mountain-city`（云山巨城）、`supernovai`（SupernovAI）、`q-346be7b35d9f3e6a`（忒修斯之船 · 3D），id 为 `long` / `short`。本仓库 `questions.dto` 目前不输出 `promptVariants`，线上目录有该字段；这次没有改服务器。
+- 说明见 `docs/batch-upload.md`。`npm run check` 195/0。`npm test` 624/624。没有对生产执行 `auth` 或 `upload`，没有改 `BATCH_UPLOAD`，没有部署。
+- 不要合并，不要部署。等 kme7 明确说可以之后再动。[本轮归档](docs/archive/2026-11-19-batch-plan-prompt-variant-kme7kme7-prog.md)。
+
 ## 2026-11-10 · 批量投稿 CLI 安全修复（PR，未合并，未部署）
 
 - 只改本地 CLI、测试和说明。`plan.mjs` 成为 CLI 与服务器共用的唯一摘要实现；独立压缩包不再缺这个文件。`manifest.json` / `plan.json` 按普通文件、非符号链接、非硬链接和 `O_NOFOLLOW` 读写，`plan.json` 用临时文件加 `rename` 替换。macOS 钥匙串不再把秘密放进 argv。`status` / `cancel` 只读本地 `plan.json`。设备码在失败和超时路径删除。作品键拒绝 `__proto__` / `constructor` / `prototype` 等特殊名。`BATCH_UPLOAD` 默认值未改。

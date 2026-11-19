@@ -1,6 +1,7 @@
 // Local batch uploader for an ordinary moderator. No --token, --endpoint, or --insecure.
 // The upload token is never printed. auth/upload talk only to https://api.arenaofbias.icu.
-import { realpathSync } from 'node:fs';
+// plan reads GET /api/catalog on that same host to check promptVariant ids.
+import { readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +10,7 @@ import { apiJson, apiRequest, assertVerificationUrl } from './http.mjs';
 import { parseStrictJson } from './json.mjs';
 import { LOCAL_LIMITS, assertBatchTotals, assertWorkBudget } from './limits.mjs';
 import { normalizeBatchId, normalizeWorkKey, planDigest } from './plan.mjs';
+import { assertPlanVariants, loadLiveVariants, variantsByTask } from './variants.mjs';
 import { openBatch, readLocalFile, readTree, realRoot, writeAtomicFile } from './walk.mjs';
 import { assertZipRuntime, storeZip } from './zip.mjs';
 
@@ -68,6 +70,26 @@ function workRecord(source, key) {
   return record;
 }
 
+// Tests point this at a local catalog snapshot so the suite does not call the API.
+// It is not a way to choose another host. A missing or invalid file fails the plan.
+const CATALOG_FILE_ENV = 'AOB_BATCH_CATALOG_FILE';
+
+export async function loadVariantsForCli(request = apiJson) {
+  const file = process.env[CATALOG_FILE_ENV];
+  if (!file) return loadLiveVariants(request);
+  if (file.includes('://')) throw new Error('无法读取官方题库，不能核对提示词版本');
+  let raw;
+  try { raw = readFileSync(file, 'utf8'); }
+  catch { throw new Error('无法读取官方题库，不能核对提示词版本'); }
+  let data;
+  try { data = parseStrictJson(raw); }
+  catch (error) {
+    if (error.message === '拒绝特殊字段名') throw error;
+    throw new Error('无法读取官方题库，不能核对提示词版本');
+  }
+  return variantsByTask(data);
+}
+
 function loadManifest(batchDir) {
   let raw;
   try { raw = parseStrictJson(readLocalFile(batchDir, 'manifest.json').toString('utf8')); }
@@ -79,7 +101,7 @@ function loadManifest(batchDir) {
   return raw;
 }
 
-export function buildPlan(dir, home = homedir()) {
+export async function buildPlan(dir, home = homedir(), deps = {}) {
   const { batchDir } = locate(dir, home);
   const manifest = loadManifest(batchDir);
   normalizeBatchId(manifest.batch);
@@ -92,6 +114,8 @@ export function buildPlan(dir, home = homedir()) {
     seen.add(key);
     return { key, work };
   });
+  const loadVariants = deps.loadVariants ?? (() => loadLiveVariants(deps.request));
+  assertPlanVariants(listed.map(({ work }) => work), await loadVariants());
   let expanded = 0;
   let compressed = 0;
   const works = listed.map(({ key, work }) => {
@@ -170,9 +194,9 @@ export function readLocalState(dir, home = homedir()) {
   return { batchDir, batch, payloadDigest: typeof state.payloadDigest === 'string' ? state.payloadDigest : '', uploaded };
 }
 
-export async function planCommand(dir, home = homedir()) {
+export async function planCommand(dir, home = homedir(), deps = {}) {
   assertZipRuntime();
-  const built = buildPlan(dir, home);
+  const built = await buildPlan(dir, home, deps);
   checkpoint(built.batchDir, { ...built.packed.plan, payloadDigest: built.packed.digest, uploaded: {} });
   console.log(`${built.packed.digest} ${built.packed.plan.works.length}`);
   return built.packed.digest;
@@ -192,7 +216,7 @@ export async function authCommand(dir, deps = {}) {
   const wait = deps.sleep ?? sleep;
   const clock = deps.now ?? Date.now;
   checkStore();
-  const built = buildPlan(dir, home);
+  const built = await buildPlan(dir, home, deps);
   const saved = readPlanFile(built.batchDir).state;
   if (saved.payloadDigest !== built.packed.digest) throw new Error('计划已变化，请重新执行 plan');
   const response = await request('POST', '/api/batch/device', {
@@ -243,7 +267,7 @@ export async function uploadCommand(dir, deps = {}) {
   const checkStore = deps.assertStore ?? assertStore;
   const wait = deps.sleep ?? sleep;
   checkStore();
-  const built = buildPlan(dir, home);
+  const built = await buildPlan(dir, home, deps);
   const saved = readPlanFile(built.batchDir);
   if (saved.state.payloadDigest !== built.packed.digest) throw new Error('计划已变化，请重新执行 plan 和 auth');
   const token = await read(`grant:${built.packed.plan.batch}`);
@@ -325,10 +349,11 @@ function main() {
   assertZipRuntime();
   const parsed = args(process.argv.slice(3));
   const command = process.argv[2];
+  const deps = { loadVariants: () => loadVariantsForCli() };
   const run = {
-    plan: () => planCommand(parsed.dir),
-    auth: () => authCommand(parsed.dir),
-    upload: () => uploadCommand(parsed.dir),
+    plan: () => planCommand(parsed.dir, undefined, deps),
+    auth: () => authCommand(parsed.dir, deps),
+    upload: () => uploadCommand(parsed.dir, deps),
     status: () => statusCommand(parsed.dir),
     cancel: () => cancelCommand(parsed.dir),
   }[command];

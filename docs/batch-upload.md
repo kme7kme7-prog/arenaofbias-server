@@ -14,6 +14,8 @@
 2. 在这个根下面准备批次目录。每个作品一个子目录，入口是 `index.html`。不要放 `.env`、`.git`、`.ssh`、密钥、符号链接或硬链接。
 3. 写 `manifest.json`。它只描述投稿事实。`pipeline`、`role`、`autoVerify`、`publish`、`show_gallery` 即使写了也会被服务器丢掉，不能用来关闭审查或打开画廊。作品键不能重复，也不能是 `__proto__`、`constructor`、`prototype` 以及 `__defineGetter__` 这一类对象特殊名。
 
+没有多个提示词版本的题目可以不写 `promptVariant`。题目在官方题库里有 `promptVariants` 时，必须写其中的 **id**，不能写中文标签。例如 `long` 是 id，`长提示词` 是标签；写成标签会在 `plan` 时失败。
+
 ```json
 {
   "batch": "lamp-2026-11-09",
@@ -34,6 +36,37 @@
 }
 ```
 
+有提示词版本的题目要带上 id。下面是「云山巨城」用长提示词的例子。`promptVariant` 写 `long`，不要写 `长提示词`。
+
+```json
+{
+  "batch": "voxel-2026-11-19",
+  "works": [
+    {
+      "key": "city-01",
+      "task": "voxel-mountain-city",
+      "dir": "works/city-01",
+      "title": "云山巨城",
+      "modelId": "数据包里的模型id",
+      "effort": "High",
+      "providerId": "official",
+      "harnessId": "claude-code",
+      "generationMode": "single-turn",
+      "humanIntervention": "none",
+      "promptVariant": "long"
+    }
+  ]
+}
+```
+
+`plan` 以当时读到的官方题库为准，不使用写死的题目名单。2026-11-19 的线上题库里，需要填写版本 id 的题目有这三道，版本 id 都是 `long` / `short`，标签都是 `长提示词` / `短提示词`：
+
+- `voxel-mountain-city` — 云山巨城
+- `supernovai` — SupernovAI
+- `q-346be7b35d9f3e6a` — 忒修斯之船 · 3D
+
+以后题库增减版本，以 `plan` 读到的 `promptVariants` 为准。缺了 id、写了不存在的 id，或写了中文标签，`plan` 都会停下来，并列出该题可用的 id 和标签。
+
 4. 用已登录的普通管理员账号打开 CLI 打印的确认页，对照完整摘要后再点确认。确认页必须属于 `https://api.arenaofbias.icu`，否则命令失败，不会把设备码写入凭据库。不要让自动化代替人确认。
 
 ## 命令
@@ -48,7 +81,11 @@ node tools/batch-upload/aob-batch.mjs status --dir <同一目录>
 node tools/batch-upload/aob-batch.mjs cancel --dir <同一目录>
 ```
 
-`plan` 不访问网络。它读取 `manifest.json` 和作品文件，写出 `plan.json`。这两个元数据文件和作品文件一样，先 `lstat`：必须是普通文件、不能是符号链接、不能是硬链接，再用 `O_NOFOLLOW` 打开。Windows 没有 `O_NOFOLLOW`，那里改为比对打开前后的 inode，并且仍然拒绝符号链接和硬链接。`plan.json` 用同目录临时文件加 `rename` 替换，不会对目标路径做截断写入，因此不会顺着符号链接或 FIFO 把外面的文件写掉。
+`plan` 会请求一次 `GET https://api.arenaofbias.icu/api/catalog`，只用来读取每道题的 `promptVariants`。没有参数可以改地址，也不发送作品或令牌。读失败时停止，不写 `plan.json`。失败包括连不上、状态不是 200、正文不是带 `questions` 数组的 JSON，以及整份题库都没有 `promptVariants` 字段（那样就无法判断哪些题要填 id）。空数组表示这道题没有多个版本，可以不写 `promptVariant`。题目不在题库里时，`plan` 不额外要求这个字段；上传时服务器仍会检查题目是否存在。核对用的是版本 **id**，标签只出现在错误说明里。
+
+`AOB_BATCH_CATALOG_FILE` 只给本仓库的测试使用。设置之后，`plan` 改读这个本地 JSON，不再请求官方题库；文件打不开或内容无效就失败，不会因此去连别的地址。平时不要设置它。
+
+除此之外，`plan` 读取 `manifest.json` 和作品文件，写出 `plan.json`。这两个元数据文件和作品文件一样，先 `lstat`：必须是普通文件、不能是符号链接、不能是硬链接，再用 `O_NOFOLLOW` 打开。Windows 没有 `O_NOFOLLOW`，那里改为比对打开前后的 inode，并且仍然拒绝符号链接和硬链接。`plan.json` 用同目录临时文件加 `rename` 替换，不会对目标路径做截断写入，因此不会顺着符号链接或 FIFO 把外面的文件写掉。`auth` 和 `upload` 会重算摘要，因此会再读一次同一份题库并做同样的核对。
 
 本地限额与服务器试点默认值、普通上传单件上限对齐，命令行不读取 `BATCH_MAX_*`。服务器若改了这些变量，可能比 CLI 更严或更松：
 
@@ -73,7 +110,7 @@ Linux 需要 `secret-tool`。没有它就不能 `auth`、`upload`、`status` 或
 
 ## 独立压缩包
 
-给没有这份仓库的管理员用的压缩包必须自带 `tools/batch-upload/` 里 CLI 会 import 的全部文件，包括 `plan.mjs`。不能只拷 `aob-batch.mjs`。在解压后的根目录执行与上面相同的 `node tools/batch-upload/aob-batch.mjs ...`。
+给没有这份仓库的管理员用的压缩包必须自带 `tools/batch-upload/` 里 CLI 会 import 的全部文件，包括 `plan.mjs` 和 `variants.mjs`。不能只拷 `aob-batch.mjs`。在解压后的根目录执行与上面相同的 `node tools/batch-upload/aob-batch.mjs ...`。
 
 ## 服务器保证
 
@@ -86,4 +123,4 @@ Linux 需要 `secret-tool`。没有它就不能 `auth`、`upload`、`status` 或
 
 ## 现在不要做的事
 
-不要为了试这条通道重启生产服务，不要在生产库里登记真实批次，不要制造生产令牌。本地验证用 `npm test`。`plan` 可以在本地目录上试；在功能被明确打开并部署之前，不要运行 `auth` 或 `upload`，它们只会访问生产地址。`status` 和 `cancel` 同样会访问生产地址。
+不要为了试这条通道重启生产服务，不要在生产库里登记真实批次，不要制造生产令牌。本地验证用 `npm test`。`plan` 可以在本地目录上试；它只会读取官方题库，不会登记批次。在功能被明确打开并部署之前，不要运行 `auth` 或 `upload`，它们会访问生产地址。`status` 和 `cancel` 同样会访问生产地址。

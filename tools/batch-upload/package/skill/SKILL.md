@@ -34,7 +34,7 @@ node tools/batch-upload/aob-batch.mjs status --dir <同一目录>
 node tools/batch-upload/aob-batch.mjs cancel --dir <同一目录>
 ```
 
-- `plan`：只本地算摘要，不访问网络。限额是每批 10 件、压缩 100 MiB、解压 300 MiB，单件压缩 30 MiB、解压 150 MiB。写出的 `plan.json` 不跟随符号链接，也不截断意外文件。
+- `plan`：在本地算摘要，并读取一次 `https://api.arenaofbias.icu/api/catalog` 来核对提示词版本。有 `promptVariants` 的题目必须写版本 id（如 `long`），不要写标签（如 `长提示词`）。读不到题库就停止，不写 `plan.json`。限额是每批 10 件、压缩 100 MiB、解压 300 MiB，单件压缩 30 MiB、解压 150 MiB。写出的 `plan.json` 不跟随符号链接，也不截断意外文件。
 - `auth`：设备码进 OS 凭据库，不进命令参数。终端只显示确认页、确认码和摘要。失败或超时会删掉设备码。
 - `upload`：一次一件；断点可重试同作品键；内容变了服务器 409，不覆盖。
 - `status` / `cancel`：只读 `plan.json` 里的批次编号和凭据库里的令牌。作品文件被移走后仍可查询或取消。`cancel` 只取消未提交暂存。
@@ -42,6 +42,7 @@ node tools/batch-upload/aob-batch.mjs cancel --dir <同一目录>
 ## 硬规矩（AI 必须遵守）
 
 - 不要把网站 Cookie、dots 令牌或批量上传令牌写进聊天、命令参数、环境变量或日志。
+- 不要设置 `AOB_BATCH_CATALOG_FILE`。那只给仓库测试替换题库快照；设置后 `plan` 不再读官方题库。
 - 不要扫描允许根以外的路径，不要跟随符号链接，不要读取 `.env` / 密钥文件去“帮忙”。
 - 不要声称可以跳过审核或直接公开；服务端强制 unverified + pending。
 - 不要声称 macOS 秘密“永远不会出现在进程内存里”。它不在 argv 里；`security` 从标准输入读，并且有大约 128 字节的提示上限。

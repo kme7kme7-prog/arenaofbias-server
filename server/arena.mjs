@@ -644,7 +644,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       const matchTask = catalog.task(taskId) ?? snapshot.task(taskId);
       if (!matchTask) fail(404, '题目不存在');
       if (isAiJudgedTask(matchTask)) fail(409, '这道题由 AI 评分，暂不开放盲评', 'ai-judged');
-      if (!guided && isTrialTask(matchTask)) fail(403, '该分区目前仅在引导式盲评测试版开放', 'guided-only');
+      if (!guided && isTrialTask(matchTask)) fail(409, '音乐分区暂未开放盲评', 'arena-closed');
       if (Date.now() - lastCleanup >= 60e3) cleanupExpiredMatches();
       const groups = new Map();
       for (const work of library.eligible(taskId, snapshot, user)) {

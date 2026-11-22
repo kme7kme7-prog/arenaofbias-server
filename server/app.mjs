@@ -42,7 +42,7 @@ import { createReview } from './review.mjs';
 import { createInbox } from './inbox.mjs';
 import { createQuestions, isArenaOnlyQuestion } from './questions.mjs';
 import { createReferences } from './references.mjs';
-import { DOMAIN_GROUPS, DOMAINS, AI_JUDGED, isAiJudgedTask, isTrialTask, requireCategory, requireDomains } from './categories.mjs';
+import { DOMAIN_GROUPS, DOMAINS, AI_JUDGED, TRIAL_CATEGORIES, isAiJudgedTask, isTrialTask, requireCategory, requireDomains } from './categories.mjs';
 import { createProfile } from './profile.mjs';
 import { registerShow1Compat } from './show1compat.mjs';
 import { registerShow1Guess } from './show1/guess.mjs';
@@ -228,7 +228,6 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     for (let i = 0; i < allWorks.length; i += 32) {
       catalog.withSnapshot(() => {
         for (const work of allWorks.slice(i, i + 32)) {
-          if (!includeTrial && isTrialTask(catalog.task(work.taskId))) continue;
           if (library.visibleTo(work, 'show2')) works.push(library.toPublic(work, user));
         }
       });
@@ -241,7 +240,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const buildCatalog = (includeTrial) => createCatalogResponse(db, catalog, async (snapshot) => ({
     ...versionInfo(snapshot), serverVersion, providers: snapshot.providers(), domains: DOMAINS, domainGroups: DOMAIN_GROUPS,
     site: siteInfo(), works: (await galleryList(null, snapshot, { includeTrial })).map(withoutMine),
-    questions: catalog.withSnapshot(() => questions.all().filter((question) => !isArenaOnlyQuestion(question) && (includeTrial || !isTrialTask(question))).map(withoutMine)),
+    questions: catalog.withSnapshot(() => questions.all().filter((question) => !isArenaOnlyQuestion(question)).map(withoutMine)),
   }), { revision: catalogRevision });
   const publicCatalog = buildCatalog(false);
   const guidedCatalog = buildCatalog(true);
@@ -257,7 +256,6 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         catalog.withSnapshot(() => {
           for (const work of allWorks.slice(i, i + 32)) {
             if (!library.visibleTo(work, 'show2')) continue;
-            if (!senior && isTrialTask(catalog.task(work.taskId))) continue;
             const measured = metricsOf(work);
             for (const [field, target] of [['usage', usage], ['artifact', artifact]]) if (measured[field]) {
               (target[work.taskId] ??= Object.create(null))[work.id] = measured[field];
@@ -324,7 +322,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
           // Shared pools are public; a senior's pin list also offers restricted models.
           ...(isSenior(user) ? { arenaModels: arena.poolModels(seesRestricted(user) ? null : pools, user, includeTrial) } : {}),
           featured: featured.read(), totals,
-          workAccess: works.filter((work) => (includeTrial || !isTrialTask(catalog.task(work.taskId))) && library.visibleTo(work, 'show2')).map((work) => library.access(work, user)),
+          workAccess: works.filter((work) => library.visibleTo(work, 'show2')).map((work) => library.access(work, user)),
           review: review(user, uploads, works),
         };
       });
@@ -337,7 +335,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     const snapshot = catalog.snapshot();
     const { workAccess, ...live } = await activity(user, { includeTrial });
     return { ...versionInfo(snapshot), serverVersion, providers: snapshot.providers(), domains: DOMAINS, domainGroups: DOMAIN_GROUPS,
-      site: siteInfo(), ...(lite ? {} : { works: await galleryList(user, snapshot, { includeTrial }) }), questions: questions.all(user).filter((question) => !isArenaOnlyQuestion(question) && (includeTrial || !isTrialTask(question))), ...session(user), ...live };
+      site: siteInfo(), ...(lite ? {} : { works: await galleryList(user, snapshot, { includeTrial }) }), questions: questions.all(user).filter((question) => !isArenaOnlyQuestion(question)), ...session(user), ...live };
   }
   // Signed-out bootstrap is the same for everyone, so it is built once per generation.
   // Signed-in requests never touch it. private keeps CDNs from storing it.
@@ -1101,7 +1099,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     const task = ctx.url.searchParams.get('task') || null;
     if (task && !catalog.task(task)) fail(404, '题目不存在');
     const category = ctx.url.searchParams.get('category') || null;
-    if (category && (task || (!AI_JUDGED.has(category) && !catalog.tasks().some((t) => t.category === category)))) fail(400, '题型筛选无效', 'invalid_query');
+    if (category && (task || (!AI_JUDGED.has(category) && !TRIAL_CATEGORIES.has(category) && !catalog.tasks().some((t) => t.category === category)))) fail(400, '题型筛选无效', 'invalid_query');
     const domain = ctx.url.searchParams.get('domain') || null;
     if (domain && (task || !catalog.tasks().some((t) => t.domains?.includes(domain)))) fail(400, '领域筛选无效', 'invalid_query');
     const filters = Object.fromEntries(['harness', 'provider'].map((field) => {

@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { transaction } from './db.mjs';
 import { fail } from './http.mjs';
-import { isAiJudgedTask } from './categories.mjs';
+import { isAiJudgedTask, isTrialTask } from './categories.mjs';
 import { isSenior } from './roles.mjs';
 import { entityKey } from './catalog.mjs';
 export { CURATED_BOARDS } from './curated-seed.mjs'; // Migration seed / legacy consumers only.
@@ -12,7 +12,7 @@ export function createCurated({ db, catalog, library, questions }) {
   const sections = () => db.prepare('SELECT * FROM curated_sections ORDER BY sort_order,id').all();
   const available = id => {
     const task = catalog.task(id);
-    return Boolean(task && !isAiJudgedTask(task) && !task.tags?.includes('arena-only') &&
+    return Boolean(task && !isAiJudgedTask(task) && !isTrialTask(task) && !task.tags?.includes('arena-only') &&
       new Set(library.eligible(id).map(work => entityKey(work))).size >= 2);
   };
   const availability = () => {

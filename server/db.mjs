@@ -897,6 +897,14 @@ const MIGRATIONS = [
     );
     CREATE INDEX IF NOT EXISTS batch_reservations_state ON batch_reservations(state);`);
   },
+  (db) => {
+    db.exec(`CREATE TABLE IF NOT EXISTS task_solve_status (
+      task_id TEXT PRIMARY KEY,
+      status TEXT NOT NULL,
+      updated_by TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );`);
+  },
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

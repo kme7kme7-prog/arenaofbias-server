@@ -44,6 +44,16 @@ export function createActivityRevision(db) {
   return () => String(revision.get().revision);
 }
 
+export function createSolveStatusRevision(db) {
+  db.exec('CREATE TEMP TABLE solve_status_revision (revision INTEGER NOT NULL); INSERT INTO solve_status_revision VALUES (0);');
+  for (const event of ['INSERT', 'UPDATE', 'DELETE']) {
+    db.exec(`CREATE TEMP TRIGGER solve_status_${event.toLowerCase()} AFTER ${event} ON main.task_solve_status
+      BEGIN UPDATE solve_status_revision SET revision = revision + 1; END;`);
+  }
+  const revision = db.prepare('SELECT revision FROM solve_status_revision');
+  return () => String(revision.get().revision);
+}
+
 // One shared JSON body per generation, serialized, hashed and compressed once.
 // `strict` must match when the body leaves: a change during the build rebuilds it
 // (moderation withdrawals). `loose` only decides whether a cached body is reused,

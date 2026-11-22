@@ -17,7 +17,7 @@ import { createLoginSecurity } from './login-security.mjs';
 import { createCapturer } from './capture.mjs';
 import { createModerator } from './moderation.mjs';
 import { createCatalog } from './catalog.mjs';
-import { createActivityRevision, createCatalogResponse, createCatalogRevision, createMetricsRevision, createSharedJson } from './catalog-response.mjs';
+import { createActivityRevision, createCatalogResponse, createCatalogRevision, createMetricsRevision, createSharedJson, createSolveStatusRevision } from './catalog-response.mjs';
 import { createSharedRead } from './shared-read.mjs';
 import { createComments } from './comments.mjs';
 import { createChangelog } from './changelog.mjs';
@@ -87,7 +87,20 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const inbox = createInbox({ library, config, limits });
   const catalogRevision = createCatalogRevision(db);
   const metricsRevision = createMetricsRevision(db);
+  const solveStatusRevision = createSolveStatusRevision(db);
   const displayRevision = () => `${catalogRevision()}|${metricsRevision()}`;
+  const SOLVE_STATUS_VALUES = new Set(['hard', 'solving', 'solved', 'scarce']);
+  const DEFAULT_SOLVE_STATUS = 'scarce';
+  const normalizeSolveStatus = (value) => (SOLVE_STATUS_VALUES.has(value) ? value : DEFAULT_SOLVE_STATUS);
+  const readSolveStatuses = () => {
+    const rows = db.prepare('SELECT task_id, status FROM task_solve_status').all();
+    return new Map(rows.map((row) => [row.task_id, normalizeSolveStatus(row.status)]));
+  };
+  const withSolveStatuses = (list, includeTrial) => {
+    if (!includeTrial) return list;
+    const statuses = readSolveStatuses();
+    return list.map((question) => ({ ...question, solveStatus: statuses.get(question.id) ?? DEFAULT_SOLVE_STATUS }));
+  };
   const curated = createCurated({ db, catalog, library, questions });
   const arena = createArena({ db, catalog, library, limits, revision: catalogRevision, curated });
   const qualification = createQualification({ db, catalog, library, auth });
@@ -240,8 +253,8 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const buildCatalog = (includeTrial) => createCatalogResponse(db, catalog, async (snapshot) => ({
     ...versionInfo(snapshot), serverVersion, providers: snapshot.providers(), domains: DOMAINS, domainGroups: DOMAIN_GROUPS,
     site: siteInfo(), works: (await galleryList(null, snapshot, { includeTrial })).map(withoutMine),
-    questions: catalog.withSnapshot(() => questions.all().filter((question) => !isArenaOnlyQuestion(question)).map(withoutMine)),
-  }), { revision: catalogRevision });
+    questions: withSolveStatuses(catalog.withSnapshot(() => questions.all().filter((question) => !isArenaOnlyQuestion(question)).map(withoutMine)), includeTrial),
+  }), { revision: includeTrial ? () => `${catalogRevision()}|${solveStatusRevision()}` : catalogRevision });
   const publicCatalog = buildCatalog(false);
   const guidedCatalog = buildCatalog(true);
   // Separate from the legacy catalog: two permission scopes, no per-user fields.
@@ -335,13 +348,13 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     const snapshot = catalog.snapshot();
     const { workAccess, ...live } = await activity(user, { includeTrial });
     return { ...versionInfo(snapshot), serverVersion, providers: snapshot.providers(), domains: DOMAINS, domainGroups: DOMAIN_GROUPS,
-      site: siteInfo(), ...(lite ? {} : { works: await galleryList(user, snapshot, { includeTrial }) }), questions: questions.all(user).filter((question) => !isArenaOnlyQuestion(question)), ...session(user), ...live };
+      site: siteInfo(), ...(lite ? {} : { works: await galleryList(user, snapshot, { includeTrial }) }), questions: withSolveStatuses(questions.all(user).filter((question) => !isArenaOnlyQuestion(question)), includeTrial), ...session(user), ...live };
   }
   // Signed-out bootstrap is the same for everyone, so it is built once per generation.
   // Signed-in requests never touch it. private keeps CDNs from storing it.
   const bootstrapActivity = createActivityRevision(db);
   const anonymousBootstrap = (lite, includeTrial = false) => createSharedJson({
-    strict: () => `${catalog.snapshot().version}|${catalogRevision()}|${capturer.available}|${moderator.enabled}`,
+    strict: () => `${catalog.snapshot().version}|${catalogRevision()}${includeTrial ? `|${solveStatusRevision()}` : ''}|${capturer.available}|${moderator.enabled}`,
     loose: bootstrapActivity,
     read: () => bootstrap(null, { lite, includeTrial }),
     ttl: config.bootstrapCacheMs ?? 15_000,
@@ -933,6 +946,25 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   adminOn('POST', '/api/admin/tasks/:id/aspects', async ctx => {
     const admin = adminOnly(ctx); limit.write(admin.id);
     return arena.taskAspects(admin, ctx.params.id, await adminJson(ctx));
+  });
+  adminOn('PUT', '/api/admin/tasks/:id/solve-status', async (ctx) => {
+    const actor = staffOnly(ctx);
+    limit.write(actor.id);
+    const taskId = String(ctx.params.id ?? '').trim();
+    const exists = catalog.withSnapshot(() => questions.all().some((q) => q.id === taskId));
+    if (!exists) fail(404, '未找到这道题目', 'task_not_found');
+    const body = await adminJson(ctx);
+    const status = typeof body?.status === 'string' ? body.status.trim() : '';
+    if (!SOLVE_STATUS_VALUES.has(status)) fail(400, '解决状态无效', 'invalid_solve_status');
+    const updatedAt = new Date().toISOString();
+    transaction(db, () => {
+      db.prepare(`INSERT INTO task_solve_status (task_id, status, updated_by, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(task_id) DO UPDATE SET status = excluded.status, updated_by = excluded.updated_by, updated_at = excluded.updated_at`)
+        .run(taskId, status, actor.id, updatedAt);
+      library.audit(actor, 'solve-status', null, `${taskId} → ${status}`);
+    });
+    return { taskId, solveStatus: status, updatedAt };
   });
   adminOn('GET', '/api/admin/arena/skip-reasons', ctx => arena.skipReasonStats(adminOnly(ctx)));
   adminOn('GET', '/api/admin/tasks/:id/editorial', (ctx) => {

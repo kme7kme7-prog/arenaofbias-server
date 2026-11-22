@@ -783,6 +783,23 @@ test('work upload frequency limits exempt moderators and senior administrators',
   }
 }));
 
+test('admin batch upload routes accept more than 120 uploads per minute', async () => withPlatform(async ({ platform, call }) => {
+  const senior = platform.db.prepare("SELECT * FROM users WHERE name = 'root'").get();
+  const staff = await platform.auth.register('staff', 'correct horse');
+  platform.auth.setRole(senior, staff.id, 'moderator');
+  assert.equal((await call('staff', 'POST', '/api/auth/login', { name: 'staff', password: 'correct horse' })).status, 200);
+
+  const inbox = '/api/admin/inbox?name=work.html&overwrite=1';
+  const upload = '/api/admin/works/upload?task=one&name=work.html&modelName=Test&effort=Max&providerId=official';
+  assert.equal((await call('voter', 'POST', inbox, html, true)).status, 403);
+  assert.equal((await call('staff', 'POST', upload, html, true)).status, 403);
+  for (let attempt = 0; attempt < 121; attempt++) {
+    assert.equal((await call('staff', 'POST', inbox, html, true)).status, 200);
+    assert.equal((await call('root', 'POST', upload, html.replaceAll('作品', `作品 ${attempt}`), true)).status, 200);
+  }
+  assert.equal((await call('staff', 'POST', '/api/admin/inbox/register', {})).status, 404);
+}));
+
 test('moderator routes preserve senior permissions and allow decisions on own works', async () => withPlatform(async ({ platform, call }) => {
   const senior = platform.db.prepare("SELECT * FROM users WHERE name = 'root'").get();
   const staff = await platform.auth.register('staff', 'correct horse');

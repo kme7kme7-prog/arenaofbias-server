@@ -941,7 +941,6 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   });
   router.on('POST', '/api/admin/works/upload', async (ctx) => {
     const admin = adminOnly(ctx);
-    limit.write(admin.id);
     const params = ctx.url.searchParams;
     const task = params.get('task') ?? '';
     checkDatapack(ctx, task);
@@ -981,7 +980,6 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   });
   router.on('POST', '/api/admin/inbox', async (ctx) => {
     const admin = staffOnly(ctx);
-    limit.write(admin.id);
     const params = ctx.url.searchParams;
     const buffer = await readBody(ctx.req, limits.uploadBytes);
     return inbox.upload(admin, params.get('name'), buffer, params.get('overwrite') === '1');

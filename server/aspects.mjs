@@ -143,7 +143,7 @@ export function trialStandings(ballots, keyOf, describe, { category = null } = {
 }
 
 // Anchored per-dimension fits; priors is a map of category-board Elo scores.
-export function trialScores(ballots, keyOf, describe, priors = new Map(), { category = null, seedKey = '', rankRange = { draws: 2000, level: 0.95 } } = {}) {
+export function trialScores(ballots, keyOf, describe, priors = new Map(), { category = null, seedKey = '', rankRange = { draws: 2000, level: 0.95 }, voterModelKey = keyOf, fullWeightUserId = null } = {}) {
   const result = trialStandings(ballots, keyOf, describe, { category });
   const activeAspects = result.category ? ASPECTS[result.category] : Object.values(ASPECTS).flat();
   const activeById = new Map(activeAspects.map((aspect) => [aspect.id, aspect]));
@@ -153,14 +153,27 @@ export function trialScores(ballots, keyOf, describe, priors = new Map(), { cate
   const scale = 400 / Math.log(10);
   for (const row of entries) row.prior = priors.get(row.key) ?? null;
   for (const dimension of result.dimensions) {
-    const comparisons = [];
+    const comparisons = [], voterVolumes = new Map();
     for (const ballot of ballots) {
       if (activeById.get(ballot.aspectId)?.dimension !== dimension.id || !OUTCOMES[ballot.aspectChoice]) continue;
       const a = indexes.get(keyOf(ballot.a)), b = indexes.get(keyOf(ballot.b));
       if (a == null || b == null || a === b) continue;
-      comparisons.push({ a, b, y: ballot.aspectChoice === 'a' ? 1 : ballot.aspectChoice === 'b' ? 0 : 0.5 });
+      const comparison = { a, b, y: ballot.aspectChoice === 'a' ? 1 : ballot.aspectChoice === 'b' ? 0 : 0.5 };
+      if (!fullWeightUserId || ballot.userId !== fullWeightUserId) {
+        const voter = ballot.userId ?? ballot;
+        if (!voterVolumes.has(voter)) voterVolumes.set(voter, new Map());
+        const volumes = voterVolumes.get(voter);
+        const left = voterModelKey(ballot.a), right = voterModelKey(ballot.b);
+        volumes.set(left, (volumes.get(left) ?? 0) + 1);
+        if (right !== left) volumes.set(right, (volumes.get(right) ?? 0) + 1);
+        Object.assign(comparison, { volumes, left, right });
+      }
+      comparisons.push(comparison);
     }
-    const fitted = fitBradleyTerry(entries.length, comparisons, entries.map(row => ({
+    const weighted = comparisons.map(({ a, b, y, volumes, left, right }) => ({ a, b, y,
+      w: volumes ? Math.min(1, Math.sqrt(20 / Math.max(volumes.get(left), volumes.get(right)))) : 1,
+    }));
+    const fitted = fitBradleyTerry(entries.length, weighted, entries.map(row => ({
       mean: row.prior == null ? 0 : (row.prior - 1000) / scale, variance: row.prior == null ? 1 : 0.25,
     })), { anchored: true });
     entries.forEach((row, i) => Object.assign(row.dimensions[dimension.id], {

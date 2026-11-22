@@ -29,6 +29,8 @@ import { ASPECTS, pickAspect, publicAspect, trialScores } from './aspects.mjs';
 
 const MATCH = { tierWidth: 150, sameTierRate: 0.9, blowoutGap: 400, rerolls: 2, cooldownRounds: 6, cooldownMs: 15 * 60e3 };
 const ANONYMOUS_MATCH_MAX = 10000;
+// Keep the basis exemption bound to its account ID, not a mutable name or staff role.
+const GUIDED_BASIS_USER_ID = '2b2170691c51c6c8';
 // The dense solver grows roughly cubically with entry count: 40 entries took
 // 112–128 ms locally, while 1000 blocked the main thread for 2.45 s. Use a
 // 40-entry cutoff so ordinary multi-model boards cannot block session requests.
@@ -903,7 +905,8 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       const result = { by, ...trialScores(ballots, keyOf, (work) => {
         const model = work.modelId ? snapshot.model?.(work.modelId) : null;
         return { model: work.modelId ?? null, modelName: model?.name ?? work.modelName, vendor: model?.vendor ?? work.vendor, effort: by === 'config' ? work.effort ?? '' : '' };
-      }, priors, { category, seedKey: JSON.stringify([by, senior, category, stamp]), rankRange: limits.board.rankRange }) };
+      }, priors, { category, seedKey: JSON.stringify([by, senior, category, stamp]), rankRange: limits.board.rankRange,
+        voterModelKey: (work) => work.modelKey ?? modelKey(work), fullWeightUserId: GUIDED_BASIS_USER_ID }) };
       guidedCache.set(scope, { stamp, result });
       return result;
     },

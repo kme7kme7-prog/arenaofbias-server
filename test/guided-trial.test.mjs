@@ -37,7 +37,9 @@ test('guided pairs are staff-only trials that ask one aspect question and stay o
 
     await assert.rejects(guided(member, 'tower'), { status: 403, code: 'guided-staff-only' });
     const page = await guided(admin, 'page');
-    assert.deepEqual([page.guided, page.aspect, page.counted, page.countableFor], [true, null, false, { public: false, curated: false }]);
+    assert.deepEqual([page.guided, page.counted, page.countableFor], [true, false, { public: false, curated: false }]);
+    // Static pages carry their own aspect pool since the 2026-11-17 guided aspects round.
+    assert.ok(ASPECTS['静态网页'].some((aspect) => aspect.id === page.aspect.id && aspect.question === page.aspect.question));
 
     const first = await guided(admin, 'tower');
     assert.ok(ASPECTS['建模'].some((aspect) => aspect.id === first.aspect.id && aspect.question === first.aspect.question));
@@ -70,7 +72,7 @@ test('guided pairs are staff-only trials that ask one aspect question and stay o
     await assert.rejects(arena.guidedDimensions(member), { status: 403, code: 'guided-staff-only' });
     const dimension = ASPECTS['建模'].find((aspect) => aspect.id === first.aspect.id).dimension;
     const chart = await arena.guidedDimensions(moderator);
-    assert.deepEqual([chart.by, chart.categories, chart.totals.pairs, chart.totals.answered, chart.totals.voters], ['model', ['建模'], 2, 1, 2]);
+    assert.deepEqual([chart.by, chart.categories, chart.totals.pairs, chart.totals.answered, chart.totals.voters], ['model', Object.keys(ASPECTS), 2, 1, 2]);
     assert.strictEqual(await arena.guidedDimensions(moderator), chart, 'unchanged reads reuse the fitted result');
     assert.notStrictEqual(await arena.guidedDimensions(admin), chart, 'senior visibility has a separate cache');
     assert.notStrictEqual(await arena.guidedDimensions(moderator, 'config'), chart, 'configuration view has a separate cache');
@@ -162,8 +164,9 @@ test('the dimension chart skips pairs without an aspect question and pairs withi
     { a: work('m2'), b: work('m3'), choice: 'b', aspectId: 'floating', aspectChoice: null, userId: 'u3', createdAt: 4000 },
   ];
   const chart = trialStandings(ballots, (identity) => identity.modelKey, (identity) => ({ modelName: identity.modelName, effort: '' }));
-  assert.deepEqual(chart.dimensions.map((dimension) => dimension.id), ['aesthetic', 'craft', 'logic', 'fit', 'diverge']);
-  assert.deepEqual(chart.dimensions[0].aspects.map((aspect) => aspect.id), ['atmosphere', 'lighting', 'material']);
+  assert.deepEqual(chart.dimensions.map((dimension) => dimension.id), ['aesthetic', 'craft', 'logic', 'diverge', 'natural']);
+  // Without a category the chart lists every category's aspects under each dimension.
+  assert.deepEqual(chart.dimensions[0].aspects.map((aspect) => aspect.id), ['lighting', 'atmosphere', 'material', 'palette', 'ornament', 'music_melody', 'music_timbre']);
   assert.deepEqual(chart.totals, { pairs: 2, answered: 1, voters: 2, since: new Date(2000).toISOString(), until: new Date(4000).toISOString() });
   const entry = Object.fromEntries(chart.entries.map((row) => [row.key, row]));
   assert.deepEqual(chart.entries.map((row) => row.key), ['m2', 'm1', 'm3']);
@@ -199,10 +202,11 @@ test('anchored dimension scores use category priors and health separates present
   assert.equal(left.prior, 1300);
   assert.equal(left.dimensions.craft.score, 1300, 'no answers stays at its category prior');
   assert.equal(left.dimensions.craft.thin, true);
-  assert.equal(left.dimensions.fit.n, 60);
-  assert.equal(left.dimensions.fit.thin, false);
-  assert.ok(left.dimensions.fit.score > left.dimensions.craft.score);
-  assert.ok(chart.boards.fit[0].score > chart.boards.fit[1].score);
+  // fidelity counts under logic since the 2026-11-17 dimension rename.
+  assert.equal(left.dimensions.logic.n, 60);
+  assert.equal(left.dimensions.logic.thin, false);
+  assert.ok(left.dimensions.logic.score > left.dimensions.craft.score);
+  assert.ok(chart.boards.logic[0].score > chart.boards.logic[1].score);
   const health = chart.health.find(row => row.id === 'fidelity');
   assert.deepEqual(health.byOrder.before.flags, ['same-side']);
   assert.deepEqual(health.byOrder.after.flags, ['ties']);
@@ -250,11 +254,11 @@ test('agreement aggregates duplicate voters, flipped sides and missing voters wi
       expectedN++; if (pick(row) === pick(other)) expectedSame++;
     }
   }));
-  const health = trialScores(rows, w => w.modelKey, () => ({})).health[0];
+  const health = trialScores(rows, w => w.modelKey, () => ({})).health.find(row => row.id === 'floating');
   assert.equal(health.agreementN, expectedN);
   assert.equal(health.agreementRate, expectedSame / expectedN);
   const many = Array.from({ length: 20000 }, (_, i) => ({ ...rows[0], userId: `u${i}` }));
-  const large = trialScores(many, w => w.modelKey, () => ({})).health[0];
+  const large = trialScores(many, w => w.modelKey, () => ({})).health.find(row => row.id === 'floating');
   assert.equal(large.agreementN, 199990000);
   assert.equal(large.agreementRate, 1);
 });

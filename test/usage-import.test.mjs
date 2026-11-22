@@ -14,7 +14,7 @@ test('v57 is additive/idempotent and usage import dry-runs, validates, deduplica
   const root=mkdtempSync(join(tmpdir(),'usage-import-')), file=join(root,'platform.db');
   const db=openDatabase(file);
   try {
-    assert.equal(db.prepare('PRAGMA user_version').get().user_version,57);
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version,MIGRATIONS.length);
     MIGRATIONS[56](db);
     assert.equal(db.prepare('SELECT COUNT(*) n FROM model_prices').get().n,0);
     const insert=db.prepare(`INSERT INTO works (id,task_id,title,model_other,content_key,source_name,root,entry,file_count,bytes,digest,checks,trial,created_at,updated_at)

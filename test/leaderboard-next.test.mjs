@@ -217,7 +217,7 @@ test('guided priors use qualified published v3 category scores even when the def
       assert.equal(published.rows.length, 2);
       assert.equal(published.watch.length, 2);
       assert.ok(published.rows.some(row => row.score !== old.rows.find(other => other.key === row.key).score));
-      const chart = await f.arena.guidedDimensions(staff, by);
+      const chart = await f.arena.guidedDimensions(staff, by, '建模');
       for (const entry of chart.entries) {
         const qualified = published.rows.find(row => row.key === entry.key);
         assert.equal(entry.prior, qualified?.score ?? null);
@@ -225,19 +225,19 @@ test('guided priors use qualified published v3 category scores even when the def
         assert.equal(entry.dimensions.aesthetic.interval, Math.round(1.96 * 400 / Math.LN10 * (qualified ? 0.5 : 1)));
       }
       assert.strictEqual(await f.arena.leaderboardSnapshot({ category: '建模', by, scoring: 3 }), published);
-      assert.strictEqual(await f.arena.guidedDimensions(staff, by), chart);
+      assert.strictEqual(await f.arena.guidedDimensions(staff, by, '建模'), chart);
       const board = chart.boards.craft;
       for (const row of board) assert.ok(row.rankLow <= row.rank && row.rank <= row.rankHigh && row.rankLow >= 1 && row.rankHigh <= board.length);
     }
-    const before = await f.arena.guidedDimensions(staff, 'model');
+    const before = await f.arena.guidedDimensions(staff, 'model', '建模');
     const published = await f.arena.leaderboardSnapshot({ category: '建模', by: 'model', scoring: 3 });
     // New formal votes leave the public atomic family in its published generation.
     for (const task of tasks) f.vote('b', 'ah', 30, task.id, {}, { votesOnly: true, task: task.id });
-    const held = await f.arena.guidedDimensions(staff, 'model');
+    const held = await f.arena.guidedDimensions(staff, 'model', '建模');
     assert.deepEqual(held.entries.map(row => [row.key, row.prior]), before.entries.map(row => [row.key, row.prior]));
     assert.strictEqual(await f.arena.leaderboardSnapshot({ category: '建模', by: 'model', scoring: 3 }), published);
     t.mock.timers.tick(600001);
-    const refreshed = await f.arena.guidedDimensions(staff, 'model');
+    const refreshed = await f.arena.guidedDimensions(staff, 'model', '建模');
     assert.notStrictEqual(refreshed, held);
     assert.notDeepEqual(refreshed.entries.map(row => row.prior), held.entries.map(row => row.prior));
     const next = await f.arena.leaderboardSnapshot({ category: '建模', by: 'model', scoring: 3 });

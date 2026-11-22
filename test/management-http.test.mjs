@@ -380,10 +380,16 @@ test('curated summary DTOs match the legacy projection for hidden/deleted/AI/are
       return Boolean(task && !isAiJudgedTask(task) && !task.tags?.includes('arena-only') && new Set(platform.library.eligible(id).map(entityKey)).size >= 2);
     };
     const settings = platform.db.prepare('SELECT counting_started_at,revision FROM curated_settings WHERE id=1').get();
+    const sectionCategories = { 'web-design': '静态网页', 'three-dimensional': '建模', language: '文学', music: '音乐' };
     const reference = adminView => ({ countingStartedAt: new Date(settings.counting_started_at).toISOString(), revision: settings.revision, includesStaffHistory: true,
       sections: sections.map(section => {
-        const taskIds = selected.filter(q => q.section_id === section.id && available(q.task_id)).map(q => q.task_id);
-        return { id: section.id, name: section.name, order: section.sort_order, questionCount: taskIds.length, taskIds, ...(adminView ? { selectedQuestionCount: taskIds.length } : {}) };
+        const inSection = selected.filter(q => q.section_id === section.id);
+        const taskIds = inSection.filter(q => available(q.task_id)).map(q => q.task_id);
+        // Sections carry their task category. The music section also shows everyone how many questions were picked,
+        // since music questions never become available; elsewhere staff see only available picks (docs/api-contract.md).
+        const category = sectionCategories[section.id] ?? null;
+        return { id: section.id, name: section.name, order: section.sort_order, questionCount: taskIds.length, taskIds, category,
+          ...(adminView || category === '音乐' ? { selectedQuestionCount: category === '音乐' ? inSection.length : taskIds.length } : {}) };
       }), ...(adminView ? { questions: [...indexed.values()].map(q => ({ taskId: q.id, title: q.title, category: q.category,
         selected: selected.some(s => s.task_id === q.id), sectionId: selected.find(s => s.task_id === q.id)?.section_id ?? null,
         available: available(q.id), ...(!available(q.id) ? { unavailableReason: '题目未公开、由AI评分或缺少可比较作品' } : {}) })) } : {}) });

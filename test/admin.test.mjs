@@ -943,7 +943,7 @@ test('guided aspect settings, dimension scores and skip reasons enforce HTTP per
     assert.equal((await call('voter', 'GET', '/api/admin/tasks/one/aspects')).status, 403);
     const settings = await call('root', 'GET', '/api/admin/tasks/one/aspects');
     assert.equal(settings.status, 200);
-    assert.equal(settings.data.aspects.find(row => row.id === 'fidelity').dimension, 'fit');
+    assert.equal(settings.data.aspects.find(row => row.id === 'fidelity').dimension, 'logic');
     assert.equal((await call('root', 'POST', '/api/admin/tasks/one/aspects', { off: ['invalid'] })).status, 400);
     const saved = await call('root', 'POST', '/api/admin/tasks/one/aspects', { off: ['lighting'] });
     assert.deepEqual(saved.data.off, ['lighting']);

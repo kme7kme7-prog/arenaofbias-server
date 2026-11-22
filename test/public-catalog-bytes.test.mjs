@@ -8,7 +8,8 @@ import {createPlatform} from '../server/app.mjs';
 import {limits} from '../server/config.mjs';
 import {openDatabase} from '../server/db.mjs';
 
-// Exact response bodies frozen from 577067e with this data, clock and server version.
+// Exact response bodies frozen from 577067e with this data, clock and server version, then regenerated
+// with the same script once questions gained promptVariants (1523c8d, deployed).
 // Provenance/generator: .local/board-v3-20261108/usage/dev-guided/metrics-endpoint/freeze-577.mjs.
 test('catalog and anonymous full bootstrap remain byte-for-byte equal to 577067e even with stored metrics', async t => {
   t.mock.timers.enable({apis:['Date'],now:1800000000000});

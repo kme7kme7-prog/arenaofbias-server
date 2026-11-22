@@ -414,7 +414,7 @@
         "supernovai"
       ],
       "countingStartedAt": "2023-11-14T22:13:20.000Z",
-      "revision": 1,
+      "revision": 2,
       "minimumVoterLevel": 1,
       "includesStaffHistory": true,
       "qualifiedModels": 3,

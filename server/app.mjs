@@ -1,3 +1,4 @@
+import { createSub2OIDC, SUB2_OIDC_PATH } from './sub2-oidc.mjs';
 // Wires the platform together: the site (static build + API) and the content handler.
 import { createUsageService } from './work-usage.mjs';
 import { extname, join, relative, resolve } from 'node:path';
@@ -135,6 +136,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     settings: { ...batchConfig(process.env), ...(config.batch ?? {}) },
     writeLimit: (id) => limit.write(id),
   });
+  const sub2OIDC = createSub2OIDC({ auth, trustProxy: config.trustProxy });
   const siteCsp = [
     "default-src 'self'",
     "script-src 'self' https://challenges.cloudflare.com",
@@ -1281,6 +1283,9 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       if (!url.pathname.startsWith('/api/')) {
         if (req.method !== 'GET' && req.method !== 'HEAD') fail(405, '不支持这个操作');
         return await serveSite(req, res, url.pathname);
+      }
+      if (sub2OIDC && url.pathname.startsWith(SUB2_OIDC_PATH + '/')) {
+        return await sub2OIDC(req, res, url);
       }
       // Moderation tokens open only the dots whitelist; every other API refuses them.
       if (url.pathname.startsWith('/api/dots/')) return dots.handle(req, res, url);

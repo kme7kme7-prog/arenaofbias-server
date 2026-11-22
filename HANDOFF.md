@@ -1,3 +1,10 @@
+## 2026-11-10 · Sub2API 接入 Arenaofbias 登录
+
+- Arenaofbias 新增面向 Sub2API 的 OIDC 接口。复用现有会话与已验证邮箱，按 Arenaofbias 用户 ID 发放身份，要求 PKCE S256，授权码一次有效。生产未迁移平台库。
+- Gallery 新增独立入口 `sub2api-login.html` 与 `sub2api-login.js`，复用原有登录、注册、邮箱验证码和找回密码表单。Sub2API 公网注册入口转至 Arenaofbias。
+- Sub2API 以稳定身份关联账号，已有同邮箱账号需要登录原账号后绑定。作品、投票、会员等级、API 用量、余额及权限仍由所属系统管理，新用户沿用 Sub2API 默认额度。
+- 生产按现场源码增量安装，备份在 `/root/aob-sub2-sso-20261110/`。本地语法检查 182/0，全量测试 604/604。公网验证入口、登录与注册表单、原 Mistral Key 的模型列表；隔离真实服务验证首次开户、同一 Arenaofbias 会话重复登录，以及同邮箱账号凭原密码绑定后保留 ID 和角色。未提交或推送。
+
 ## 2026-11-10 · 批量投稿 CLI 安全修复（PR，未合并，未部署）
 
 - 只改本地 CLI、测试和说明。`plan.mjs` 成为 CLI 与服务器共用的唯一摘要实现；独立压缩包不再缺这个文件。`manifest.json` / `plan.json` 按普通文件、非符号链接、非硬链接和 `O_NOFOLLOW` 读写，`plan.json` 用临时文件加 `rename` 替换。macOS 钥匙串不再把秘密放进 argv。`status` / `cancel` 只读本地 `plan.json`。设备码在失败和超时路径删除。作品键拒绝 `__proto__` / `constructor` / `prototype` 等特殊名。`BATCH_UPLOAD` 默认值未改。

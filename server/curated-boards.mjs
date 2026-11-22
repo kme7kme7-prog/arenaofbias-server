@@ -27,8 +27,10 @@ export function createCurated({ db, catalog, library, questions }) {
   const sectionDto = (row, rows, admin = false, isAvailable = available) => {
     const selected = rows.filter(q => q.section_id === row.id);
     const taskIds = selected.filter(q => isAvailable(q.task_id)).map(q => q.task_id);
+    // Music questions never become available, so only the music section reports every pick.
+    const music = SECTION_CATEGORIES[row.id] === '音乐';
     return { id: row.id, name: row.name, order: row.sort_order, questionCount: taskIds.length, taskIds, category: SECTION_CATEGORIES[row.id] ?? null,
-      ...(admin || SECTION_CATEGORIES[row.id] === '音乐' ? { selectedQuestionCount: selected.length } : {}) };
+      ...(admin || music ? { selectedQuestionCount: music ? selected.length : taskIds.length } : {}) };
   };
   const info = (admin = false, isAvailable = availability()) => catalog.withSnapshot(() => {
     const s = settings(), rows = assignments();

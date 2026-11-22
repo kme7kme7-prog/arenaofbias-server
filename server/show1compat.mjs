@@ -129,6 +129,7 @@ export function registerShow1Compat(router, deps) {
         category: previous?.category ?? task.category,
         code: previous?.code ?? (kind === 'text' ? 'STORY' : 'WEB'),
         name: previous?.name ?? task.title, prompt: task.prompt,
+        ...(task.tags?.length ? { tags: task.tags } : {}),
         ...(task.promptVariants?.length ? { promptVariants: task.promptVariants } : {}),
         commentary: previous?.commentary ?? task.summary,
         detail: previous?.detail ?? '同一提示词 · 不同模型的结果',

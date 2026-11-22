@@ -105,7 +105,7 @@ export function pathPolicy(route, cdn, sites) {
   return [
     'sandbox allow-scripts allow-forms allow-modals allow-popups allow-pointer-lock allow-downloads',
     `default-src ${own} data: blob:`,
-    `script-src ${own} ${route.origin}${contentRuntimePath} 'unsafe-inline' 'unsafe-eval' blob: ${cdn}`,
+    `script-src ${own} ${route.origin}${contentRuntimePath} 'unsafe-inline' 'unsafe-eval' blob: data: ${cdn}`,
     `style-src ${own} 'unsafe-inline' ${cdn}`,
     `img-src ${own} data: blob: ${cdn}`, `font-src ${own} data: ${cdn}`,
     `media-src ${own} data: blob: ${cdn}`, `connect-src ${own} data: blob: ${cdn}`,

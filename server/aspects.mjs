@@ -5,13 +5,13 @@ import { fitBradleyTerry, rankRanges } from './ranking.mjs';
 // one aspect question (测评点) from its category's pool. Trial answers are kept in guided_trial_votes,
 // which no board reads; only the staff dimension chart (trialStandings) counts them.
 // Pilot: 建模 only. Aspect IDs are stable; the wording may change.
-export const DIMENSIONS = { aesthetic: '审美', craft: '工程完备', logic: '逻辑', fit: '贴题', diverge: '发散' };
+export const DIMENSIONS = { aesthetic: '审美能力', craft: '工程完备能力', logic: '逻辑能力', diverge: '发散能力' };
 
 export const ASPECTS = {
   建模: [
     { id: 'floating', dimension: 'craft', question: '哪个建模的悬空或断连现象更少？', keyword: '悬空或断连',
       hint: '拖动旋转，看各部件的连接处和贴地的地方。两边都没有就选「都很好」。' },
-    { id: 'fidelity', dimension: 'fit', question: '哪个的造型更贴合题目？', keyword: '造型',
+    { id: 'fidelity', dimension: 'logic', question: '哪个的造型更贴合题目？', keyword: '造型',
       hint: '对照提示词，看形状、结构和比例。' },
     { id: 'atmosphere', dimension: 'aesthetic', question: '哪个的氛围/环境更能衬托建模？', keyword: '氛围/环境',
       hint: '背景、地面、天空和配景。' },

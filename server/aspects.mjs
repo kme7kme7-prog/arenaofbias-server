@@ -4,7 +4,7 @@ import { fitBradleyTerry, rankRanges } from './ranking.mjs';
 // Guided blind voting trial (staff only). Besides the overall question, a trial match may carry
 // one aspect question (测评点) from its category's pool. Trial answers are kept in guided_trial_votes,
 // which no board reads; only the staff dimension chart (trialStandings) counts them.
-// Pilot: 建模 and 静态网页. Aspect IDs are stable; the wording may change.
+// Pilot: 建模, 静态网页 and 音乐. Aspect IDs are stable; the wording may change.
 export const DIMENSIONS = { aesthetic: '审美能力', craft: '工程完备能力', logic: '逻辑能力', diverge: '发散能力' };
 
 export const ASPECTS = {
@@ -39,6 +39,18 @@ export const ASPECTS = {
       hint: '对照提示词，看板块划分、信息主次与视觉形式是不是真正匹配网页/PPT/海报的用途，而非生搬硬套。' },
     { id: 'ai_template', dimension: 'diverge', question: '哪个的 AI 味模版感更少？', keyword: 'AI 味模版',
       hint: '看有没有廉价紫蓝渐变、千篇一律的圆角三栏卡片和乱塞的图标徽章。两边都不套路就选「都很好」，都很套路就选「都不好」。' },
+  ],
+  音乐: [
+    { id: 'music_melody', dimension: 'aesthetic', question: '哪首的旋律更好听、不别扭？', keyword: '旋律',
+      hint: '看主旋律是否顺耳好听、有记忆点，有没有生硬断档或怪异别扭的跳音。' },
+    { id: 'music_timbre', dimension: 'aesthetic', question: '哪首的音色层次更舒服、更有质感？', keyword: '音色层次',
+      hint: '感受乐器与人声听起来是否自然舒服、层次分明，而不是刺耳干瘪或糊成一团。' },
+    { id: 'music_mix', dimension: 'craft', question: '哪首的混音平衡做得更到位？', keyword: '混音平衡',
+      hint: '看人声、伴奏和低频之间音量比例是否协调，声场是否干净不炸耳、不互相打架。' },
+    { id: 'music_theme', dimension: 'logic', question: '哪首更贴合题目要求的曲风主题？', keyword: '曲风主题',
+      hint: '对照题目给出的曲风、情绪和主题要求，看哪首真正做到了对味贴合。' },
+    { id: 'music_idea', dimension: 'diverge', question: '哪首的编曲巧思让你眼前一亮？', keyword: '编曲巧思',
+      hint: '听听有没有题目没明说但加得恰到好处的细节，比如转调、停顿留白或加花。' },
   ],
 };
 

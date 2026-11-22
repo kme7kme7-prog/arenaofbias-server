@@ -16,6 +16,26 @@ cat /www/wwwroot/arenaofbias-server/.server-version
 
 两者也应一致；若 `SERVER_VERSION` 环境变量覆盖了版本文件，先查清来源。只部署**已经合并到上游 `main` 的提交**，即使 PR 已通过审阅也不够。选定目标完整 SHA 后，在对应仓库执行 `git fetch origin main` 和 `git merge-base --is-ancestor <目标SHA> origin/main`；返回非 0 就停止。若当前现场含未合并补丁，须先使其进入 main 或另行明确处理，不能用 main 归档直接盖过。
 
+### 只从提交上线、漂移检查与部署记录
+
+线上代码只能来自已推送的提交。正式后端和正式 Gallery 只部署已合并 `main` 的提交；管理员试运行站 `gallery-guided-trial` 可以部署已推送的非 `main` 分支提交。不能用工作区、`/root/aob-*` 暂存目录、手改文件或「只替换几个模块、保留现场其他补丁」的方式上线。服务器上不直接改源码，紧急修复也先在分支提交、推送，再按本页部署。源码一律用 `git -c core.autocrlf=false archive` 导出，避免 Windows 换行进入现场。
+
+部署前后都在本机运行漂移检查（零依赖，只读，经 SSH 在服务器上用 Node 计算 git blob 哈希）。部署前 `--ref` 取该站上次部署的提交，部署后取本次目标提交；退出码 1 表示现场与该提交不一致，部署前出现就按上一段停止调查。不带路径时只列出该提交已有目录的直接子文件，避免把数据包文件算作漂移。
+
+```bash
+# 后端（在 arenaofbias-server 目录）
+node scripts/live-drift.mjs --host arena --live /www/wwwroot/arenaofbias-server --ref <SHA> server scripts admin tools deploy package.json
+# 正式 Gallery；试运行站把 --live 换成 /www/wwwroot/gallery-guided-trial/guided-trial
+node scripts/live-drift.mjs --host arena --repo ../ArenaGalleri --prefix site/ --live /www/wwwroot/gallery --ref <SHA> \
+  --exclude index.html,runtime-config.js,version.json,data.json,sandtable-bridge.js
+```
+
+「Only line endings differ」只是 CRLF 差异，内容相同；「Only in git」是该提交里还没部署的文件。部署完成后，在服务器向 `/root/deploy-log.tsv` 追加一行：UTC 时间、站点、仓库、完整 SHA、操作者 GitHub 用户名、任务目录。下一次部署前的 `--ref` 就取该站最后一行。
+
+```bash
+printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$site" "$repo" "$sha" "$operator" "$job" >> /root/deploy-log.tsv
+```
+
 ## 线上路由与 Nginx
 
 配置目录为 `/www/server/panel/vhost/nginx`，可执行文件为 `/www/server/nginx/sbin/nginx`。改配置时先备份对应 `.conf`，编辑后测试，通过才重载：

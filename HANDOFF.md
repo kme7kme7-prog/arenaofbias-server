@@ -1,3 +1,7 @@
+## 2026-11-23 · 线上漂移检查与只从提交上线（未推送）
+
+- 新增零依赖只读脚本 `scripts/live-drift.mjs`，逐文件比对服务器目录与指定提交；`docs/deploy.md` 第 0 节与 `AGENTS.md` 写明只部署已推送提交（正式环境须已合并 `main`）、部署前后运行检查并记入 `/root/deploy-log.tsv`。已对生产后端与正式 Gallery 实跑，只读。[本轮归档](docs/archive/2026-11-23-live-drift-check-wsnxxxs.md)
+
 ## 2026-11-10 · 批量投稿 CLI 安全修复（PR，未合并，未部署）
 
 - 只改本地 CLI、测试和说明。`plan.mjs` 成为 CLI 与服务器共用的唯一摘要实现；独立压缩包不再缺这个文件。`manifest.json` / `plan.json` 按普通文件、非符号链接、非硬链接和 `O_NOFOLLOW` 读写，`plan.json` 用临时文件加 `rename` 替换。macOS 钥匙串不再把秘密放进 argv。`status` / `cancel` 只读本地 `plan.json`。设备码在失败和超时路径删除。作品键拒绝 `__proto__` / `constructor` / `prototype` 等特殊名。`BATCH_UPLOAD` 默认值未改。

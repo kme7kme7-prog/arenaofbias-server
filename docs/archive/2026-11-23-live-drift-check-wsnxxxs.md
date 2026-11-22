@@ -11,6 +11,7 @@
 - 新增 `scripts/live-drift.mjs`：零依赖，经 SSH 在服务器用 Node 计算线上文件的 git blob 哈希，与本机指定提交逐个比对，分出内容不同、只差换行、只在服务器、只在 git 四类，有漂移时退出码 1。给定路径递归比较；不给路径时只列出该提交已有目录的直接子文件，避免把共用目录里的数据包文件算作漂移。
 - `docs/deploy.md` 第 0 节新增「只从提交上线、漂移检查与部署记录」：正式环境只部署已合并 `main` 的提交，试运行站可部署已推送分支；部署前后运行检查，并向服务器 `/root/deploy-log.tsv` 追加部署记录。
 - `AGENTS.md` 新增「线上代码」约定。
+- 补充：`docs/deploy.md` 开头写明后端密钥只放 root `0600` 的 `/root/.config/arenaofbias/server-secrets.env`，由 `85-secrets.conf` 的 `EnvironmentFile=` 注入，不写进 drop-in 的 `Environment=`；审核与 Turnstile 示例随之去掉密钥行。服务器已按此调整：systemd 解析出的值与运行进程一致，非 root 用户读不到；只做了 `daemon-reload`，服务未重启，下次重启起从该文件读取。
 
 ## 验证
 

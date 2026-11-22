@@ -4,6 +4,14 @@
 
 后端正式目录 `/www/wwwroot/arenaofbias-server` 不是 Git 仓库，代码版本写在 `.server-version`。systemd 服务 `arenaofbias-server` 监听 `127.0.0.1:5273`（API/管理端）和 `127.0.0.1:5180`（作品沙盒内容）。Cookie、真实 IP、SMTP、截图和审核由服务器环境或 systemd drop-in 配置；最近一次审核接通记录为 `CAPTURE=1`、`CONTENT_MODERATION=1`，通过专用 SSH tunnel 使用第 6.1 节 relay，仍应在部署前重新确认。已记录每日 03:30 的 cron 运行 `/root/archive-backup.sh`，使用 restic 加密归档；证书续期由 `/root/.acme.sh` 的 cron 处理。不要把凭据、私钥或 drop-in 的实际密钥值写入本文或仓库。
 
+后端密钥（`MODERATION_API_KEY`、`SMTP_PASS`、`TURNSTILE_SECRET_KEY`）只放在 root 持有的 `0600` 文件 `/root/.config/arenaofbias/server-secrets.env`，每行一个 `KEY=value`，由下面的 drop-in 注入。不要把密钥写进 drop-in 的 `Environment=`：那里的值任何本机用户都能用 `systemctl show` 读到。这个文件不带 `-` 前缀，缺失时服务直接启动失败，不会静默关掉审核、邮件或人机验证。改动后 `daemon-reload` 并重启服务才生效。
+
+```ini
+# /etc/systemd/system/arenaofbias-server.service.d/85-secrets.conf
+[Service]
+EnvironmentFile=/root/.config/arenaofbias/server-secrets.env
+```
+
 ## 0. 现场版本与合并门禁
 
 **在任何线上文件、服务、Nginx 或数据包改动之前**，从公网读取 `https://api.arenaofbias.icu/api/bootstrap` 的 `serverVersion`，与操作者本人上次部署时记录的完整 SHA 对比。若没有可靠的个人记录，或值不一致，立即停止并调查是谁部署了什么、该提交是否已合并 main、现场是否含 PR 独有补丁；先把现场状态和来源弄清楚，再制定新部署。不能用本页历史 SHA 或本地 `main` 猜测线上状态。
@@ -404,10 +412,10 @@ Turnstile 是否启用以部署时环境和 `/api/auth/turnstile` 为准，不�
 # /etc/systemd/system/arenaofbias-server.service.d/turnstile.conf
 [Service]
 Environment="TURNSTILE_SITE_KEY=<site-key>"
-Environment="TURNSTILE_SECRET_KEY=<secret-key>"
+# TURNSTILE_SECRET_KEY 写入 server-secrets.env（见本文开头），不写在这里。
 ```
 
-写入后执行 `systemctl daemon-reload`、重启服务，并通过 `/api/auth/turnstile` 核对站点密钥。SMTP 仍由现有 `smtp.conf` 提供。
+写入后执行 `systemctl daemon-reload`、重启服务，并通过 `/api/auth/turnstile` 核对站点密钥。SMTP 仍由现有 `smtp.conf` 提供，其中的 `SMTP_PASS` 同样在 `server-secrets.env`。
 
 ## 媒体 CDN 双写（COS，Phase B）
 
@@ -534,7 +542,7 @@ Environment="CONTENT_MODERATION=1"
 Environment="CAPTURE=1"
 Environment="MODERATION_BASE_URL=https://api.openai.com/v1"
 Environment="MODERATION_MODEL=gpt-6-luna"
-Environment="MODERATION_API_KEY=<server-only-key>"
+# MODERATION_API_KEY 写入 server-secrets.env（见本文开头），不写在这里。
 ```
 
 生产启用截图和自动审核时，必须安装能被后端进程 `import('playwright')` 解析的 Playwright 及 Chrome，并保证服务账号可以启动浏览器；只在其他前端目录安装 Playwright 不保证后端可用。本服务不新增 npm 依赖声明，截图所需组件作为部署环境单独准备。`CAPTURE_BROWSER` 默认 `chrome`，对应本机 Chrome；所装 Playwright 必须支持 `routeWebSocket`。启动会实际探测导入和浏览器启动，并打印一次「自动截图可用」「自动截图不可用」或「自动截图已关闭」。
@@ -619,7 +627,7 @@ ssh -NT -i /root/.ssh/arenaofbias-review-154.36.185.169 \
 
 SSH 使用独立 Ed25519 身份并固定主机公钥；远端授权公钥限制为 `restrict,port-forwarding,permitopen="127.0.0.1:5280"`，用户无登录 shell。上述两项新服务设为开机启动、失败后恢复，既有 Xray、443 监听及全局 Node 均不改动。
 
-先在正式服务器请求 `http://127.0.0.1:5280/health`，再用隔离作品跑实际截图和内容审查模块、确认 Luna Flex 响应。成功后将现有 moderation.conf 的 `MODERATION_BASE_URL` 改为 `http://127.0.0.1:5280/v1`，保留 Key 与审核/截图开关；daemon-reload、重启正式服务，再核对运行进程设置和公网 bootstrap。loopback HTTP 由上述 SSH 通道加密跨机传输。
+先在正式服务器请求 `http://127.0.0.1:5280/health`，再用隔离作品跑实际截图和内容审查模块、确认 Luna Flex 响应。成功后将现有 moderation.conf 的 `MODERATION_BASE_URL` 改为 `http://127.0.0.1:5280/v1`，保留审核/截图开关，密钥仍在 `server-secrets.env`；daemon-reload、重启正式服务，再核对运行进程设置和公网 bootstrap。loopback HTTP 由上述 SSH 通道加密跨机传输。
 
 回滚该连接仅需恢复备份 moderation.conf 并重启平台，再停止专用 tunnel/relay；不涉及数据迁移，也不删除 Xray 或修改共享端口。当前部署、实际验证与备份位置以 HANDOFF 最新记录为准。
 

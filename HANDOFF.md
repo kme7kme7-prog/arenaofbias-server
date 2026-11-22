@@ -1,6 +1,6 @@
 ## 2026-11-23 · 线上漂移检查与只从提交上线（未推送）
 
-- 新增零依赖只读脚本 `scripts/live-drift.mjs`，逐文件比对服务器目录与指定提交；`docs/deploy.md` 第 0 节与 `AGENTS.md` 写明只部署已推送提交（正式环境须已合并 `main`）、部署前后运行检查并记入 `/root/deploy-log.tsv`。已对生产后端与正式 Gallery 实跑，只读。[本轮归档](docs/archive/2026-11-23-live-drift-check-wsnxxxs.md)
+- 新增零依赖只读脚本 `scripts/live-drift.mjs`，逐文件比对服务器目录与指定提交；`docs/deploy.md` 第 0 节与 `AGENTS.md` 写明只部署已推送提交（正式环境须已合并 `main`）、部署前后运行检查并记入 `/root/deploy-log.tsv`。已对生产后端与正式 Gallery 实跑，只读。后端密钥改由 root 专用文件 `server-secrets.env` 经 `EnvironmentFile=` 注入，见 `docs/deploy.md` 开头；服务未重启。[本轮归档](docs/archive/2026-11-23-live-drift-check-wsnxxxs.md)
 
 ## 2026-11-10 · 批量投稿 CLI 安全修复（PR，未合并，未部署）
 

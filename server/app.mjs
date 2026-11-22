@@ -42,7 +42,7 @@ import { createReview } from './review.mjs';
 import { createInbox } from './inbox.mjs';
 import { createQuestions, isArenaOnlyQuestion } from './questions.mjs';
 import { createReferences } from './references.mjs';
-import { DOMAIN_GROUPS, DOMAINS, AI_JUDGED, TRIAL_CATEGORIES, isAiJudgedTask, isTrialTask, requireCategory, requireDomains } from './categories.mjs';
+import { DOMAIN_GROUPS, DOMAINS, GUIDED_DOMAIN_GROUPS, GUIDED_DOMAINS, AI_JUDGED, TRIAL_CATEGORIES, isAiJudgedTask, isTrialTask, requireCategory, requireDomains } from './categories.mjs';
 import { createProfile } from './profile.mjs';
 import { registerShow1Compat } from './show1compat.mjs';
 import { registerShow1Guess } from './show1/guess.mjs';
@@ -279,7 +279,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const withoutMine = ({ mine, ...item }) => item;
   const activityRevision = () => `${catalog.snapshot().version}|${catalogRevision()}`;
   const buildCatalog = (includeTrial) => createCatalogResponse(db, catalog, async (snapshot) => ({
-    ...versionInfo(snapshot), serverVersion, providers: snapshot.providers(), domains: DOMAINS, domainGroups: DOMAIN_GROUPS,
+    ...versionInfo(snapshot), serverVersion, providers: snapshot.providers(), domains: includeTrial ? GUIDED_DOMAINS : DOMAINS, domainGroups: includeTrial ? GUIDED_DOMAIN_GROUPS : DOMAIN_GROUPS,
     site: siteInfo(), works: (await galleryList(null, snapshot, { includeTrial })).map(withoutMine),
     questions: withSolveStatuses(catalog.withSnapshot(() => questions.all().filter((question) => !isArenaOnlyQuestion(question)).map(withoutMine)), includeTrial),
   }), { revision: includeTrial ? () => `${catalogRevision()}|${solveStatusRevision()}` : catalogRevision });
@@ -375,7 +375,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   async function bootstrap(user, { lite = false, includeTrial = false } = {}) {
     const snapshot = catalog.snapshot();
     const { workAccess, ...live } = await activity(user, { includeTrial });
-    return { ...versionInfo(snapshot), serverVersion, providers: snapshot.providers(), domains: DOMAINS, domainGroups: DOMAIN_GROUPS,
+    return { ...versionInfo(snapshot), serverVersion, providers: snapshot.providers(), domains: includeTrial ? GUIDED_DOMAINS : DOMAINS, domainGroups: includeTrial ? GUIDED_DOMAIN_GROUPS : DOMAIN_GROUPS,
       site: siteInfo(), ...(lite ? {} : { works: await galleryList(user, snapshot, { includeTrial }) }), questions: withSolveStatuses(questions.all(user).filter((question) => !isArenaOnlyQuestion(question)), includeTrial), ...session(user), ...live };
   }
   // Signed-out bootstrap is the same for everyone, so it is built once per generation.

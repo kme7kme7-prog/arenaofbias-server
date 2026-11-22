@@ -15,6 +15,11 @@ export const DOMAIN_GROUPS = [
   { title: '生活与娱乐', domains: ['游戏娱乐', '生活服务', '餐饮美食', '旅游出行', '运动体育'] },
 ];
 export const DOMAINS = DOMAIN_GROUPS.flatMap((group) => group.domains);
+export const GUIDED_DOMAIN_GROUPS = [
+  ...DOMAIN_GROUPS,
+  { title: '其他', domains: ['其他'] },
+];
+export const GUIDED_DOMAINS = GUIDED_DOMAIN_GROUPS.flatMap((group) => group.domains);
 export const MAX_DOMAINS = 2;
 export const isTrialCategory = (category) => TRIAL_CATEGORIES.has(category);
 export const isTrialTask = (task) => isTrialCategory(task?.category);
@@ -37,6 +42,6 @@ export function requireCategory(category) {
 export function requireDomains(domains) {
   const unique = Array.isArray(domains) ? [...new Set(domains)] : [];
   if (!unique.length) fail(400, '请选择所属领域');
-  if (unique.length > MAX_DOMAINS || unique.some((domain) => !DOMAINS.includes(domain))) fail(400, `所属领域为 1–${MAX_DOMAINS} 个，且须在列表内`);
+  if (unique.length > MAX_DOMAINS || unique.some((domain) => !GUIDED_DOMAINS.includes(domain))) fail(400, `所属领域为 1–${MAX_DOMAINS} 个，且须在列表内`);
   return unique;
 }

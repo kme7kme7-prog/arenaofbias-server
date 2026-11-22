@@ -40,3 +40,14 @@ test('a failed compressor cannot fall back to shared JSON withdrawn while it was
   await response;
   assert.deepEqual(JSON.parse(gunzipSync(body)).works, []);
 });
+
+
+test('shared metrics responses check request authority before body or conditional 304 headers', async () => {
+  const handler=createSharedJson({strict:()=>0,read:()=>({artifact:'private'}),cacheControl:'private, no-cache'});
+  const {entry}=await handler.current();
+  for(const headers of [{},{'if-none-match':`"${entry.hash}"`}]) {
+    let sent=false;
+    await assert.rejects(handler({method:'GET',headers},{getHeader(){},writeHead(){sent=true;},end(){}},{beforeSend(){throw new Error('permission changed');}}),/permission changed/);
+    assert.equal(sent,false);
+  }
+});

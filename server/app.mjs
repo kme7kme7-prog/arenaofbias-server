@@ -1,4 +1,5 @@
 // Wires the platform together: the site (static build + API) and the content handler.
+import { createUsageService } from './work-usage.mjs';
 import { extname, join, relative, resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -15,7 +16,7 @@ import { createLoginSecurity } from './login-security.mjs';
 import { createCapturer } from './capture.mjs';
 import { createModerator } from './moderation.mjs';
 import { createCatalog } from './catalog.mjs';
-import { createActivityRevision, createCatalogResponse, createCatalogRevision, createSharedJson } from './catalog-response.mjs';
+import { createActivityRevision, createCatalogResponse, createCatalogRevision, createMetricsRevision, createSharedJson } from './catalog-response.mjs';
 import { createSharedRead } from './shared-read.mjs';
 import { createComments } from './comments.mjs';
 import { createChangelog } from './changelog.mjs';
@@ -80,9 +81,12 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const moderationMode = createModerationMode(db, config);
   const library = createLibrary({ db, catalog, config, limits, legacyRounds: new Set(show1Snapshot.works.map((work) => work.promptId)),
     moderationRoute: () => moderationMode.current, restricted });
+  const usage = createUsageService({ db, catalog, library, showCost: config.usage?.showCost === true });
   const adminService = createAdmin({ db, catalog, library });
   const inbox = createInbox({ library, config, limits });
   const catalogRevision = createCatalogRevision(db);
+  const metricsRevision = createMetricsRevision(db);
+  const displayRevision = () => `${catalogRevision()}|${metricsRevision()}`;
   const curated = createCurated({ db, catalog, library, questions });
   const arena = createArena({ db, catalog, library, limits, revision: catalogRevision, curated });
   const qualification = createQualification({ db, catalog, library, auth });
@@ -233,6 +237,30 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     ...versionInfo(snapshot), serverVersion, providers: snapshot.providers(), domains: DOMAINS, domainGroups: DOMAIN_GROUPS,
     site: siteInfo(), works: (await galleryList(null, snapshot)).map(withoutMine), questions: catalog.withSnapshot(() => questions.all().map(withoutMine)),
   }), { revision: catalogRevision });
+  // Separate from the legacy catalog: two permission scopes, no per-user fields.
+  const workMetrics = Object.fromEntries([false, true].map(senior => [String(senior), createSharedJson({
+    strict: () => `${catalog.snapshot().version}|${displayRevision()}|${restricted.revision()}`,
+    read: async () => {
+      await yieldToRequests();
+      const snapshot = catalog.snapshot(), viewer = senior ? { role: 'admin' } : null;
+      const allWorks = catalog.withSnapshot(() => library.allWorks({ snapshot, viewer }));
+      const metricsOf = library.metricsSnapshot(), usage = Object.create(null), artifact = Object.create(null);
+      for (let i = 0; i < allWorks.length; i += 32) {
+        catalog.withSnapshot(() => {
+          for (const work of allWorks.slice(i, i + 32)) {
+            if (!library.visibleTo(work, 'show2')) continue;
+            const measured = metricsOf(work);
+            for (const [field, target] of [['usage', usage], ['artifact', artifact]]) if (measured[field]) {
+              (target[work.taskId] ??= Object.create(null))[work.id] = measured[field];
+            }
+          }
+        });
+        await yieldToRequests();
+      }
+      return { usage, artifact };
+    },
+    cacheControl: senior ? 'private, no-cache' : 'public, no-cache', label: 'work-metrics', compressBody,
+  })]));
   function session(user) {
     return {
       ...versionInfo(),
@@ -380,6 +408,10 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     return bootstrap(ctx.user, { lite });
   });
   router.on('GET', '/api/catalog', ({ req, res }) => publicCatalog(req, res));
+  router.on('GET', '/api/works/metrics', ctx => {
+    if (ctx.user) signedIn(ctx);
+    return workMetrics[String(seesRestricted(ctx.user))](ctx.req, ctx.res, { beforeSend: privateBeforeSend(ctx) });
+  });
   router.on('GET', '/api/session', (ctx) => session(ctx.user));
   router.on('GET', '/api/activity', (ctx) => activity(ctx.user));
   router.on('GET', '/api/show1/works', (ctx) => ({
@@ -860,6 +892,38 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     if (!work) fail(404, '作品不存在', 'not_found');
     return { url: `${library.previewOrigin(work, admin)}/` };
   });
+  router.on('GET', '/api/pricing', () => usage.pricing());
+  adminOn('GET', '/api/admin/works/:task/:id/usage', ctx => usage.getUsage(staffOnly(ctx), ctx.params.task, ctx.params.id));
+  adminOn('PUT', '/api/admin/works/:task/:id/usage', async ctx => {
+    const actor = staffOnly(ctx); limit.write(actor.id);
+    return usage.saveUsage(actor, ctx.params.task, ctx.params.id, await adminJson(ctx));
+  });
+  adminOn('DELETE', '/api/admin/works/:task/:id/usage', ctx => {
+    const actor = staffOnly(ctx); limit.write(actor.id);
+    return usage.deleteUsage(actor, ctx.params.task, ctx.params.id);
+  });
+  adminOn('GET', '/api/admin/pricing', ctx => usage.adminPricing(adminOnly(ctx)));
+  adminOn('PUT', '/api/admin/pricing/models/:model/:since', async ctx => {
+    const actor = adminOnly(ctx); limit.write(actor.id);
+    return usage.savePrice(actor, ctx.params.model, ctx.params.since, await adminJson(ctx));
+  });
+  adminOn('DELETE', '/api/admin/pricing/models/:model/:since', ctx => {
+    const actor = adminOnly(ctx); limit.write(actor.id);
+    return usage.deletePrice(actor, ctx.params.model, ctx.params.since);
+  });
+  adminOn('PUT', '/api/admin/pricing/meta', async ctx => {
+    const actor = adminOnly(ctx); limit.write(actor.id);
+    return usage.saveMeta(actor, await adminJson(ctx));
+  });
+  adminOn('DELETE', '/api/admin/pricing/meta', ctx => {
+    const actor = adminOnly(ctx); limit.write(actor.id); return usage.deleteMeta(actor);
+  });
+  adminOn('GET', '/api/admin/tasks/:id/aspects', ctx => arena.taskAspects(adminOnly(ctx), ctx.params.id));
+  adminOn('POST', '/api/admin/tasks/:id/aspects', async ctx => {
+    const admin = adminOnly(ctx); limit.write(admin.id);
+    return arena.taskAspects(admin, ctx.params.id, await adminJson(ctx));
+  });
+  adminOn('GET', '/api/admin/arena/skip-reasons', ctx => arena.skipReasonStats(adminOnly(ctx)));
   adminOn('GET', '/api/admin/tasks/:id/editorial', (ctx) => {
     const admin = adminOnly(ctx);
     return adminService.getEditorial(ctx.params.id, ctx.url.searchParams.get('face'), admin);
@@ -957,6 +1021,11 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       return { ...match, challenge: voters.challenge(actor) };
     });
   });
+  router.on('POST', '/api/arena/matches/:id/skip-reason', async ctx => {
+    limit.write(ctx.user?.id ?? ctx.ip);
+    const body = await readJson(ctx.req), actor = voters.actor(ctx);
+    return voters.serial(actor, () => arena.skipReason(ctx.user, ctx.params.id, body.reason, actor.visitorHash));
+  });
   router.on('POST', '/api/arena/matches/:id/ready', async ctx => {
     limit.write(ctx.user?.id ?? ctx.ip);
     const actor = voters.actor(ctx);
@@ -1015,7 +1084,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   adminOn('POST', '/api/admin/qualification/pairs', async ctx => qualification.savePair(adminOnly(ctx), await adminJson(ctx)));
   adminOn('PATCH', '/api/admin/qualification/pairs/:id', async ctx => qualification.savePair(adminOnly(ctx), await adminJson(ctx), ctx.params.id));
   adminOn('DELETE', '/api/admin/qualification/pairs/:id', async ctx => qualification.deletePair(adminOnly(ctx), ctx.params.id, await adminJson(ctx)));
-  router.on('GET', '/api/leaderboard', (ctx) => {
+  const readLeaderboard = (ctx, weightedTrial = false, scoring = limits.board.scoring) => {
     const board = ctx.url.searchParams.get('board') || null;
     const audience = ctx.url.searchParams.get('audience') || null, sectionId = ctx.url.searchParams.get('sectionId') || null;
     const task = ctx.url.searchParams.get('task') || null;
@@ -1030,8 +1099,15 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       return [field, value];
     }));
     // Senior admins read a separately cached board that also counts restricted works; sendJson keeps it no-store.
-    return arena.leaderboardSnapshot({ task, category, domain, board, audience, sectionId, by: ctx.url.searchParams.get('by') === 'model' ? 'model' : 'config', ...filters,
+    return arena.leaderboardSnapshot({ task, category, domain, board, audience, sectionId, weightedTrial, scoring, by: ctx.url.searchParams.get('by') === 'model' ? 'model' : 'config', ...filters,
       ...(seesRestricted(ctx.user) ? { senior: true } : {}) });
+  };
+  router.on('GET', '/api/leaderboard', ctx => readLeaderboard(ctx));
+  router.on('GET', '/api/leaderboard/weighted-trial', ctx => readLeaderboard(ctx, true, 2));
+  router.on('GET', '/api/leaderboard/next', ctx => readLeaderboard(ctx, false, 3));
+  router.on('GET', '/api/leaderboard/previous', ctx => {
+    if (limits.board.scoring < 3) fail(404, '旧版榜单尚未开放');
+    return readLeaderboard(ctx, false, 2);
   });
 
   registerShow1Compat(router, { db, catalog, library, snapshot: show1Snapshot, config, limit });
@@ -1176,7 +1252,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         if (isTrustedOrigin(req, config)) {
           res.setHeader('Access-Control-Allow-Origin', req.headers.origin);
           res.setHeader('Access-Control-Allow-Credentials', 'true');
-          res.setHeader('Access-Control-Expose-Headers', ['/api/catalog', '/api/bootstrap'].includes(url.pathname) ? 'X-Datapack-Stale, ETag, Server-Timing' : 'X-Datapack-Stale');
+          res.setHeader('Access-Control-Expose-Headers', ['/api/catalog', '/api/bootstrap', '/api/works/metrics'].includes(url.pathname) ? 'X-Datapack-Stale, ETag, Server-Timing' : 'X-Datapack-Stale');
         }
       }
       const referenceMedia = url.pathname.startsWith('/media/references/') || url.pathname.startsWith('/media/pack-references/');
@@ -1214,7 +1290,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       }
       if (req.method === 'GET' || req.method === 'HEAD') readGuard.api(req, url.pathname);
       if (['GET', 'HEAD'].includes(req.method)
-        && ['/api/bootstrap', '/api/catalog', '/api/show1/works', '/api/works', '/api/prompts', '/api/votes', '/api/ratings'].includes(url.pathname)
+        && ['/api/bootstrap', '/api/catalog', '/api/works/metrics', '/api/show1/works', '/api/works', '/api/prompts', '/api/votes', '/api/ratings'].includes(url.pathname)
         && ['limit', 'offset', 'page'].some((key) => url.searchParams.has(key))) fail(400, '此接口返回完整目录，不支持分页参数', 'unsupported_pagination');
       const route = router.match(req.method, url.pathname);
       if (!route) fail(404, '接口不存在');

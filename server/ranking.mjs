@@ -40,7 +40,7 @@ function solveWith(lower, vector) {
   return x;
 }
 
-// comparisons: [{ a, b, y }] with entry indexes and y = 1 (a preferred), 0 (b), 0.5 (tie).
+// Comparisons have entry indexes, outcome y (1, 0, or 0.5), and optional weight w.
 // Numeric prior is the original precision. Per-entry priors use logit mean/variance.
 // Anchored work fits retain the configuration scale instead of recentering by work count.
 export function fitBradleyTerry(size, comparisons, prior = 1, { anchored = false, strength = false } = {}) {
@@ -56,11 +56,11 @@ export function fitBradleyTerry(size, comparisons, prior = 1, { anchored = false
       gradient[i] = -precision * (beta[i] - mean);
       hessian[i][i] = precision;
     }
-    for (const { a, b, y } of comparisons) {
+    for (const { a, b, y, w = 1 } of comparisons) {
       const p = 1 / (1 + Math.exp(beta[b] - beta[a]));
-      const weight = p * (1 - p);
-      gradient[a] += y - p;
-      gradient[b] -= y - p;
+      const weight = w * (p * (1 - p));
+      gradient[a] += w * (y - p);
+      gradient[b] -= w * (y - p);
       hessian[a][a] += weight;
       hessian[b][b] += weight;
       hessian[a][b] -= weight;
@@ -93,14 +93,15 @@ export function fitBradleyTerry(size, comparisons, prior = 1, { anchored = false
 
 // votes: [{ a: work, b: work, choice: 'a' | 'b' | 'tie', userId }] where work carries the fields
 // entityKey needs. Votes between two works of the same entry say nothing about the entry.
-export function rankEntries(votes, keyOf, { provisionalGames, strength = false }) {
+export function rankEntries(votes, keyOf, { provisionalGames, strength = false, voterModelKey = null, scoring = 2 }) {
   const entries = new Map();
   const touch = (work) => {
     const key = keyOf(work);
-    if (!entries.has(key)) entries.set(key, { key, sample: work, games: 0, wins: 0, draws: 0, losses: 0, voters: new Set(), tasks: new Set() });
+    if (!entries.has(key)) entries.set(key, { key, sample: work, games: 0, wins: 0, draws: 0, losses: 0, voters: new Set(), tasks: new Set(), taskWeights: new Map(), voterWeights: new Map() });
     return entries.get(key);
   };
   const comparisons = [];
+  const voterVolumes = new Map();
   for (const vote of votes) {
     const a = touch(vote.a);
     const b = touch(vote.b);
@@ -113,16 +114,41 @@ export function rankEntries(votes, keyOf, { provisionalGames, strength = false }
     if (vote.choice === 'tie') { a.draws++; b.draws++; }
     else if (vote.choice === 'a') { a.wins++; b.losses++; }
     else { b.wins++; a.losses++; }
-    comparisons.push({ a, b, y: vote.choice === 'a' ? 1 : vote.choice === 'b' ? 0 : 0.5 });
+    const comparison = { a, b, userId: vote.userId, taskId: vote.a.taskId, y: vote.choice === 'a' ? 1 : vote.choice === 'b' ? 0 : 0.5 };
+    if (voterModelKey) {
+      const left = voterModelKey(vote.a), right = voterModelKey(vote.b);
+      if (!voterVolumes.has(vote.userId)) voterVolumes.set(vote.userId, new Map());
+      const volumes = voterVolumes.get(vote.userId);
+      volumes.set(left, (volumes.get(left) ?? 0) + 1);
+      if (right !== left) volumes.set(right, (volumes.get(right) ?? 0) + 1);
+      Object.assign(comparison, { volumes, left, right, baseWeight: vote.publicWeight ?? 1 });
+    }
+    comparisons.push(comparison);
   }
   const ranked = [...entries.values()].filter((entry) => entry.games > 0);
   const index = new Map(ranked.map((entry, i) => [entry, i]));
-  const fitted = ranked.length ? fitBradleyTerry(ranked.length, comparisons.map(({ a, b, y }) => ({ a: index.get(a), b: index.get(b), y })), 1, { strength }) : [];
+  if (scoring >= 3) for (const { a, b, volumes, left, right, baseWeight, userId, taskId } of comparisons) {
+    const weight = volumes ? baseWeight * Math.min(1, Math.sqrt(20 / Math.max(volumes.get(left), volumes.get(right)))) : 1;
+    for (const entry of [a, b]) {
+      entry.taskWeights.set(taskId, (entry.taskWeights.get(taskId) ?? 0) + weight);
+      entry.voterWeights.set(userId, (entry.voterWeights.get(userId) ?? 0) + weight);
+    }
+  }
+  const fitted = ranked.length ? fitBradleyTerry(ranked.length, comparisons.map(({ a, b, y, volumes, left, right, baseWeight }) => ({
+    a: index.get(a), b: index.get(b), y,
+    w: volumes ? baseWeight * Math.min(1, Math.sqrt(20 / Math.max(volumes.get(left), volumes.get(right)))) : 1,
+  })), 1, { strength }) : [];
   return ranked.map((entry, i) => ({
     key: entry.key,
     sample: entry.sample,
     score: Math.round(fitted[i].score),
     interval: Math.round(fitted[i].interval),
+    ...(scoring >= 3 ? {
+      intervalVotes: Math.round(fitted[i].interval),
+      taskShare: Math.max(...entry.taskWeights.values()) / [...entry.taskWeights.values()].reduce((s, n) => s + n, 0),
+      effectiveTasks: effectiveCount(entry.taskWeights.values()),
+      effectiveVoters: effectiveCount(entry.voterWeights.values()),
+    } : {}),
     games: entry.games,
     ...(strength ? { strength: fitted[i].strength } : {}),
     wins: entry.wins,
@@ -159,4 +185,96 @@ export function rankWorks(votes, configKeyOf) {
     entries.map((work) => ({ mean: configurations.get(work.config) ?? 0, variance: 0.25 })), { anchored: true });
   return entries.map((work, i) => ({ id: work.id, score: Math.round(fitted[i].score),
     interval: Math.round(fitted[i].interval), games: work.games }));
+}
+
+
+function effectiveCount(values) {
+  const weights = [...values];
+  return weights.reduce((s, n) => s + n, 0) ** 2 / weights.reduce((s, n) => s + n * n, 0);
+}
+
+export const widen = (intervalVotes, effectiveTasks, spread) =>
+  Math.hypot(intervalVotes, 1.96 * spread / Math.sqrt(Math.max(1, effectiveTasks)));
+
+// Tolerate arithmetic roundoff only at policy boundaries; retain reported precision.
+const belowThreshold = (value, threshold) =>
+  value < threshold - 1e-12 * Math.max(1, Math.abs(value), Math.abs(threshold));
+
+export function eligibility(row, rule) {
+  const reasons = [];
+  if (rule.minimumTasks && row.tasks < rule.minimumTasks) reasons.push('tasks');
+  if (rule.minimumTasks && belowThreshold(rule.maxTaskShare, row.taskShare)) reasons.push('task-share');
+  if (belowThreshold(row.effectiveVoters, rule.minimumEffectiveVoters)) reasons.push('voters');
+  return reasons;
+}
+
+// Mulberry32 and Box–Muller: local state makes identical snapshots reproducible.
+function gaussian(seed) {
+  let state = seed >>> 0;
+  const uniform = () => {
+    let t = state += 0x6D2B79F5;
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+  return () => Math.sqrt(-2 * Math.log(1 - uniform())) * Math.cos(2 * Math.PI * uniform());
+}
+
+export function rankRanges(rows, { draws, level, seed }) {
+  const normal = gaussian(seed);
+  const ranks = rows.map(() => new Uint32Array(draws));
+  for (let d = 0; d < draws; d++) {
+    rows.map((row, i) => [row.score + row.interval / 1.96 * normal(), i])
+      .sort((a, b) => b[0] - a[0])
+      .forEach(([, i], position) => { ranks[i][d] = position + 1; });
+  }
+  const tail = (1 - level) / 2;
+  return ranks.map((r, i) => {
+    r.sort();
+    return [Math.min(i + 1, r[Math.floor(tail * (draws - 1))]),
+      Math.max(i + 1, r[Math.ceil((1 - tail) * (draws - 1))])];
+  });
+}
+
+export function composite(boards, weights) {
+  const cats = Object.keys(weights), total = cats.reduce((s, c) => s + weights[c], 0);
+  const parts = new Map();
+  for (const c of cats) for (const row of boards[c] ?? []) parts.set(row.key, { ...parts.get(row.key), [c]: row });
+  const full = [...parts].filter(([, p]) => cats.every((c) => p[c]));
+  const centre = Object.fromEntries(cats.map((c) => [c, full.length ? full.reduce((s, [, p]) => s + p[c].score, 0) / full.length : 1000]));
+  const partScores = (p) => Object.fromEntries(Object.entries(p).map(([c, row]) => [c,
+    { rank: row.rank, aligned: row.score - centre[c] + 1000 }]));
+  const rows = full.map(([key, p]) => ({ key,
+    score: 1000 + cats.reduce((s, c) => s + weights[c] / total * (p[c].score - centre[c]), 0),
+    interval: Math.hypot(...cats.map((c) => weights[c] / total * p[c].interval)),
+    parts: partScores(p),
+  })).sort((a, b) => b.score - a.score || a.key.localeCompare(b.key));
+  const partial = [...parts].filter(([, p]) => !cats.every((c) => p[c]))
+    .map(([key, p]) => ({ key, parts: partScores(p), missing: cats.filter((c) => !p[c]) }));
+  return { rows, partial };
+}
+
+// Runs in the ranking worker too, so rank sampling never blocks HTTP handling.
+export function groupV3(rows, { rule, seed, singleTask = false, boards = null, minimumGames = 21, excludedModel = '' }) {
+  const visible = rows.filter((r) => r.games >= minimumGames && r.key.split('|')[0] !== excludedModel)
+    .map((r) => ({ ...r, interval: singleTask ? r.intervalVotes : widen(r.intervalVotes, r.effectiveTasks, rule.taskSpread) }));
+  let ranked, partial = [], watch;
+  if (boards) {
+    const combined = composite(boards, rule.composite);
+    const stats = new Map(visible.map((r) => [r.key, r]));
+    ranked = combined.rows.filter((r) => stats.has(r.key)).map((r) => ({ ...stats.get(r.key), ...r }));
+    partial = combined.partial.filter((r) => stats.has(r.key)).map((r) => {
+      const { rank, score, interval, intervalVotes, ...rest } = stats.get(r.key);
+      return { ...rest, ...r };
+    });
+    const keys = new Set([...ranked, ...partial].map((r) => r.key));
+    watch = visible.filter((r) => !keys.has(r.key)).map((r) => ({ ...r, reasons: ['coverage'] }));
+  } else {
+    const tested = visible.map((r) => ({ ...r, reasons: eligibility(r, { ...rule, minimumTasks: singleTask ? 0 : rule.minimumTasks }) }));
+    ranked = tested.filter((r) => !r.reasons.length).map(({ reasons, ...r }) => r);
+    watch = tested.filter((r) => r.reasons.length);
+  }
+  const ranges = rankRanges(ranked, { ...rule.rankRange, seed });
+  return { rows: ranked.map((r, i) => ({ ...r, rank: i + 1, rankLow: ranges[i][0], rankHigh: ranges[i][1] })),
+    partial, watch: watch.map(({ rank, ...r }) => r) };
 }

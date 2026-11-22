@@ -9,6 +9,7 @@ import { createArena } from '../server/arena.mjs';
 import { createCatalog, modelKey, entityKey } from '../server/catalog.mjs';
 import { createLibrary } from '../server/library.mjs';
 import { openDatabase } from '../server/db.mjs';
+import { rankEntries } from '../server/ranking.mjs';
 import { limits } from '../server/config.mjs';
 import { CURATED_BOARDS } from '../server/curated-boards.mjs';
 
@@ -126,6 +127,52 @@ test('global totals, scopes and units reuse validated ballots until invalidation
   } finally { f.close(); }
 });
 
+test('public ratings diminish repeated voter comparisons across model configurations', async () => {
+  const f = fixture();
+  try {
+    f.vote('ah', 'b', 21);
+    f.vote('al', 'b', 21);
+    const equal = await f.arena.leaderboard({ by: 'config' });
+    const curatedBefore = await f.arena.leaderboard({ audience: 'curated', by: 'config' });
+    // The same visitor supplies 40 votes spread across two configurations of A.
+    f.db.prepare("UPDATE votes SET visitor_hash='repeat' WHERE id NOT IN ('vote-21', 'vote-42')").run();
+    f.arena.invalidate();
+    for (const by of ['model', 'config']) {
+      const publicBoard = await f.arena.leaderboardSnapshot({ by });
+      const weighted = await f.arena.leaderboardSnapshot({ by, weightedTrial: true });
+      const reference = by === 'config' ? equal : await f.arena.leaderboard({ audience: 'curated', by });
+      assert.equal(weighted.totals.votes, 42);
+      for (const row of weighted.rows.filter(r => r.model === 'a')) {
+        assert.equal(row.games, by === 'config' ? 21 : 42);
+        assert.equal(row.wins, row.games);
+        assert.ok(row.score < reference.rows.find(r => r.key === row.key).score);
+        assert.equal(publicBoard.rows.find(r => r.key === row.key).score, reference.rows.find(r => r.key === row.key).score);
+      }
+      assert.equal(weighted.rows.filter(r => r.model === 'a').length, by === 'config' ? 2 : 1);
+    }
+    const curated = await f.arena.leaderboard({ audience: 'curated', by: 'config' });
+    assert.deepEqual(curated.rows.map(r => [r.key, r.score]), curatedBefore.rows.map(r => [r.key, r.score]));
+  } finally { f.close(); }
+});
+
+test('recovered historical staff levels affect public ratings without changing the original snapshot', async () => {
+  const f = fixture();
+  try {
+    f.vote('ah', 'b', 21);
+    f.db.prepare('UPDATE votes SET voter_level=NULL').run();
+    f.arena.invalidate();
+    const before = await f.arena.leaderboard({ by: 'model', weightedTrial: true });
+    const curated = await f.arena.leaderboard({ audience: 'curated', by: 'model' });
+    f.db.exec('INSERT INTO legacy_vote_levels (vote_id,level) SELECT id,3 FROM votes');
+    f.arena.invalidate();
+    const after = await f.arena.leaderboard({ by: 'model', weightedTrial: true });
+    assert.deepEqual(after.totals, before.totals);
+    assert.ok(after.rows.find(r => r.key === 'a').score > before.rows.find(r => r.key === 'a').score);
+    assert.deepEqual((await f.arena.leaderboard({ audience: 'curated', by: 'model' })).totals, curated.totals);
+    assert.equal(f.db.prepare('SELECT COUNT(voter_level) AS known FROM votes').get().known, 0);
+  } finally { f.close(); }
+});
+
 test('curated board uses exactly the selected questions and model-level qualification in both views', async () => {
   assert.equal(CURATED_BOARDS.frontend.taskIds.length, 36);
   assert.equal(new Set(CURATED_BOARDS.frontend.taskIds).size, 36);
@@ -144,9 +191,10 @@ test('curated board uses exactly the selected questions and model-level qualific
     assert.equal(model.totals.votes, 115);
     assert.deepEqual(new Set(model.rows.map((r) => r.model)), new Set(['a', 'b']));
     assert.ok(model.rows.every((r) => !r.provisional));
-    const reference = await f.arena.leaderboard({ task: f.selected, by: 'model' });
-    for (const row of model.rows) assert.equal(row.score, reference.rows.find((r) => r.key === row.key).score, 'excluded opponents remain in the fit');
-    assert.ok(reference.rows.some((r) => r.model === 'unknown'));
+    const comparisons = [['ah', 15], ['al', 15], ['c', 20], ['unknown', 35], ['pool', 30]].flatMap(([id, count]) =>
+      Array.from({ length: count }, () => ({ a: f.library.work(f.selected, id), b: f.library.work(f.selected, 'b'), choice: 'a' })));
+    const reference = rankEntries(comparisons, modelKey, limits);
+    for (const row of model.rows) assert.equal(row.score, reference.find(r => r.key === row.key).score, 'excluded opponents remain in the fit');
     assert.ok((await f.arena.leaderboard({ by: 'model' })).rows.some((r) => r.model === 'c' && !r.provisional));
     const config = await f.arena.leaderboard({ board: 'frontend' });
     assert.deepEqual(new Set(config.rows.map((r) => r.key)), new Set(['a|high', 'a|low', 'b|high']));
@@ -194,6 +242,13 @@ test('leaderboard HTTP API forwards curated scope and rejects conflicting or unk
     assert.equal(data.board, 'frontend');
     assert.equal(data.rows.length, 2);
     assert.equal(data.by, 'model');
+    const publicResponse = await fetch(`${base}?by=model`);
+    const trialResponse = await fetch(`${base}/weighted-trial?by=model`);
+    assert.equal(publicResponse.status, 200);
+    assert.equal(trialResponse.status, 200);
+    const publicBoard = await publicResponse.json(), trialBoard = await trialResponse.json();
+    assert.deepEqual(trialBoard.totals, publicBoard.totals);
+    assert.ok(trialBoard.rows.find(r => r.key === 'a').score > publicBoard.rows.find(r => r.key === 'a').score);
     for (const query of ['board=unknown', 'board=frontend&category=design', `board=frontend&task=${f.selected}`]) {
       const rejected = await fetch(`${base}?${query}`);
       assert.equal(rejected.status, 400);

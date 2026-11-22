@@ -1,6 +1,7 @@
 // Every work the platform knows: data package files plus submitted uploads.
 // Uploads move through unverified → verified | questioned; drafts hold a staged upload
 // until its author has watched the trial load and submits it.
+import { createWorkMetrics } from './work-usage.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
@@ -65,6 +66,7 @@ function writeTree(target, files) {
 }
 
 export function createLibrary({ db, catalog, config, limits, legacyRounds = new Set(), moderationRoute = () => 'machine', restricted = createRestricted(db), maintenance = true }) {
+  const workMetrics = createWorkMetrics(db, config.usage);
   const isRestricted = (work) => restricted.isRestrictedWork(work);
   const hidden = (work, viewer) => restricted.hiddenFrom(work, viewer);
   const contentAllowedEffective = (work) => Boolean(work && !work.curatedAs && catalog.task(work.taskId) &&
@@ -770,6 +772,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
         ...(!work.curated && viewer && (viewer.id === work.ownerId || isStaff(viewer)) ? { arena: arenaState(work) } : {}) };
     },
 
+    metricsSnapshot: () => workMetrics.snapshot(),
     toPublic(work, viewer, { admin = false, preview = true } = {}) {
       work = withDisplay(work);
       if (!work) return null;
@@ -1240,6 +1243,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
         }
         if (moved) {
           q.moveWorkTask.run(moved.to, Date.now(), id);
+          for (const table of ['work_usage', 'work_artifacts']) db.prepare(`UPDATE ${table} SET task_id=? WHERE task_id=? AND work_id=?`).run(moved.to, moved.from, id);
           q.moveVotes.run(moved.to, moved.from, id, id);
           q.moveMatches.run(moved.to, moved.from, id, id);
           q.moveComments.run(moved.to, moved.from, id);

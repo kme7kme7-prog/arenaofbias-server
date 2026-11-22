@@ -23,10 +23,12 @@ const originalEnv = Object.fromEntries([
 ].map((key) => [key, process.env[key]]));
 const listen = (server) => new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 const close = (server) => new Promise((resolve) => server.close(resolve));
-const codeFromLastMail = () => {
-  const body = messages.at(-1).split('\r\n\r\n')[1];
-  return Buffer.from(body, 'base64').toString('utf8').match(/\b\d{6}\b/)[0];
+const lastMailPart = (type) => {
+  const part = messages.at(-1).match(new RegExp(`Content-Type: text/${type}; charset=UTF-8\\r\\nContent-Transfer-Encoding: base64\\r\\n\\r\\n([A-Za-z0-9+/=\\r\\n]+)`));
+  assert.ok(part, `Missing ${type} mail part`);
+  return Buffer.from(part[1], 'base64').toString('utf8');
 };
+const codeFromLastMail = () => lastMailPart('plain').match(/\b\d{6}\b/)[0];
 const cookie = (response) => response.headers.get('set-cookie')?.split(';')[0] ?? '';
 async function post(path, body, session = '') {
   const response = await fetch(base + path, {
@@ -119,8 +121,11 @@ test('registration requires a verified email and Turnstile is off without keys',
   assert.equal(result.status, 200);
   alice = result.cookie;
   assert.equal(result.data.user.email, 'alice-registration@test.invalid');
-  const mailText = Buffer.from(messages.at(-1).split('\r\n\r\n')[1], 'base64').toString('utf8');
+  const mailText = lastMailPart('plain');
   assert.match(mailText, /注册账号并验证邮箱/);
+  assert.match(messages.at(-1), /Content-Type: multipart\/alternative/);
+  assert.match(lastMailPart('html'), /亿模亿样/);
+  assert.ok(lastMailPart('html').includes(codeFromLastMail()));
 });
 
 test('email migration can rerun without changing existing account data', () => {
@@ -142,6 +147,7 @@ test('registration codes are purpose-specific, one-use and roll back with failed
   await emailAuth.send({ purpose: 'register', email }, null, 'core-ip');
   const code = delivered.at(-1).code;
   assert.equal(delivered.at(-1).purpose, 'register');
+  assert.equal(delivered.at(-1).expiresInMs, 600000);
   await assert.rejects(() => emailAuth.register({ ...body, code: code === '000000' ? '000001' : '000000' }), { status: 400 });
   platform.db.exec("CREATE TRIGGER fail_registration BEFORE INSERT ON users WHEN NEW.name = 'atomic-user' BEGIN SELECT RAISE(ABORT, 'registration insert failed'); END");
   try {
@@ -163,7 +169,7 @@ test('registration codes are purpose-specific, one-use and roll back with failed
   const sent = delivered.length;
   assert.deepEqual(await emailAuth.send({ purpose: 'register', email }, null, 'core-ip'), { sent: true, email });
   assert.equal(delivered.length, sent + 1);
-  assert.deepEqual(delivered.at(-1), { to: email, code: null, purpose: 'registered' });
+  assert.deepEqual(delivered.at(-1), { to: email, code: null, purpose: 'registered', expiresInMs: 600000 });
   // Without a valid code nothing says whether the name or address is taken.
   await assert.rejects(() => emailAuth.register({ ...body, name: 'another-user', code }), { status: 400 });
   await assert.rejects(() => emailAuth.register({ ...body, email: 'unused@test.invalid', code: '123456' }), { status: 400 });

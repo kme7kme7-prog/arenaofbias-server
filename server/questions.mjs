@@ -16,6 +16,13 @@ const authorModeration = ({ status, reason, at, round, previous }) => ({ status,
 const publicQuestion = (question) => ['legacy', 'approved'].includes(question.moderation.status);
 // A reserved publishing tag keeps entertainment-only threads out of Gallery's catalog and pool.
 export const isArenaOnlyQuestion = (question) => question?.tags?.includes('arena-only') === true;
+function requireMusicPrompt(category, prompt, variants = []) {
+  if (category !== '音乐') return;
+  if (!/mp3/i.test(prompt)) fail(400, '音乐题的完整提示词中须明确要求导出 .mp3 音频文件');
+  for (const variant of variants) {
+    if (!/mp3/i.test(variant.prompt ?? '')) fail(400, `提示词版本「${variant.label || variant.id}」中须明确要求导出 .mp3 音频文件`);
+  }
+}
 function required(value, label, max) {
   if (typeof value !== 'string' || !value.trim()) fail(400, `请填写${label}`);
   if (value.trim().length > max) fail(400, `${label}最多 ${max} 字`);
@@ -175,6 +182,7 @@ export function createQuestions(db, { references = null, restricted = null } = {
       if (question.packaged) fail(400, '数据包题目请在数据仓库维护提示词版本');
       variants = promptVariants(body.promptVariants);
     }
+    requireMusicPrompt(category, prompt, variants);
     const items = itemsFor(question.id);
     if (prompt !== question.prompt && publicQuestion(question) && items.length) fail(409, '已有作品的题目不能修改提示词');
     if (JSON.stringify(variants) !== JSON.stringify(question.promptVariants) && publicQuestion(question) && items.length) fail(409, '已有作品的题目不能修改提示词版本');
@@ -269,6 +277,7 @@ export function createQuestions(db, { references = null, restricted = null } = {
       const variants = body.promptVariants === undefined ? [] : promptVariants(body.promptVariants);
       const tags = normalizeTags(body.tags, existingTags, category);
       const credit = referenceCredit(body.referenceCredit), refs = prepareReferences(user, body.references);
+      requireMusicPrompt(category, prompt, variants);
       if (!compatibleTemplates(category, body.templates)) fail(400, '提交格式与题目分类不匹配');
       if (!isStaff(user) && pending.get(user.id).n >= 3) fail(429, '你已有 3 道题目在等待审核');
       const id = `q-${randomBytes(8).toString('hex')}`, now = Date.now();

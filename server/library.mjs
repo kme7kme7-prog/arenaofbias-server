@@ -952,13 +952,15 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
 
     // ---- drafts: stage → trial load → submit --------------------------------------------
     createDraft(user, taskId, filename, buffer, template = null) {
-      const task = taskId === '__new__' ? { acceptsUploads: true, templates: ['static', 'vite', 'text'] } : catalog.task(taskId, user);
+      const task = taskId === '__new__' ? { acceptsUploads: true, templates: ['static', 'vite', 'text', 'audio'] } : catalog.task(taskId, user);
       if (!task) fail(404, '题目不存在');
       if (!task.acceptsUploads) fail(409, '这道题暂不接受上传');
       purgeDrafts();
       const allowed = templatesOf(task);
       if (template && !allowed.includes(template)) fail(400, '该题不支持此提交格式');
-      const selected = template ?? (allowed.length === 1 ? allowed[0] : /\.(txt|md|markdown)$/i.test(filename) && allowed.includes('text') ? 'text' : null);
+      const selected = template ?? (allowed.length === 1 ? allowed[0]
+        : /\.mp3$/i.test(filename) && allowed.includes('audio') ? 'audio'
+        : /\.(txt|md|markdown)$/i.test(filename) && allowed.includes('text') ? 'text' : null);
       const inspected = inspectUpload(buffer, filename, { limits, cdn: config.cdn, template: selected });
       const format = selected ?? (inspected.files.has('package.json') && inspected.root ? 'vite' : 'static');
       if (!allowed.includes(format)) fail(400, '该题不支持此提交格式');

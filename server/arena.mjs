@@ -20,7 +20,7 @@ import { createCurated } from './curated-boards.mjs';
 import { createLeaderboardCache } from './leaderboard-cache.mjs';
 import { startLeaderboardWarmup } from './leaderboard-warmup.mjs';
 import { generationOf } from './generation.mjs';
-import { isTextTask, isAiJudgedTask } from './categories.mjs';
+import { isTextTask, isAiJudgedTask, isTrialTask } from './categories.mjs';
 import { isSenior, isStaff, levelOf } from './roles.mjs';
 import { checkTiming, minimumViewingTimes, timing } from './arena-voter-state.mjs';
 import { manualCorrections, voteAttribution, votesBeforeTaskMove } from './vote-attribution.mjs';
@@ -171,7 +171,10 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     const works = new Map();
     const tasks = new Map();
     const aiJudged = (id) => {
-      if (!tasks.has(id)) tasks.set(id, isAiJudgedTask(catalog.task(id)));
+      if (!tasks.has(id)) {
+        const t = catalog.task(id);
+        tasks.set(id, isAiJudgedTask(t) || isTrialTask(t));
+      }
       return tasks.get(id);
     };
     const lookup = (task, id) => {
@@ -330,7 +333,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
 
   function workScores(taskId, snapshot = catalog.snapshot()) {
     currentRevision(snapshot);
-    if (isAiJudgedTask(catalog.task(taskId)) || isTextTask(catalog.task(taskId))) return Promise.resolve([]);
+    if (isAiJudgedTask(catalog.task(taskId)) || isTextTask(catalog.task(taskId)) || isTrialTask(catalog.task(taskId))) return Promise.resolve([]);
     const cacheKey = `${snapshot.version}|${taskId}|work`;
     if (cache.has(cacheKey)) return cache.get(cacheKey);
     const activeCache = cache;
@@ -370,7 +373,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     const activeCache = cache;
     const pending = Promise.resolve().then(async () => {
       const keyOf = (work) => by === 'model' ? (work.modelKey ?? modelKey(work)) : (work.configKey ?? entityKey(work));
-      const rankedTasks = readBatch(() => (task ? [catalog.task(task)].filter(Boolean) : catalog.tasks()).filter((t) => !isAiJudgedTask(t)));
+      const rankedTasks = readBatch(() => (task ? [catalog.task(task)].filter(Boolean) : catalog.tasks()).filter((t) => !isAiJudgedTask(t) && !isTrialTask(t)));
       const selected = curated && new Set(curated.taskIds);
       const scoped = curated || category || domain ? rankedTasks.filter((t) => (!selected || selected.has(t.id)) && (!category || t.category === category) && (!domain || t.domains?.includes(domain))) : null;
       const { votes, rankedEntryCount } = await countedVotes(task, archive, keyOf, filters, scoped && new Set(scoped.map((t) => t.id)), curated, senior);
@@ -548,11 +551,11 @@ export function createArena({ db, catalog, library, limits, random = Math.random
   }
 
   // Models in the blind pool and the tasks holding their works, for a senior admin to pin.
-  function poolModels(pools = null, viewer = null) {
+  function poolModels(pools = null, viewer = null, includeTrial = false) {
     const archive = catalog.snapshot();
     const models = new Map();
     for (const task of catalog.tasks()) {
-      if (isAiJudgedTask(task)) continue;
+      if (isAiJudgedTask(task) || (!includeTrial && isTrialTask(task))) continue;
       for (const work of pools?.get(task.id) ?? library.eligible(task.id, null, viewer)) {
         const key = modelKey(work);
         if (!models.has(key)) models.set(key, { key, name: (work.modelId && archive.model(work.modelId)?.name) || work.modelName, tasks: [] });
@@ -638,8 +641,10 @@ export function createArena({ db, catalog, library, limits, random = Math.random
     async createMatch(user, taskId, previousId, snapshot = catalog.snapshot(), avoidCooling = false, pin = null, visitorHash = null, guided = false) {
       if (pin && !isSenior(user)) fail(403, '仅高级管理员可以固定模型');
       if (guided && !isStaff(user)) fail(403, '引导式盲评测试版只对管理员开放', 'guided-staff-only');
-      if (!snapshot.task(taskId) && !catalog.task(taskId)) fail(404, '题目不存在');
-      if (isAiJudgedTask(catalog.task(taskId) ?? snapshot.task(taskId))) fail(409, '这道题由 AI 评分，暂不开放盲评', 'ai-judged');
+      const matchTask = catalog.task(taskId) ?? snapshot.task(taskId);
+      if (!matchTask) fail(404, '题目不存在');
+      if (isAiJudgedTask(matchTask)) fail(409, '这道题由 AI 评分，暂不开放盲评', 'ai-judged');
+      if (!guided && isTrialTask(matchTask)) fail(403, '该分区目前仅在引导式盲评测试版开放', 'guided-only');
       if (Date.now() - lastCleanup >= 60e3) cleanupExpiredMatches();
       const groups = new Map();
       for (const work of library.eligible(taskId, snapshot, user)) {

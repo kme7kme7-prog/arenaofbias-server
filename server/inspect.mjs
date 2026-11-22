@@ -5,6 +5,7 @@ import { posix } from 'node:path';
 import * as zlib from 'node:zlib';
 import { HttpError, fail, formatBytes } from './http.mjs';
 import { renderTextUpload } from './text.mjs';
+import { renderAudioUpload } from './audio.mjs';
 import { THREE_MIRROR_PATH } from './config.mjs';
 
 const JUNK = /(^|\/)(__MACOSX(\/|$)|\.DS_Store$|Thumbs\.db$|desktop\.ini$)/i;
@@ -216,13 +217,14 @@ export function inspectUpload(buffer, filename, options) {
 function inspectUploadBody(buffer, filename, { limits, cdn, template, policy, inflateBudgetMs }) {
   if (!buffer.length) fail(400, '文件是空的');
   const textUpload = template === 'text' ? renderTextUpload(buffer, filename) : null;
-  const isZip = buffer.length >= 4 && buffer.readUInt32LE(0) === 0x04034b50;
+  const audioUpload = template === 'audio' ? renderAudioUpload(buffer, filename) : null;
+  const isZip = !textUpload && !audioUpload && buffer.length >= 4 && buffer.readUInt32LE(0) === 0x04034b50;
   const magic = !isZip ? imageKind(buffer.subarray(0, 16)) : null;
-  if (!textUpload && magic) fail(400, '图片不能当作网页上传');
-  const isHtml = !isZip && !magic && (/\.html?$/i.test(filename) || /^\s*(<!doctype html|<html|<head|<body|<meta|<script|<!--)/i.test(buffer.subarray(0, 512).toString('utf8').replace(/^﻿/, '')));
-  if (!textUpload && !isZip && !isHtml) fail(400, '请上传 ZIP 压缩包或单个 HTML 文件');
+  if (!textUpload && !audioUpload && magic) fail(400, '图片不能当作网页上传');
+  const isHtml = !textUpload && !audioUpload && !isZip && !magic && (/\.html?$/i.test(filename) || /^\s*(<!doctype html|<html|<head|<body|<meta|<script|<!--)/i.test(buffer.subarray(0, 512).toString('utf8').replace(/^﻿/, '')));
+  if (!textUpload && !audioUpload && !isZip && !isHtml) fail(400, '请上传 ZIP 压缩包或单个 HTML 文件');
 
-  const archive = textUpload ? { files: textUpload.files, ignored: 0 } : isZip ? readZip(buffer, limits, { inflateBudgetMs }) : { files: new Map([['index.html', buffer]]), ignored: 0 };
+  const archive = (textUpload ?? audioUpload) ? { files: (textUpload ?? audioUpload).files, ignored: 0 } : isZip ? readZip(buffer, limits, { inflateBudgetMs }) : { files: new Map([['index.html', buffer]]), ignored: 0 };
   if (policy === 'batch') assertBatchFiles(archive.files);
   const files = stripWrapper(archive.files);
   const builtRoot = (template === 'vite' || (!template && files.has('package.json')))
@@ -236,7 +238,8 @@ function inspectUploadBody(buffer, filename, { limits, cdn, template, policy, in
 
   const checks = [];
   const bytes = [...files.values()].reduce((sum, data) => sum + data.length, 0);
-  checks.push({ id: 'format', state: 'ok', label: '文件格式', detail: textUpload ? `识别为 ${textUpload.isMarkdown ? 'Markdown' : '纯文本'} · 约 ${textUpload.characters.toLocaleString('en-US')} 字 · ${formatBytes(buffer.length)}` : isZip ? `ZIP · ${files.size} 个文件 · 解压后 ${formatBytes(bytes)}` : `单个 HTML · ${formatBytes(bytes)}` });
+  const sampleRateLabel = audioUpload ? `${(audioUpload.sampleRate / 1000).toFixed(1).replace(/\.0$/, '')} kHz` : '';
+  checks.push({ id: 'format', state: 'ok', label: '文件格式', detail: textUpload ? `识别为 ${textUpload.isMarkdown ? 'Markdown' : '纯文本'} · 约 ${textUpload.characters.toLocaleString('en-US')} 字 · ${formatBytes(buffer.length)}` : audioUpload ? `单个 MP3 音频 · ${sampleRateLabel} · ${audioUpload.bitrateKbps} kbps · ${formatBytes(buffer.length)}` : isZip ? `ZIP · ${files.size} 个文件 · 解压后 ${formatBytes(bytes)}` : `单个 HTML · ${formatBytes(bytes)}` });
   if (archive.ignored) checks.push({ id: 'ignored', state: 'info', label: '依赖目录', detail: `已忽略 ${archive.ignored} 个依赖或版本库文件（node_modules、.git 等）` });
   checks.push({ id: 'entry', state: 'ok', label: '入口页面', detail: root ? `${root}/${entry}（以 ${root}/ 作为站点根目录）` : entry });
 
@@ -272,6 +275,8 @@ function inspectUploadBody(buffer, filename, { limits, cdn, template, policy, in
   // A text page escapes everything the author wrote; its only external address is the platform's KaTeX.
   if (textUpload) {
     checks.push({ id: 'external', state: 'ok', label: '外部资源', detail: textUpload.math ? '公式由平台加载 KaTeX 显示，正文不引用外部地址' : '未引用外部地址，作品可以独立运行' });
+  } else if (audioUpload) {
+    checks.push({ id: 'external', state: 'ok', label: '外部资源', detail: '音频与频谱播放器在沙盒本地独立运行，不引用外部地址' });
   } else if (external.size) {
     checks.push({ id: 'external', state: 'warn', label: '外部资源', detail: `引用了 ${[...external].slice(0, 3).join('、')}，平台会拦截这些地址。请把依赖打包进作品。` });
   } else if (cdnHosts.size) {
@@ -281,8 +286,8 @@ function inspectUploadBody(buffer, filename, { limits, cdn, template, policy, in
   }
   // A text upload is the work itself; a README only makes sense beside a page.
   const readme = [...files.keys()].find((path) => /^readme\.md$/i.test(path));
-  if (!textUpload) checks.push({ id: 'readme', state: readme ? 'ok' : 'info', label: '说明文件', detail: readme ? '包含 README.md' : '未包含 README.md（选填）' });
+  if (!textUpload && !audioUpload) checks.push({ id: 'readme', state: readme ? 'ok' : 'info', label: '说明文件', detail: readme ? '包含 README.md' : '未包含 README.md（选填）' });
 
   const digest = sha256([...files.keys()].sort().map((path) => `${path}\0${sha256(files.get(path))}`).join('\n'));
-  return { files, root, entry, count: files.size, bytes, digest, entryDigest: sha256(entryData), checks, kind: textUpload ? 'text' : isZip ? 'zip' : 'html' };
+  return { files, root, entry, count: files.size, bytes, digest, entryDigest: sha256(entryData), checks, kind: textUpload ? 'text' : audioUpload ? 'audio' : isZip ? 'zip' : 'html' };
 }

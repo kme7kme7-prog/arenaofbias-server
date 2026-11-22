@@ -42,7 +42,7 @@ import { createReview } from './review.mjs';
 import { createInbox } from './inbox.mjs';
 import { createQuestions, isArenaOnlyQuestion } from './questions.mjs';
 import { createReferences } from './references.mjs';
-import { DOMAIN_GROUPS, DOMAINS, AI_JUDGED, isAiJudgedTask, requireCategory, requireDomains } from './categories.mjs';
+import { DOMAIN_GROUPS, DOMAINS, AI_JUDGED, isAiJudgedTask, isTrialTask, requireCategory, requireDomains } from './categories.mjs';
 import { createProfile } from './profile.mjs';
 import { registerShow1Compat } from './show1compat.mjs';
 import { registerShow1Guess } from './show1/guess.mjs';
@@ -221,13 +221,16 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     limits: { uploadBytes: limits.uploadBytes, coverBytes: limits.coverBytes, referenceCount: limits.referenceCount,
       referenceBytes: limits.referenceBytes, pendingPerUser: limits.pendingPerUser, provisionalGames: limits.provisionalGames },
   });
-  async function galleryList(user, snapshot = catalog.snapshot()) {
+  async function galleryList(user, snapshot = catalog.snapshot(), { includeTrial = false } = {}) {
     await yieldToRequests();
     const allWorks = catalog.withSnapshot(() => library.allWorks({ snapshot, viewer: user }));
     const works = [];
     for (let i = 0; i < allWorks.length; i += 32) {
       catalog.withSnapshot(() => {
-        for (const work of allWorks.slice(i, i + 32)) if (library.visibleTo(work, 'show2')) works.push(library.toPublic(work, user));
+        for (const work of allWorks.slice(i, i + 32)) {
+          if (!includeTrial && isTrialTask(catalog.task(work.taskId))) continue;
+          if (library.visibleTo(work, 'show2')) works.push(library.toPublic(work, user));
+        }
       });
       await yieldToRequests();
     }
@@ -235,10 +238,13 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   }
   const withoutMine = ({ mine, ...item }) => item;
   const activityRevision = () => `${catalog.snapshot().version}|${catalogRevision()}`;
-  const publicCatalog = createCatalogResponse(db, catalog, async (snapshot) => ({
+  const buildCatalog = (includeTrial) => createCatalogResponse(db, catalog, async (snapshot) => ({
     ...versionInfo(snapshot), serverVersion, providers: snapshot.providers(), domains: DOMAINS, domainGroups: DOMAIN_GROUPS,
-    site: siteInfo(), works: (await galleryList(null, snapshot)).map(withoutMine), questions: catalog.withSnapshot(() => questions.all().filter(question => !isArenaOnlyQuestion(question)).map(withoutMine)),
+    site: siteInfo(), works: (await galleryList(null, snapshot, { includeTrial })).map(withoutMine),
+    questions: catalog.withSnapshot(() => questions.all().filter((question) => !isArenaOnlyQuestion(question) && (includeTrial || !isTrialTask(question))).map(withoutMine)),
   }), { revision: catalogRevision });
+  const publicCatalog = buildCatalog(false);
+  const guidedCatalog = buildCatalog(true);
   // Separate from the legacy catalog: two permission scopes, no per-user fields.
   const workMetrics = Object.fromEntries([false, true].map(senior => [String(senior), createSharedJson({
     strict: () => `${catalog.snapshot().version}|${displayRevision()}|${restricted.revision()}`,
@@ -251,6 +257,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         catalog.withSnapshot(() => {
           for (const work of allWorks.slice(i, i + 32)) {
             if (!library.visibleTo(work, 'show2')) continue;
+            if (!senior && isTrialTask(catalog.task(work.taskId))) continue;
             const measured = metricsOf(work);
             for (const [field, target] of [['usage', usage], ['artifact', artifact]]) if (measured[field]) {
               (target[work.taskId] ??= Object.create(null))[work.id] = measured[field];
@@ -286,11 +293,11 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         questions: isSenior(user) ? questions.pendingCount() : 0,
       } : null;
   }
-  const publicPools = createSharedRead({ revision: activityRevision, read: async () => {
+  const buildPools = (includeTrial) => createSharedRead({ revision: activityRevision, read: async () => {
     const snapshot = catalog.snapshot();
     const pools = new Map(), arenaStats = {};
     for (const task of catalog.withSnapshot(() => catalog.tasks())) {
-      if (isAiJudgedTask(task) || isArenaOnlyQuestion(task)) continue;
+      if (isAiJudgedTask(task) || isArenaOnlyQuestion(task) || (!includeTrial && isTrialTask(task))) continue;
       catalog.withSnapshot(() => {
         const pool = library.eligible(task.id, snapshot);
         pools.set(task.id, pool);
@@ -300,10 +307,12 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     }
     return { snapshot, pools, arenaStats };
   } });
-  async function activity(user) {
+  const publicPools = buildPools(false);
+  const guidedPools = buildPools(true);
+  async function activity(user, { includeTrial = false } = {}) {
     for (;;) {
       const revision = activityRevision();
-      const { snapshot, pools, arenaStats } = await publicPools();
+      const { snapshot, pools, arenaStats } = await (includeTrial ? guidedPools() : publicPools());
       const totals = await arena.totals(snapshot);
       const result = catalog.withSnapshot(() => {
         // Access flags and staff review counts use the same fresh rows within
@@ -313,9 +322,9 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         return {
           ...versionInfo(snapshot), reactions: library.reactionSummary(user), arena: arenaStats,
           // Shared pools are public; a senior's pin list also offers restricted models.
-          ...(isSenior(user) ? { arenaModels: arena.poolModels(seesRestricted(user) ? null : pools, user) } : {}),
+          ...(isSenior(user) ? { arenaModels: arena.poolModels(seesRestricted(user) ? null : pools, user, includeTrial) } : {}),
           featured: featured.read(), totals,
-          workAccess: works.filter((work) => library.visibleTo(work, 'show2')).map((work) => library.access(work, user)),
+          workAccess: works.filter((work) => (includeTrial || !isTrialTask(catalog.task(work.taskId))) && library.visibleTo(work, 'show2')).map((work) => library.access(work, user)),
           review: review(user, uploads, works),
         };
       });
@@ -324,24 +333,25 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   }
   // `lite` leaves out `works` (most of the body); everything else, including
   // serverVersion and datapack, stays. Older servers ignore the parameter.
-  async function bootstrap(user, { lite = false } = {}) {
+  async function bootstrap(user, { lite = false, includeTrial = false } = {}) {
     const snapshot = catalog.snapshot();
-    const { workAccess, ...live } = await activity(user);
+    const { workAccess, ...live } = await activity(user, { includeTrial });
     return { ...versionInfo(snapshot), serverVersion, providers: snapshot.providers(), domains: DOMAINS, domainGroups: DOMAIN_GROUPS,
-      site: siteInfo(), ...(lite ? {} : { works: await galleryList(user, snapshot) }), questions: questions.all(user).filter(question => !isArenaOnlyQuestion(question)), ...session(user), ...live };
+      site: siteInfo(), ...(lite ? {} : { works: await galleryList(user, snapshot, { includeTrial }) }), questions: questions.all(user).filter((question) => !isArenaOnlyQuestion(question) && (includeTrial || !isTrialTask(question))), ...session(user), ...live };
   }
   // Signed-out bootstrap is the same for everyone, so it is built once per generation.
   // Signed-in requests never touch it. private keeps CDNs from storing it.
   const bootstrapActivity = createActivityRevision(db);
-  const anonymousBootstrap = (lite) => createSharedJson({
+  const anonymousBootstrap = (lite, includeTrial = false) => createSharedJson({
     strict: () => `${catalog.snapshot().version}|${catalogRevision()}|${capturer.available}|${moderator.enabled}`,
     loose: bootstrapActivity,
-    read: () => bootstrap(null, { lite }),
+    read: () => bootstrap(null, { lite, includeTrial }),
     ttl: config.bootstrapCacheMs ?? 15_000,
     cacheControl: 'private, no-cache',
-    label: 'bootstrap',
+    label: includeTrial ? 'bootstrap-guided' : 'bootstrap',
   });
-  const publicBootstrap = { full: anonymousBootstrap(false), lite: anonymousBootstrap(true) };
+  const publicBootstrap = { full: anonymousBootstrap(false, false), lite: anonymousBootstrap(true, false) };
+  const guidedBootstrap = { full: anonymousBootstrap(false, true), lite: anonymousBootstrap(true, true) };
 
   const router = createRouter();
   // Only these literal registrations enter the automation registry. The request
@@ -406,18 +416,19 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   });
   router.on('GET', '/api/bootstrap', (ctx) => {
     const lite = ctx.url.searchParams.get('lite') === '1';
-    if (!ctx.user) return publicBootstrap[lite ? 'lite' : 'full'](ctx.req, ctx.res);
-    return bootstrap(ctx.user, { lite });
+    const includeTrial = ctx.url.searchParams.get('guided') === '1';
+    if (!ctx.user) return (includeTrial ? guidedBootstrap : publicBootstrap)[lite ? 'lite' : 'full'](ctx.req, ctx.res);
+    return bootstrap(ctx.user, { lite, includeTrial });
   });
-  router.on('GET', '/api/catalog', ({ req, res }) => publicCatalog(req, res));
+  router.on('GET', '/api/catalog', (ctx) => (ctx.url.searchParams.get('guided') === '1' ? guidedCatalog : publicCatalog)(ctx.req, ctx.res));
   router.on('GET', '/api/works/metrics', ctx => {
     if (ctx.user) signedIn(ctx);
     return workMetrics[String(seesRestricted(ctx.user))](ctx.req, ctx.res, { beforeSend: privateBeforeSend(ctx) });
   });
   router.on('GET', '/api/session', (ctx) => session(ctx.user));
-  router.on('GET', '/api/activity', (ctx) => activity(ctx.user));
+  router.on('GET', '/api/activity', (ctx) => activity(ctx.user, { includeTrial: ctx.url.searchParams.get('guided') === '1' }));
   router.on('GET', '/api/show1/works', (ctx) => ({
-    works: publicList(library.published('show1'), ctx.user),
+    works: publicList(library.published('show1').filter((work) => !isTrialTask(catalog.task(work.taskId))), ctx.user),
     reactions: library.reactionSummary(ctx.user, 'show1'),
   }));
 

@@ -39,7 +39,7 @@ import { createLibrary } from './library.mjs';
 import { createAdmin } from './admin.mjs';
 import { createReview } from './review.mjs';
 import { createInbox } from './inbox.mjs';
-import { createQuestions } from './questions.mjs';
+import { createQuestions, isArenaOnlyQuestion } from './questions.mjs';
 import { createReferences } from './references.mjs';
 import { DOMAIN_GROUPS, DOMAINS, AI_JUDGED, isAiJudgedTask, requireCategory, requireDomains } from './categories.mjs';
 import { createProfile } from './profile.mjs';
@@ -235,7 +235,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const activityRevision = () => `${catalog.snapshot().version}|${catalogRevision()}`;
   const publicCatalog = createCatalogResponse(db, catalog, async (snapshot) => ({
     ...versionInfo(snapshot), serverVersion, providers: snapshot.providers(), domains: DOMAINS, domainGroups: DOMAIN_GROUPS,
-    site: siteInfo(), works: (await galleryList(null, snapshot)).map(withoutMine), questions: catalog.withSnapshot(() => questions.all().map(withoutMine)),
+    site: siteInfo(), works: (await galleryList(null, snapshot)).map(withoutMine), questions: catalog.withSnapshot(() => questions.all().filter(question => !isArenaOnlyQuestion(question)).map(withoutMine)),
   }), { revision: catalogRevision });
   // Separate from the legacy catalog: two permission scopes, no per-user fields.
   const workMetrics = Object.fromEntries([false, true].map(senior => [String(senior), createSharedJson({
@@ -288,7 +288,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     const snapshot = catalog.snapshot();
     const pools = new Map(), arenaStats = {};
     for (const task of catalog.withSnapshot(() => catalog.tasks())) {
-      if (isAiJudgedTask(task)) continue;
+      if (isAiJudgedTask(task) || isArenaOnlyQuestion(task)) continue;
       catalog.withSnapshot(() => {
         const pool = library.eligible(task.id, snapshot);
         pools.set(task.id, pool);
@@ -326,7 +326,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     const snapshot = catalog.snapshot();
     const { workAccess, ...live } = await activity(user);
     return { ...versionInfo(snapshot), serverVersion, providers: snapshot.providers(), domains: DOMAINS, domainGroups: DOMAIN_GROUPS,
-      site: siteInfo(), ...(lite ? {} : { works: await galleryList(user, snapshot) }), questions: questions.all(user), ...session(user), ...live };
+      site: siteInfo(), ...(lite ? {} : { works: await galleryList(user, snapshot) }), questions: questions.all(user).filter(question => !isArenaOnlyQuestion(question)), ...session(user), ...live };
   }
   // Signed-out bootstrap is the same for everyone, so it is built once per generation.
   // Signed-in requests never touch it. private keeps CDNs from storing it.

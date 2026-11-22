@@ -13,6 +13,7 @@ import { authorOf, isStaff, isSenior, roleOf } from './roles.mjs';
 import { fail } from './http.mjs';
 import { inspectUpload } from './inspect.mjs';
 import { isTextTask, templatesOf } from './categories.mjs';
+import { isArenaOnlyQuestion } from './questions.mjs';
 import { GENERATION_FIELDS, IGNORED_GENERATION_FIELDS, generationFrom, generationOf, generationAudit, generationAuditView } from './generation.mjs';
 import { readWorkPreview } from './work-previews.mjs';
 import { mirrorPublicMedia, purgeWorkMedia, remirrorWorkMedia } from './cos-dual-write.mjs';
@@ -381,7 +382,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     byKey: db.prepare('SELECT task_id, work_id FROM curated_content_keys WHERE content_key = ?'),
     add: db.prepare('INSERT OR IGNORE INTO curated_content_keys (task_id, work_id, content_key) VALUES (?, ?, ?)'),
   };
-  const visibleEffective = (work, site) => Boolean(work && !inInbox(work) && publicContentEffective(work) &&
+  const visibleEffective = (work, site) => Boolean(work && !isArenaOnlyQuestion(catalog.task(work.taskId)) && !inInbox(work) && publicContentEffective(work) &&
     (site === 'show1' ? work.showArena : work.showGallery));
   const visibleTo = (work, site = 'show2') => visibleEffective(withDisplay(work), site);
   // Text tasks keep their earlier rules; other works must be single-turn without human intervention.
@@ -696,6 +697,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     },
     // Package works plus verified uploads: the pool blind comparisons draw from.
     eligible(taskId, snapshot = null, viewer = null) {
+      if (isArenaOnlyQuestion(catalog.task(taskId))) return [];
       const archive = snapshot ?? catalog.snapshot();
       return catalog.withSnapshot(() => [...archive.works(taskId).map((work) => withDisplay(work)),
         ...q.worksOfTask.all(taskId).map((row) => fromRow(row, archive))].filter((work) => eligibleEffective(work) && !hidden(work, viewer)));

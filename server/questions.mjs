@@ -14,6 +14,8 @@ const tagKey = (value) => tagName(value).toLowerCase();
 const authorModeration = ({ status, reason, at, round, previous }) => ({ status, ...(status === 'rejected' ? { reason } : {}), ...(at ? { at } : {}),
   ...(round > 1 ? { round } : {}), ...(previous ? { previous: { reason: previous.reason, at: previous.at } } : {}) });
 const publicQuestion = (question) => ['legacy', 'approved'].includes(question.moderation.status);
+// A reserved publishing tag keeps entertainment-only threads out of Gallery's catalog and pool.
+export const isArenaOnlyQuestion = (question) => question?.tags?.includes('arena-only') === true;
 function required(value, label, max) {
   if (typeof value !== 'string' || !value.trim()) fail(400, `请填写${label}`);
   if (value.trim().length > max) fail(400, `${label}最多 ${max} 字`);

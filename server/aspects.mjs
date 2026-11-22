@@ -4,8 +4,8 @@ import { fitBradleyTerry, rankRanges } from './ranking.mjs';
 // Guided blind voting trial (staff only). Besides the overall question, a trial match may carry
 // one aspect question (测评点) from its category's pool. Trial answers are kept in guided_trial_votes,
 // which no board reads; only the staff dimension chart (trialStandings) counts them.
-// Pilot: 建模, 静态网页 and 音乐. Aspect IDs are stable; the wording may change.
-export const DIMENSIONS = { aesthetic: '审美能力', craft: '工程完备能力', logic: '逻辑能力', diverge: '发散能力' };
+// Pilot: 建模, 静态网页, 文学 and 音乐. Aspect IDs are stable; the wording may change.
+export const DIMENSIONS = { aesthetic: '审美能力', craft: '工程完备能力', logic: '逻辑能力', diverge: '发散能力', natural: '语言自然能力' };
 
 export const ASPECTS = {
   建模: [
@@ -39,6 +39,18 @@ export const ASPECTS = {
       hint: '对照提示词，看板块划分、信息主次与视觉形式是不是真正匹配网页/PPT/海报的用途，而非生搬硬套。' },
     { id: 'ai_template', dimension: 'diverge', question: '哪个的 AI 味模版感更少？', keyword: 'AI 味模版',
       hint: '看有没有廉价紫蓝渐变、千篇一律的圆角三栏卡片和乱塞的图标徽章。两边都不套路就选「都很好」，都很套路就选「都不好」。' },
+  ],
+  文学: [
+    { id: 'lit_constraint', dimension: 'craft', question: '哪篇更符合提示词的要求？', keyword: '提示词的要求',
+      hint: '对照提示词，看体裁格式、字数篇幅、禁用词、指定文风或分段要求有没有漏项、犯规或敷衍凑数。两边都严格达标就选「都很好」。' },
+    { id: 'lit_coherence', dimension: 'logic', question: '哪篇的前后逻辑与细节推演更严谨自洽？', keyword: '前后逻辑',
+      hint: '看因果链条、人物动机、时间线与设定细节是否合乎情理，有没有前后矛盾、强行降智或硬凹反转。' },
+    { id: 'lit_plot', dimension: 'diverge', question: '哪篇的情节构思更有新意、不落俗套？', keyword: '情节构思',
+      hint: '看故事走向、切入角度、意象设计或反转处理有没有让人眼前一亮的巧思，而不是一眼能猜到结尾的老套桥段。' },
+    { id: 'lit_ai_flavor', dimension: 'natural', question: '哪篇的 AI 味更淡、读起来更自然？', keyword: 'AI 味',
+      hint: '看有没有明显的“不是……而是……”句式堆砌、生硬翻译腔、排比金句强行升华、机械工整的段落结构或滥用破折号与引号黑话。两边都很自然就选「都很好」，都很重就选「都不好」。' },
+    { id: 'lit_diction', dimension: 'natural', question: '哪篇的用词把握更准确、更贴合语境？', keyword: '用词把握',
+      hint: '看遣词造句的分寸感、语体色彩与人物口吻是否对味，有没有词不达意、用力过猛的辞藻堆砌，或违和的书面语/网络热词混搭。' },
   ],
   音乐: [
     { id: 'music_melody', dimension: 'aesthetic', question: '哪首的旋律更好听、不别扭？', keyword: '旋律',

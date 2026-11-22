@@ -52,7 +52,7 @@ async function withPlatform(run, configOptions = {}) {
   for (const id of ['a', 'b']) writeFileSync(join(dist, 'results', 'one', id, 'index.html'), html);
   writeFileSync(join(dist, 'data.json'), JSON.stringify({ schemaVersion: 1, title: '测试馆藏', models: [
     { id: 'ma', name: '模型甲', vendor: '甲' }, { id: 'mb', name: '模型乙', vendor: '乙' },
-  ], tasks: [{ id: 'one', title: '测试题', arenaId: '901', category: '建模', domains: ['物理'], prompt: '测试题提示词', templates: ['static'], results: [
+  ], modelPool: [{ id: 'retired-model', name: '旧模型', replacedBy: 'ma' }], tasks: [{ id: 'one', title: '测试题', arenaId: '901', category: '建模', domains: ['物理'], prompt: '测试题提示词', templates: ['static'], results: [
     { id: 'a', title: '精选甲', model: 'ma', scene: 'results/one/a/', generationMode: 'single-turn', humanIntervention: 'none' },
     { id: 'b', title: '精选乙', model: 'mb', scene: 'results/one/b/', generationMode: 'single-turn', humanIntervention: 'none' },
   ] }, { id: 'two', title: '第二题', category: '建模', domains: ['物理'], prompt: '第二题提示词', templates: ['static'], results: [] }] }));
@@ -233,6 +233,19 @@ test('uploads default blank titles from resolved models and efforts and truncate
     providerId: 'official', harnessOther: '测试工具',
   });
   assert.equal(missing.status, 400);
+}));
+
+test('retired model IDs and names resolve to the current model on upload', async () => withPlatform(async ({ call }) => {
+  for (const model of [{ modelId: 'retired-model' }, { modelName: '旧模型' }]) {
+    const draft = await call('voter', 'POST', '/api/drafts?task=one&name=work.html', html, true);
+    assert.equal(draft.status, 200);
+    const saved = await call('voter', 'POST', '/api/works', {
+      draftId: draft.data.draft.id, confirmed: true, providerId: 'official', harnessOther: '测试工具', effort: 'Max', ...model,
+    });
+    assert.equal(saved.status, 200, JSON.stringify(saved.data));
+    assert.equal(saved.data.work.model, 'ma');
+    assert.equal(saved.data.work.title, '模型甲 · Max');
+  }
 }));
 
 test('author and admin edits default explicit blank titles but preserve omitted titles', async () => withModeratedUpload(async ({ call, id, work }) => {

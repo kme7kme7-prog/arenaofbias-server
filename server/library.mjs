@@ -469,13 +469,14 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
   }
 
   function identity(body, actor = null) {
+    const currentModel = (model) => model?.replacedBy ? catalog.model(model.replacedBy) : model;
     const modelId = body.modelId ? String(body.modelId) : null;
     if (modelId) {
-      const model = catalog.model(modelId);
+      const model = currentModel(catalog.model(modelId));
       if (!model) fail(400, '所选模型不存在');
       // A later data package could register a restricted code; that model stays unusable here.
       if (restricted.claims(model.id) || restricted.claims(model.name)) fail(400, '模型名称无效', 'invalid_model');
-      return { modelId, modelName: model.name, vendor: model.vendor };
+      return { modelId: model.id, modelName: model.name, vendor: model.vendor };
     }
     const modelName = clip(body.modelName, 60);
     if (!modelName) fail(400, '请填写模型名称');
@@ -487,7 +488,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       return { modelId: null, modelName: restricted.displayName(claimed), vendor: '' };
     }
     // A typed name that is a registered name or alias ranks with that model.
-    const named = catalog.modelNamed(modelName);
+    const named = currentModel(catalog.modelNamed(modelName));
     if (named) return { modelId: named.id, modelName: named.name, vendor: named.vendor };
     return { modelId: null, modelName, vendor: clip(body.vendor, 40) };
   }

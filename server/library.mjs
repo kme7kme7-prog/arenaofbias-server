@@ -553,13 +553,15 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
   }
 
   // Tasks with several prompt versions need each upload to name the one it answers.
-  const promptVariantFrom = (taskId, body, current = '', required = false) => {
-    const variants = catalog.task(taskId)?.promptVariants ?? [];
-    const value = Object.hasOwn(body, 'promptVariant') ? String(body.promptVariant ?? '') : current;
+  const pickVariant = (variants, value, required) => {
     if (!variants.length) return '';
     if (value && !variants.some((variant) => variant.id === value)) fail(400, '提示词版本无效', 'invalid_prompt_variant');
     if (!value && required) fail(400, '请选择生成时使用的提示词版本', 'invalid_prompt_variant');
     return value;
+  };
+  const promptVariantFrom = (taskId, body, current = '', required = false) => {
+    const value = Object.hasOwn(body, 'promptVariant') ? String(body.promptVariant ?? '') : current;
+    return pickVariant(catalog.task(taskId)?.promptVariants ?? [], value, required);
   };
   const publicProvenance = (work) => ({
     ...generationOf(work),
@@ -1015,7 +1017,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       const effort = effortOf(body.effort);
       if (!effort) fail(400, '请选择或填写推理档位');
       if (!source.providerId) fail(400, '请选择服务商');
-      const promptVariant = promptVariantFrom(draft.task_id, body, '', !isStaff(user));
+      let promptVariant = promptVariantFrom(draft.task_id, body, '', !isStaff(user));
       if (!isStaff(user) && !source.harnessId && !source.harnessOther) fail(400, '请选择或填写 Harness');
       const who = identity(body, user);
       if (!createQuestion && !who.modelId && restricted.claims(who.modelName) && !grayHome(draft.task_id)) fail(409, GRAY_HOME);
@@ -1053,6 +1055,10 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
             const question = createQuestion();
             if (!question.templates.includes(format)) fail(400, '该题不支持此提交格式');
             taskId = question.id;
+            // The pre-flight pass saw no task yet ('__new__'); resolve the version
+            // against the question just created so its sample names one too.
+            if (question.promptVariants?.length) promptVariant = pickVariant(question.promptVariants,
+              Object.hasOwn(body, 'promptVariant') ? String(body.promptVariant ?? '') : '', !isStaff(user));
           } else if (!templatesOf(catalog.task(taskId, user)).includes(format)) fail(400, '该题不支持此提交格式');
           q.insertWork.run(id, taskId, user.id, title, clip(body.summary, 200), who.modelId, who.modelId ? '' : who.modelName,
             who.modelId ? '' : who.vendor, effort, source.harnessId, source.harnessOther, source.providerId,

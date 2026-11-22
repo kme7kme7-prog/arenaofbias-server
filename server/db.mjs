@@ -913,6 +913,12 @@ const MIGRATIONS = [
       updated_at TEXT NOT NULL
     );`);
   },
+  (db) => {
+    const now = Date.now();
+    const insert = db.prepare('INSERT OR IGNORE INTO curated_sections (id,name,sort_order,created_at,updated_at,updated_by) VALUES (?,?,(SELECT COALESCE(MAX(sort_order),-1)+1 FROM curated_sections),?,?,NULL)');
+    const added = insert.run('language', '语言', now, now).changes + insert.run('music', '音乐', now, now).changes;
+    if (added) db.prepare('UPDATE curated_settings SET revision=revision+1,updated_at=? WHERE id=1').run(now);
+  },
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

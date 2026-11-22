@@ -123,10 +123,12 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     if (!includeTrial) return list;
     const statuses = readSolveStatuses();
     const subcats = readSubcategories();
+    const selected = curated.selection();
     return list.map((question) => ({
       ...question,
       solveStatus: statuses.get(question.id) ?? DEFAULT_SOLVE_STATUS,
       subcategory: validSubcategory(question.category, subcats.get(question.id)),
+      curatedSectionId: selected.get(question.id) ?? null,
     }));
   };
   const curated = createCurated({ db, catalog, library, questions });
@@ -282,7 +284,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     ...versionInfo(snapshot), serverVersion, providers: snapshot.providers(), domains: includeTrial ? GUIDED_DOMAINS : DOMAINS, domainGroups: includeTrial ? GUIDED_DOMAIN_GROUPS : DOMAIN_GROUPS,
     site: siteInfo(), works: (await galleryList(null, snapshot, { includeTrial })).map(withoutMine),
     questions: withSolveStatuses(catalog.withSnapshot(() => questions.all().filter((question) => !isArenaOnlyQuestion(question)).map(withoutMine)), includeTrial),
-  }), { revision: includeTrial ? () => `${catalogRevision()}|${solveStatusRevision()}` : catalogRevision });
+  }), { revision: includeTrial ? () => `${catalogRevision()}|${solveStatusRevision()}|${curated.revision()}` : catalogRevision });
   const publicCatalog = buildCatalog(false);
   const guidedCatalog = buildCatalog(true);
   // Separate from the legacy catalog: two permission scopes, no per-user fields.
@@ -382,7 +384,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   // Signed-in requests never touch it. private keeps CDNs from storing it.
   const bootstrapActivity = createActivityRevision(db);
   const anonymousBootstrap = (lite, includeTrial = false) => createSharedJson({
-    strict: () => `${catalog.snapshot().version}|${catalogRevision()}${includeTrial ? `|${solveStatusRevision()}` : ''}|${capturer.available}|${moderator.enabled}`,
+    strict: () => `${catalog.snapshot().version}|${catalogRevision()}${includeTrial ? `|${solveStatusRevision()}|${curated.revision()}` : ''}|${capturer.available}|${moderator.enabled}`,
     loose: bootstrapActivity,
     read: () => bootstrap(null, { lite, includeTrial }),
     ttl: config.bootstrapCacheMs ?? 15_000,
@@ -1161,6 +1163,13 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   adminOn('POST','/api/admin/vote-risk/votes/void',async ctx=>{const actor=adminOnly(ctx);limit.write(actor.id);return voteRisk.voidVotes(actor,await adminJson(ctx));});
   adminOn('POST','/api/admin/vote-risk/votes/restore',async ctx=>{const actor=adminOnly(ctx);limit.write(actor.id);return voteRisk.restoreVotes(actor,await adminJson(ctx));});
   router.on('GET', '/api/curated', () => curated.info());
+  router.on('PUT', '/api/admin/curated/questions/:task', async ctx => {
+    const body = await readJson(ctx.req);
+    ctx.user = auth.userFrom(ctx.req);
+    const actor = staffOnly(ctx);
+    limit.write(actor.id);
+    return curated.setQuestion(actor, ctx.params.task, body);
+  });
   adminOn('GET', '/api/admin/curated', ctx => curated.adminInfo(adminOnly(ctx)));
   adminOn('POST', '/api/admin/curated/sections', async ctx => curated.createSection(adminOnly(ctx), await adminJson(ctx)));
   adminOn('PATCH', '/api/admin/curated/sections/:id', async ctx => curated.editSection(adminOnly(ctx), ctx.params.id, await adminJson(ctx)));

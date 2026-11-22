@@ -344,8 +344,8 @@ export function createArena({ db, catalog, library, limits, random = Math.random
   }
 
   // Reuse the v3 published category family, including its qualification and refresh policy.
-  async function guidedPriors(by, senior) {
-    const board = await leaderboardSnapshot({ category: '建模', audience: 'public', by, senior, scoring: 3 });
+  async function guidedPriors(by, senior, category = null) {
+    const board = await leaderboardSnapshot({ category, audience: 'public', by, senior, scoring: 3 });
     return new Map(board.rows.filter(row => Number.isFinite(row.score)).map(row => [row.key, row.score]));
   }
 
@@ -877,13 +877,14 @@ export function createArena({ db, catalog, library, limits, random = Math.random
 
     // Guided trial dimension chart (staff only): trial ballots per model or configuration, from the
     // identities captured when each pair was drawn. Restricted works stay hidden from non-senior staff.
-    async guidedDimensions(user, by = 'model') {
+    async guidedDimensions(user, by = 'model', rawCategory = null) {
       if (!isStaff(user)) fail(403, '引导式盲评测试版只对管理员开放', 'guided-staff-only');
+      const category = rawCategory && Object.hasOwn(ASPECTS, rawCategory) ? rawCategory : null;
       const snapshot = catalog.snapshot();
       const senior = seesRestricted(user);
-      const priors = await guidedPriors(by, senior);
-      const stamp = JSON.stringify([currentRevision(snapshot), q.trialRevision.get(), [...priors]]);
-      const scope = `${by}|${senior}`;
+      const priors = await guidedPriors(by, senior, category);
+      const stamp = JSON.stringify([currentRevision(snapshot), q.trialRevision.get(), category, [...priors]]);
+      const scope = `${by}|${senior}|${category ?? '*'}`;
       const cached = guidedCache.get(scope);
       if (cached?.stamp === stamp) return cached.result;
       const keyOf = by === 'config' ? (work) => work.configKey ?? entityKey(work) : (work) => work.modelKey ?? modelKey(work);
@@ -897,7 +898,7 @@ export function createArena({ db, catalog, library, limits, random = Math.random
       const result = { by, ...trialScores(ballots, keyOf, (work) => {
         const model = work.modelId ? snapshot.model?.(work.modelId) : null;
         return { model: work.modelId ?? null, modelName: model?.name ?? work.modelName, vendor: model?.vendor ?? work.vendor, effort: by === 'config' ? work.effort ?? '' : '' };
-      }, priors, { seedKey: JSON.stringify([by, senior, stamp]), rankRange: limits.board.rankRange }) };
+      }, priors, { category, seedKey: JSON.stringify([by, senior, category, stamp]), rankRange: limits.board.rankRange }) };
       guidedCache.set(scope, { stamp, result });
       return result;
     },

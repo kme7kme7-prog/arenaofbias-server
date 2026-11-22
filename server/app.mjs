@@ -1008,7 +1008,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
 
   router.on('GET', '/api/arena/policy', ctx => voters.policy(voters.actor(ctx)));
   // Guided trial dimension chart (staff only); ?by=config splits models by configuration.
-  router.on('GET', '/api/arena/guided/dimensions', ctx => arena.guidedDimensions(signedIn(ctx), ctx.url.searchParams.get('by') === 'config' ? 'config' : 'model'));
+  router.on('GET', '/api/arena/guided/dimensions', ctx => arena.guidedDimensions(signedIn(ctx), ctx.url.searchParams.get('by') === 'config' ? 'config' : 'model', ctx.url.searchParams.get('category') || null));
   router.on('POST', '/api/arena/matches', async ctx => {
     limit.matches(ctx.user?.id ?? ctx.ip);
     const body = await readJson(ctx.req), actor = voters.actor(ctx);

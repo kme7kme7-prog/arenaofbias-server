@@ -46,9 +46,11 @@ export function createActivityRevision(db) {
 
 export function createSolveStatusRevision(db) {
   db.exec('CREATE TEMP TABLE solve_status_revision (revision INTEGER NOT NULL); INSERT INTO solve_status_revision VALUES (0);');
-  for (const event of ['INSERT', 'UPDATE', 'DELETE']) {
-    db.exec(`CREATE TEMP TRIGGER solve_status_${event.toLowerCase()} AFTER ${event} ON main.task_solve_status
-      BEGIN UPDATE solve_status_revision SET revision = revision + 1; END;`);
+  for (const table of ['task_solve_status', 'task_subcategories']) {
+    for (const event of ['INSERT', 'UPDATE', 'DELETE']) {
+      db.exec(`CREATE TEMP TRIGGER guided_meta_${table}_${event.toLowerCase()} AFTER ${event} ON main.${table}
+        BEGIN UPDATE solve_status_revision SET revision = revision + 1; END;`);
+    }
   }
   const revision = db.prepare('SELECT revision FROM solve_status_revision');
   return () => String(revision.get().revision);

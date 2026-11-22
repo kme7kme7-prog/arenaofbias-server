@@ -92,14 +92,42 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const SOLVE_STATUS_VALUES = new Set(['hard', 'solving', 'solved', 'scarce']);
   const DEFAULT_SOLVE_STATUS = 'scarce';
   const normalizeSolveStatus = (value) => (SOLVE_STATUS_VALUES.has(value) ? value : DEFAULT_SOLVE_STATUS);
+  const SUBCATEGORIES_BY_CATEGORY = {
+    文学: new Set(['模仿写作', '网文', '碎片文段', '主题小说']),
+    推理: new Set(['数学', '物理', '电路', '逻辑']),
+    静态网页: new Set(['网页', '像素画', 'Word', 'PPT', 'Excel']),
+    建模: new Set(['Three.js', 'Blender']),
+    音乐: new Set(['氛围音乐', '电音', '词曲']),
+  };
+  const validSubcategory = (category, value) => {
+    const sub = typeof value === 'string' ? value.trim() : '';
+    return sub && SUBCATEGORIES_BY_CATEGORY[category]?.has(sub) ? sub : '';
+  };
   const readSolveStatuses = () => {
     const rows = db.prepare('SELECT task_id, status FROM task_solve_status').all();
     return new Map(rows.map((row) => [row.task_id, normalizeSolveStatus(row.status)]));
   };
+  const readSubcategories = () => {
+    const rows = db.prepare('SELECT task_id, subcategory FROM task_subcategories').all();
+    return new Map(rows.map((row) => [row.task_id, row.subcategory]));
+  };
+  const saveQuestionSubcategory = (q, raw, actorId) => {
+    const sub = validSubcategory(q?.category, raw);
+    if (!sub) return;
+    db.prepare(`INSERT INTO task_subcategories (task_id, subcategory, updated_by, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(task_id) DO UPDATE SET subcategory = excluded.subcategory, updated_by = excluded.updated_by, updated_at = excluded.updated_at`)
+      .run(q.id, sub, actorId, new Date().toISOString());
+  };
   const withSolveStatuses = (list, includeTrial) => {
     if (!includeTrial) return list;
     const statuses = readSolveStatuses();
-    return list.map((question) => ({ ...question, solveStatus: statuses.get(question.id) ?? DEFAULT_SOLVE_STATUS }));
+    const subcats = readSubcategories();
+    return list.map((question) => ({
+      ...question,
+      solveStatus: statuses.get(question.id) ?? DEFAULT_SOLVE_STATUS,
+      subcategory: validSubcategory(question.category, subcats.get(question.id)),
+    }));
   };
   const curated = createCurated({ db, catalog, library, questions });
   const arena = createArena({ db, catalog, library, limits, revision: catalogRevision, curated });
@@ -504,13 +532,21 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     const body = await readJson(ctx.req, 6 * 1024 * 1024);
     requireCategory(body.category);
     if (!Object.hasOwn(body, 'draftId') && !Object.hasOwn(body, 'work') && !Object.hasOwn(body, 'confirmed')) {
-      const question = transaction(db, () => questions.create(user, body, catalog.tags()));
+      const question = transaction(db, () => {
+        const created = questions.create(user, body, catalog.tags());
+        saveQuestionSubcategory(created, body.subcategory, user.id);
+        return created;
+      });
       return { question };
     }
     if (!body.draftId || !body.work || typeof body.work !== 'object' || Array.isArray(body.work)) fail(400, '请附上一份模型结果');
     let question;
     const work = library.submit(user, { ...body.work, draftId: body.draftId, confirmed: body.confirmed }, {
-      createQuestion: () => (question = questions.create(user, body, catalog.tags())),
+      createQuestion: () => {
+        question = questions.create(user, body, catalog.tags());
+        saveQuestionSubcategory(question, body.subcategory, user.id);
+        return question;
+      },
     });
     queueWork(work);
     arena.invalidate();
@@ -965,6 +1001,31 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       library.audit(actor, 'solve-status', null, `${taskId} → ${status}`);
     });
     return { taskId, solveStatus: status, updatedAt };
+  });
+  adminOn('PUT', '/api/admin/tasks/:id/subcategory', async (ctx) => {
+    const actor = staffOnly(ctx);
+    limit.write(actor.id);
+    const taskId = String(ctx.params.id ?? '').trim();
+    const task = catalog.withSnapshot(() => questions.all().find((q) => q.id === taskId));
+    if (!task) fail(404, '未找到这道题目', 'task_not_found');
+    const body = await adminJson(ctx);
+    const raw = typeof body?.subcategory === 'string' ? body.subcategory.trim() : '';
+    if (raw !== '' && !SUBCATEGORIES_BY_CATEGORY[task.category]?.has(raw)) {
+      fail(400, '细分分类无效', 'invalid_subcategory');
+    }
+    const updatedAt = new Date().toISOString();
+    transaction(db, () => {
+      if (raw === '') {
+        db.prepare('DELETE FROM task_subcategories WHERE task_id = ?').run(taskId);
+      } else {
+        db.prepare(`INSERT INTO task_subcategories (task_id, subcategory, updated_by, updated_at)
+          VALUES (?, ?, ?, ?)
+          ON CONFLICT(task_id) DO UPDATE SET subcategory = excluded.subcategory, updated_by = excluded.updated_by, updated_at = excluded.updated_at`)
+          .run(taskId, raw, actor.id, updatedAt);
+      }
+      library.audit(actor, 'subcategory', null, `${taskId} → ${raw || '未分类'}`);
+    });
+    return { taskId, subcategory: raw, updatedAt };
   });
   adminOn('GET', '/api/admin/arena/skip-reasons', ctx => arena.skipReasonStats(adminOnly(ctx)));
   adminOn('GET', '/api/admin/tasks/:id/editorial', (ctx) => {

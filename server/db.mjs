@@ -905,6 +905,14 @@ const MIGRATIONS = [
       updated_at TEXT NOT NULL
     );`);
   },
+  (db) => {
+    db.exec(`CREATE TABLE IF NOT EXISTS task_subcategories (
+      task_id TEXT PRIMARY KEY,
+      subcategory TEXT NOT NULL,
+      updated_by TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );`);
+  },
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

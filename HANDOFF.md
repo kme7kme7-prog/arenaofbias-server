@@ -1,3 +1,10 @@
+## 2026-11-26 · 引导试运行后端区、1:2:1:2 后端榜与设计区 PDF 合并解析（PR 待部署）
+
+- 新增 `server/backend-benchmark.mjs` 与 `GET /api/leaderboard/backend`：为引导试运行目录接入 AGB-Bench v4.1 四个闭卷后端基准套件（`agb-v41-ez` / `hd` / `in` / `at`，含编程语言标注与 `1:2:1:2` 权重系数），并在合成总榜返回 18 个完整 4 卷模型与 2 个缺卷参考条目（含不可靠条目标记与每卷耗时注记）。仅在 `?guided=1` 与引导接口返回，非引导 `/api/catalog` 与 `/api/bootstrap` 严格隔离；拒绝手动新建 `后端` 题目，仅允许 `PUT /api/admin/tasks/:id/solve-status` 管理其解决状态，严禁泄露内部题面代码库或具体子题名。
+- 合并设计区办公子分类（`Word`/`PPT`/`Excel` → `PDF`）：`SUBCATEGORIES_BY_CATEGORY['静态网页']` 收敛为 `网页`、`像素画`、`PDF`；新增数据库只增迁移 `#62` 将既有 `Word`/`PPT`/`Excel` 迁移为 `PDF`；非引导接口将 `templates: ['pdf']` 夹紧为 `['static']` 并剥离 `subcategory`，保护旧正式前端不崩溃。
+- 新增 `server/pdf.mjs` 并打通 `inspect.mjs` / `library.mjs` / `questions.mjs` / `inbox.mjs` / `batch.mjs` / `capture.mjs` / `app.mjs`：对 `PDF` 题目服务端强制拒绝 `.html`/`.htm`/伪造文件头/ZIP/图片/加密 PDF，仅接收有效单个 `.pdf` 并生成剥离文件名与 PDF 元信息的沙盒 `PDF.js` 查看器（支持连续/逐页浏览、HiDPI 画布、缩放、键盘翻页与文本解析复制抽屉，兼容亮/暗主题与 `aob:work-ready` 信号）；已存在作品禁止管理员在 `PDF` 与其他子分类间互切（409）。
+- 验证：`node scripts/check-syntax.mjs` 224/0；新增 `test/backend-benchmark.test.mjs` 与 `test/pdf-upload.test.mjs` 及 `test/curated-toggle.test.mjs` 通过，全栈 Playwright 真实 Chromium QA 验证迁移 v62、接口隔离、PDF.js 沙盒渲染/文本解析、提交与详情回放无报错。[本轮归档](docs/archive/2026-11-26-guided-backend-and-pdf-atmeplz.md)
+
 ## 2026-11-23 · 服务器现场补录入库（未推送、未部署）
 
 - 现场后端由本地未推送的 `lb/integration` 和 21 轮热修叠加而成，已按轮次补录到 `sync/vps-20261123`，迁移顺序与生产 v61 一致。另补录 cron 用的清理脚本和截图服务 8 核 drop-in，测试按已上线行为更新，并修复精选计数回归（未部署）。check 220/0，test 725/725；漂移检查显示 `server/` 与生产一致，只剩 main 上未部署的批量投稿 CLI 修复等。[本轮归档](docs/archive/2026-11-23-vps-sync-wsnxxxs.md)

@@ -4,7 +4,7 @@ import { avatarOf } from './auth.mjs';
 import { transaction } from './db.mjs';
 import { fail, resolveInside } from './http.mjs';
 import { authorOf, isSenior, isStaff, roleOf } from './roles.mjs';
-import { compatibleTemplates, defaultTemplates, requireCategory, requireDomains } from './categories.mjs';
+import { BACKEND_CATEGORY, compatibleTemplates, defaultTemplates, requireCategory, requireDomains } from './categories.mjs';
 import { seesRestricted } from './restricted.mjs';
 import { mirrorReferenceMedia, packReferenceKey, purgePackReferenceMedia, purgeWorkMedia } from './cos-dual-write.mjs';
 
@@ -16,6 +16,10 @@ const authorModeration = ({ status, reason, at, round, previous }) => ({ status,
 const publicQuestion = (question) => ['legacy', 'approved'].includes(question.moderation.status);
 // A reserved publishing tag keeps entertainment-only threads out of Gallery's catalog and pool.
 export const isArenaOnlyQuestion = (question) => question?.tags?.includes('arena-only') === true;
+function requireQuestionCategory(category) {
+  if (category === BACKEND_CATEGORY) fail(400, '后端闭卷题集由系统维护，不支持手动发起');
+  return requireCategory(category);
+}
 function requireMusicPrompt(category, prompt, variants = []) {
   if (category !== '音乐') return;
   if (!/mp3/i.test(prompt)) fail(400, '音乐题的完整提示词中须明确要求导出 .mp3 音频文件');
@@ -90,6 +94,7 @@ export function createQuestions(db, { references = null, restricted = null } = {
     deleted_at = excluded.deleted_at, updated_by = excluded.updated_by, updated_at = excluded.updated_at`);
   const approvedBefore = db.prepare(`SELECT 1 FROM audit WHERE task_id = ? AND action = 'question-review' AND json_extract(detail, '$.status') = 'approved' LIMIT 1`);
   const deletedPackWork = db.prepare('SELECT deleted_at FROM work_overrides WHERE task_id = ? AND work_id = ?');
+  const readSubcategory = db.prepare('SELECT subcategory FROM task_subcategories WHERE task_id = ?');
   function fromRow(row) {
     if (!row) return null;
     return { ...row, packaged: false, domains: JSON.parse(row.domains), tags: JSON.parse(row.tags), templates: JSON.parse(row.templates),
@@ -154,7 +159,7 @@ export function createQuestions(db, { references = null, restricted = null } = {
     return [];
   }
   function meta(question, body, actor = null) {
-    const fields = ['title', 'summary', 'prompt', 'category', 'domains', 'templates', 'acceptsUploads', 'cover', 'references', 'referenceCredit', 'promptVariants'];
+    const fields = ['title', 'summary', 'prompt', 'category', 'domains', 'templates', 'subcategory', 'acceptsUploads', 'cover', 'references', 'referenceCredit', 'promptVariants'];
     if (!body || typeof body !== 'object' || Array.isArray(body) || !fields.some((field) => Object.hasOwn(body, field))) fail(400, '请提供要修改的题目信息');
     const title = Object.hasOwn(body, 'title') ? required(body.title, '题目标题', 70) : question.title;
     const summary = Object.hasOwn(body, 'summary') ? required(body.summary, '测试简述', 400) : question.summary;
@@ -170,13 +175,24 @@ export function createQuestions(db, { references = null, restricted = null } = {
       } else refs = prepareReferences(actor, body.references, question.id);
     }
     if (question.packaged && credit !== question.referenceCredit) fail(400, '数据包题目不能修改参考图署名，请在数据仓库维护');
-    const category = Object.hasOwn(body, 'category') ? requireCategory(body.category) : question.category;
+    const category = Object.hasOwn(body, 'category') ? requireQuestionCategory(body.category) : question.category;
     const domains = Object.hasOwn(body, 'domains') ? requireDomains(body.domains) : question.domains;
+    const currentSubcat = readSubcategory.get(question.id)?.subcategory ?? '';
+    const subcategory = Object.hasOwn(body, 'subcategory') ? (typeof body.subcategory === 'string' ? body.subcategory.trim() : '') : currentSubcat;
     let templates = question.templates;
-    if (Object.hasOwn(body, 'templates')) {
+    if (category === '静态网页' && subcategory === 'PDF') {
+      templates = ['pdf'];
+    } else if (Object.hasOwn(body, 'templates')) {
+      if (category === '静态网页' && subcategory && subcategory !== 'PDF' && Array.isArray(body.templates) && body.templates.includes('pdf')) {
+        fail(400, '提交格式与题目分类不匹配');
+      }
       if (!compatibleTemplates(category, body.templates)) fail(400, '提交格式与题目分类不匹配');
       templates = [...new Set(body.templates)];
-    } else if (category !== question.category && !compatibleTemplates(category, templates)) templates = defaultTemplates(category);
+    } else if (category !== question.category && !compatibleTemplates(category, templates)) {
+      templates = defaultTemplates(category);
+    } else if (category === '静态网页' && subcategory && subcategory !== 'PDF' && templates.includes('pdf')) {
+      templates = ['static'];
+    }
     let variants = question.promptVariants;
     if (Object.hasOwn(body, 'promptVariants')) {
       if (question.packaged) fail(400, '数据包题目请在数据仓库维护提示词版本');
@@ -271,17 +287,25 @@ export function createQuestions(db, { references = null, restricted = null } = {
       return question ? adminQuestion(question, viewer) : null;
     },
     create(user, body, existingTags = []) {
-      const category = requireCategory(body.category);
+      const category = requireQuestionCategory(body.category);
+      const subcategory = typeof body.subcategory === 'string' ? body.subcategory.trim() : '';
       const domains = body.domains === undefined ? [] : requireDomains(body.domains);
       const title = required(body.title, '题目标题', 70), summary = required(body.summary, '测试简述', 400), prompt = required(body.prompt, '完整提示词', 20000);
       const variants = body.promptVariants === undefined ? [] : promptVariants(body.promptVariants);
       const tags = normalizeTags(body.tags, existingTags, category);
       const credit = referenceCredit(body.referenceCredit), refs = prepareReferences(user, body.references);
       requireMusicPrompt(category, prompt, variants);
-      if (!compatibleTemplates(category, body.templates)) fail(400, '提交格式与题目分类不匹配');
+      let templates = body.templates;
+      if (category === '静态网页' && subcategory === 'PDF') {
+        templates = ['pdf'];
+      } else if (category === '静态网页' && subcategory && subcategory !== 'PDF') {
+        if (Array.isArray(templates) && templates.includes('pdf')) fail(400, '提交格式与题目分类不匹配');
+        if (!Array.isArray(templates) || !templates.length) templates = ['static'];
+      }
+      if (!compatibleTemplates(category, templates)) fail(400, '提交格式与题目分类不匹配');
       if (!isStaff(user) && pending.get(user.id).n >= 3) fail(429, '你已有 3 道题目在等待审核');
       const id = `q-${randomBytes(8).toString('hex')}`, now = Date.now();
-      insert.run(id, user.id, title, summary, prompt, JSON.stringify(tags), JSON.stringify([...new Set(body.templates)]), now,
+      insert.run(id, user.id, title, summary, prompt, JSON.stringify(tags), JSON.stringify([...new Set(templates)]), now,
         JSON.stringify({ status: 'pending', at: now }), category, JSON.stringify(domains), roleOf(user.role), credit, JSON.stringify(variants));
       references?.save(id, refs);
       audit.run(now, user.id, user.name, 'question-create', id, null, title);
@@ -339,7 +363,7 @@ export function createQuestions(db, { references = null, restricted = null } = {
       if (!body || typeof body !== 'object' || Array.isArray(body)) fail(400, '请提供要修改的题目信息');
       const { removeSamples = false, ...fields } = body;
       if (typeof removeSamples !== 'boolean') fail(400, '示例结果选项无效');
-      if (Object.keys(fields).some((field) => !['title', 'summary', 'prompt', 'category', 'domains', 'templates', 'references', 'referenceCredit', 'promptVariants'].includes(field))) fail(400, '题目信息格式不正确');
+      if (Object.keys(fields).some((field) => !['title', 'summary', 'prompt', 'category', 'domains', 'templates', 'subcategory', 'references', 'referenceCredit', 'promptVariants'].includes(field))) fail(400, '题目信息格式不正确');
       if (!isStaff(user) && pending.get(user.id).n >= 3) fail(429, '你已有 3 道题目在等待审核');
       const now = Date.now();
       const removedSamples = transaction(db, () => {
@@ -353,6 +377,11 @@ export function createQuestions(db, { references = null, restricted = null } = {
           if (JSON.stringify(question[field]) !== JSON.stringify(next[field])) detail[field] = { from: question[field], to: next[field] };
         }
         if (next.prompt !== question.prompt) detail.prompt = { changed: '已修改', fromLength: question.prompt.length, toLength: next.prompt.length };
+        if (Object.hasOwn(fields, 'subcategory')) {
+          const prevSub = readSubcategory.get(id)?.subcategory ?? '';
+          const nextSub = typeof fields.subcategory === 'string' ? fields.subcategory.trim() : '';
+          if (prevSub !== nextSub) detail.subcategory = { from: prevSub, to: nextSub };
+        }
         if (removed.length) detail.samples = removed.length;
         if (!Object.keys(detail).length) fail(400, '内容和上次相同，请按审核意见修改后再提交');
         const { reason, reviewer, at, round = 1 } = question.moderation;

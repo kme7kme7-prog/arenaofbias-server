@@ -919,6 +919,9 @@ const MIGRATIONS = [
     const added = insert.run('language', '语言', now, now).changes + insert.run('music', '音乐', now, now).changes;
     if (added) db.prepare('UPDATE curated_settings SET revision=revision+1,updated_at=? WHERE id=1').run(now);
   },
+  (db) => {
+    db.exec("UPDATE task_subcategories SET subcategory = 'PDF' WHERE subcategory IN ('Word', 'PPT', 'Excel');");
+  },
 ];
 
 // Exported so tests can build databases at an intermediate schema version.

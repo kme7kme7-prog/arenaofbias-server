@@ -536,6 +536,18 @@ export function createCapturer({ config, library, loadChromium = async () => (aw
               }
             }
             if (wait.settleMs) await step(() => page.waitForTimeout(wait.settleMs), relaxed(wait.settleMs), 'wait');
+            if (typeof page.evaluate === 'function') {
+              const isPdf = await step(() => page.evaluate(() => document.documentElement.dataset.pdfViewer === '1'), timeouts.probe, 'probe').catch(() => false);
+              if (isPdf && typeof page.waitForFunction === 'function') {
+                const pdfLimit = Math.max(1, Math.min(15_000, budget.remaining()));
+                try {
+                  await step(() => page.waitForFunction(() => document.documentElement.dataset.pdfReady === '1', null, { timeout: pdfLimit }), relaxed(pdfLimit), 'pdf_ready');
+                } catch (error) {
+                  if (error instanceof CaptureTimeout && error.step === 'task') throw error;
+                  if (error?.code === 'capture_cancelled') throw error;
+                }
+              }
+            }
             const webgl = await framesUseWebgl(page, timeouts.probe);
             aborted();
             if (webgl) budget.extend(timeouts.webglTask);

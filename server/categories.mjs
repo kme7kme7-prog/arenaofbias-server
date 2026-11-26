@@ -2,6 +2,7 @@
 import { fail } from './http.mjs';
 
 export const CATEGORIES = ['文学', '推理', '静态网页', '建模', '音乐'];
+export const BACKEND_CATEGORY = '后端';
 export const TEXT_CATEGORIES = new Set(['文学', '推理']);
 export const AUDIO_CATEGORIES = new Set(['音乐']);
 export const TRIAL_CATEGORIES = new Set(['音乐']);
@@ -24,13 +25,15 @@ export const MAX_DOMAINS = 2;
 export const isTrialCategory = (category) => TRIAL_CATEGORIES.has(category);
 export const isTrialTask = (task) => isTrialCategory(task?.category);
 export const defaultTemplates = (category) => TEXT_CATEGORIES.has(category) ? ['text'] : AUDIO_CATEGORIES.has(category) ? ['audio'] : ['static', 'vite'];
-export const templatesOf = (task) => task.templates?.length ? task.templates : defaultTemplates(task.category);
+export const isPdfTask = (task) => Boolean(task && (task.subcategory === 'PDF' || (Array.isArray(task.templates) && task.templates.length === 1 && task.templates[0] === 'pdf')));
+export const templatesOf = (task) => isPdfTask(task) ? ['pdf'] : task?.templates?.length ? task.templates : defaultTemplates(task?.category);
 // Community text questions have templates but no kind field.
 export const isTextTask = (task) => Boolean(task && (task.kind === 'text' || templatesOf(task).every((type) => type === 'text')));
 export const isAudioTask = (task) => Boolean(task && (AUDIO_CATEGORIES.has(task.category) || templatesOf(task).every((type) => type === 'audio')));
 export const compatibleTemplates = (category, templates) => Array.isArray(templates) && templates.length > 0
   && (TEXT_CATEGORIES.has(category) ? templates.length === 1 && templates[0] === 'text'
     : AUDIO_CATEGORIES.has(category) ? templates.length === 1 && templates[0] === 'audio'
+    : category === '静态网页' && templates.includes('pdf') ? templates.length === 1 && templates[0] === 'pdf'
     : templates.every((type) => ['static', 'vite'].includes(type)));
 
 export function requireCategory(category) {

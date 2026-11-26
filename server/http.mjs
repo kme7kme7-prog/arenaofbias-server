@@ -188,7 +188,7 @@ export const MIME = {
   '.hdr': 'application/octet-stream', '.exr': 'application/octet-stream', '.ktx2': 'image/ktx2', '.basis': 'application/octet-stream',
   '.wasm': 'application/wasm', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.m4a': 'audio/mp4',
   '.mp4': 'video/mp4', '.webm': 'video/webm', '.csv': 'text/csv; charset=utf-8', '.sbox': 'application/octet-stream',
-  '.webmanifest': 'application/manifest+json',
+  '.pdf': 'application/pdf', '.webmanifest': 'application/manifest+json',
 };
 
 // Resolves a URL path inside base without escaping it; directories map to index.html.

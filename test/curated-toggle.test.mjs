@@ -71,7 +71,7 @@ async function fixture(t) {
 }
 
 test('v60 to v61 only adds missing sections; repeated migration preserves all 38 selections and ballots', t => {
-  assert.equal(MIGRATIONS.length, 61);
+  assert.ok(MIGRATIONS.length >= 61);
   const root = mkdtempSync(join(tmpdir(), 'curated-v61-')); let db;
   t.after(() => { db?.close(); rmSync(root, { recursive: true, force: true }); });
   for (const existing of [[], ['language'], ['music'], ['language', 'music']]) {
@@ -79,7 +79,7 @@ test('v60 to v61 only adds missing sections; repeated migration preserves all 38
     for (const id of existing) db.prepare('INSERT INTO curated_sections VALUES (?,?,?,1,2,?)').run(id, `Custom ${id}`, 10 + existing.indexOf(id), 'original-selector');
     db.exec("UPDATE curated_settings SET revision=17,updated_by='original-selector',updated_at=1234");
     const before = state(db), votes = ballots(db); db.close(); db = openDatabase(file);
-    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 61);
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, MIGRATIONS.length);
     const after = state(db), settings = after.curated_settings[0];
     assert.equal(settings.revision, 17 + Number(existing.length < 2));
     for (const key of ['counting_started_at', 'updated_by']) assert.equal(settings[key], before.curated_settings[0][key]);

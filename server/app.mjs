@@ -42,7 +42,8 @@ import { createReview } from './review.mjs';
 import { createInbox } from './inbox.mjs';
 import { createQuestions, isArenaOnlyQuestion } from './questions.mjs';
 import { createReferences } from './references.mjs';
-import { DOMAIN_GROUPS, DOMAINS, GUIDED_DOMAIN_GROUPS, GUIDED_DOMAINS, AI_JUDGED, TRIAL_CATEGORIES, isAiJudgedTask, isTrialTask, requireCategory, requireDomains } from './categories.mjs';
+import { BACKEND_CATEGORY, DOMAIN_GROUPS, DOMAINS, GUIDED_DOMAIN_GROUPS, GUIDED_DOMAINS, AI_JUDGED, TRIAL_CATEGORIES, defaultTemplates, isAiJudgedTask, isPdfTask, isTrialTask, requireCategory, requireDomains } from './categories.mjs';
+import { BACKEND_TASK_IDS, backendLeaderboard, backendQuestions } from './backend-benchmark.mjs';
 import { createProfile } from './profile.mjs';
 import { registerShow1Compat } from './show1compat.mjs';
 import { registerShow1Guess } from './show1/guess.mjs';
@@ -95,7 +96,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const SUBCATEGORIES_BY_CATEGORY = {
     文学: new Set(['模仿写作', '网文', '碎片文段', '主题小说']),
     推理: new Set(['数学', '物理', '电路', '逻辑']),
-    静态网页: new Set(['网页', '像素画', 'Word', 'PPT', 'Excel']),
+    静态网页: new Set(['网页', '像素画', 'PDF']),
     建模: new Set(['Three.js', 'Blender']),
     音乐: new Set(['氛围音乐', '电音', '词曲']),
   };
@@ -119,17 +120,36 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       ON CONFLICT(task_id) DO UPDATE SET subcategory = excluded.subcategory, updated_by = excluded.updated_by, updated_at = excluded.updated_at`)
       .run(q.id, sub, actorId, new Date().toISOString());
   };
+  const syncQuestionSubcategory = (q, body, actorId) => {
+    if (!body || !Object.hasOwn(body, 'subcategory')) return;
+    const raw = typeof body.subcategory === 'string' ? body.subcategory.trim() : '';
+    if (raw === '') db.prepare('DELETE FROM task_subcategories WHERE task_id = ?').run(q.id);
+    else saveQuestionSubcategory(q, raw, actorId);
+  };
   const withSolveStatuses = (list, includeTrial) => {
-    if (!includeTrial) return list;
-    const statuses = readSolveStatuses();
     const subcats = readSubcategories();
+    if (!includeTrial) {
+      return list.map((question) => {
+        const subcategory = validSubcategory(question.category, subcats.get(question.id));
+        if (subcategory === 'PDF' || (Array.isArray(question.templates) && question.templates.includes('pdf'))) {
+          return { ...question, templates: ['static'] };
+        }
+        return question;
+      });
+    }
+    const statuses = readSolveStatuses();
     const selected = curated.selection();
-    return list.map((question) => ({
-      ...question,
-      solveStatus: statuses.get(question.id) ?? DEFAULT_SOLVE_STATUS,
-      subcategory: validSubcategory(question.category, subcats.get(question.id)),
-      curatedSectionId: selected.get(question.id) ?? null,
-    }));
+    const mapped = list.map((question) => {
+      const subcategory = validSubcategory(question.category, subcats.get(question.id));
+      return {
+        ...question,
+        ...(subcategory === 'PDF' ? { templates: ['pdf'] } : {}),
+        solveStatus: statuses.get(question.id) ?? DEFAULT_SOLVE_STATUS,
+        subcategory,
+        curatedSectionId: selected.get(question.id) ?? null,
+      };
+    });
+    return [...mapped, ...backendQuestions(statuses)];
   };
   const curated = createCurated({ db, catalog, library, questions });
   const arena = createArena({ db, catalog, library, limits, revision: catalogRevision, curated });
@@ -532,6 +552,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     emailBound(ctx);
     limit.write(user.id);
     const body = await readJson(ctx.req, 6 * 1024 * 1024);
+    if (body.category === BACKEND_CATEGORY) fail(400, '后端闭卷题集由系统维护，不支持手动发起');
     requireCategory(body.category);
     if (!Object.hasOwn(body, 'draftId') && !Object.hasOwn(body, 'work') && !Object.hasOwn(body, 'confirmed')) {
       const question = transaction(db, () => {
@@ -558,7 +579,9 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   adminOn('POST', '/api/admin/questions', async (ctx) => {
     const admin = adminOnly(ctx);
     limit.write(admin.id);
-    const question = questions.createByAdmin(admin, await adminJson(ctx), catalog.tags());
+    const body = await adminJson(ctx);
+    const question = questions.createByAdmin(admin, body, catalog.tags());
+    saveQuestionSubcategory(question, body.subcategory, admin.id);
     arena.invalidate();
     return { question };
   });
@@ -600,14 +623,18 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   adminOn('POST', '/api/admin/questions/:id/meta', async (ctx) => {
     const admin = adminOnly(ctx);
     limit.write(admin.id);
-    const question = questions.edit(admin, ctx.params.id, await adminJson(ctx));
+    const body = await adminJson(ctx);
+    const question = questions.edit(admin, ctx.params.id, body);
+    syncQuestionSubcategory(question, body, admin.id);
     arena.invalidate();
     return { question };
   });
   router.on('POST', '/api/questions/:id/resubmit', async (ctx) => {
     const user = emailBound(ctx);
     limit.write(user.id);
-    const question = questions.resubmit(user, ctx.params.id, await readJson(ctx.req, 6 * 1024 * 1024));
+    const body = await readJson(ctx.req, 6 * 1024 * 1024);
+    const question = questions.resubmit(user, ctx.params.id, body);
+    syncQuestionSubcategory(question, body, user.id);
     arena.invalidate();
     return { question };
   });
@@ -989,7 +1016,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     const actor = staffOnly(ctx);
     limit.write(actor.id);
     const taskId = String(ctx.params.id ?? '').trim();
-    const exists = catalog.withSnapshot(() => questions.all().some((q) => q.id === taskId));
+    const exists = BACKEND_TASK_IDS.has(taskId) || catalog.withSnapshot(() => questions.all().some((q) => q.id === taskId));
     if (!exists) fail(404, '未找到这道题目', 'task_not_found');
     const body = await adminJson(ctx);
     const status = typeof body?.status === 'string' ? body.status.trim() : '';
@@ -1015,6 +1042,12 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     if (raw !== '' && !SUBCATEGORIES_BY_CATEGORY[task.category]?.has(raw)) {
       fail(400, '细分分类无效', 'invalid_subcategory');
     }
+    const currentSub = readSubcategories().get(taskId) ?? '';
+    const wasPdf = currentSub === 'PDF' || isPdfTask(task);
+    const willBePdf = raw === 'PDF';
+    const hasWorks = wasPdf !== willBePdf
+      && (catalog.withSnapshot(() => questions.adminGet(taskId, { role: 'admin' })?.works ?? 0) > 0);
+    if (hasWorks) fail(409, '已有作品的题目不能切换 PDF 分类');
     const updatedAt = new Date().toISOString();
     transaction(db, () => {
       if (raw === '') {
@@ -1024,6 +1057,13 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
           VALUES (?, ?, ?, ?)
           ON CONFLICT(task_id) DO UPDATE SET subcategory = excluded.subcategory, updated_by = excluded.updated_by, updated_at = excluded.updated_at`)
           .run(taskId, raw, actor.id, updatedAt);
+      }
+      if (wasPdf !== willBePdf) {
+        const dbRow = db.prepare('SELECT 1 FROM questions WHERE id = ? AND deleted_at IS NULL').get(taskId);
+        if (dbRow) {
+          const nextTemplates = willBePdf ? ['pdf'] : defaultTemplates(task.category);
+          db.prepare('UPDATE questions SET templates = ? WHERE id = ?').run(JSON.stringify(nextTemplates), taskId);
+        }
       }
       library.audit(actor, 'subcategory', null, `${taskId} → ${raw || '未分类'}`);
     });
@@ -1220,6 +1260,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     if (limits.board.scoring < 3) fail(404, '旧版榜单尚未开放');
     return readLeaderboard(ctx, false, 2);
   });
+  router.on('GET', '/api/leaderboard/backend', (ctx) => backendLeaderboard(ctx.url.searchParams.get('tier')));
 
   registerShow1Compat(router, { db, catalog, library, snapshot: show1Snapshot, config, limit });
   registerShow1Guess(router, { db, limit, config, adminOnly, adminOn, adminJson });

@@ -6,7 +6,8 @@ import { runInNewContext } from 'node:vm';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createContentHandler } from '../server/content.mjs';
-import { validateContentOrigin, contentUrl, contentRoute, pathDocument, contentRuntimePath } from '../server/content-path.mjs';
+import { createHash } from 'node:crypto';
+import { validateContentOrigin, contentUrl, contentRoute, pathDocument, contentRuntimePath, normalizeNewlines } from '../server/content-path.mjs';
 import { guardCaptureContext } from '../server/capture.mjs';
 
 const key = prefix => `${prefix}${'a'.repeat(32)}`;
@@ -77,6 +78,27 @@ test('trusted shell contains no work code and sandbox responses are opaque even 
   assert.equal(shared.headers['cache-control'], 'public, max-age=31536000, immutable');
   for (const path of [`/v/${key('w')}/`, `/c/${key('w')}/assets/app.mjs`, `/c/${key('m')}/__content-runtime.js`])
     assert.equal((await f.request(path)).status, 410, 'revocation gates shell and every asset');
+});
+
+test('preview shell CSP hash matches the LF-normalized inline script the browser will check', async t => {
+  const crlf = 'a\r\nb\rc\n';
+  assert.equal(normalizeNewlines(crlf), 'a\nb\nc\n');
+  const file = readFileSync(new URL('../server/content-shell.js', import.meta.url), 'utf8');
+  const lf = normalizeNewlines(file.replace(/\n/g, '\r\n'));
+  assert.equal(lf.includes('\r'), false);
+  assert.equal(createHash('sha256').update(lf).digest('base64'), createHash('sha256').update(normalizeNewlines(file)).digest('base64'));
+
+  const f = await fixture(t);
+  const shell = await f.request(`/v/${key('w')}/`);
+  assert.equal(shell.status, 200);
+  const script = shell.body.match(/<script>([\s\S]*?)<\/script>/i)?.[1];
+  assert.ok(script);
+  assert.equal(script.includes('\r'), false);
+  const hash = createHash('sha256').update(script).digest('base64');
+  assert.match(shell.headers['content-security-policy'], new RegExp(`script-src 'sha256-${hash.replace(/[+/]/g, '\\$&')}'`));
+  const crlfHash = createHash('sha256').update(script.replace(/\n/g, '\r\n')).digest('base64');
+  assert.notEqual(crlfHash, hash);
+  assert.equal(shell.headers['content-security-policy'].includes(crlfHash), false);
 });
 
 test('path transport rebases CSS and bridge resources, keeps HEAD and legacy addresses working', async t => {

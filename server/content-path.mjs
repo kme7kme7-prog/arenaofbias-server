@@ -5,7 +5,10 @@ import { readFileSync } from 'node:fs';
 
 const KEY = '[wmdpce][0-9a-f]{32}';
 const ROUTE = new RegExp(`^/(v|c)/(${KEY})(/.*)$`);
-const shellScript = readFileSync(new URL('./content-shell.js', import.meta.url), 'utf8');
+// Browsers hash inline scripts after normalizing newlines to LF. Hash and emit
+// the same bytes, even if the file on disk was checked out with CRLF.
+export const normalizeNewlines = text => String(text).replace(/\r\n|\r/g, '\n');
+const shellScript = normalizeNewlines(readFileSync(new URL('./content-shell.js', import.meta.url), 'utf8'));
 const shellHash = createHash('sha256').update(shellScript).digest('base64');
 export const contentRuntime = readFileSync(new URL('./content-runtime.js', import.meta.url));
 export const contentRuntimePath = `/_aob/content-runtime.${createHash('sha256').update(contentRuntime).digest('hex').slice(0, 20)}.js`;

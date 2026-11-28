@@ -2,6 +2,10 @@
 
 - 现场后端由本地未推送的 `lb/integration` 和 21 轮热修叠加而成，已按轮次补录到 `sync/vps-20261123`，迁移顺序与生产 v61 一致。另补录 cron 用的清理脚本和截图服务 8 核 drop-in，测试按已上线行为更新，并修复精选计数回归（未部署）。check 220/0，test 725/725；漂移检查显示 `server/` 与生产一致，只剩 main 上未部署的批量投稿 CLI 修复等。[本轮归档](docs/archive/2026-11-23-vps-sync-wsnxxxs.md)
 
+## 2026-11-23 · 线上漂移检查与只从提交上线（未推送）
+
+- 新增零依赖只读脚本 `scripts/live-drift.mjs`，逐文件比对服务器目录与指定提交；`docs/deploy.md` 第 0 节与 `AGENTS.md` 写明只部署已推送提交（正式环境须已合并 `main`）、部署前后运行检查并记入 `/root/deploy-log.tsv`。已对生产后端与正式 Gallery 实跑，只读。后端密钥改由 root 专用文件 `server-secrets.env` 经 `EnvironmentFile=` 注入，见 `docs/deploy.md` 开头；服务未重启。[本轮归档](docs/archive/2026-11-23-live-drift-check-wsnxxxs.md)
+
 ## 2026-11-19 · 批量投稿 plan 核对提示词版本（PR，未合并，未部署）
 
 - `plan` 对有 `promptVariants` 的题目要求 manifest 填写版本 id。缺省、错误 id、中文标签（如 `长提示词`）都会在写 `plan.json` 之前失败，并列出可用 id 和标签。没有版本的题目仍可不写该字段。版本名单来自 `GET https://api.arenaofbias.icu/api/catalog` 的 `questions[].promptVariants`，不写死三道题。读不到题库，或整份题库都没有这个字段时，`plan` 停止。

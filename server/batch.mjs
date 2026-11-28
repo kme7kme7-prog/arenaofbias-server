@@ -4,6 +4,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { mkdirSync, rmSync, statfsSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { planDigest } from './batch-plan.mjs';
+import { isPdfTask } from './categories.mjs';
 import { transaction } from './db.mjs';
 import { HttpError, assertSameOrigin, fail, rateLimit, readBody, readJson } from './http.mjs';
 import { inspectUpload } from './inspect.mjs';
@@ -95,6 +96,7 @@ export function createBatch({ db, config, limits, library, catalog, moderator, c
       FROM batch_reservations LEFT JOIN batch_grants
         ON batch_grants.user_id = batch_reservations.user_id AND batch_grants.batch_id = batch_reservations.batch_id
       WHERE batch_reservations.state = 'held'`),
+    taskSubcategory: db.prepare('SELECT subcategory FROM task_subcategories WHERE task_id = ?'),
     audit: db.prepare('INSERT INTO audit (at, actor_id, actor_name, action, task_id, work_id, detail) VALUES (?, ?, ?, ?, ?, ?, ?)'),
   };
   const deviceLimit = rateLimit(10 * 60e3, 10, '登记太频繁，请稍后再试', 'batch_rate');
@@ -247,8 +249,10 @@ export function createBatch({ db, config, limits, library, catalog, moderator, c
   }
 
   function taskAllowed(taskId, user) {
-    const task = catalog.task(taskId, user);
-    if (!task) fail(404, '题目不存在');
+    const base = catalog.task(taskId, user);
+    if (!base) fail(404, '题目不存在');
+    const row = q.taskSubcategory.get(taskId);
+    const task = row?.subcategory ? { ...base, subcategory: row.subcategory } : base;
     if (!task.acceptsUploads) fail(409, '这道题暂不接受上传');
     return task;
   }
@@ -427,14 +431,16 @@ export function createBatch({ db, config, limits, library, catalog, moderator, c
     if (requested && requested !== work.task) fail(409, '题目与已批准的摘要不一致', 'digest_mismatch');
     if (!allowed.includes(work.task)) fail(403, '题目不在这次授权里', 'batch_forbidden');
     if (length !== work.compressedBytes) fail(409, '上传体积与已批准的摘要不一致', 'digest_mismatch');
-    taskAllowed(work.task, user);
+    const task = taskAllowed(work.task, user);
     const existing = q.workRow.get(user.id, batchId, workKey);
     if (existing && existing.payload_digest !== grant.payload_digest) fail(409, '同一作品键已绑定另一份摘要', 'digest_mismatch');
 
     const finishReplay = async () => {
       const buffer = await readBody(ctx.req, work.compressedBytes);
-      const inspected = inspectUpload(buffer, buffer.length >= 4 && buffer.readUInt32LE(0) === 0x04034b50 ? 'work.zip' : 'index.html', {
-        limits, cdn: config.cdn ?? [], policy: 'batch', inflateBudgetMs: settings.inflateBudgetMs, exclusive: true,
+      const pdfTask = isPdfTask(task);
+      const filename = pdfTask ? 'document.pdf' : (buffer.length >= 4 && buffer.readUInt32LE(0) === 0x04034b50 ? 'work.zip' : 'index.html');
+      const inspected = inspectUpload(buffer, filename, {
+        limits, cdn: config.cdn ?? [], policy: 'batch', template: pdfTask ? 'pdf' : null, inflateBudgetMs: settings.inflateBudgetMs, exclusive: true,
       });
       if (!filesMatch(work.files, actualFiles(inspected))) fail(409, '作品内容与已批准的摘要不一致', 'digest_mismatch');
       return inspected;

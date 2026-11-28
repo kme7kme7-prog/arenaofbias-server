@@ -12,7 +12,7 @@ import { avatarOf } from './auth.mjs';
 import { authorOf, isStaff, isSenior, roleOf } from './roles.mjs';
 import { fail } from './http.mjs';
 import { inspectUpload } from './inspect.mjs';
-import { isTextTask, templatesOf } from './categories.mjs';
+import { isPdfTask, isTextTask, templatesOf } from './categories.mjs';
 import { isArenaOnlyQuestion } from './questions.mjs';
 import { GENERATION_FIELDS, IGNORED_GENERATION_FIELDS, generationFrom, generationOf, generationAudit, generationAuditView } from './generation.mjs';
 import { readWorkPreview } from './work-previews.mjs';
@@ -235,8 +235,16 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     auditFor: db.prepare('SELECT * FROM audit WHERE task_id = ? AND (? IS NULL OR work_id = ?) ORDER BY id DESC LIMIT ?'),
     workModels: db.prepare('SELECT id, model_id, model_other FROM works'),
     userRole: db.prepare('SELECT role FROM users WHERE id = ?'),
+    taskSubcategory: db.prepare('SELECT subcategory FROM task_subcategories WHERE task_id = ?'),
     ballotsOfWork: db.prepare('SELECT a_work, b_work FROM votes WHERE task_id = ? AND (a_work = ? OR b_work = ?)'),
   };
+
+  function effectiveTask(taskId, viewer = null) {
+    const task = catalog.task(taskId, viewer);
+    if (!task) return null;
+    const row = q.taskSubcategory.get(taskId);
+    return row?.subcategory ? { ...task, subcategory: row.subcategory } : task;
+  }
 
   function fromRow(row, archive = catalog) {
     const model = row.model_id ? archive.model(row.model_id) : null;
@@ -952,13 +960,14 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
 
     // ---- drafts: stage → trial load → submit --------------------------------------------
     createDraft(user, taskId, filename, buffer, template = null) {
-      const task = taskId === '__new__' ? { acceptsUploads: true, templates: ['static', 'vite', 'text', 'audio'] } : catalog.task(taskId, user);
+      const task = taskId === '__new__' ? { acceptsUploads: true, templates: ['static', 'vite', 'text', 'audio', 'pdf'] } : effectiveTask(taskId, user);
       if (!task) fail(404, '题目不存在');
       if (!task.acceptsUploads) fail(409, '这道题暂不接受上传');
       purgeDrafts();
-      const allowed = templatesOf(task);
+      const allowed = taskId === '__new__' ? task.templates : templatesOf(task);
       if (template && !allowed.includes(template)) fail(400, '该题不支持此提交格式');
       const selected = template ?? (allowed.length === 1 ? allowed[0]
+        : (/\.pdf$/i.test(filename) || buffer.subarray(0, 1024).toString('latin1').includes('%PDF-')) && allowed.includes('pdf') ? 'pdf'
         : /\.mp3$/i.test(filename) && allowed.includes('audio') ? 'audio'
         : /\.(txt|md|markdown)$/i.test(filename) && allowed.includes('text') ? 'text' : null);
       const inspected = inspectUpload(buffer, filename, { limits, cdn: config.cdn, template: selected });
@@ -1008,7 +1017,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       if (!draft || draft.owner_id !== user.id || draft.expires_at <= Date.now()) fail(404, '试加载已过期，请重新选择文件');
       if (createQuestion ? draft.task_id !== '__new__' : draft.task_id === '__new__') fail(400, '新题目草稿只能用于发起题目');
       if (!createQuestion) {
-        const task = catalog.task(draft.task_id, user);
+        const task = effectiveTask(draft.task_id, user);
         if (!task) fail(404, '题目不存在');
         if (!task.acceptsUploads) fail(409, '这道题暂不接受上传');
       }
@@ -1054,15 +1063,21 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
         transaction(db, () => {
           const format = JSON.parse(draft.checks).find((check) => check.id === 'format')?.template
             ?? (draft.root && existsSync(join(stored, 'package.json')) ? 'vite' : 'static');
+          const isPdfDraft = format === 'pdf' && existsSync(join(stored, draft.root, 'document.pdf'));
           if (createQuestion) {
             const question = createQuestion();
-            if (!question.templates.includes(format)) fail(400, '该题不支持此提交格式');
+            if (isPdfTask(question) !== isPdfDraft) fail(400, '该题不支持此提交格式');
+            if (!templatesOf(question).includes(format)) fail(400, '该题不支持此提交格式');
             taskId = question.id;
             // The pre-flight pass saw no task yet ('__new__'); resolve the version
             // against the question just created so its sample names one too.
             if (question.promptVariants?.length) promptVariant = pickVariant(question.promptVariants,
               Object.hasOwn(body, 'promptVariant') ? String(body.promptVariant ?? '') : '', !isStaff(user));
-          } else if (!templatesOf(catalog.task(taskId, user)).includes(format)) fail(400, '该题不支持此提交格式');
+          } else {
+            const targetTask = effectiveTask(taskId, user);
+            if (isPdfTask(targetTask) !== isPdfDraft) fail(400, '该题不支持此提交格式');
+            if (!templatesOf(targetTask).includes(format)) fail(400, '该题不支持此提交格式');
+          }
           q.insertWork.run(id, taskId, user.id, title, clip(body.summary, 200), who.modelId, who.modelId ? '' : who.modelName,
             who.modelId ? '' : who.vendor, effort, source.harnessId, source.harnessOther, source.providerId,
             source.providerOther, clip(body.note, 1000), token('w'), draft.source_name, draft.root, draft.entry, draft.file_count,
@@ -1091,7 +1106,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     // with every public face closed, even when content moderation is switched off.
     submitMemberPipeline(owner, spec, guard) {
       if (!owner?.id) fail(400, '缺少作品所有者');
-      const task = catalog.task(spec.taskId, owner);
+      const task = effectiveTask(spec.taskId, owner);
       if (!task) fail(404, '题目不存在');
       if (!task.acceptsUploads) fail(409, '这道题暂不接受上传');
       const source = provenance(spec);
@@ -1107,8 +1122,10 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       if (!title) fail(400, '请填写作品标题');
       const inspected = spec.inspected;
       const format = inspected.checks.find((check) => check.id === 'format')?.template
-        ?? (inspected.root && inspected.files.has('package.json') ? 'vite' : 'static');
-      if (!templatesOf(task).includes(format)) fail(400, '该题不支持此提交格式');
+        ?? (inspected.kind === 'pdf' ? 'pdf' : inspected.kind === 'audio' ? 'audio' : inspected.kind === 'text' ? 'text'
+          : inspected.root && inspected.files.has('package.json') ? 'vite' : 'static');
+      const isPdfDraft = format === 'pdf' && inspected.files.has('document.pdf');
+      if (isPdfTask(task) !== isPdfDraft || !templatesOf(task).includes(format)) fail(400, '该题不支持此提交格式');
       let id = workId();
       while (q.work.get(id)) id = workId();
       const stored = join(dirs.works, id);
@@ -1149,12 +1166,15 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       const key = restrictedKeyOf(code);
       if (!restricted.hasKey(key)) fail(409, `模型 ${key} 尚未登记为灰度模型，请先运行 restricted-model add`);
       if (catalogConflict(catalog, key)) fail(409, '灰度代号与已登记的公开模型重名，请换一个代号');
-      const task = catalog.task(taskId, owner);
+      const task = effectiveTask(taskId, owner);
       if (!task) fail(404, '题目不存在');
       if (!grayHome(taskId)) fail(409, GRAY_HOME);
       const allowed = templatesOf(task);
       if (template && !allowed.includes(template)) fail(400, '该题不支持此提交格式');
-      const selected = template ?? (allowed.length === 1 ? allowed[0] : /\.(txt|md|markdown)$/i.test(filename) && allowed.includes('text') ? 'text' : null);
+      const selected = template ?? (allowed.length === 1 ? allowed[0]
+        : (/\.pdf$/i.test(filename) || buffer.subarray(0, 1024).toString('latin1').includes('%PDF-')) && allowed.includes('pdf') ? 'pdf'
+        : /\.mp3$/i.test(filename) && allowed.includes('audio') ? 'audio'
+        : /\.(txt|md|markdown)$/i.test(filename) && allowed.includes('text') ? 'text' : null);
       const inspected = inspectUpload(buffer, filename, { limits, cdn: config.cdn, template: selected });
       const format = selected ?? (inspected.files.has('package.json') && inspected.root ? 'vite' : 'static');
       if (!allowed.includes(format)) fail(400, '该题不支持此提交格式');

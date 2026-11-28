@@ -28,3 +28,20 @@ test('worker computes the same hierarchical work scores above the entry threshol
   assert.deepEqual(actual, expected);
   assert.equal((await exit)[0], 0);
 });
+
+test('v3 worker preserves weighted coverage statistics and scores', async () => {
+  const votes = Array.from({ length: 70 }, (_, i) => ({
+    a: { modelKey: 'a', configKey: 'a|high', taskId: `t${i % 3}` },
+    b: { modelKey: 'b', configKey: 'b|high', taskId: `t${i % 3}` },
+    userId: i < 40 ? 'repeat' : `u${i}`, publicWeight: i % 2 ? 0.5 : 1.25, choice: i % 3 ? 'a' : 'tie',
+  }));
+  const limits = { provisionalGames: 30 };
+  const expected = rankEntries(votes, w => w.configKey, { ...limits, scoring: 3, voterModelKey: w => w.modelKey });
+  const worker = new Worker(new URL('../server/ranking-worker.mjs', import.meta.url), {
+    workerData: { votes, by: 'config', limits, scoring: 3, diminishVoterWeight: true },
+  });
+  const exit = once(worker, 'exit');
+  const [actual] = await once(worker, 'message');
+  assert.deepEqual(actual, expected);
+  assert.equal((await exit)[0], 0);
+});

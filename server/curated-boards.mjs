@@ -1,10 +1,12 @@
 import { randomBytes } from 'node:crypto';
 import { transaction } from './db.mjs';
 import { fail } from './http.mjs';
-import { isAiJudgedTask } from './categories.mjs';
-import { isSenior } from './roles.mjs';
+import { isAiJudgedTask, isTrialTask } from './categories.mjs';
+import { isSenior, isStaff } from './roles.mjs';
 import { entityKey } from './catalog.mjs';
 export { CURATED_BOARDS } from './curated-seed.mjs'; // Migration seed / legacy consumers only.
+
+const SECTION_CATEGORIES = { 'web-design': '静态网页', 'three-dimensional': '建模', language: '文学', music: '音乐' };
 
 export function createCurated({ db, catalog, library, questions }) {
   const settings = () => db.prepare('SELECT * FROM curated_settings WHERE id=1').get();
@@ -12,7 +14,7 @@ export function createCurated({ db, catalog, library, questions }) {
   const sections = () => db.prepare('SELECT * FROM curated_sections ORDER BY sort_order,id').all();
   const available = id => {
     const task = catalog.task(id);
-    return Boolean(task && !isAiJudgedTask(task) && !task.tags?.includes('arena-only') &&
+    return Boolean(task && !isAiJudgedTask(task) && !isTrialTask(task) && !task.tags?.includes('arena-only') &&
       new Set(library.eligible(id).map(work => entityKey(work))).size >= 2);
   };
   const availability = () => {
@@ -25,8 +27,10 @@ export function createCurated({ db, catalog, library, questions }) {
   const sectionDto = (row, rows, admin = false, isAvailable = available) => {
     const selected = rows.filter(q => q.section_id === row.id);
     const taskIds = selected.filter(q => isAvailable(q.task_id)).map(q => q.task_id);
-    return { id: row.id, name: row.name, order: row.sort_order, questionCount: taskIds.length, taskIds,
-      ...(admin ? { selectedQuestionCount: taskIds.length } : {}) };
+    // Music questions never become available, so only the music section reports every pick.
+    const music = SECTION_CATEGORIES[row.id] === '音乐';
+    return { id: row.id, name: row.name, order: row.sort_order, questionCount: taskIds.length, taskIds, category: SECTION_CATEGORIES[row.id] ?? null,
+      ...(admin || music ? { selectedQuestionCount: music ? selected.length : taskIds.length } : {}) };
   };
   const info = (admin = false, isAvailable = availability()) => catalog.withSnapshot(() => {
     const s = settings(), rows = assignments();
@@ -58,6 +62,31 @@ export function createCurated({ db, catalog, library, questions }) {
         taskIds: assignments().filter(row => (!sectionId || row.section_id === sectionId) && available(row.task_id)).map(row => row.task_id) };
     },
     contains: id => Boolean(db.prepare('SELECT 1 FROM curated_questions WHERE task_id=?').get(id)) && available(id),
+    selection: () => new Map(assignments().map(row => [row.task_id, row.section_id])),
+    setQuestion(actor, taskId, body) {
+      if (!isStaff(actor)) fail(403, '仅管理员可以操作');
+      if (typeof body?.selected !== 'boolean' || !Number.isInteger(body.revision)) fail(400, '请选择精选状态并提供当前版本');
+      return transaction(db, () => {
+        const revision = settings().revision;
+        if (body.revision !== revision) fail(409, '精选配置已更新，请重新载入', 'curated_revision_conflict');
+        const current = db.prepare('SELECT section_id FROM curated_questions WHERE task_id=?').get(taskId);
+        const task = (questions ? questions.all() : catalog.tasks()).find(task => task.id === taskId);
+        if (!task || task.tags?.includes('arena-only')) fail(404, '题目不存在或尚未公开');
+        const sectionId = Object.keys(SECTION_CATEGORIES).find(id => SECTION_CATEGORIES[id] === task.category);
+        if (body.selected && (!sectionId || isAiJudgedTask(task))) fail(400, '该题目类型暂不支持精选');
+        if (body.selected === Boolean(current)) return { taskId, selected: body.selected, sectionId: current?.section_id ?? null, revision };
+        const now = Date.now();
+        if (body.selected) {
+          getSection(sectionId);
+          db.prepare('INSERT INTO curated_questions (task_id,section_id,selected_by,selected_at) VALUES (?,?,?,?)').run(taskId, sectionId, actor.id, now);
+        } else db.prepare('DELETE FROM curated_questions WHERE task_id=?').run(taskId);
+        const result = { taskId, selected: body.selected, sectionId: body.selected ? sectionId : null, revision: revision + 1 };
+        db.prepare('UPDATE curated_settings SET revision=revision+1,updated_by=?,updated_at=? WHERE id=1').run(actor.id, now);
+        db.prepare('INSERT INTO audit(at,actor_id,actor_name,action,task_id,detail) VALUES (?,?,?,?,?,?)')
+          .run(now, actor.id, actor.name, 'curated-question-toggle', taskId, JSON.stringify({ ...result, previousSectionId: current?.section_id ?? null }));
+        return result;
+      });
+    },
     info,
     adminInfo(actor) {
       return catalog.withSnapshot(() => {

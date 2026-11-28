@@ -739,6 +739,18 @@ Show1 兼容字段额外包含 `username` 和 `email`（未绑定为 `null`）�
 
 ### 3.10 `GET /api/leaderboard` —— 排行榜
 
+`LEADERBOARD_SCORING` 默认为 2，控制正式接口计分；新增 `GET /api/leaderboard/next` 固定请求 v3，`GET /api/leaderboard/previous` 在配置 >=3 时返回 v2，否则 404。精选榜始终 v2（不含 `scoring`），`/weighted-trial` 保持原计分。预热另含 v3 综合的模型、配置两项。版本进入独立计算及公开快照缓存键。
+
+大众 v3 新增 `scoring:{version:3,weighted:true,minimumGames:21,minimumTasks:3,maxTaskShare:0.5,minimumEffectiveVoters:10,taskSpread:85,rankRange:0.95,composite:{建模:1,静态网页:1,文学:1}}`、`partial:[]`、`watch:[]`。所有行保留 v2 描述及原始胜平负、场次、人数、题数、作品数。新增 `intervalVotes`（投票噪声）、`effectiveTasks`、`taskShare`（最大题加权比较占比）、`effectiveVoters`（权重集中度折算人数）。有效数公式 `(Σw)²/Σw²`，权重沿用加权试运行。未满21场或排除的混合条目在所有分组都不公开，`unranked=[]`。
+
+- 分类/领域榜：`rows` 仅含覆盖达标行，附 `rank/rankLow/rankHigh`；`interval=hypot(intervalVotes,1.96*taskSpread/sqrt(max(1,effectiveTasks)))`。`watch` 有分数/区间但无名次，`reasons` 可为 `tasks`、`task-share`、`voters` 的组合；`partial=[]`。
+- 单题榜：`scoring.minimumTasks=0,taskSpread=0`，不检查题数与占比，`interval=intervalVotes`；仍检查有效投票者，观察原因仅 `voters`。
+- 综合榜（无 task/category/domain）：对三张达标分类榜在共同条目池对齐中心至1000，再按配置权重平均；区间由加权分类区间平方和开根。`rows.parts[分类]={rank,aligned}`；`partial` 为部分分类达标，含 `parts/missing`，无总分/区间/名次；`watch.reasons=['coverage']` 为没有分类达标者，其分数/区间是混合池参考值。`standings[分类][key]` 仅含该分类达标名次。共同池为空时综合 rows 为空，partial 的 aligned 回退原分类分。综合行的 intervalVotes 是混合池诊断值，不用于合成区间。
+
+v3 综合和三张配置内分类（建模、静态网页、文学）按相同 by/harness/provider/权限作为一组原子发布：首次请求任一张时一并计算，三分类与综合共享十分钟有效期；新票不提前更新公开整组，过期后任一成员的请求刷新整组。每张返回不透明 `generation`，综合另带 `categoryGenerations:{分类:generation}`，明确合成所用代次；可从当前三分类 rows 独立复算综合。高级管理员仍隔离公开缓存，新票后其整组立即失效，HTTP继续 no-store。单题、领域榜及非配置内分类仍按自己的范围缓存。v2 发布与失效语义保持原样。
+
+按模型与按配置独立拟合、达标和合成，描述字段沿用各自 v2；harness/provider 筛选后再合成。名次范围按各行分数与区间独立正态抽样2000次取95%分位，包含当前名次；缓存键哈希作种子，结果可复现。watch/partial 均无 rank、rankLow、rankHigh。
+
 **认证**：无。**限流**：无。
 
 公开榜单按题目/题型/领域/精选范围、计分单位与来源筛选分别共享十分钟计算快照。首次访问按需生成，并合并同范围并发请求；成功后十分钟内新投票不会触发公开榜单重算，到期后下一次访问更新。响应的`updatedAt`为实际计算时间，新增`refreshIntervalSeconds: 600`及`nextUpdateAt`（该快照下一次可更新时间）。失败不缓存。换包、作品审核/撤下与归属更正仍立即失效；盲评抽样和统计总计继续使用实时内部缓存。此快照跨账号共享，响应不含身份数据，不写磁盘。正式入口监听后串行预热综合/精选前端的配置与模型四个常用榜，并在一轮完成600秒后再次读取公开缓存；其它范围按需生成。预热不延长已有快照或提前纳入新票；变更期间的在途旧结果也会丢弃重读。服务重启后重新生成，`LEADERBOARD_WARMUP=0`可关闭后台预热。
@@ -1401,3 +1413,37 @@ v49 给 `moderation_tokens` 加 `scopes`（已有令牌默认 `moderation`），
 ### 作品声明、读取与截图替换（无迁移）
 
 `scopes` 仍是文本。新增 `works:read`（`GET /api/dots/works/:task/:id`，安全声明，文件列表默认关，`?files=1` 才列路径）、`meta:write`（`PATCH /api/dots/works/:task/:id/meta`，完整声明字段，不含 `task`；默认不重送审，`resubmitModeration: true` 才在送审文本变化时重送；条件更新，冲突 409）、`captures:write`（`PUT /api/dots/works/:task/:id/captures/:slot`，`slot` 为 `first` 或 `mobile`，只收 JPEG，新文件名，只改 `captures` 的对应键）。不提供 dots 回滚，不清审核错误，不改封面。`/media/<作品>/` 同时接受 `first.jpg`、`mobile.jpg` 和 `first-<8–24 位>.jpg`、`mobile-<8–24 位>.jpg`。详见 [dots 审核 API](dots-moderation-api.md) 第 10–12 节。写操作另有 `DOTS_WRITES_PER_MIN`（默认 30）。
+
+## 用量、官方价格与产物体量（v57，后端数据库）
+
+所有用量、价格、汇率与产物统计均保存在平台 SQLite，不读取数据包的同名字段，不预置真实价格或汇率。
+
+既有公开作品 DTO（`/api/catalog`、匿名及完整bootstrap/public works）不附 `usage` 或 `artifact`，保持577067e字段与顺序；新独立公开 `GET /api/works/metrics` 返回 `{usage:{[taskId]:{[workId]:Usage}},artifact:{[taskId]:{[workId]:Artifact}}}`，没有记录或不可见作品时省略键，空结果为两个空对象。`usage` 为 `{input?,cacheRead?,cacheWrite?,output?,reasoning?,requests?,durationSec?,source,paid?:{basis,amount?,currency?}}`；数字原样透传，未填为数据库 NULL/响应省略，显式 0 保留。source 为 api/harness/bill/log；paid.basis 为 api/subscription/credits/reseller，金额出现时必须带三位币种代码。公开数据不含录入人及时间。模型、档位、Harness 身份继续使用作品原有字段，支持前端按模型/配置/Harness/模型+Harness分组。
+
+`artifact` 是后端统计模块输出（files/lines/bytes，可有 tokens/chars 等统计方法字段），由回填 CLI 写入 `work_artifacts`，不在目录请求中扫描源码。普通投稿与数据包作品共用这张表，公开可见性规则不变。抽组、ready、投票及揭晓响应均不附用量/产物；前端揭晓后按公开作品task/id查独立指标接口。
+
+`GET /api/pricing` 公开返回 `{asOf,fxAsOf,fx,models}`；日期初始 null，fx/models 初始空对象。fx 记每一单位币种折合 CNY，CNY 隐含为1；models 按模型ID分组，条目为 `{since,currency,input,output,cacheRead?,cacheWrite?,url}`（每百万 token）。取 since<=asOf 的最新条目，缓存价缺省按输入价；无定价/无汇率不猜算。实付仅附注，不参与官方花费比较。
+
+管理接口均沿用 adminOn 的 Cookie 与 dots-admin 双入口、读写权限复核及写限流：
+
+| 方法 | 路径 | 权限及响应 |
+|---|---|---|
+| GET / PUT / DELETE | `/api/admin/works/:task/:id/usage` | 普通管理员及以上；PUT body 为公开usage对象，全量替换。GET/PUT 返回 `{task,id,usage}`，usage额外含createdBy/updatedBy（`{id,name}`或null）及ISO createdAt/updatedAt；无记录usage=null。DELETE返回ok |
+| GET | `/api/admin/pricing` | 高级管理员；公开pricing字段加entries数组（含model及录入/修改人和时间），并含元信息updatedBy/updatedAt |
+| PUT / DELETE | `/api/admin/pricing/models/:model/:since` | 高级管理员；模型必须已登记，since有效日期。PUT为currency/input/output/cacheRead?/cacheWrite?/url；必填基础单价与http(s)官方价格页，返回管理pricing；DELETE返回ok |
+| PUT / DELETE | `/api/admin/pricing/meta` | 高级管理员；PUT body `{asOf,fxAsOf,fx}`全量替换，汇率为正有限数且有汇率时必须带日期；DELETE清空日期汇率、保留价格历史，返回ok |
+
+错误：400 invalid_usage/invalid_price/invalid_pricing_meta；不可见或不存在作品404 not_found；未登录401，普通账号/非高级管理员越权403。所有价格必须人工提供，不会自动抓取或猜测官方价。
+
+
+金额默认关闭：`config.usage.showCost`（`USAGE_SHOW_COST=1` 开启），`GET /api/pricing` 在关闭时**仅返回 `{showCost:false}`**，不下发日期/汇率/价格；开启时返回完整价格表并带showCost:true。公开usage.paid在关闭时只留basis。管理员接口仍显示完整价格与实付。前端关闭时仅展示token/耗时/请求/产物，不显示任何花费金额、倍数或花费图。
+
+批量导入：`node scripts/usage-import.mjs --db <platform.db> --input <usage.json> [--dry-run|--apply] [--replace] [--admin-id <id>]`，默认只读预演，输入works[].uploadId匹配未删除站内作品ID。全量预检，有非法字段/不存在作品/冲突则整批不写；相同记录不改时间，覆盖差异须replace。可指定管理员或记录「系统导入」，不更改模型/Harness/作品内容。每件打印计划与实际写入状态，冲突/错误退出1。
+
+产物统计落库：只读 `scripts/artifact-backfill.mjs`（usage-tools分支）输出JSON，再用 `node scripts/artifact-import.mjs --db <platform.db> --input <输出.json> [--dist <只读数据包>] [--dry-run|--apply]`。默认预演，全量检查后显式apply才写work_artifacts；同值不改时间。代码体量含tokens/tokenizer/approximate，文本体量含chars，算法定义见工具契约；不冒充o200k或计费token。公开读取不扫描文件，全部作品由该回填路径覆盖，缺原始文件只报缺失、不猜体量。
+
+
+缓存与导入事务：HTTP及同进程usage/artifact/pricing写入使用独立TEMP展示修订，独立指标接口及时更新，既有目录/bootstrap不因进程内指标写入重建，且不会提前刷新v2发布快照、v3原子发布集合或guided拟合。外部CLI仍沿用PRAGMA data_version检测：实际导入后，公开目录与榜单缓存在下次请求时刷新，CLI会输出同样提示；这是保留的外部写库行为。usage-import整批预检、查重、upsert及审计处于同一事务，任何执行错误整批回滚；HTTP单件用量和审计也原子提交。产物校验严格互斥：代码必须files/lines/bytes/tokens/tokenizer=utf8-pretoken-4-v1/approximate=true；文本必须files/lines/bytes/chars，禁止混用。
+
+
+独立指标缓存：每次构建各读一次usage/artifact全表成Map；按displayRevision（目录修订+指标修订）及受限规则修订独立失效，沿用createSharedJson的ETag/304和gzip/br。匿名/普通请求按公开目录可见集合（public,no-cache），高级管理员按其完整bootstrap可见集合（private,no-cache，含受限但公开展示作品）单独缓存；隐藏、未公开及对当前角色不可见作品均不输出，且无录入人/时间。请求携带登录会话时，压缩或304发送前复核权限。新接口沿用完整目录读取限流和分页参数拒绝规则；前端按task/id与原目录合并使用，原目录不加载指标。

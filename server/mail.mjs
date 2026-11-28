@@ -3,6 +3,7 @@
 import net from 'node:net';
 import tls from 'node:tls';
 import { randomBytes } from 'node:crypto';
+import { renderVerificationEmail } from './mail-template.mjs';
 
 const timeoutMs = Number(process.env.MAIL_SMTP_TIMEOUT_MS || 20000);
 
@@ -10,12 +11,6 @@ export const mailReady = () =>
   Boolean(
     process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS,
   );
-
-const PURPOSE_TEXT = {
-  register: '注册账号并验证邮箱',
-  bind: '绑定邮箱',
-  reset: '重置密码',
-};
 
 // 一次 SMTP 会话：严格的请求-应答来回，同一时刻只有一个未决应答。
 class SmtpSession {
@@ -145,11 +140,32 @@ const ehloName = () => {
 const encodeHeader = (value) =>
   `=?UTF-8?B?${Buffer.from(value, 'utf8').toString('base64')}?=`;
 
-const buildMessage = ({ from, fromName, to, subject, text }) => {
-  const body = Buffer.from(text, 'utf8')
+const encodeBody = (value) => (Buffer.from(value, 'utf8')
     .toString('base64')
-    .match(/.{1,76}/g)
-    .join('\r\n');
+    .match(/.{1,76}/g) || []).join('\r\n');
+
+export const buildMessage = ({ from, fromName, to, subject, text, html }) => {
+  const boundary = `aob_${randomBytes(18).toString('hex')}`;
+  const content = html === undefined ? [
+    'Content-Type: text/plain; charset=UTF-8',
+    'Content-Transfer-Encoding: base64',
+    '',
+    encodeBody(text),
+  ] : [
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    '',
+    `--${boundary}`,
+    'Content-Type: text/plain; charset=UTF-8',
+    'Content-Transfer-Encoding: base64',
+    '',
+    encodeBody(text),
+    `--${boundary}`,
+    'Content-Type: text/html; charset=UTF-8',
+    'Content-Transfer-Encoding: base64',
+    '',
+    encodeBody(html),
+    `--${boundary}--`,
+  ];
   const message = [
     `From: ${encodeHeader(fromName)} <${from}>`,
     `To: <${to}>`,
@@ -157,10 +173,7 @@ const buildMessage = ({ from, fromName, to, subject, text }) => {
     `Date: ${new Date().toUTCString()}`,
     `Message-ID: <${randomBytes(12).toString('hex')}@${from.split('@')[1] || 'arenaofbias.local'}>`,
     'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset=UTF-8',
-    'Content-Transfer-Encoding: base64',
-    '',
-    body,
+    ...content,
     '',
   ].join('\r\n');
   // 点填充：以 . 开头的行要双写，否则会被当成 DATA 的结束标记
@@ -170,7 +183,7 @@ const buildMessage = ({ from, fromName, to, subject, text }) => {
     .join('\r\n');
 };
 
-export async function sendMail({ to, subject, text }) {
+export async function sendMail({ to, subject, text, html }) {
   const host = process.env.SMTP_HOST;
   const port = Number(process.env.SMTP_PORT || 465);
   const user = process.env.SMTP_USER;
@@ -200,7 +213,7 @@ export async function sendMail({ to, subject, text }) {
     await session.command(`MAIL FROM:<${from}>`, [250]);
     await session.command(`RCPT TO:<${to}>`, [250, 251]);
     await session.command('DATA', [354]);
-    session.socket.write(`${buildMessage({ from, fromName, to, subject, text })}\r\n.\r\n`);
+    session.socket.write(`${buildMessage({ from, fromName, to, subject, text, html })}\r\n.\r\n`);
     await session.expect([250]);
     session.socket.end('QUIT\r\n');
   } catch (error) {
@@ -209,30 +222,7 @@ export async function sendMail({ to, subject, text }) {
   }
 }
 
-export async function sendVerificationEmail({ to, code, purpose }) {
-  if (purpose === 'registered') {
-    await sendMail({ to, subject: 'Arena of Bias 注册提醒', text: [
-      '有人正在用这个邮箱注册新账号，但它已经绑定了一个现有账号，因此没有发送验证码。',
-      '',
-      '如果是你本人，请直接登录；忘记密码可以在登录页使用「找回密码」。',
-      '如果这不是你本人的操作，请忽略这封邮件。',
-      '',
-      '— Arena of Bias 偏见试验场',
-    ].join('\n') });
-    return { sent: true };
-  }
-  const action = PURPOSE_TEXT[purpose] || '验证';
-  const subject = `Arena of Bias ${action}验证码`;
-  const text = [
-    `你正在${action}，验证码是：`,
-    '',
-    `    ${code}`,
-    '',
-    '验证码 10 分钟内有效，且只能使用一次。',
-    '如果这不是你本人的操作，请忽略这封邮件。',
-    '',
-    '— Arena of Bias 偏见试验场',
-  ].join('\n');
-  await sendMail({ to, subject, text });
+export async function sendVerificationEmail({ to, code, purpose, expiresInMs = 600000 }) {
+  await sendMail({ to, ...renderVerificationEmail({ code, purpose, expiresInMs }) });
   return { sent: true };
 }

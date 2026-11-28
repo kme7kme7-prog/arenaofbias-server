@@ -1,4 +1,6 @@
+import { createSub2OIDC, SUB2_OIDC_PATH } from './sub2-oidc.mjs';
 // Wires the platform together: the site (static build + API) and the content handler.
+import { createUsageService } from './work-usage.mjs';
 import { extname, join, relative, resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -15,7 +17,7 @@ import { createLoginSecurity } from './login-security.mjs';
 import { createCapturer } from './capture.mjs';
 import { createModerator } from './moderation.mjs';
 import { createCatalog } from './catalog.mjs';
-import { createActivityRevision, createCatalogResponse, createCatalogRevision, createSharedJson } from './catalog-response.mjs';
+import { createActivityRevision, createCatalogResponse, createCatalogRevision, createMetricsRevision, createSharedJson, createSolveStatusRevision } from './catalog-response.mjs';
 import { createSharedRead } from './shared-read.mjs';
 import { createComments } from './comments.mjs';
 import { createChangelog } from './changelog.mjs';
@@ -38,9 +40,9 @@ import { createLibrary } from './library.mjs';
 import { createAdmin } from './admin.mjs';
 import { createReview } from './review.mjs';
 import { createInbox } from './inbox.mjs';
-import { createQuestions } from './questions.mjs';
+import { createQuestions, isArenaOnlyQuestion } from './questions.mjs';
 import { createReferences } from './references.mjs';
-import { DOMAIN_GROUPS, DOMAINS, AI_JUDGED, isAiJudgedTask, requireCategory, requireDomains } from './categories.mjs';
+import { DOMAIN_GROUPS, DOMAINS, GUIDED_DOMAIN_GROUPS, GUIDED_DOMAINS, AI_JUDGED, TRIAL_CATEGORIES, isAiJudgedTask, isTrialTask, requireCategory, requireDomains } from './categories.mjs';
 import { createProfile } from './profile.mjs';
 import { registerShow1Compat } from './show1compat.mjs';
 import { registerShow1Guess } from './show1/guess.mjs';
@@ -80,9 +82,55 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   const moderationMode = createModerationMode(db, config);
   const library = createLibrary({ db, catalog, config, limits, legacyRounds: new Set(show1Snapshot.works.map((work) => work.promptId)),
     moderationRoute: () => moderationMode.current, restricted });
+  const usage = createUsageService({ db, catalog, library, showCost: config.usage?.showCost === true });
   const adminService = createAdmin({ db, catalog, library });
   const inbox = createInbox({ library, config, limits });
   const catalogRevision = createCatalogRevision(db);
+  const metricsRevision = createMetricsRevision(db);
+  const solveStatusRevision = createSolveStatusRevision(db);
+  const displayRevision = () => `${catalogRevision()}|${metricsRevision()}`;
+  const SOLVE_STATUS_VALUES = new Set(['hard', 'solving', 'solved', 'scarce']);
+  const DEFAULT_SOLVE_STATUS = 'scarce';
+  const normalizeSolveStatus = (value) => (SOLVE_STATUS_VALUES.has(value) ? value : DEFAULT_SOLVE_STATUS);
+  const SUBCATEGORIES_BY_CATEGORY = {
+    文学: new Set(['模仿写作', '网文', '碎片文段', '主题小说']),
+    推理: new Set(['数学', '物理', '电路', '逻辑']),
+    静态网页: new Set(['网页', '像素画', 'Word', 'PPT', 'Excel']),
+    建模: new Set(['Three.js', 'Blender']),
+    音乐: new Set(['氛围音乐', '电音', '词曲']),
+  };
+  const validSubcategory = (category, value) => {
+    const sub = typeof value === 'string' ? value.trim() : '';
+    return sub && SUBCATEGORIES_BY_CATEGORY[category]?.has(sub) ? sub : '';
+  };
+  const readSolveStatuses = () => {
+    const rows = db.prepare('SELECT task_id, status FROM task_solve_status').all();
+    return new Map(rows.map((row) => [row.task_id, normalizeSolveStatus(row.status)]));
+  };
+  const readSubcategories = () => {
+    const rows = db.prepare('SELECT task_id, subcategory FROM task_subcategories').all();
+    return new Map(rows.map((row) => [row.task_id, row.subcategory]));
+  };
+  const saveQuestionSubcategory = (q, raw, actorId) => {
+    const sub = validSubcategory(q?.category, raw);
+    if (!sub) return;
+    db.prepare(`INSERT INTO task_subcategories (task_id, subcategory, updated_by, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(task_id) DO UPDATE SET subcategory = excluded.subcategory, updated_by = excluded.updated_by, updated_at = excluded.updated_at`)
+      .run(q.id, sub, actorId, new Date().toISOString());
+  };
+  const withSolveStatuses = (list, includeTrial) => {
+    if (!includeTrial) return list;
+    const statuses = readSolveStatuses();
+    const subcats = readSubcategories();
+    const selected = curated.selection();
+    return list.map((question) => ({
+      ...question,
+      solveStatus: statuses.get(question.id) ?? DEFAULT_SOLVE_STATUS,
+      subcategory: validSubcategory(question.category, subcats.get(question.id)),
+      curatedSectionId: selected.get(question.id) ?? null,
+    }));
+  };
   const curated = createCurated({ db, catalog, library, questions });
   const arena = createArena({ db, catalog, library, limits, revision: catalogRevision, curated });
   const qualification = createQualification({ db, catalog, library, auth });
@@ -131,6 +179,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     settings: { ...batchConfig(process.env), ...(config.batch ?? {}) },
     writeLimit: (id) => limit.write(id),
   });
+  const sub2OIDC = createSub2OIDC({ auth, trustProxy: config.trustProxy });
   const siteCsp = [
     "default-src 'self'",
     "script-src 'self' https://challenges.cloudflare.com",
@@ -215,13 +264,15 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     limits: { uploadBytes: limits.uploadBytes, coverBytes: limits.coverBytes, referenceCount: limits.referenceCount,
       referenceBytes: limits.referenceBytes, pendingPerUser: limits.pendingPerUser, provisionalGames: limits.provisionalGames },
   });
-  async function galleryList(user, snapshot = catalog.snapshot()) {
+  async function galleryList(user, snapshot = catalog.snapshot(), { includeTrial = false } = {}) {
     await yieldToRequests();
     const allWorks = catalog.withSnapshot(() => library.allWorks({ snapshot, viewer: user }));
     const works = [];
     for (let i = 0; i < allWorks.length; i += 32) {
       catalog.withSnapshot(() => {
-        for (const work of allWorks.slice(i, i + 32)) if (library.visibleTo(work, 'show2')) works.push(library.toPublic(work, user));
+        for (const work of allWorks.slice(i, i + 32)) {
+          if (library.visibleTo(work, 'show2')) works.push(library.toPublic(work, user));
+        }
       });
       await yieldToRequests();
     }
@@ -229,10 +280,37 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   }
   const withoutMine = ({ mine, ...item }) => item;
   const activityRevision = () => `${catalog.snapshot().version}|${catalogRevision()}`;
-  const publicCatalog = createCatalogResponse(db, catalog, async (snapshot) => ({
-    ...versionInfo(snapshot), serverVersion, providers: snapshot.providers(), domains: DOMAINS, domainGroups: DOMAIN_GROUPS,
-    site: siteInfo(), works: (await galleryList(null, snapshot)).map(withoutMine), questions: catalog.withSnapshot(() => questions.all().map(withoutMine)),
-  }), { revision: catalogRevision });
+  const buildCatalog = (includeTrial) => createCatalogResponse(db, catalog, async (snapshot) => ({
+    ...versionInfo(snapshot), serverVersion, providers: snapshot.providers(), domains: includeTrial ? GUIDED_DOMAINS : DOMAINS, domainGroups: includeTrial ? GUIDED_DOMAIN_GROUPS : DOMAIN_GROUPS,
+    site: siteInfo(), works: (await galleryList(null, snapshot, { includeTrial })).map(withoutMine),
+    questions: withSolveStatuses(catalog.withSnapshot(() => questions.all().filter((question) => !isArenaOnlyQuestion(question)).map(withoutMine)), includeTrial),
+  }), { revision: includeTrial ? () => `${catalogRevision()}|${solveStatusRevision()}|${curated.revision()}` : catalogRevision });
+  const publicCatalog = buildCatalog(false);
+  const guidedCatalog = buildCatalog(true);
+  // Separate from the legacy catalog: two permission scopes, no per-user fields.
+  const workMetrics = Object.fromEntries([false, true].map(senior => [String(senior), createSharedJson({
+    strict: () => `${catalog.snapshot().version}|${displayRevision()}|${restricted.revision()}`,
+    read: async () => {
+      await yieldToRequests();
+      const snapshot = catalog.snapshot(), viewer = senior ? { role: 'admin' } : null;
+      const allWorks = catalog.withSnapshot(() => library.allWorks({ snapshot, viewer }));
+      const metricsOf = library.metricsSnapshot(), usage = Object.create(null), artifact = Object.create(null);
+      for (let i = 0; i < allWorks.length; i += 32) {
+        catalog.withSnapshot(() => {
+          for (const work of allWorks.slice(i, i + 32)) {
+            if (!library.visibleTo(work, 'show2')) continue;
+            const measured = metricsOf(work);
+            for (const [field, target] of [['usage', usage], ['artifact', artifact]]) if (measured[field]) {
+              (target[work.taskId] ??= Object.create(null))[work.id] = measured[field];
+            }
+          }
+        });
+        await yieldToRequests();
+      }
+      return { usage, artifact };
+    },
+    cacheControl: senior ? 'private, no-cache' : 'public, no-cache', label: 'work-metrics', compressBody,
+  })]));
   function session(user) {
     return {
       ...versionInfo(),
@@ -256,11 +334,11 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         questions: isSenior(user) ? questions.pendingCount() : 0,
       } : null;
   }
-  const publicPools = createSharedRead({ revision: activityRevision, read: async () => {
+  const buildPools = (includeTrial) => createSharedRead({ revision: activityRevision, read: async () => {
     const snapshot = catalog.snapshot();
     const pools = new Map(), arenaStats = {};
     for (const task of catalog.withSnapshot(() => catalog.tasks())) {
-      if (isAiJudgedTask(task)) continue;
+      if (isAiJudgedTask(task) || isArenaOnlyQuestion(task) || (!includeTrial && isTrialTask(task))) continue;
       catalog.withSnapshot(() => {
         const pool = library.eligible(task.id, snapshot);
         pools.set(task.id, pool);
@@ -270,10 +348,12 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     }
     return { snapshot, pools, arenaStats };
   } });
-  async function activity(user) {
+  const publicPools = buildPools(false);
+  const guidedPools = buildPools(true);
+  async function activity(user, { includeTrial = false } = {}) {
     for (;;) {
       const revision = activityRevision();
-      const { snapshot, pools, arenaStats } = await publicPools();
+      const { snapshot, pools, arenaStats } = await (includeTrial ? guidedPools() : publicPools());
       const totals = await arena.totals(snapshot);
       const result = catalog.withSnapshot(() => {
         // Access flags and staff review counts use the same fresh rows within
@@ -283,7 +363,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         return {
           ...versionInfo(snapshot), reactions: library.reactionSummary(user), arena: arenaStats,
           // Shared pools are public; a senior's pin list also offers restricted models.
-          ...(isSenior(user) ? { arenaModels: arena.poolModels(seesRestricted(user) ? null : pools, user) } : {}),
+          ...(isSenior(user) ? { arenaModels: arena.poolModels(seesRestricted(user) ? null : pools, user, includeTrial) } : {}),
           featured: featured.read(), totals,
           workAccess: works.filter((work) => library.visibleTo(work, 'show2')).map((work) => library.access(work, user)),
           review: review(user, uploads, works),
@@ -294,24 +374,25 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   }
   // `lite` leaves out `works` (most of the body); everything else, including
   // serverVersion and datapack, stays. Older servers ignore the parameter.
-  async function bootstrap(user, { lite = false } = {}) {
+  async function bootstrap(user, { lite = false, includeTrial = false } = {}) {
     const snapshot = catalog.snapshot();
-    const { workAccess, ...live } = await activity(user);
-    return { ...versionInfo(snapshot), serverVersion, providers: snapshot.providers(), domains: DOMAINS, domainGroups: DOMAIN_GROUPS,
-      site: siteInfo(), ...(lite ? {} : { works: await galleryList(user, snapshot) }), questions: questions.all(user), ...session(user), ...live };
+    const { workAccess, ...live } = await activity(user, { includeTrial });
+    return { ...versionInfo(snapshot), serverVersion, providers: snapshot.providers(), domains: includeTrial ? GUIDED_DOMAINS : DOMAINS, domainGroups: includeTrial ? GUIDED_DOMAIN_GROUPS : DOMAIN_GROUPS,
+      site: siteInfo(), ...(lite ? {} : { works: await galleryList(user, snapshot, { includeTrial }) }), questions: withSolveStatuses(questions.all(user).filter((question) => !isArenaOnlyQuestion(question)), includeTrial), ...session(user), ...live };
   }
   // Signed-out bootstrap is the same for everyone, so it is built once per generation.
   // Signed-in requests never touch it. private keeps CDNs from storing it.
   const bootstrapActivity = createActivityRevision(db);
-  const anonymousBootstrap = (lite) => createSharedJson({
-    strict: () => `${catalog.snapshot().version}|${catalogRevision()}|${capturer.available}|${moderator.enabled}`,
+  const anonymousBootstrap = (lite, includeTrial = false) => createSharedJson({
+    strict: () => `${catalog.snapshot().version}|${catalogRevision()}${includeTrial ? `|${solveStatusRevision()}|${curated.revision()}` : ''}|${capturer.available}|${moderator.enabled}`,
     loose: bootstrapActivity,
-    read: () => bootstrap(null, { lite }),
+    read: () => bootstrap(null, { lite, includeTrial }),
     ttl: config.bootstrapCacheMs ?? 15_000,
     cacheControl: 'private, no-cache',
-    label: 'bootstrap',
+    label: includeTrial ? 'bootstrap-guided' : 'bootstrap',
   });
-  const publicBootstrap = { full: anonymousBootstrap(false), lite: anonymousBootstrap(true) };
+  const publicBootstrap = { full: anonymousBootstrap(false, false), lite: anonymousBootstrap(true, false) };
+  const guidedBootstrap = { full: anonymousBootstrap(false, true), lite: anonymousBootstrap(true, true) };
 
   const router = createRouter();
   // Only these literal registrations enter the automation registry. The request
@@ -376,14 +457,19 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   });
   router.on('GET', '/api/bootstrap', (ctx) => {
     const lite = ctx.url.searchParams.get('lite') === '1';
-    if (!ctx.user) return publicBootstrap[lite ? 'lite' : 'full'](ctx.req, ctx.res);
-    return bootstrap(ctx.user, { lite });
+    const includeTrial = ctx.url.searchParams.get('guided') === '1';
+    if (!ctx.user) return (includeTrial ? guidedBootstrap : publicBootstrap)[lite ? 'lite' : 'full'](ctx.req, ctx.res);
+    return bootstrap(ctx.user, { lite, includeTrial });
   });
-  router.on('GET', '/api/catalog', ({ req, res }) => publicCatalog(req, res));
+  router.on('GET', '/api/catalog', (ctx) => (ctx.url.searchParams.get('guided') === '1' ? guidedCatalog : publicCatalog)(ctx.req, ctx.res));
+  router.on('GET', '/api/works/metrics', ctx => {
+    if (ctx.user) signedIn(ctx);
+    return workMetrics[String(seesRestricted(ctx.user))](ctx.req, ctx.res, { beforeSend: privateBeforeSend(ctx) });
+  });
   router.on('GET', '/api/session', (ctx) => session(ctx.user));
-  router.on('GET', '/api/activity', (ctx) => activity(ctx.user));
+  router.on('GET', '/api/activity', (ctx) => activity(ctx.user, { includeTrial: ctx.url.searchParams.get('guided') === '1' }));
   router.on('GET', '/api/show1/works', (ctx) => ({
-    works: publicList(library.published('show1'), ctx.user),
+    works: publicList(library.published('show1').filter((work) => !isTrialTask(catalog.task(work.taskId))), ctx.user),
     reactions: library.reactionSummary(ctx.user, 'show1'),
   }));
 
@@ -448,13 +534,21 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     const body = await readJson(ctx.req, 6 * 1024 * 1024);
     requireCategory(body.category);
     if (!Object.hasOwn(body, 'draftId') && !Object.hasOwn(body, 'work') && !Object.hasOwn(body, 'confirmed')) {
-      const question = transaction(db, () => questions.create(user, body, catalog.tags()));
+      const question = transaction(db, () => {
+        const created = questions.create(user, body, catalog.tags());
+        saveQuestionSubcategory(created, body.subcategory, user.id);
+        return created;
+      });
       return { question };
     }
     if (!body.draftId || !body.work || typeof body.work !== 'object' || Array.isArray(body.work)) fail(400, '请附上一份模型结果');
     let question;
     const work = library.submit(user, { ...body.work, draftId: body.draftId, confirmed: body.confirmed }, {
-      createQuestion: () => (question = questions.create(user, body, catalog.tags())),
+      createQuestion: () => {
+        question = questions.create(user, body, catalog.tags());
+        saveQuestionSubcategory(question, body.subcategory, user.id);
+        return question;
+      },
     });
     queueWork(work);
     arena.invalidate();
@@ -860,6 +954,82 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
     if (!work) fail(404, '作品不存在', 'not_found');
     return { url: `${library.previewOrigin(work, admin)}/` };
   });
+  router.on('GET', '/api/pricing', () => usage.pricing());
+  adminOn('GET', '/api/admin/works/:task/:id/usage', ctx => usage.getUsage(staffOnly(ctx), ctx.params.task, ctx.params.id));
+  adminOn('PUT', '/api/admin/works/:task/:id/usage', async ctx => {
+    const actor = staffOnly(ctx); limit.write(actor.id);
+    return usage.saveUsage(actor, ctx.params.task, ctx.params.id, await adminJson(ctx));
+  });
+  adminOn('DELETE', '/api/admin/works/:task/:id/usage', ctx => {
+    const actor = staffOnly(ctx); limit.write(actor.id);
+    return usage.deleteUsage(actor, ctx.params.task, ctx.params.id);
+  });
+  adminOn('GET', '/api/admin/pricing', ctx => usage.adminPricing(adminOnly(ctx)));
+  adminOn('PUT', '/api/admin/pricing/models/:model/:since', async ctx => {
+    const actor = adminOnly(ctx); limit.write(actor.id);
+    return usage.savePrice(actor, ctx.params.model, ctx.params.since, await adminJson(ctx));
+  });
+  adminOn('DELETE', '/api/admin/pricing/models/:model/:since', ctx => {
+    const actor = adminOnly(ctx); limit.write(actor.id);
+    return usage.deletePrice(actor, ctx.params.model, ctx.params.since);
+  });
+  adminOn('PUT', '/api/admin/pricing/meta', async ctx => {
+    const actor = adminOnly(ctx); limit.write(actor.id);
+    return usage.saveMeta(actor, await adminJson(ctx));
+  });
+  adminOn('DELETE', '/api/admin/pricing/meta', ctx => {
+    const actor = adminOnly(ctx); limit.write(actor.id); return usage.deleteMeta(actor);
+  });
+  adminOn('GET', '/api/admin/tasks/:id/aspects', ctx => arena.taskAspects(adminOnly(ctx), ctx.params.id));
+  adminOn('POST', '/api/admin/tasks/:id/aspects', async ctx => {
+    const admin = adminOnly(ctx); limit.write(admin.id);
+    return arena.taskAspects(admin, ctx.params.id, await adminJson(ctx));
+  });
+  adminOn('PUT', '/api/admin/tasks/:id/solve-status', async (ctx) => {
+    const actor = staffOnly(ctx);
+    limit.write(actor.id);
+    const taskId = String(ctx.params.id ?? '').trim();
+    const exists = catalog.withSnapshot(() => questions.all().some((q) => q.id === taskId));
+    if (!exists) fail(404, '未找到这道题目', 'task_not_found');
+    const body = await adminJson(ctx);
+    const status = typeof body?.status === 'string' ? body.status.trim() : '';
+    if (!SOLVE_STATUS_VALUES.has(status)) fail(400, '解决状态无效', 'invalid_solve_status');
+    const updatedAt = new Date().toISOString();
+    transaction(db, () => {
+      db.prepare(`INSERT INTO task_solve_status (task_id, status, updated_by, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(task_id) DO UPDATE SET status = excluded.status, updated_by = excluded.updated_by, updated_at = excluded.updated_at`)
+        .run(taskId, status, actor.id, updatedAt);
+      library.audit(actor, 'solve-status', null, `${taskId} → ${status}`);
+    });
+    return { taskId, solveStatus: status, updatedAt };
+  });
+  adminOn('PUT', '/api/admin/tasks/:id/subcategory', async (ctx) => {
+    const actor = staffOnly(ctx);
+    limit.write(actor.id);
+    const taskId = String(ctx.params.id ?? '').trim();
+    const task = catalog.withSnapshot(() => questions.all().find((q) => q.id === taskId));
+    if (!task) fail(404, '未找到这道题目', 'task_not_found');
+    const body = await adminJson(ctx);
+    const raw = typeof body?.subcategory === 'string' ? body.subcategory.trim() : '';
+    if (raw !== '' && !SUBCATEGORIES_BY_CATEGORY[task.category]?.has(raw)) {
+      fail(400, '细分分类无效', 'invalid_subcategory');
+    }
+    const updatedAt = new Date().toISOString();
+    transaction(db, () => {
+      if (raw === '') {
+        db.prepare('DELETE FROM task_subcategories WHERE task_id = ?').run(taskId);
+      } else {
+        db.prepare(`INSERT INTO task_subcategories (task_id, subcategory, updated_by, updated_at)
+          VALUES (?, ?, ?, ?)
+          ON CONFLICT(task_id) DO UPDATE SET subcategory = excluded.subcategory, updated_by = excluded.updated_by, updated_at = excluded.updated_at`)
+          .run(taskId, raw, actor.id, updatedAt);
+      }
+      library.audit(actor, 'subcategory', null, `${taskId} → ${raw || '未分类'}`);
+    });
+    return { taskId, subcategory: raw, updatedAt };
+  });
+  adminOn('GET', '/api/admin/arena/skip-reasons', ctx => arena.skipReasonStats(adminOnly(ctx)));
   adminOn('GET', '/api/admin/tasks/:id/editorial', (ctx) => {
     const admin = adminOnly(ctx);
     return adminService.getEditorial(ctx.params.id, ctx.url.searchParams.get('face'), admin);
@@ -875,7 +1045,6 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   });
   router.on('POST', '/api/admin/works/upload', async (ctx) => {
     const admin = adminOnly(ctx);
-    limit.write(admin.id);
     const params = ctx.url.searchParams;
     const task = params.get('task') ?? '';
     checkDatapack(ctx, task);
@@ -915,7 +1084,6 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   });
   router.on('POST', '/api/admin/inbox', async (ctx) => {
     const admin = staffOnly(ctx);
-    limit.write(admin.id);
     const params = ctx.url.searchParams;
     const buffer = await readBody(ctx.req, limits.uploadBytes);
     return inbox.upload(admin, params.get('name'), buffer, params.get('overwrite') === '1');
@@ -944,7 +1112,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
 
   router.on('GET', '/api/arena/policy', ctx => voters.policy(voters.actor(ctx)));
   // Guided trial dimension chart (staff only); ?by=config splits models by configuration.
-  router.on('GET', '/api/arena/guided/dimensions', ctx => arena.guidedDimensions(signedIn(ctx), ctx.url.searchParams.get('by') === 'config' ? 'config' : 'model'));
+  router.on('GET', '/api/arena/guided/dimensions', ctx => arena.guidedDimensions(signedIn(ctx), ctx.url.searchParams.get('by') === 'config' ? 'config' : 'model', ctx.url.searchParams.get('category') || null));
   router.on('POST', '/api/arena/matches', async ctx => {
     limit.matches(ctx.user?.id ?? ctx.ip);
     const body = await readJson(ctx.req), actor = voters.actor(ctx);
@@ -956,6 +1124,11 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       db.prepare('UPDATE matches SET draw_ip=?,draw_subnet=? WHERE id=?').run(normalizeIp(ctx.ip),subnetOf(ctx.ip),match.id);
       return { ...match, challenge: voters.challenge(actor) };
     });
+  });
+  router.on('POST', '/api/arena/matches/:id/skip-reason', async ctx => {
+    limit.write(ctx.user?.id ?? ctx.ip);
+    const body = await readJson(ctx.req), actor = voters.actor(ctx);
+    return voters.serial(actor, () => arena.skipReason(ctx.user, ctx.params.id, body.reason, actor.visitorHash));
   });
   router.on('POST', '/api/arena/matches/:id/ready', async ctx => {
     limit.write(ctx.user?.id ?? ctx.ip);
@@ -990,6 +1163,13 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   adminOn('POST','/api/admin/vote-risk/votes/void',async ctx=>{const actor=adminOnly(ctx);limit.write(actor.id);return voteRisk.voidVotes(actor,await adminJson(ctx));});
   adminOn('POST','/api/admin/vote-risk/votes/restore',async ctx=>{const actor=adminOnly(ctx);limit.write(actor.id);return voteRisk.restoreVotes(actor,await adminJson(ctx));});
   router.on('GET', '/api/curated', () => curated.info());
+  router.on('PUT', '/api/admin/curated/questions/:task', async ctx => {
+    const body = await readJson(ctx.req);
+    ctx.user = auth.userFrom(ctx.req);
+    const actor = staffOnly(ctx);
+    limit.write(actor.id);
+    return curated.setQuestion(actor, ctx.params.task, body);
+  });
   adminOn('GET', '/api/admin/curated', ctx => curated.adminInfo(adminOnly(ctx)));
   adminOn('POST', '/api/admin/curated/sections', async ctx => curated.createSection(adminOnly(ctx), await adminJson(ctx)));
   adminOn('PATCH', '/api/admin/curated/sections/:id', async ctx => curated.editSection(adminOnly(ctx), ctx.params.id, await adminJson(ctx)));
@@ -1015,13 +1195,13 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
   adminOn('POST', '/api/admin/qualification/pairs', async ctx => qualification.savePair(adminOnly(ctx), await adminJson(ctx)));
   adminOn('PATCH', '/api/admin/qualification/pairs/:id', async ctx => qualification.savePair(adminOnly(ctx), await adminJson(ctx), ctx.params.id));
   adminOn('DELETE', '/api/admin/qualification/pairs/:id', async ctx => qualification.deletePair(adminOnly(ctx), ctx.params.id, await adminJson(ctx)));
-  router.on('GET', '/api/leaderboard', (ctx) => {
+  const readLeaderboard = (ctx, weightedTrial = false, scoring = limits.board.scoring) => {
     const board = ctx.url.searchParams.get('board') || null;
     const audience = ctx.url.searchParams.get('audience') || null, sectionId = ctx.url.searchParams.get('sectionId') || null;
     const task = ctx.url.searchParams.get('task') || null;
     if (task && !catalog.task(task)) fail(404, '题目不存在');
     const category = ctx.url.searchParams.get('category') || null;
-    if (category && (task || (!AI_JUDGED.has(category) && !catalog.tasks().some((t) => t.category === category)))) fail(400, '题型筛选无效', 'invalid_query');
+    if (category && (task || (!AI_JUDGED.has(category) && !TRIAL_CATEGORIES.has(category) && !catalog.tasks().some((t) => t.category === category)))) fail(400, '题型筛选无效', 'invalid_query');
     const domain = ctx.url.searchParams.get('domain') || null;
     if (domain && (task || !catalog.tasks().some((t) => t.domains?.includes(domain)))) fail(400, '领域筛选无效', 'invalid_query');
     const filters = Object.fromEntries(['harness', 'provider'].map((field) => {
@@ -1030,8 +1210,15 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       return [field, value];
     }));
     // Senior admins read a separately cached board that also counts restricted works; sendJson keeps it no-store.
-    return arena.leaderboardSnapshot({ task, category, domain, board, audience, sectionId, by: ctx.url.searchParams.get('by') === 'model' ? 'model' : 'config', ...filters,
+    return arena.leaderboardSnapshot({ task, category, domain, board, audience, sectionId, weightedTrial, scoring, by: ctx.url.searchParams.get('by') === 'model' ? 'model' : 'config', ...filters,
       ...(seesRestricted(ctx.user) ? { senior: true } : {}) });
+  };
+  router.on('GET', '/api/leaderboard', ctx => readLeaderboard(ctx));
+  router.on('GET', '/api/leaderboard/weighted-trial', ctx => readLeaderboard(ctx, true, 2));
+  router.on('GET', '/api/leaderboard/next', ctx => readLeaderboard(ctx, false, 3));
+  router.on('GET', '/api/leaderboard/previous', ctx => {
+    if (limits.board.scoring < 3) fail(404, '旧版榜单尚未开放');
+    return readLeaderboard(ctx, false, 2);
   });
 
   registerShow1Compat(router, { db, catalog, library, snapshot: show1Snapshot, config, limit });
@@ -1176,7 +1363,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         if (isTrustedOrigin(req, config)) {
           res.setHeader('Access-Control-Allow-Origin', req.headers.origin);
           res.setHeader('Access-Control-Allow-Credentials', 'true');
-          res.setHeader('Access-Control-Expose-Headers', ['/api/catalog', '/api/bootstrap'].includes(url.pathname) ? 'X-Datapack-Stale, ETag, Server-Timing' : 'X-Datapack-Stale');
+          res.setHeader('Access-Control-Expose-Headers', ['/api/catalog', '/api/bootstrap', '/api/works/metrics'].includes(url.pathname) ? 'X-Datapack-Stale, ETag, Server-Timing' : 'X-Datapack-Stale');
         }
       }
       const referenceMedia = url.pathname.startsWith('/media/references/') || url.pathname.startsWith('/media/pack-references/');
@@ -1206,6 +1393,9 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
         if (req.method !== 'GET' && req.method !== 'HEAD') fail(405, '不支持这个操作');
         return await serveSite(req, res, url.pathname);
       }
+      if (sub2OIDC && url.pathname.startsWith(SUB2_OIDC_PATH + '/')) {
+        return await sub2OIDC(req, res, url);
+      }
       // Moderation tokens open only the dots whitelist; every other API refuses them.
       if (url.pathname.startsWith('/api/dots/')) return dots.handle(req, res, url);
       // Batch routes accept only a batch-grant. Every other API still rejects Bearer.
@@ -1214,7 +1404,7 @@ export function createPlatform({ config, limits, captureFactory = createCapturer
       }
       if (req.method === 'GET' || req.method === 'HEAD') readGuard.api(req, url.pathname);
       if (['GET', 'HEAD'].includes(req.method)
-        && ['/api/bootstrap', '/api/catalog', '/api/show1/works', '/api/works', '/api/prompts', '/api/votes', '/api/ratings'].includes(url.pathname)
+        && ['/api/bootstrap', '/api/catalog', '/api/works/metrics', '/api/show1/works', '/api/works', '/api/prompts', '/api/votes', '/api/ratings'].includes(url.pathname)
         && ['limit', 'offset', 'page'].some((key) => url.searchParams.has(key))) fail(400, '此接口返回完整目录，不支持分页参数', 'unsupported_pagination');
       const route = router.match(req.method, url.pathname);
       if (!route) fail(404, '接口不存在');

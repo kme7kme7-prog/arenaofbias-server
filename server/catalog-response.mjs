@@ -18,6 +18,18 @@ export function createCatalogRevision(db) {
   return () => `${revision.get().revision}|${external.get().data_version}`;
 }
 
+// Display-only measurements never invalidate arena's fits or published score snapshots.
+// External writes still reach both readers through catalogRevision's data_version.
+export function createMetricsRevision(db) {
+  db.exec('CREATE TEMP TABLE metrics_revision (revision INTEGER NOT NULL); INSERT INTO metrics_revision VALUES (0);');
+  for (const table of ['work_usage', 'work_artifacts', 'model_prices', 'pricing_meta']) {
+    for (const event of ['INSERT', 'UPDATE', 'DELETE']) db.exec(`CREATE TEMP TRIGGER metrics_${table}_${event.toLowerCase()}
+      AFTER ${event} ON main.${table} BEGIN UPDATE metrics_revision SET revision = revision + 1; END;`);
+  }
+  const read = db.prepare('SELECT revision FROM metrics_revision');
+  return () => String(read.get().revision);
+}
+
 // Writes that change the public activity block (votes, reactions, featured picks).
 // A separate counter, so a vote does not throw away the catalog's work DTOs.
 export function createActivityRevision(db) {
@@ -29,6 +41,18 @@ export function createActivityRevision(db) {
     }
   }
   const revision = db.prepare('SELECT revision FROM activity_revision');
+  return () => String(revision.get().revision);
+}
+
+export function createSolveStatusRevision(db) {
+  db.exec('CREATE TEMP TABLE solve_status_revision (revision INTEGER NOT NULL); INSERT INTO solve_status_revision VALUES (0);');
+  for (const table of ['task_solve_status', 'task_subcategories']) {
+    for (const event of ['INSERT', 'UPDATE', 'DELETE']) {
+      db.exec(`CREATE TEMP TRIGGER guided_meta_${table}_${event.toLowerCase()} AFTER ${event} ON main.${table}
+        BEGIN UPDATE solve_status_revision SET revision = revision + 1; END;`);
+    }
+  }
+  const revision = db.prepare('SELECT revision FROM solve_status_revision');
   return () => String(revision.get().revision);
 }
 
@@ -72,7 +96,7 @@ export function createSharedJson({ strict, loose = () => '', read, ttl = 30_000,
     }
     return entry.variants.get(encoding);
   };
-  const handler = async (req, res) => {
+  const handler = async (req, res, { beforeSend } = {}) => {
     const started = performance.now();
     for (;;) {
       const { entry, hit } = await current();
@@ -86,6 +110,7 @@ export function createSharedJson({ strict, loose = () => '', read, ttl = 30_000,
       };
       const timing = () => `${label};dur=${(performance.now() - started).toFixed(2)};desc="${hit ? 'hit' : 'miss'}"`;
       if (etagMatches(req.headers['if-none-match'], entry.hash)) {
+        beforeSend?.();
         res.writeHead(304, { ...headers, 'Server-Timing': timing() });
         return res.end();
       }
@@ -98,6 +123,7 @@ export function createSharedJson({ strict, loose = () => '', read, ttl = 30_000,
       // the plain-body fallback when a compressor fails during a withdrawal.
       if (strict() !== entry.strict) continue;
       if (!used) headers.ETag = etagFor(entry.hash, null);
+      beforeSend?.();
       res.writeHead(200, { ...headers, 'Server-Timing': timing(), 'Content-Type': 'application/json; charset=utf-8',
         ...(used ? { 'Content-Encoding': used } : {}), 'Content-Length': body.length });
       return res.end(req.method === 'HEAD' ? undefined : body);

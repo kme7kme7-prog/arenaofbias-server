@@ -18,9 +18,9 @@ export function parseWorkFilename(name) {
   const base = String(name ?? '').normalize('NFKC').trim();
   const braced = /^[「『](.+)[，,](.+)[」』]$/.exec(base);
   // The Show1 convention keeps the extension inside the brackets: 「标题，模型名.html」.
-  const stripExt = (value) => value.trim().replace(/\.(html?|zip)$/i, '');
+  const stripExt = (value) => value.trim().replace(/\.(html?|zip|mp3)$/i, '');
   if (braced) return { title: stripExt(braced[1]).slice(0, 40), model: stripExt(braced[2]).slice(0, 60) };
-  return { title: base.replace(/\.(html?|zip)$/i, '').slice(0, 40), model: '' };
+  return { title: base.replace(/\.(html?|zip|mp3)$/i, '').slice(0, 40), model: '' };
 }
 
 export function createInbox({ library, config, limits }) {
@@ -37,7 +37,7 @@ export function createInbox({ library, config, limits }) {
     const base = String(raw ?? '').normalize('NFKC').split(/[\\/]+/).pop().trim();
     if (!base || base.length > 120 || base.startsWith('.') || /[\0-\x1f]/.test(base)) fail(400, '文件名无效');
     // The Show1 convention 「标题，模型名.html」 keeps the extension inside the brackets.
-    if (!/\.(html?|zip)$/i.test(base) && !/\.(html?|zip)[」』]$/i.test(base)) fail(400, '只支持 .html / .htm / .zip 文件');
+    if (!/\.(html?|zip|mp3)$/i.test(base) && !/\.(html?|zip|mp3)[」』]$/i.test(base)) fail(400, '只支持 .html / .htm / .zip / .mp3 文件');
     return base;
   };
   const destroy = (id) => {
@@ -57,7 +57,10 @@ export function createInbox({ library, config, limits }) {
       const found = resolveInside(dir, `/${target}`);
       if (!found || !statSync(found.file, { throwIfNoEntry: false })?.isFile()) return null;
       // The stored upload has no telling extension; the browser needs a renderable type.
-      if (rest.length === 1 && rest[0] === 'file') found.type = readEntry(id).kind === 'zip' ? 'application/zip' : 'text/html; charset=utf-8';
+      if (rest.length === 1 && rest[0] === 'file') {
+        const kind = readEntry(id).kind;
+        found.type = kind === 'zip' ? 'application/zip' : kind === 'audio' ? 'audio/mpeg' : 'text/html; charset=utf-8';
+      }
       return found;
     },
 
@@ -66,7 +69,7 @@ export function createInbox({ library, config, limits }) {
         const id = file.slice(0, -5);
         const meta = readEntry(id);
         if (!meta) return null;
-        const preview = meta.kind === 'zip' && meta.entry
+        const preview = (meta.kind === 'zip' || meta.kind === 'audio') && meta.entry
           ? `/admin/inbox/${id}/${meta.entry.split('/').map(encodeURIComponent).join('/')}`
           : `/admin/inbox/${id}/file`;
         return { id, name: meta.name, kind: meta.kind, size: statSync(join(dir, `${id}.bin`)).size, addedAt: meta.addedAt, suggest: parseWorkFilename(meta.name), preview };
@@ -80,11 +83,12 @@ export function createInbox({ library, config, limits }) {
       const existing = idOf(name);
       if (existing && !overwrite) fail(409, '收件箱里已有同名文件，可以在表单里选择覆盖', 'inbox_conflict');
       // Inspect before storing: a file that could never register is rejected on sight.
-      const inspected = inspectUpload(buffer, name, { limits, cdn: config.cdn, template: null });
+      const isAudio = /\.mp3(?:[」』])?$/i.test(name);
+      const inspected = inspectUpload(buffer, name.replace(/[」』]$/, ''), { limits, cdn: config.cdn, template: isAudio ? 'audio' : null });
       const id = existing ?? randomBytes(8).toString('hex');
       destroy(id);
       writeFileSync(join(dir, `${id}.bin`), buffer);
-      if (inspected.kind === 'zip') {
+      if (inspected.kind === 'zip' || inspected.kind === 'audio') {
         const target = join(dir, `${id}.d`);
         mkdirSync(target, { recursive: true });
         try {

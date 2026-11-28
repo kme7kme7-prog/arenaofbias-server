@@ -58,7 +58,7 @@ export function createContentHandler({ config, library, arena, qualification, ca
   const policy = [
     'sandbox allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-pointer-lock allow-downloads',
     "default-src 'self' data: blob:",
-    `script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: ${cdn}`,
+    `script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: data: ${cdn}`,
     `style-src 'self' 'unsafe-inline' ${cdn}`,
     `img-src 'self' data: blob: ${cdn}`,
     `font-src 'self' data: ${cdn}`,

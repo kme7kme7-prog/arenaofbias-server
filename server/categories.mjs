@@ -1,8 +1,10 @@
 // Categories decide the formats a question can accept.
 import { fail } from './http.mjs';
 
-export const CATEGORIES = ['文学', '推理', '静态网页', '建模'];
+export const CATEGORIES = ['文学', '推理', '静态网页', '建模', '音乐'];
 export const TEXT_CATEGORIES = new Set(['文学', '推理']);
+export const AUDIO_CATEGORIES = new Set(['音乐']);
+export const TRIAL_CATEGORIES = new Set(['音乐']);
 export const AI_JUDGED = new Set(['推理']);
 export const isAiJudgedTask = (task) => AI_JUDGED.has(task?.category);
 // Domains say what a question is about. They scope browsing and the leaderboard, never formats.
@@ -13,13 +15,22 @@ export const DOMAIN_GROUPS = [
   { title: '生活与娱乐', domains: ['游戏娱乐', '生活服务', '餐饮美食', '旅游出行', '运动体育'] },
 ];
 export const DOMAINS = DOMAIN_GROUPS.flatMap((group) => group.domains);
+export const GUIDED_DOMAIN_GROUPS = [
+  ...DOMAIN_GROUPS,
+  { title: '其他', domains: ['其他'] },
+];
+export const GUIDED_DOMAINS = GUIDED_DOMAIN_GROUPS.flatMap((group) => group.domains);
 export const MAX_DOMAINS = 2;
-export const defaultTemplates = (category) => TEXT_CATEGORIES.has(category) ? ['text'] : ['static', 'vite'];
+export const isTrialCategory = (category) => TRIAL_CATEGORIES.has(category);
+export const isTrialTask = (task) => isTrialCategory(task?.category);
+export const defaultTemplates = (category) => TEXT_CATEGORIES.has(category) ? ['text'] : AUDIO_CATEGORIES.has(category) ? ['audio'] : ['static', 'vite'];
 export const templatesOf = (task) => task.templates?.length ? task.templates : defaultTemplates(task.category);
 // Community text questions have templates but no kind field.
 export const isTextTask = (task) => Boolean(task && (task.kind === 'text' || templatesOf(task).every((type) => type === 'text')));
+export const isAudioTask = (task) => Boolean(task && (AUDIO_CATEGORIES.has(task.category) || templatesOf(task).every((type) => type === 'audio')));
 export const compatibleTemplates = (category, templates) => Array.isArray(templates) && templates.length > 0
   && (TEXT_CATEGORIES.has(category) ? templates.length === 1 && templates[0] === 'text'
+    : AUDIO_CATEGORIES.has(category) ? templates.length === 1 && templates[0] === 'audio'
     : templates.every((type) => ['static', 'vite'].includes(type)));
 
 export function requireCategory(category) {
@@ -31,6 +42,6 @@ export function requireCategory(category) {
 export function requireDomains(domains) {
   const unique = Array.isArray(domains) ? [...new Set(domains)] : [];
   if (!unique.length) fail(400, '请选择所属领域');
-  if (unique.length > MAX_DOMAINS || unique.some((domain) => !DOMAINS.includes(domain))) fail(400, `所属领域为 1–${MAX_DOMAINS} 个，且须在列表内`);
+  if (unique.length > MAX_DOMAINS || unique.some((domain) => !GUIDED_DOMAINS.includes(domain))) fail(400, `所属领域为 1–${MAX_DOMAINS} 个，且须在列表内`);
   return unique;
 }

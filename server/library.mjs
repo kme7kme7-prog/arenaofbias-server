@@ -1,6 +1,7 @@
 // Every work the platform knows: data package files plus submitted uploads.
 // Uploads move through unverified → verified | questioned; drafts hold a staged upload
 // until its author has watched the trial load and submits it.
+import { createWorkMetrics } from './work-usage.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
@@ -12,6 +13,7 @@ import { authorOf, isStaff, isSenior, roleOf } from './roles.mjs';
 import { fail } from './http.mjs';
 import { inspectUpload } from './inspect.mjs';
 import { isTextTask, templatesOf } from './categories.mjs';
+import { isArenaOnlyQuestion } from './questions.mjs';
 import { GENERATION_FIELDS, IGNORED_GENERATION_FIELDS, generationFrom, generationOf, generationAudit, generationAuditView } from './generation.mjs';
 import { readWorkPreview } from './work-previews.mjs';
 import { mirrorPublicMedia, purgeWorkMedia, remirrorWorkMedia } from './cos-dual-write.mjs';
@@ -65,6 +67,7 @@ function writeTree(target, files) {
 }
 
 export function createLibrary({ db, catalog, config, limits, legacyRounds = new Set(), moderationRoute = () => 'machine', restricted = createRestricted(db), maintenance = true }) {
+  const workMetrics = createWorkMetrics(db, config.usage);
   const isRestricted = (work) => restricted.isRestrictedWork(work);
   const hidden = (work, viewer) => restricted.hiddenFrom(work, viewer);
   const contentAllowedEffective = (work) => Boolean(work && !work.curatedAs && catalog.task(work.taskId) &&
@@ -379,7 +382,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     byKey: db.prepare('SELECT task_id, work_id FROM curated_content_keys WHERE content_key = ?'),
     add: db.prepare('INSERT OR IGNORE INTO curated_content_keys (task_id, work_id, content_key) VALUES (?, ?, ?)'),
   };
-  const visibleEffective = (work, site) => Boolean(work && !inInbox(work) && publicContentEffective(work) &&
+  const visibleEffective = (work, site) => Boolean(work && !isArenaOnlyQuestion(catalog.task(work.taskId)) && !inInbox(work) && publicContentEffective(work) &&
     (site === 'show1' ? work.showArena : work.showGallery));
   const visibleTo = (work, site = 'show2') => visibleEffective(withDisplay(work), site);
   // Text tasks keep their earlier rules; other works must be single-turn without human intervention.
@@ -466,13 +469,14 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
   }
 
   function identity(body, actor = null) {
+    const currentModel = (model) => model?.replacedBy ? catalog.model(model.replacedBy) : model;
     const modelId = body.modelId ? String(body.modelId) : null;
     if (modelId) {
-      const model = catalog.model(modelId);
+      const model = currentModel(catalog.model(modelId));
       if (!model) fail(400, '所选模型不存在');
       // A later data package could register a restricted code; that model stays unusable here.
       if (restricted.claims(model.id) || restricted.claims(model.name)) fail(400, '模型名称无效', 'invalid_model');
-      return { modelId, modelName: model.name, vendor: model.vendor };
+      return { modelId: model.id, modelName: model.name, vendor: model.vendor };
     }
     const modelName = clip(body.modelName, 60);
     if (!modelName) fail(400, '请填写模型名称');
@@ -484,7 +488,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       return { modelId: null, modelName: restricted.displayName(claimed), vendor: '' };
     }
     // A typed name that is a registered name or alias ranks with that model.
-    const named = catalog.modelNamed(modelName);
+    const named = currentModel(catalog.modelNamed(modelName));
     if (named) return { modelId: named.id, modelName: named.name, vendor: named.vendor };
     return { modelId: null, modelName, vendor: clip(body.vendor, 40) };
   }
@@ -550,13 +554,15 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
   }
 
   // Tasks with several prompt versions need each upload to name the one it answers.
-  const promptVariantFrom = (taskId, body, current = '', required = false) => {
-    const variants = catalog.task(taskId)?.promptVariants ?? [];
-    const value = Object.hasOwn(body, 'promptVariant') ? String(body.promptVariant ?? '') : current;
+  const pickVariant = (variants, value, required) => {
     if (!variants.length) return '';
     if (value && !variants.some((variant) => variant.id === value)) fail(400, '提示词版本无效', 'invalid_prompt_variant');
     if (!value && required) fail(400, '请选择生成时使用的提示词版本', 'invalid_prompt_variant');
     return value;
+  };
+  const promptVariantFrom = (taskId, body, current = '', required = false) => {
+    const value = Object.hasOwn(body, 'promptVariant') ? String(body.promptVariant ?? '') : current;
+    return pickVariant(catalog.task(taskId)?.promptVariants ?? [], value, required);
   };
   const publicProvenance = (work) => ({
     ...generationOf(work),
@@ -694,6 +700,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
     },
     // Package works plus verified uploads: the pool blind comparisons draw from.
     eligible(taskId, snapshot = null, viewer = null) {
+      if (isArenaOnlyQuestion(catalog.task(taskId))) return [];
       const archive = snapshot ?? catalog.snapshot();
       return catalog.withSnapshot(() => [...archive.works(taskId).map((work) => withDisplay(work)),
         ...q.worksOfTask.all(taskId).map((row) => fromRow(row, archive))].filter((work) => eligibleEffective(work) && !hidden(work, viewer)));
@@ -770,6 +777,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
         ...(!work.curated && viewer && (viewer.id === work.ownerId || isStaff(viewer)) ? { arena: arenaState(work) } : {}) };
     },
 
+    metricsSnapshot: () => workMetrics.snapshot(),
     toPublic(work, viewer, { admin = false, preview = true } = {}) {
       work = withDisplay(work);
       if (!work) return null;
@@ -944,13 +952,15 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
 
     // ---- drafts: stage → trial load → submit --------------------------------------------
     createDraft(user, taskId, filename, buffer, template = null) {
-      const task = taskId === '__new__' ? { acceptsUploads: true, templates: ['static', 'vite', 'text'] } : catalog.task(taskId, user);
+      const task = taskId === '__new__' ? { acceptsUploads: true, templates: ['static', 'vite', 'text', 'audio'] } : catalog.task(taskId, user);
       if (!task) fail(404, '题目不存在');
       if (!task.acceptsUploads) fail(409, '这道题暂不接受上传');
       purgeDrafts();
       const allowed = templatesOf(task);
       if (template && !allowed.includes(template)) fail(400, '该题不支持此提交格式');
-      const selected = template ?? (allowed.length === 1 ? allowed[0] : /\.(txt|md|markdown)$/i.test(filename) && allowed.includes('text') ? 'text' : null);
+      const selected = template ?? (allowed.length === 1 ? allowed[0]
+        : /\.mp3$/i.test(filename) && allowed.includes('audio') ? 'audio'
+        : /\.(txt|md|markdown)$/i.test(filename) && allowed.includes('text') ? 'text' : null);
       const inspected = inspectUpload(buffer, filename, { limits, cdn: config.cdn, template: selected });
       const format = selected ?? (inspected.files.has('package.json') && inspected.root ? 'vite' : 'static');
       if (!allowed.includes(format)) fail(400, '该题不支持此提交格式');
@@ -1010,7 +1020,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
       const effort = effortOf(body.effort);
       if (!effort) fail(400, '请选择或填写推理档位');
       if (!source.providerId) fail(400, '请选择服务商');
-      const promptVariant = promptVariantFrom(draft.task_id, body, '', !isStaff(user));
+      let promptVariant = promptVariantFrom(draft.task_id, body, '', !isStaff(user));
       if (!isStaff(user) && !source.harnessId && !source.harnessOther) fail(400, '请选择或填写 Harness');
       const who = identity(body, user);
       if (!createQuestion && !who.modelId && restricted.claims(who.modelName) && !grayHome(draft.task_id)) fail(409, GRAY_HOME);
@@ -1048,6 +1058,10 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
             const question = createQuestion();
             if (!question.templates.includes(format)) fail(400, '该题不支持此提交格式');
             taskId = question.id;
+            // The pre-flight pass saw no task yet ('__new__'); resolve the version
+            // against the question just created so its sample names one too.
+            if (question.promptVariants?.length) promptVariant = pickVariant(question.promptVariants,
+              Object.hasOwn(body, 'promptVariant') ? String(body.promptVariant ?? '') : '', !isStaff(user));
           } else if (!templatesOf(catalog.task(taskId, user)).includes(format)) fail(400, '该题不支持此提交格式');
           q.insertWork.run(id, taskId, user.id, title, clip(body.summary, 200), who.modelId, who.modelId ? '' : who.modelName,
             who.modelId ? '' : who.vendor, effort, source.harnessId, source.harnessOther, source.providerId,
@@ -1240,6 +1254,7 @@ export function createLibrary({ db, catalog, config, limits, legacyRounds = new 
         }
         if (moved) {
           q.moveWorkTask.run(moved.to, Date.now(), id);
+          for (const table of ['work_usage', 'work_artifacts']) db.prepare(`UPDATE ${table} SET task_id=? WHERE task_id=? AND work_id=?`).run(moved.to, moved.from, id);
           q.moveVotes.run(moved.to, moved.from, id, id);
           q.moveMatches.run(moved.to, moved.from, id, id);
           q.moveComments.run(moved.to, moved.from, id);

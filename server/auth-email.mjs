@@ -33,7 +33,7 @@ export function createEmailAuth(db, auth, { mailer = { ready: mailReady, send: s
 
   async function deliver(email, code, purpose) {
     const refund = emailLimit(digest(email));
-    try { await mailer.send({ to: email, code, purpose }); }
+    try { await mailer.send({ to: email, code, purpose, expiresInMs: codeTtl }); }
     catch (error) { refund(); throw error; }
   }
 

@@ -189,7 +189,7 @@ const state = { user: undefined, data: null, works: null, audit: [], users: null
   system: ['arena', 'common'].includes(store.get('admin-system')) ? store.get('admin-system') : 'gallery', adminWorks: [], workTotal: 0,
   workCache: new Map(), workKey: '', workLoading: false, trafficLoading: false, requestId: 0,
   sidebarCollapsed: store.get('admin-sidebar-collapsed') === '1',
-  workPage: 1, workTask: '', workStatus: '', workShow: '', workHarness: '', workProvider: '', workSearch: '', traffic: null,
+  workPage: 1, workTask: '', workStatus: '', workShow: '', workHarness: '', workProvider: '', workSearch: '', traffic: null, skipReasons: null, pricing: null,
   workModel: '', workEffort: '', workAuthor: '', workGenerationMode: '', workHumanIntervention: '', workEfforts: [],
   inbox: null, inboxForms: {}, intake: null, adminQuestions: null, reviewCounts: null, domainGroups: [],
   curated: null, curatedDraft: null, curatedFilter: 'all', curatedSearch: '', curatedType: '', curatedTarget: '', curatedNote: '',
@@ -255,6 +255,7 @@ const TABS = [
   { id: 'works', label: '作品', icon: 'file' },
   { id: 'tasks', label: '题目', icon: 'guide' },
   { id: 'qualification', label: '资格考试', icon: 'check' },
+  { id: 'skip-reasons', label: '跳过原因', icon: 'list' },
   { id: 'vote-risk', label: '投票风控', icon: 'shield' },
   { id: 'changelog', label: '更新日志', icon: 'calendar' },
 ];
@@ -263,9 +264,10 @@ const COMMON_TABS = [
   { id: 'upload', label: '上传入口', icon: 'inbox' },
   { id: 'users', label: '用户', icon: 'users' },
   { id: 'traffic', label: '流量', icon: 'clock' },
+  { id: 'pricing', label: '价格表', icon: 'list' },
 ];
 const ARENA_NAV = [
-  ['内容管理', [['works', '作品管理', 'file', '#/works'], ['intake', '收件箱 · 娱乐作品', 'inbox', '#/intake'], ['tasks', '题目管理', 'guide', '#/tasks'], ['qualification', '资格考试', 'check', '#/qualification'], ['vote-risk', '投票风控', 'shield', '#/vote-risk'], ['gallery-review', '审核', 'shield', 'https://gallery.arenaofbias.icu/#/review']]],
+  ['内容管理', [['works', '作品管理', 'file', '#/works'], ['intake', '收件箱 · 娱乐作品', 'inbox', '#/intake'], ['tasks', '题目管理', 'guide', '#/tasks'], ['qualification', '资格考试', 'check', '#/qualification'], ['vote-risk', '投票风控', 'shield', '#/vote-risk'], ['skip-reasons', '跳过原因', 'list', '#/skip-reasons'], ['gallery-review', '审核', 'shield', 'https://gallery.arenaofbias.icu/#/review']]],
   ['玩法', [['guess', '模一把', 'game', '#/guess'], ['activity', '活动管理', 'calendar', '#/activity']]],
 ];
 const SUBMIT_URL = 'https://gallery.arenaofbias.icu/#/submit';
@@ -478,7 +480,7 @@ function syncQuestionDomains(form) {
   $$('[name="domains"]', form).forEach((input) => { input.disabled = count >= MAX_DOMAINS && !input.checked; });
   $('[data-domain-count]', form).textContent = `已选 ${count} / ${MAX_DOMAINS}`;
 }
-const taskCard = (task, { lead = '', mark = '', note = '', cls = '', category = false } = {}) => `<article class="admin-task${cls}">${lead}<div class="admin-task-main"><h3>${esc(task.title)}${mark}</h3><p class="muted">${publisher(task)} · ${esc(QUESTION_STATUS[task.moderation?.status] ?? '')}${category ? ` · ${esc(QUESTION_TYPES[task.category] ?? task.category ?? '')}` : ''} · ${task.works ?? 0} 件作品 · ${task.votes ?? 0} 票</p>${note}</div><div class="actions"><button class="btn" data-question-edit="${esc(task.id)}">编辑与审核</button><button class="btn" data-task-note="${esc(task.id)}">${state.system === 'gallery' ? '编辑策展文案' : '编辑点评与权重'}</button><button class="btn danger" data-question-delete="${esc(task.id)}"${task.votes ? ' disabled title="有票题目不能删除"' : ''}>删除</button></div></article>`;
+const taskCard = (task, { lead = '', mark = '', note = '', cls = '', category = false } = {}) => `<article class="admin-task${cls}">${lead}<div class="admin-task-main"><h3>${esc(task.title)}${mark}</h3><p class="muted">${publisher(task)} · ${esc(QUESTION_STATUS[task.moderation?.status] ?? '')}${category ? ` · ${esc(QUESTION_TYPES[task.category] ?? task.category ?? '')}` : ''} · ${task.works ?? 0} 件作品 · ${task.votes ?? 0} 票</p>${note}</div><div class="actions"><button class="btn" data-question-edit="${esc(task.id)}">编辑与审核</button><button class="btn" data-task-aspects="${esc(task.id)}">测评点</button><button class="btn" data-task-note="${esc(task.id)}">${state.system === 'gallery' ? '编辑策展文案' : '编辑点评与权重'}</button><button class="btn danger" data-question-delete="${esc(task.id)}"${task.votes ? ' disabled title="有票题目不能删除"' : ''}>删除</button></div></article>`;
 function tasksView() {
   const tasks = state.adminQuestions ?? [];
   const curated = curatedOn() && state.curated;
@@ -895,6 +897,46 @@ function intakeView() {
     ${rows ? `<div class="table-wrap"><table class="board"><thead><tr><th></th><th>作品</th><th>原题</th><th>进入时间</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="board-empty">收件箱是空的。</p>'}</section>`;
 }
 
+function pricingView() {
+  const data = state.pricing;
+  const hero = pageHero('官方标价', '价格表', '管理员维护每百万 token 单价。系统不预置或猜测价格；未录入的模型保持未定价。', []);
+  if (!data) return `${hero}<section class="block">${skeleton(4)}</section>`;
+  return `${hero}<section class="block"><div class="actions"><h2>模型价格</h2><button class="btn primary" data-price-new>新增价格条目</button></div><div class="table-wrap"><table style="min-width:640px"><thead><tr><th>模型 / 生效日</th><th>币种</th><th>输入 / 输出</th><th>缓存读 / 写</th><th>依据 / 修改人</th><th>操作</th></tr></thead><tbody>${data.entries.map(row => `<tr><td>${esc((state.data?.models ?? []).find(model => model.id === row.model)?.name ?? row.model)}<small> · ${esc(row.since)}</small></td><td>${esc(row.currency)}</td><td>${row.input} / ${row.output}</td><td>${row.cacheRead ?? '按输入价'} / ${row.cacheWrite ?? '按输入价'}</td><td><a href="${esc(row.url)}" target="_blank" rel="noopener">官方价格页</a><small> · ${esc(row.updatedBy?.name ?? '—')} · ${formatDate(row.updatedAt)}</small></td><td><button class="btn sm" data-price-edit="${esc(JSON.stringify([row.model,row.since]))}">修改</button> <button class="btn sm danger" data-price-delete="${esc(JSON.stringify([row.model,row.since]))}">删除</button></td></tr>`).join('') || '<tr><td colspan="6">尚无价格，所有模型未定价。</td></tr>'}</tbody></table></div></section>
+    <section class="block"><h2>价格表日期与汇率</h2><p class="fine">汇率为 1 单位外币折合 CNY。请据可靠来源录入，并填写汇率日期；留空不猜算。</p><form id="pricing-meta" class="admin-editor"><label class="field"><span>价格表日期</span><input class="input" type="date" name="asOf" value="${esc(data.asOf)}"></label><label class="field"><span>汇率日期</span><input class="input" type="date" name="fxAsOf" value="${esc(data.fxAsOf)}"></label><label class="field"><span>汇率 JSON（币种代码 → 人民币）</span><textarea class="input" name="fx" rows="4">${esc(JSON.stringify(data.fx,null,2))}</textarea></label><p class="form-error" role="alert"></p><div class="actions"><button class="btn primary" type="submit">保存日期与汇率</button><button class="btn danger" type="button" data-pricing-meta-delete>清空日期与汇率</button></div></form></section>`;
+}
+
+function priceDialog(row = null) {
+  const models = state.data?.models ?? [];
+  const sheet = openDialog({ title: row ? '修改官方标价' : '新增官方标价', body: `<form class="admin-editor" id="price-entry">
+    <p class="fine">每百万 token，按官方价格页原币登记。缓存价留空表示按输入价计算；长上下文分档未计。</p>
+    <label class="field"><span>模型</span><select class="input" name="model"${row ? ' disabled' : ''}>${models.map(model => `<option value="${esc(model.id)}"${row?.model === model.id ? ' selected' : ''}>${esc(model.name ?? model.id)}</option>`).join('')}</select></label>
+    <label class="field"><span>生效日期</span><input class="input" type="date" name="since" value="${esc(row?.since)}" required${row ? ' disabled' : ''}></label>
+    <label class="field"><span>币种代码</span><input class="input" name="currency" value="${esc(row?.currency)}" pattern="[A-Z]{3}" maxlength="3" required></label>
+    ${[['input','输入'],['output','输出（含推理）'],['cacheRead','缓存读'],['cacheWrite','缓存写']].map(([key,label]) => `<label class="field"><span>${label}</span><input class="input" type="number" min="0" step="any" name="${key}" value="${row?.[key] ?? ''}"${['input','output'].includes(key) ? ' required' : ''}></label>`).join('')}
+    <label class="field"><span>官方价格页 URL</span><input class="input" type="url" name="url" value="${esc(row?.url)}" required></label><p class="form-error" role="alert"></p><button class="btn primary" type="submit">保存价格</button></form>` });
+  const form = $('form', sheet.el);
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    const value = key => form.elements.namedItem(key).value;
+    const body = { currency: value('currency'), url: value('url'), input: Number(value('input')), output: Number(value('output')) };
+    for (const key of ['cacheRead','cacheWrite']) if (value(key) !== '') body[key] = Number(value(key));
+    const done = busy($('button[type="submit"]', form), '正在保存…');
+    try { await api(`admin/pricing/models/${encodeURIComponent(value('model'))}/${encodeURIComponent(value('since'))}`, {method:'PUT',body}); sheet.close(); await reload(); }
+    catch (error) { $('.form-error',form).textContent=error.message; done(); }
+  });
+}
+
+function skipReasonsView() {
+  const data = state.skipReasons;
+  const hero = pageHero('只读统计', '跳过原因', '比例以填写过跳过原因的组为分母，不代表所有展示组；同组两边是同一模型时只计一次。', []);
+  if (!data) return `${hero}<section class="block" aria-busy="true">${skeleton(4)}</section>`;
+  const percent = (value) => `${(value * 100).toFixed(1)}%`;
+  const table = (heads, rows) => `<div class="table-wrap"><table><thead><tr>${heads.map(head => `<th>${head}</th>`).join('')}</tr></thead><tbody>${rows.join('') || `<tr><td colspan="${heads.length}" class="muted">暂无记录</td></tr>`}</tbody></table></div>`;
+  return `${hero}<section class="block"><h2>按模型 · 认出了模型</h2>${table(['模型', '原因样本', '被认出', '比例'], data.models.map(row => `<tr><td>${esc(row.modelName ?? row.key)}</td><td>${row.n}</td><td>${row.recognized}</td><td>${percent(row.recognizedRate)}</td></tr>`))}</section>
+    <section class="block"><h2>按题目 · 不会判断</h2>${table(['题目', '原因样本', '不会判断', '比例'], data.tasks.map(row => `<tr><td>${esc(row.taskTitle ?? row.task)}</td><td>${row.n}</td><td>${row.unsure}</td><td>${percent(row.unsureRate)}</td></tr>`))}</section>
+    <section class="block"><h2>待人工核查</h2><p class="fine">同一作品被报「打不开」至少 3 次。报告未区分故障在哪一边，两侧均列为候选；作品状态保持不变。</p>${table(['题目', '作品', '报告数', '查看'], data.broken.filter(row => row.n >= 3).map(row => `<tr><td>${esc(row.taskTitle ?? row.task)}</td><td>${esc(row.title ?? row.work)}<small class="muted"> · ${esc(row.work)}</small></td><td>${row.n}</td><td><button class="btn sm" data-skip-preview="${esc(JSON.stringify([row.task, row.work]))}">预览作品</button></td></tr>`))}</section>`;
+}
+
 function trafficView() {
   const data = state.traffic;
   if (!data) return `${pageHero('访问概况', '流量', '近 30 日页面浏览和注册概况。', [['用户总数', '—'], ['新增用户', '—']])}<section class="block" aria-busy="true"><h2>每日访问</h2><div class="traffic-skeleton">${skeleton(16, 'bar')}</div><h2>热门路径</h2>${skeleton(5)}</section>`;
@@ -1254,6 +1296,25 @@ function calibrationDialog(w) {
   });
   $('[data-clear-calibration]', sheet.el).addEventListener('click', () => save(null));
   setTimeout(paint);
+}
+
+async function aspectsDialog(taskId) {
+  const sheet = openDialog({ title: `测评点 · ${taskTitle(taskId)}`, body: skeleton(3) });
+  try {
+    const current = await api(`admin/tasks/${encodeURIComponent(taskId)}/aspects`);
+    if (!sheet.el.isConnected) return;
+    $('.sheet-body', sheet.el).innerHTML = `<form class="admin-editor"><p class="fine">勾选启用的测评点，仅影响之后抽取的测试对局。</p>${current.aspects.map(aspect => `<label class="field"><span><input type="checkbox" name="aspect" value="${esc(aspect.id)}"${current.off.includes(aspect.id) ? '' : ' checked'}> ${esc(aspect.dimensionName)} · ${esc(aspect.keyword)}</span></label>`).join('') || '<p>本题暂无测评点。</p>'}<p class="form-error" role="alert"></p><button class="btn primary" type="submit">保存</button></form>`;
+    const form = $('form', sheet.el);
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      const done = busy($('button[type="submit"]', form), '正在保存…');
+      try {
+        const off = $$('input[name="aspect"]', form).filter(input => !input.checked).map(input => input.value);
+        await api(`admin/tasks/${encodeURIComponent(taskId)}/aspects`, { method: 'POST', body: { off } });
+        sheet.close(); toast('测评点已保存');
+      } catch (error) { $('.form-error', form).textContent = error.message; done(); }
+    });
+  } catch (error) { if (sheet.el.isConnected) $('.sheet-body', sheet.el).innerHTML = `<p class="form-error" role="alert">${esc(error.message)}</p>`; }
 }
 
 async function editorialDialog(taskId) {
@@ -2005,6 +2066,8 @@ async function reload({ navigation = false } = {}) {
       state.qualification = await api('admin/qualification');
       await Promise.all([...new Set(state.qualification.pairs.map((pair) => pair.taskId))].map((taskId) => loadExamWorks(taskId).catch(() => [])));
     }
+    else if (route === 'pricing') state.pricing = await api('admin/pricing');
+    else if (route === 'skip-reasons') state.skipReasons = await api('admin/arena/skip-reasons');
     else if (route === 'changelog') state.changelog = (await api('admin/changelog')).entries;
     else if (route === 'vote-risk') { if (navigation || !state.risk.data) loadRisk(); }
     else if (route === 'works') {
@@ -2046,8 +2109,8 @@ function render({ soft = false, world = false } = {}) {
   if (route === 'review') { location.replace(REVIEW_URL); return; }
   if (!routeAllowed(route, sub)) { location.hash = state.system === 'common' ? (isSenior() ? '#/dashboard' : '#/upload') : '#/works'; return; }
   const body = state.system === 'common'
-    ? route === 'upload' ? uploadView() : route === 'users' ? usersView() : route === 'traffic' ? trafficView() : dashboardView()
-    : route === 'works' ? systemWorksView() : route === 'intake' ? intakeView() : route === 'tasks' ? tasksView() : route === 'qualification' ? qualificationView() : route === 'vote-risk' ? voteRiskView() : route === 'changelog' ? changelogView() : placeholderView(route);
+    ? route === 'pricing' ? pricingView() : route === 'upload' ? uploadView() : route === 'users' ? usersView() : route === 'traffic' ? trafficView() : dashboardView()
+    : route === 'works' ? systemWorksView() : route === 'intake' ? intakeView() : route === 'tasks' ? tasksView() : route === 'qualification' ? qualificationView() : route === 'skip-reasons' ? skipReasonsView() : route === 'vote-risk' ? voteRiskView() : route === 'changelog' ? changelogView() : placeholderView(route);
   const content = `${state.error ? `<p class="form-error page-error">${esc(state.error)}</p>` : ''}${body}`;
   const shellKey = `${state.system}/${route}/${sub || ''}`;
   const currentMain = $('main.page', app());
@@ -2210,6 +2273,29 @@ document.addEventListener('click', async (e) => {
   }
   const calibrate = e.target.closest('[data-calibrate]');
   if (calibrate) { const w = state.adminWorks.find((item) => `${item.task}/${item.id}` === calibrate.dataset.calibrate); if (w && canDecide(w)) calibrationDialog(w); return; }
+  if (e.target.closest('[data-price-new]')) { priceDialog(); return; }
+  const priceEdit = e.target.closest('[data-price-edit]');
+  if (priceEdit) { const [model,since]=JSON.parse(priceEdit.dataset.priceEdit); priceDialog(state.pricing.entries.find(row=>row.model===model&&row.since===since)); return; }
+  const priceDelete = e.target.closest('[data-price-delete]');
+  if (priceDelete) {
+    if (!await confirmDialog({title:'删除价格条目',message:'删除后，使用该日期价格的作品花费可能变化。',confirm:'删除',danger:true})) return;
+    const [model,since]=JSON.parse(priceDelete.dataset.priceDelete);
+    try { await api(`admin/pricing/models/${encodeURIComponent(model)}/${encodeURIComponent(since)}`,{method:'DELETE'}); await reload(); } catch(error) {toast(error.message);} return;
+  }
+  if (e.target.closest('[data-pricing-meta-delete]')) {
+    if (!await confirmDialog({title:'清空日期与汇率',message:'保留模型历史价格，但暂停按价格表日期选择当前价及币种折算。',confirm:'清空',danger:true})) return;
+    try { await api('admin/pricing/meta',{method:'DELETE'}); await reload(); } catch(error) {toast(error.message);} return;
+  }
+  const skipPreview = e.target.closest('[data-skip-preview]');
+  if (skipPreview) {
+    const [task, work] = JSON.parse(skipPreview.dataset.skipPreview);
+    const sheet = openDialog({ title: '待人工核查 · 作品预览', body: '<p class="fine">正在载入…</p>' });
+    try {
+      const data = await api(`admin/works/${encodeURIComponent(task)}/${encodeURIComponent(work)}/preview`, { method: 'POST' });
+      if (sheet.el.isConnected) $('.sheet-body', sheet.el).innerHTML = `<iframe src="${esc(data.url)}" title="待核查作品" sandbox="allow-scripts allow-pointer-lock" style="width:100%;height:65vh;border:0"></iframe>`;
+    } catch (error) { if (sheet.el.isConnected) $('.sheet-body', sheet.el).textContent = error.message; }
+    return;
+  }
   const preview = e.target.closest('[data-preview]');
   if (preview) {
     const work = state.adminWorks.find((item) => `${item.task}/${item.id}` === preview.dataset.preview);
@@ -2234,6 +2320,8 @@ document.addEventListener('click', async (e) => {
     try { await api(`questions/${encodeURIComponent(questionDelete.dataset.questionDelete)}`, { method: 'DELETE' }); await reload(); toast('题目已删除'); } catch (error) { toast(error.message); }
     return;
   }
+  const aspects = e.target.closest('[data-task-aspects]');
+  if (aspects) { await aspectsDialog(aspects.dataset.taskAspects); return; }
   const note = e.target.closest('[data-task-note]');
   if (note) { await editorialDialog(note.dataset.taskNote); return; }
   if (e.target.closest('[data-logout]')) {
@@ -2402,6 +2490,12 @@ document.addEventListener('submit', async (e) => {
       await reload();
     } catch (error) { toast(error.message); done(); }
     return;
+  }
+  if (e.target.id === 'pricing-meta') {
+    e.preventDefault(); const form=e.target;
+    const done=busy($('button[type="submit"]',form),'正在保存…');
+    try { await api('admin/pricing/meta',{method:'PUT',body:{asOf:form.elements.namedItem('asOf').value||null,fxAsOf:form.elements.namedItem('fxAsOf').value||null,fx:JSON.parse(form.elements.namedItem('fx').value)}}); await reload(); }
+    catch(error) {$('.form-error',form).textContent=error.message;done();} return;
   }
   if (e.target.id !== 'admin-work-filter') return;
   e.preventDefault();

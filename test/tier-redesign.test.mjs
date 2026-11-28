@@ -327,7 +327,8 @@ test('curated starts at zero, filters level snapshots and history, and sections 
     {taskId:'supernovai',sectionId:'web-design'},{taskId:'other',sectionId:'three-dimensional'}]});
   assert.equal(changed.status,200);
   const metadata=(await f.call('member','GET','/api/curated')).data;
-  assert.deepEqual(metadata.sections.map(s=>s.taskIds),[['supernovai'],['other']]);
+  // The v61 language and music sections stay empty here.
+  assert.deepEqual(metadata.sections.map(s=>s.taskIds),[['supernovai'],['other'],[],[]]);
   const total=await f.arena.leaderboardSnapshot({audience:'curated',by:'model'});
   assert.equal(total.totals.votes,50); assert.equal(total.rows.length,2);
   const scoped=await f.arena.leaderboard({audience:'curated',sectionId:'three-dimensional',by:'model'});

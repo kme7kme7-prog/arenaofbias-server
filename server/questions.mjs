@@ -14,10 +14,34 @@ const tagKey = (value) => tagName(value).toLowerCase();
 const authorModeration = ({ status, reason, at, round, previous }) => ({ status, ...(status === 'rejected' ? { reason } : {}), ...(at ? { at } : {}),
   ...(round > 1 ? { round } : {}), ...(previous ? { previous: { reason: previous.reason, at: previous.at } } : {}) });
 const publicQuestion = (question) => ['legacy', 'approved'].includes(question.moderation.status);
+// A reserved publishing tag keeps entertainment-only threads out of Gallery's catalog and pool.
+export const isArenaOnlyQuestion = (question) => question?.tags?.includes('arena-only') === true;
+function requireMusicPrompt(category, prompt, variants = []) {
+  if (category !== '音乐') return;
+  if (!/mp3/i.test(prompt)) fail(400, '音乐题的完整提示词中须明确要求导出 .mp3 音频文件');
+  for (const variant of variants) {
+    if (!/mp3/i.test(variant.prompt ?? '')) fail(400, `提示词版本「${variant.label || variant.id}」中须明确要求导出 .mp3 音频文件`);
+  }
+}
 function required(value, label, max) {
   if (typeof value !== 'string' || !value.trim()) fail(400, `请填写${label}`);
   if (value.trim().length > max) fail(400, `${label}最多 ${max} 字`);
   return value.trim();
+}
+// Community questions carry the same version list packaged tasks do: id is the
+// durable ballot marker, label and prompt are what uploaders see.
+function promptVariants(input) {
+  if (!Array.isArray(input)) fail(400, '提示词版本格式不正确');
+  if (input.length > 6) fail(400, '提示词版本最多 6 个');
+  const seen = new Set();
+  return input.map((variant) => {
+    if (!variant || typeof variant !== 'object' || Array.isArray(variant)) fail(400, '提示词版本格式不正确');
+    const id = required(variant.id, '提示词版本标识', 24);
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) fail(400, '提示词版本标识只能由小写字母、数字和连字符组成');
+    if (seen.has(id)) fail(400, '提示词版本标识不能重复');
+    seen.add(id);
+    return { id, label: required(variant.label, '提示词版本名称', 24), prompt: required(variant.prompt, '提示词版本内容', 20000) };
+  });
 }
 export function normalizeTags(input = [], existing = [], category = null) {
   if (!Array.isArray(input)) fail(400, '标签格式不正确');
@@ -42,7 +66,7 @@ export function createQuestions(db, { references = null, restricted = null } = {
   const owned = db.prepare(`${select} WHERE questions.owner_id = ? AND questions.deleted_at IS NULL ORDER BY questions.created_at DESC, questions.id`);
   const ownedOne = db.prepare(`${select} WHERE questions.owner_id = ? AND questions.id = ? AND questions.deleted_at IS NULL`);
   const pending = db.prepare(`SELECT COUNT(*) AS n FROM questions WHERE owner_id = ? AND deleted_at IS NULL AND json_extract(moderation, '$.status') = 'pending'`);
-  const insert = db.prepare(`INSERT INTO questions (id, owner_id, title, summary, prompt, tags, templates, created_at, moderation, category, domains, author_role, reference_credit) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const insert = db.prepare(`INSERT INTO questions (id, owner_id, title, summary, prompt, tags, templates, created_at, moderation, category, domains, author_role, reference_credit, prompt_variants) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const audit = db.prepare('INSERT INTO audit (at, actor_id, actor_name, action, task_id, work_id, detail) VALUES (?, ?, ?, ?, ?, ?, ?)');
   const works = db.prepare('SELECT id, owner_id, task_id, model_id, model_other FROM works WHERE task_id = ? AND deleted_at IS NULL AND curated_as IS NULL ORDER BY created_at, id');
   const votes = db.prepare('SELECT COUNT(*) AS n FROM votes WHERE task_id = ?');
@@ -69,6 +93,7 @@ export function createQuestions(db, { references = null, restricted = null } = {
   function fromRow(row) {
     if (!row) return null;
     return { ...row, packaged: false, domains: JSON.parse(row.domains), tags: JSON.parse(row.tags), templates: JSON.parse(row.templates),
+      promptVariants: JSON.parse(row.prompt_variants ?? '[]'),
       moderation: JSON.parse(row.moderation), acceptsUploads: Boolean(row.accepts_uploads), cover: row.cover_work,
       references: references?.forQuestion(row.id) ?? [], referenceCredit: row.reference_credit,
       createdAt: new Date(row.created_at).toISOString(), date: new Date(row.created_at).toISOString().slice(0, 10) };
@@ -90,6 +115,7 @@ export function createQuestions(db, { references = null, restricted = null } = {
   const allQuestions = () => [...(catalog?.snapshot().tasks() ?? []).map(fromPack).filter(Boolean), ...all.all().map(fromRow)];
   function dto(question, viewer = null, moderationView = false, adminView = false) {
     return { id: question.id, title: question.title, summary: question.summary, prompt: question.prompt,
+      promptVariants: question.promptVariants ?? [],
       category: question.category, domains: question.domains, tags: question.tags, templates: question.templates,
       references: question.references, referenceCredit: question.referenceCredit,
       version: question.version, date: question.date, createdAt: question.createdAt,
@@ -128,7 +154,7 @@ export function createQuestions(db, { references = null, restricted = null } = {
     return [];
   }
   function meta(question, body, actor = null) {
-    const fields = ['title', 'summary', 'prompt', 'category', 'domains', 'templates', 'acceptsUploads', 'cover', 'references', 'referenceCredit'];
+    const fields = ['title', 'summary', 'prompt', 'category', 'domains', 'templates', 'acceptsUploads', 'cover', 'references', 'referenceCredit', 'promptVariants'];
     if (!body || typeof body !== 'object' || Array.isArray(body) || !fields.some((field) => Object.hasOwn(body, field))) fail(400, '请提供要修改的题目信息');
     const title = Object.hasOwn(body, 'title') ? required(body.title, '题目标题', 70) : question.title;
     const summary = Object.hasOwn(body, 'summary') ? required(body.summary, '测试简述', 400) : question.summary;
@@ -151,8 +177,15 @@ export function createQuestions(db, { references = null, restricted = null } = {
       if (!compatibleTemplates(category, body.templates)) fail(400, '提交格式与题目分类不匹配');
       templates = [...new Set(body.templates)];
     } else if (category !== question.category && !compatibleTemplates(category, templates)) templates = defaultTemplates(category);
+    let variants = question.promptVariants;
+    if (Object.hasOwn(body, 'promptVariants')) {
+      if (question.packaged) fail(400, '数据包题目请在数据仓库维护提示词版本');
+      variants = promptVariants(body.promptVariants);
+    }
+    requireMusicPrompt(category, prompt, variants);
     const items = itemsFor(question.id);
     if (prompt !== question.prompt && publicQuestion(question) && items.length) fail(409, '已有作品的题目不能修改提示词');
+    if (JSON.stringify(variants) !== JSON.stringify(question.promptVariants) && publicQuestion(question) && items.length) fail(409, '已有作品的题目不能修改提示词版本');
     if ((JSON.stringify(refs) !== JSON.stringify(question.references) || credit !== question.referenceCredit) && publicQuestion(question) && items.length)
       fail(409, '已有作品的题目不能修改参考图或署名');
     if (JSON.stringify(templates) !== JSON.stringify(question.templates) && items.length) fail(409, '已有作品的题目不能修改提交格式');
@@ -161,7 +194,7 @@ export function createQuestions(db, { references = null, restricted = null } = {
     const cover = Object.hasOwn(body, 'cover') ? body.cover : question.cover;
     if (Object.hasOwn(body, 'cover') && cover !== null && (typeof cover !== 'string' || !items.some((work) => work.id === cover && !restricted?.isRestrictedWork(work)))) fail(400, '封面必须是本题现有作品');
     const tags = category !== question.category ? question.tags.filter((tag) => tagKey(tag) !== tagKey(category)) : question.tags;
-    return { title, summary, prompt, category, domains, templates, tags, acceptsUploads, cover, references: refs, referenceCredit: credit };
+    return { title, summary, prompt, promptVariants: variants, category, domains, templates, tags, acceptsUploads, cover, references: refs, referenceCredit: credit };
   }
   // COS keeps reference images of public questions only. Called after the change commits,
   // with the question before and after it (after is null once deleted).
@@ -189,8 +222,8 @@ export function createQuestions(db, { references = null, restricted = null } = {
       accepts_uploads: Number(next.acceptsUploads), cover_work: next.cover,
     });
     else {
-      db.prepare('UPDATE questions SET title = ?, summary = ?, prompt = ?, category = ?, domains = ?, templates = ?, tags = ?, accepts_uploads = ?, cover_work = ?, reference_credit = ? WHERE id = ?')
-        .run(next.title, next.summary, next.prompt, next.category, JSON.stringify(next.domains), JSON.stringify(next.templates), JSON.stringify(next.tags), Number(next.acceptsUploads), next.cover, next.referenceCredit, question.id);
+      db.prepare('UPDATE questions SET title = ?, summary = ?, prompt = ?, category = ?, domains = ?, templates = ?, tags = ?, accepts_uploads = ?, cover_work = ?, reference_credit = ?, prompt_variants = ? WHERE id = ?')
+        .run(next.title, next.summary, next.prompt, next.category, JSON.stringify(next.domains), JSON.stringify(next.templates), JSON.stringify(next.tags), Number(next.acceptsUploads), next.cover, next.referenceCredit, JSON.stringify(next.promptVariants), question.id);
       references?.save(question.id, next.references);
     }
   }
@@ -241,13 +274,15 @@ export function createQuestions(db, { references = null, restricted = null } = {
       const category = requireCategory(body.category);
       const domains = body.domains === undefined ? [] : requireDomains(body.domains);
       const title = required(body.title, '题目标题', 70), summary = required(body.summary, '测试简述', 400), prompt = required(body.prompt, '完整提示词', 20000);
+      const variants = body.promptVariants === undefined ? [] : promptVariants(body.promptVariants);
       const tags = normalizeTags(body.tags, existingTags, category);
       const credit = referenceCredit(body.referenceCredit), refs = prepareReferences(user, body.references);
+      requireMusicPrompt(category, prompt, variants);
       if (!compatibleTemplates(category, body.templates)) fail(400, '提交格式与题目分类不匹配');
       if (!isStaff(user) && pending.get(user.id).n >= 3) fail(429, '你已有 3 道题目在等待审核');
       const id = `q-${randomBytes(8).toString('hex')}`, now = Date.now();
       insert.run(id, user.id, title, summary, prompt, JSON.stringify(tags), JSON.stringify([...new Set(body.templates)]), now,
-        JSON.stringify({ status: 'pending', at: now }), category, JSON.stringify(domains), roleOf(user.role), credit);
+        JSON.stringify({ status: 'pending', at: now }), category, JSON.stringify(domains), roleOf(user.role), credit, JSON.stringify(variants));
       references?.save(id, refs);
       audit.run(now, user.id, user.name, 'question-create', id, null, title);
       return dto(fromRow(one.get(id)), user, true);
@@ -261,7 +296,7 @@ export function createQuestions(db, { references = null, restricted = null } = {
       const question = lookup(id);
       if (!question) fail(404, '题目不存在');
       const next = meta(question, body, actor), detail = {};
-      for (const field of ['title', 'summary', 'category', 'domains', 'templates', 'tags', 'acceptsUploads', 'cover', 'references', 'referenceCredit']) {
+      for (const field of ['title', 'summary', 'category', 'domains', 'templates', 'tags', 'acceptsUploads', 'cover', 'references', 'referenceCredit', 'promptVariants']) {
         if (JSON.stringify(question[field]) !== JSON.stringify(next[field])) detail[field] = { from: question[field], to: next[field] };
       }
       if (next.prompt !== question.prompt) detail.prompt = { changed: '已修改', fromLength: question.prompt.length, toLength: next.prompt.length };
@@ -304,7 +339,7 @@ export function createQuestions(db, { references = null, restricted = null } = {
       if (!body || typeof body !== 'object' || Array.isArray(body)) fail(400, '请提供要修改的题目信息');
       const { removeSamples = false, ...fields } = body;
       if (typeof removeSamples !== 'boolean') fail(400, '示例结果选项无效');
-      if (Object.keys(fields).some((field) => !['title', 'summary', 'prompt', 'category', 'domains', 'templates', 'references', 'referenceCredit'].includes(field))) fail(400, '题目信息格式不正确');
+      if (Object.keys(fields).some((field) => !['title', 'summary', 'prompt', 'category', 'domains', 'templates', 'references', 'referenceCredit', 'promptVariants'].includes(field))) fail(400, '题目信息格式不正确');
       if (!isStaff(user) && pending.get(user.id).n >= 3) fail(429, '你已有 3 道题目在等待审核');
       const now = Date.now();
       const removedSamples = transaction(db, () => {
@@ -314,7 +349,7 @@ export function createQuestions(db, { references = null, restricted = null } = {
           audit.run(now, user.id, user.name, 'delete', id, work.id, '重新提交题目时移除');
         }
         const next = meta(question, fields, user), detail = {};
-        for (const field of ['title', 'summary', 'category', 'domains', 'templates', 'references', 'referenceCredit']) {
+        for (const field of ['title', 'summary', 'category', 'domains', 'templates', 'references', 'referenceCredit', 'promptVariants']) {
           if (JSON.stringify(question[field]) !== JSON.stringify(next[field])) detail[field] = { from: question[field], to: next[field] };
         }
         if (next.prompt !== question.prompt) detail.prompt = { changed: '已修改', fromLength: question.prompt.length, toLength: next.prompt.length };

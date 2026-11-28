@@ -1,9 +1,29 @@
+## 2026-11-23 · 服务器现场补录入库（未推送、未部署）
+
+- 现场后端由本地未推送的 `lb/integration` 和 21 轮热修叠加而成，已按轮次补录到 `sync/vps-20261123`，迁移顺序与生产 v61 一致。另补录 cron 用的清理脚本和截图服务 8 核 drop-in，测试按已上线行为更新，并修复精选计数回归（未部署）。check 220/0，test 725/725；漂移检查显示 `server/` 与生产一致，只剩 main 上未部署的批量投稿 CLI 修复等。[本轮归档](docs/archive/2026-11-23-vps-sync-wsnxxxs.md)
+
 ## 2026-11-19 · 批量投稿 plan 核对提示词版本（PR，未合并，未部署）
 
 - `plan` 对有 `promptVariants` 的题目要求 manifest 填写版本 id。缺省、错误 id、中文标签（如 `长提示词`）都会在写 `plan.json` 之前失败，并列出可用 id 和标签。没有版本的题目仍可不写该字段。版本名单来自 `GET https://api.arenaofbias.icu/api/catalog` 的 `questions[].promptVariants`，不写死三道题。读不到题库，或整份题库都没有这个字段时，`plan` 停止。
 - 2026-11-19 线上题库（`pr31.3a7eaf2`，digest `89c3acac…`）里需要填写的是 `voxel-mountain-city`（云山巨城）、`supernovai`（SupernovAI）、`q-346be7b35d9f3e6a`（忒修斯之船 · 3D），id 为 `long` / `short`。本仓库 `questions.dto` 目前不输出 `promptVariants`，线上目录有该字段；这次没有改服务器。
 - 说明见 `docs/batch-upload.md`。`npm run check` 195/0。`npm test` 624/624。没有对生产执行 `auth` 或 `upload`，没有改 `BATCH_UPLOAD`，没有部署。
 - 不要合并，不要部署。等 kme7 明确说可以之后再动。[本轮归档](docs/archive/2026-11-19-batch-plan-prompt-variant-kme7kme7-prog.md)。
+
+## 2026-11-16 · Fable 灰度合并（已上线）
+
+- 后端兼容旧 ID；生产合并 6 件 Max 作品、50 条投票及关联数据。公网配置榜 Max 50 场、模型榜 96 场，灰度不再单列。[本轮归档](docs/archive/2026-11-16-fable52-merge-wsnxxxs.md)。
+
+## 2026-11-15 · 管理员批量上传取消通用写入限流（已部署）
+
+- 线上只替换现有 `server/app.mjs` 中收件箱上传及高级管理员直传的两处限流调用。服务重启后目录接口返回 200，两个公网上传入口未登录时均返回 401。本地两个入口各连续上传 121 次成功，后端测试 606/606。线上未写入测试作品。
+- 回退备份：`/root/aob-admin-upload-20261115-o8ylze1a/app.before.mjs`。
+
+## 2026-11-10 · Sub2API 接入 Arenaofbias 登录
+
+- Arenaofbias 新增面向 Sub2API 的 OIDC 接口。复用现有会话与已验证邮箱，按 Arenaofbias 用户 ID 发放身份，要求 PKCE S256，授权码一次有效。生产未迁移平台库。
+- Gallery 新增独立入口 `sub2api-login.html` 与 `sub2api-login.js`，复用原有登录、注册、邮箱验证码和找回密码表单。Sub2API 公网注册入口转至 Arenaofbias。
+- Sub2API 以稳定身份关联账号，已有同邮箱账号需要登录原账号后绑定。作品、投票、会员等级、API 用量、余额及权限仍由所属系统管理，新用户沿用 Sub2API 默认额度。
+- 生产按现场源码增量安装，备份在 `/root/aob-sub2-sso-20261110/`。本地语法检查 182/0，全量测试 604/604。公网验证入口、登录与注册表单、原 Mistral Key 的模型列表；隔离真实服务验证首次开户、同一 Arenaofbias 会话重复登录，以及同邮箱账号凭原密码绑定后保留 ID 和角色。未提交或推送。
 
 ## 2026-11-10 · 批量投稿 CLI 安全修复（PR，未合并，未部署）
 
@@ -16,10 +36,41 @@
 - 新增独立认证种类 `batch-grant`：设备码确认计划摘要后签发一次性上传令牌。服务端强制未核验且内容审查 pending，不调用工作人员自动核验，不打开画廊或竞技场。Cookie 会话的管理员投稿行为不变。`BATCH_UPLOAD` 默认关闭。
 - 本地 CLI 在 `tools/batch-upload/`。令牌只进操作系统凭据库。截图出网增加私网、元数据和 DNS 重绑定拒绝。磁盘不足 507，队列过深在提交前 429/503。说明见 `docs/batch-upload.md`。
 - 本轮只开 PR 供自测。不要合并，不要部署，不要重启服务，不要制造生产令牌。串行全量 614/614 通过；`npm run check` 191/0。
+## 2026-11-08 · 作品用量与花费（测试站已上线，金额默认关闭）
+
+- 新表 v57：work_usage、work_artifacts、model_prices、pricing_meta，只新增；缺省数字存 NULL。普通管理员及以上可录入、修改、删除作品用量，高级管理员在后台「价格表」维护官方标价与汇率；库里不预置任何价格。`USAGE_SHOW_COST`（默认关）控制金额：关闭时 `GET /api/pricing` 只返回 `{showCost:false}`，公开 paid 只留 basis。
+- 公开目录、bootstrap 与作品列表的原始响应与改动前逐字节相同，不带指标；用量与产物体量由新的公开接口 `GET /api/works/metrics` 提供，独立缓存、按可见性分 public/private。对局各接口不带指标。写用量、产物、价格只推进展示修订，不刷新 v2、v3 或维度图缓存；外部 CLI 写库会像其他外部写入一样让榜单缓存提前重算一次。
+- 工具：`scripts/artifact-backfill.mjs` 与 `artifact-import.mjs`（产物体量：代码按近似分词 `utf8-pretoken-4-v1` 计 token，写作计字数）；`scripts/usage-from-logs.mjs`（Claude Code 与 Codex 本地会话日志，含子代理、计数器重置、混用模型标记）；`scripts/usage-import.mjs`（默认 dry-run、整批事务、`--replace` 才覆盖）。
+- 生产安装后缀 `+usage.7751036db529`。生产 `app.mjs`、`read-guard.mjs` 由 Lead 三方合并（保留 isArenaOnlyQuestion 线上补丁；read-guard 仅 CRLF 差异），`library.mjs` 补丁干净叠加。安装后回填产物 3,703 件，导入 GPT-6.2 Sol 灰度 15 件用量（来自 Codex Desktop 本地会话，两份独立提取逐件一致）；公开指标为用量 15、产物 3,298。旧正式票与试运行票逐行保留，quick_check 与外键检查通过，导入前数据库备份在 `/root/aob-board-v3-20261108/usage-release/r2/`。
+- 本地 check 197/0、test 673/673。回执、脚本与回退在服务器 `/root/aob-board-v3-20261108/usage-release/r2/`，本地证据在父目录 `.local/board-v3-20261108/`。改动在本地分支 `lb/integration`，未推送。
+
+## 2026-11-08 · v3 计分与盲评维度（测试站已上线，正式口径仍为 v2）
+
+- 新增 `GET /api/leaderboard/next`：v3 加权计分、每类覆盖门槛（3 道题、单题不超过一半、有效投票者 10 人）、含换题波动的加宽区间、95% 名次范围、三类等权综合；三张分类榜与综合榜同代发布。`/api/leaderboard` 按 `LEADERBOARD_SCORING`（默认 2）仍返回 v2，`/previous` 在 v2 期间为 404，`/weighted-trial` 保留，精选榜恒为 v2。
+- 引导式盲评：`GUIDED_ASPECT_ORDER`（默认 after，先综合）、测评点按维度轮换、按题关闭测评点（后台「测评点」）、对所有人开放的 `POST /api/arena/matches/:id/skip-reason`、高级管理员「跳过原因」视图。被报打不开 3 次以上的作品只列为待人工核查，不改作品状态。维度分按维度锚定拟合，先验取 v3 建模分类达标分；维度榜带名次范围；测评点体检按顺序分开统计。schema v56，只新增表和带默认值的列。
+- 本地 check 184/0、test 625/625。生产副本预演：v2 与 weighted-trial 共 20 个范围逐项相同；v3 按模型 22/31/47、按配置 21/92/103（排名/未覆盖/观察区），用时为 v2 的 1.19 倍；换题波动重估 91.5，与配置 85 相差不足 10，未改。只因有效投票者不足被挡的是 HY4（建模、网页）、LongCat 2.5（建模）、Qwen3.6-35B-A3B-…-abliterated（文学），正式切换前由用户决定是否降到 8 或改为只提示。
+- 生产安装版本后缀 `+board-v3.ad463c1e7ef9`。旧正式票 40,667、引导测试票 17 逐行保留，quick_check 与外键检查通过；安装期间没有新正式票，v2 逐项严格比对通过；后端安装到测试站静态安装之间没有新增测试票。回执与回退脚本在服务器 `/root/aob-board-v3-20261108/release/`，本地证据在父目录 `.local/board-v3-20261108/`。改动在本地分支 `lb/integration`，未推送。
+- 生产 `server/` 另有不在 git 中的线上补丁（`app.mjs` 的 isArenaOnlyQuestion 过滤、`questions.mjs`、`auth-email.mjs`、`library.mjs`、`mail.mjs`、`read-guard.mjs`、`show1compat.mjs`、仅生产有的 `mail-template.mjs`，以及他人同日改动的 `content.mjs`、`content-path.mjs`）。本轮以生产文件为底叠加，未纳入仓库。
 
 ## 2026-11-08 · 管理员上传自动核验
 
 - 两级管理员通过普通投稿、收件箱登记或提交题目示例时，在作品提交事务内自动通过核验。高级管理员直传同样适用并保留显式门面选择。普通用户仍待人工核验，新题仍须单独审核。线上回执见 `/root/aob-staff-auto-verify-20261108/`。
+
+## 2026-11-08 · 加权计分试运行
+
+- `GET /api/leaderboard/weighted-trial` 单独返回试运行计分，普通榜与精选榜沿用等权，抽组沿用现有口径。正式接口与试运行接口各用独立的榜单缓存。
+- 生产副本预演，正式模型榜、配置榜、分类名次及精选榜与部署前逐项相同。试运行模型榜 39,227 场、配置榜 40,174 场，首位均为 Claude Sonnet 5。生产安装 schema v55，独立导入 1,452 条历史身份映射，旧正式票和引导测试票逐行保留，SQLite 完整性及外键检查通过。
+- 本地语法检查 181/0，全量 605/605，新增 HTTP 路由断言的针对性检查 8/8。发布回退文件及数据库热备见 `/root/aob-weighted-trial-20261108/`。试运行源码在工作区。
+
+## 2026-11-08 · 旧三档投票权重映射（本地完成，未部署）
+
+- 大众榜恢复基础权重（访客 0.5、Lv0 1.0、Lv1–Lv3 1.25），再乘 20 场递减系数。旧普通用户映射 Lv0，普通管理员映射 Lv2，高级管理员映射 Lv3。已有投票等级快照优先，无法追溯的旧成员票按 1.0。
+- 对照生产备份与角色变更记录，恢复旧普通管理员 126 票、高级管理员 1,326 票，当前管理员的 6 张旧票未确认当时角色，按 1.0。单独保存补齐数据，原始投票等级和精选资格不受影响。临时生产副本演练导入 1,452 行，二次导入 0 行，quick_check 通过、外键检查无错误，模型及配置榜票数保持 39,225 和 40,172。导入清单和回放结果在父目录 `.local/legacy-vote-levels-20261108/`。
+
+## 2026-11-08 · 大众榜按投票者与模型递减（本地完成，未部署）
+
+- 大众模型榜、配置榜及其筛选范围按有效比较重算。每票取同一投票者涉及两侧模型的比较量较大值，20 场内满权，超过后权重为 `√(20/n)`。配置间同模型对局计入配置榜时，每票只给该模型增加一次比较量。原始胜平负、21 场入榜门槛、精选榜和抽组评分维持原口径。
+- 生产 SQLite 一致副本配临时模块验证，模型榜 39,225 票/100 个条目、配置榜 40,172 票/216 个条目，与 20 场影子榜的名次、分数和场次逐项相同。未改生产库和运行代码。语法检查 180/0，全量测试 604/604。
 
 ## 2026-11-08 · 管理员作品上传限额
 

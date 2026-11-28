@@ -789,6 +789,46 @@ const MIGRATIONS = [
     created_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS guided_trial_votes_task ON guided_trial_votes (task_id);`),
+  // Recovered roles are separate from original vote snapshots and curated eligibility.
+  (db) => db.exec(`CREATE TABLE IF NOT EXISTS legacy_vote_levels (
+    vote_id TEXT PRIMARY KEY REFERENCES votes(id) ON DELETE CASCADE,
+    level INTEGER NOT NULL CHECK(level IN (2, 3))
+  );`),
+  // v56: legacy trial rows retain their original before order.
+  (db) => {
+    for (const table of ['guided_matches', 'guided_trial_votes']) {
+      if (!db.prepare(`PRAGMA table_info(${table})`).all().some(column => column.name === 'aspect_order'))
+        db.exec(`ALTER TABLE ${table} ADD COLUMN aspect_order TEXT NOT NULL DEFAULT 'before' CHECK (aspect_order IN ('before', 'after'))`);
+    }
+    db.exec(`CREATE TABLE IF NOT EXISTS task_aspects_off (
+      task_id TEXT NOT NULL, aspect_id TEXT NOT NULL,
+      user_id TEXT REFERENCES users(id) ON DELETE SET NULL, created_at INTEGER NOT NULL,
+      PRIMARY KEY(task_id, aspect_id));
+    CREATE TABLE IF NOT EXISTS skip_reasons (
+      match_id TEXT PRIMARY KEY, task_id TEXT NOT NULL,
+      reason TEXT NOT NULL CHECK (reason IN ('recognized', 'broken', 'unsure')),
+      a_identity TEXT, b_identity TEXT,
+      user_id TEXT REFERENCES users(id) ON DELETE SET NULL, visitor_hash TEXT, created_at INTEGER NOT NULL);
+    CREATE INDEX IF NOT EXISTS skip_reasons_task ON skip_reasons(task_id);`);
+  },
+  // v57: raw measurements and administrator-maintained official prices; no seeded rates.
+  (db) => db.exec(`CREATE TABLE IF NOT EXISTS work_usage (
+    task_id TEXT NOT NULL, work_id TEXT NOT NULL,
+    input INTEGER, cache_read INTEGER, cache_write INTEGER, output INTEGER, reasoning INTEGER, requests INTEGER, duration_sec REAL,
+    created_name TEXT, updated_name TEXT, paid TEXT, source TEXT NOT NULL CHECK(source IN ('api','harness','bill','log')),
+    created_by TEXT REFERENCES users(id) ON DELETE SET NULL, updated_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(task_id,work_id));
+  CREATE TABLE IF NOT EXISTS model_prices (
+    model_id TEXT NOT NULL, since TEXT NOT NULL, currency TEXT NOT NULL, input REAL NOT NULL, output REAL NOT NULL,
+    cache_read REAL, cache_write REAL, url TEXT NOT NULL,
+    created_by TEXT REFERENCES users(id) ON DELETE SET NULL, updated_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(model_id,since));
+  CREATE TABLE IF NOT EXISTS pricing_meta (
+    id INTEGER PRIMARY KEY CHECK(id=1), as_of TEXT, fx_as_of TEXT, fx TEXT NOT NULL DEFAULT '{}',
+    updated_by TEXT REFERENCES users(id) ON DELETE SET NULL, updated_at INTEGER NOT NULL);
+  CREATE TABLE IF NOT EXISTS work_artifacts (
+    task_id TEXT NOT NULL, work_id TEXT NOT NULL, artifact TEXT NOT NULL, updated_at INTEGER NOT NULL,
+    PRIMARY KEY(task_id,work_id));`),
   // Batch grants for ordinary moderators. role_security_version invalidates a grant
   // when the role changes, including a later promotion back to moderator.
   (db) => {
@@ -856,6 +896,28 @@ const MIGRATIONS = [
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS batch_reservations_state ON batch_reservations(state);`);
+  },
+  (db) => {
+    db.exec(`CREATE TABLE IF NOT EXISTS task_solve_status (
+      task_id TEXT PRIMARY KEY,
+      status TEXT NOT NULL,
+      updated_by TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );`);
+  },
+  (db) => {
+    db.exec(`CREATE TABLE IF NOT EXISTS task_subcategories (
+      task_id TEXT PRIMARY KEY,
+      subcategory TEXT NOT NULL,
+      updated_by TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );`);
+  },
+  (db) => {
+    const now = Date.now();
+    const insert = db.prepare('INSERT OR IGNORE INTO curated_sections (id,name,sort_order,created_at,updated_at,updated_by) VALUES (?,?,(SELECT COALESCE(MAX(sort_order),-1)+1 FROM curated_sections),?,?,NULL)');
+    const added = insert.run('language', '语言', now, now).changes + insert.run('music', '音乐', now, now).changes;
+    if (added) db.prepare('UPDATE curated_settings SET revision=revision+1,updated_at=? WHERE id=1').run(now);
   },
 ];
 

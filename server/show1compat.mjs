@@ -30,7 +30,7 @@ import { transaction } from './db.mjs';
 import { fail, rateLimit, readJson } from './http.mjs';
 import { buildShow1Boards, replayShow1Ratings } from './show1-ranking.mjs';
 import { manualCorrections, voteAttribution, votesBeforeTaskMove } from './vote-attribution.mjs';
-import { isTextTask, isAiJudgedTask } from './categories.mjs';
+import { isTextTask, isAiJudgedTask, isTrialTask } from './categories.mjs';
 
 const forestTexts = JSON.parse(readFileSync(new URL('./playground-forest-texts.json', import.meta.url), 'utf8'));
 
@@ -129,14 +129,15 @@ export function registerShow1Compat(router, deps) {
         category: previous?.category ?? task.category,
         code: previous?.code ?? (kind === 'text' ? 'STORY' : 'WEB'),
         name: previous?.name ?? task.title, prompt: task.prompt,
+        ...(task.tags?.length ? { tags: task.tags } : {}),
         ...(task.promptVariants?.length ? { promptVariants: task.promptVariants } : {}),
         commentary: previous?.commentary ?? task.summary,
         detail: previous?.detail ?? '同一提示词 · 不同模型的结果',
       });
     }
-    return { prompts: [...prompts.values()].filter((prompt) => !isAiJudgedTask(deps.catalog.task?.(taskByRound[prompt.id]) ?? prompt))
+    return { prompts: [...prompts.values()].filter((prompt) => { const task = deps.catalog.task?.(taskByRound[prompt.id]) ?? prompt; return !isAiJudgedTask(task) && !isTrialTask(task); })
       .sort((a, b) => a.id.localeCompare(b.id)), taskByRound, roundByTask,
-      aiRounds: new Set([...prompts.values()].filter((prompt) => isAiJudgedTask({ category: prompt.category })).map((prompt) => prompt.id)) };
+      aiRounds: new Set([...prompts.values()].filter((prompt) => isAiJudgedTask({ category: prompt.category }) || isTrialTask({ category: prompt.category })).map((prompt) => prompt.id)) };
   }
   let catalogCache = { signature: '', at: 0, value: null };
   // Reading the catalog version stats the package directory, which costs real
@@ -410,7 +411,9 @@ export function registerShow1Compat(router, deps) {
     const id = String(body.id ?? '');
     if (!UUID4.test(id)) fail(400, '投票编号无效');
     const promptId = String(body.promptId ?? '');
-    if (isAiJudgedTask(deps.catalog.task?.(taskOfRound(promptId)))) fail(409, '这道题由 AI 评分，暂不接受投票', 'ai-judged');
+    const roundTask = deps.catalog.task?.(taskOfRound(promptId));
+    if (isAiJudgedTask(roundTask)) fail(409, '这道题由 AI 评分，暂不接受投票', 'ai-judged');
+    if (isTrialTask(roundTask)) fail(409, '音乐分区暂未开放盲评', 'arena-closed');
     if (!published(promptId)) fail(400, '题目不存在');
     const winnerRid = trim64(body.winnerRid);
     const loserRid = trim64(body.loserRid);
